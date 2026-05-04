@@ -25,6 +25,45 @@ async function getGraphToken() {
   return tokenResponse.accessToken;
 }
 
+function cleanBidItem(item) {
+  const fields = item.fields || {};
+
+  return {
+    BOL: fields.BOLNumber_x0028_Won_x0029_ || '',
+    BidID: fields.BidID || '',
+    Customer: fields.Company || '',
+    Origin: fields.Shipment_x0020_Origin || '',
+    Destination: fields.Shipment_x0020_Destination || '',
+    Status: fields.Status || '',
+    Truck: fields.Truck_x0020_Number || '',
+    Driver: fields.Operator_x002f_Team || ''
+  };
+}
+
+async function getAllBidItems(token) {
+  let url = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${process.env.BID_LIST_ID}/items?$expand=fields&$top=999`;
+  const allItems = [];
+
+  while (url) {
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(JSON.stringify(data));
+    }
+
+    allItems.push(...(data.value || []));
+    url = data['@odata.nextLink'] || null;
+  }
+
+  return allItems;
+}
+
 app.get('/', (req, res) => {
   res.send('Kole Lookup API is running');
 });
@@ -54,63 +93,6 @@ app.get('/graph-test', async (req, res) => {
   }
 });
 
-app.get('/site-test', async (req, res) => {
-  try {
-    const token = await getGraphToken();
-
-    const response = await fetch(
-      'https://graph.microsoft.com/v1.0/sites/netorgft3137173.sharepoint.com:/sites/koletrucking.com',
-      {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      }
-    );
-
-    const data = await response.json();
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-app.get('/lists-test', async (req, res) => {
-  try {
-    const token = await getGraphToken();
-
-    const response = await fetch(
-      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      }
-    );
-
-    const data = await response.json();
-
-    res.json(
-      data.value.map(list => ({
-        id: list.id,
-        name: list.name,
-        displayName: list.displayName
-      }))
-    );
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
-
 app.get('/bids-test', async (req, res) => {
   try {
     const token = await getGraphToken();
@@ -126,19 +108,11 @@ app.get('/bids-test', async (req, res) => {
 
     const data = await response.json();
 
-    const cleaned = data.value.map(item => ({
-      BOL: item.fields.BOLNumber_x0028_Won_x0029_,
-      BidID: item.fields.BidID,
-      Customer: item.fields.Company,
-      Origin: item.fields.Shipment_x0020_Origin,
-      Destination: item.fields.Shipment_x0020_Destination,
-      Status: item.fields.Status,
-      Truck: item.fields.Truck_x0020_Number,
-      Driver: item.fields.Operator_x002f_Team
-    }));
+    if (!response.ok) {
+      throw new Error(JSON.stringify(data));
+    }
 
-    res.json(cleaned);
-
+    res.json((data.value || []).map(cleanBidItem));
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -159,27 +133,8 @@ app.get('/search', async (req, res) => {
       });
     }
 
-    const response = await fetch(
-      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${process.env.BID_LIST_ID}/items?$expand=fields&$top=100`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      }
-    );
-
-    const data = await response.json();
-
-    const cleaned = data.value.map(item => ({
-      BOL: item.fields.BOLNumber_x0028_Won_x0029_ || '',
-      BidID: item.fields.BidID || '',
-      Customer: item.fields.Company || '',
-      Origin: item.fields.Shipment_x0020_Origin || '',
-      Destination: item.fields.Shipment_x0020_Destination || '',
-      Status: item.fields.Status || '',
-      Truck: item.fields.Truck_x0020_Number || '',
-      Driver: item.fields.Operator_x002f_Team || ''
-    }));
+    const items = await getAllBidItems(token);
+    const cleaned = items.map(cleanBidItem);
 
     const results = cleaned.filter(item =>
       Object.values(item).some(value =>
@@ -190,14 +145,18 @@ app.get('/search', async (req, res) => {
     res.json({
       success: true,
       query: q,
+      searchedRecords: cleaned.length,
       count: results.length,
       results
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
       error: error.message
     });
   }
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
