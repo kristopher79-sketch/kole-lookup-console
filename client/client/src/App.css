@@ -100,3 +100,163 @@ tr:nth-child(even) {
   background: #374151;
   color: #9ca3af;
 }
+tbody tr {
+  cursor: pointer;
+}
+
+tbody tr:hover {
+  background: #1f2937;
+}
+
+.selected-row {
+  background: #1e3a5f !important;
+}
+
+.detail-panel {
+  margin-top: 24px;
+  padding: 24px;
+  background: #020617;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+}
+
+.detail-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.detail-header h2 {
+  margin: 0;
+  color: #f8fafc;
+}
+
+.detail-header p {
+  margin: 4px 0 0;
+  color: #94a3b8;
+}
+
+.close-button {
+  background: #334155;
+}
+
+.close-button:hover {
+  background: #475569;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+
+.detail-item {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.detail-item span {
+  display: block;
+  margin-bottom: 6px;
+  color: #94a3b8;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.detail-item strong {
+  color: #e5e7eb;
+  font-size: 15px;
+  word-break: break-word;
+}
+
+.detail-item.wide {
+  grid-column: span 2;
+}.view-button {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #475569;
+  color: white;
+  border: none;
+  cursor: pointer;
+}
+
+.view-button:hover {
+  background: #64748b;
+}
+
+.selected-row {
+  background: #1e3a5f !important;
+}
+
+.detail-panel {
+  margin-top: 24px;
+  padding: 24px;
+  background: #020617;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+}
+
+.detail-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.detail-header h2 {
+  margin: 0;
+  color: #f8fafc;
+}
+
+.detail-header p {
+  margin: 4px 0 0;
+  color: #94a3b8;
+}
+
+.close-button {
+  background: #334155;
+}
+
+.close-button:hover {
+  background: #475569;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+
+.detail-item {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.detail-item span {
+  display: block;
+  margin-bottom: 6px;
+  color: #94a3b8;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.detail-item strong {
+  color: #e5e7eb;
+  font-size: 15px;
+  word-break: break-word;
+}
+
+.detail-item.wide {
+  grid-column: span 2;
+}
