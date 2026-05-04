@@ -1,0 +1,102 @@
+body {
+  margin: 0;
+  font-family: Segoe UI, Arial, sans-serif;
+  background: #0f172a;
+  color: #e5e7eb;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 40px auto;
+  padding: 20px;
+}
+
+h1 {
+  margin-bottom: 20px;
+}
+
+.search-bar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+input {
+  flex: 1;
+  padding: 10px;
+  font-size: 16px;
+  border-radius: 6px;
+  border: none;
+}
+
+button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  background: #2563eb;
+  color: white;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+}
+
+.summary {
+  margin-bottom: 10px;
+  color: #9ca3af;
+}
+
+.msg {
+  margin: 20px 0;
+}
+
+.msg.error {
+  color: #f87171;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #111827;
+}
+
+th, td {
+  padding: 10px;
+  text-align: left;
+}
+
+th {
+  background: #1f2937;
+}
+
+tr:nth-child(even) {
+  background: #0b1220;
+}
+
+/* STATUS COLORS */
+
+.status {
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.status.won {
+  background: #065f46;
+  color: #34d399;
+}
+
+.status.lost {
+  background: #7f1d1d;
+  color: #f87171;
+}
+
+.status.tonu {
+  background: #78350f;
+  color: #fbbf24;
+}
+
+.status.cancelled {
+  background: #374151;
+  color: #9ca3af;
+}
