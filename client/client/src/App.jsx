@@ -72,23 +72,25 @@ export default function App() {
 
     return 'status';
   }
-function formatDateTime(dateValue, timeValue, ampmValue) {
-  if (!dateValue) return '-';
 
-  const date = new Date(dateValue);
+  function formatDateTime(dateValue, timeValue, ampmValue) {
+    if (!dateValue) return '-';
 
-  const dateText = date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric'
-  });
+    const date = new Date(dateValue);
 
-  const timeText = [timeValue, ampmValue].filter(Boolean).join(' ');
+    const dateText = date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
 
-  if (!timeText) return dateText;
+    const timeText = [timeValue, ampmValue].filter(Boolean).join(' ');
 
-  return `${dateText} @ ${timeText}`;
-}
+    if (!timeText) return dateText;
+
+    return `${dateText} @ ${timeText}`;
+  }
+
   return (
     <div className="container">
       <h1>Kole Lookup Console</h1>
@@ -206,19 +208,18 @@ function formatDateTime(dateValue, timeValue, ampmValue) {
             </div>
 
             <div className="detail-item">
+              <span>Pickup</span>
+              <strong>
+                {formatDateTime(selected.PickupDate, selected.PickupTime, selected.PickupAMPM)}
+              </strong>
+            </div>
 
-  <span>Pickup</span>
-  <strong>
-    {formatDateTime(selected.PickupDate, selected.PickupTime, selected.PickupAMPM)}
-  </strong>
-</div>
-
-<div className="detail-item">
-  <span>Delivery</span>
-  <strong>
-    {formatDateTime(selected.DeliveryDate, selected.DeliveryTime, selected.DeliveryAMPM)}
-  </strong>
-</div>
+            <div className="detail-item">
+              <span>Delivery</span>
+              <strong>
+                {formatDateTime(selected.DeliveryDate, selected.DeliveryTime, selected.DeliveryAMPM)}
+              </strong>
+            </div>
           </div>
         </div>
       )}
