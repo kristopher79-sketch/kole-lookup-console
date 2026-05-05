@@ -25,6 +25,19 @@ async function getGraphToken() {
   return tokenResponse.accessToken;
 }
 
+function firstValue(fields, names, fallback = '') {
+  for (const name of names) {
+    const value = fields[name];
+
+    if (value !== undefined && value !== null && value !== '') {
+      if (typeof value === 'object' && value.Value) return value.Value;
+      return value;
+    }
+  }
+
+  return fallback;
+}
+
 function cleanBidItem(item) {
   const fields = item.fields || {};
 
@@ -197,9 +210,9 @@ app.get('/record/:id', async (req, res) => {
       Width: f.Width || '',
       Height: f.Height || '',
       LoadedMiles: f.Loaded_x0020_Miles || '',
-      EmptyMiles: f.Empty_x0020_Deadhead_x0020_Miles || '',
+      EmptyMiles: f.Empty_x0020_Deadhead_x002 || '',
       QuotedTotal: f.Quoted_x0020_Total || '',
-      RatePerMile: f.x0024__x0020_Per_x0020_Mile || '',
+      RatePerMile: f._x0024__x0020_Per_x0020_Mile || '',
       PickupDate: f.Pickup_x0020_Offer_x0020_Date || '',
       DeliveryDate: f.Expected_x0020_Delivery_x0020_Da || '',
       PickupTime: f.Pickup1PickupTime || '',
