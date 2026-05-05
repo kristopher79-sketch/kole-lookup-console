@@ -193,14 +193,13 @@ app.get('/record/:id', async (req, res) => {
 
     const f = data.fields || {};
 
-console.log(
-  Object.keys(f)
-    .filter(k => k.toLowerCase().includes('empty') || k.toLowerCase().includes('deadhead'))
-);
-
     res.json({
       success: true,
       id: data.id || '',
+
+      // -------------------------
+      // BASIC LOAD INFO
+      // -------------------------
       BOL: f.BOLNumber_x0028_Won_x0029_ || '',
       BidID: f.BidID || '',
       Customer: f.Company || '',
@@ -225,7 +224,57 @@ console.log(
       DeliveryTime: f.Delivery1Time || '',
       DeliveryAMPM: f.Delivery1AMorPM || '',
       AircraftRelated: f.Aircraft_x0020_Related_x003f_ || '',
-      TeamRequired: f.Team_x0020_Required || ''
+      TeamRequired: f.Team_x0020_Required || '',
+      Route: f.Route || '',
+
+      // -------------------------
+      // DISPATCH INFO
+      // -------------------------
+      Pickup1Name: f.Pickup1Name || '',
+      Pickup1Address1: f.Pickup1Address1 || '',
+      Pickup1City: f.Pickup1City || '',
+      Pickup1State: f.Pickup2State || '',
+      Pickup1Zip: f.Pickup2Zip || '',
+      Pickup1ContactName: f.Pickup1ContactName || '',
+      Pickup1ContactNumber: f.Pickup1ContactNumber || '',
+      Pickup1TimeSnapshot: f.Pickup1TimeSnapshot || '',
+
+      Delivery1Name: f.Delivery1Name || '',
+      Delivery1Address1: f.Deliver1Address1 || '',
+      Delivery1City: f.Delivery1City || '',
+      Delivery1State: f.Delivery1State || '',
+      Delivery1Zip: f.Delivery1Zip || '',
+      Delivery1ContactName: f.Delivery1ContactName || '',
+      Delivery1ContactNumber: f.Delivery1ContactNumber || '',
+      Delivery1TimeSnapshot: f.Delivery1TimeSnapshot || '',
+
+      Item1QTY: f.Item1QTY || '',
+      Item1Description: f.Item1Description || '',
+      Item1Serial: f.Item1Serial || '',
+      Item1Dimensions: f.Item1Dimensions || '',
+      EstimatedWeight: f.EstimatedWeight || '',
+      TotalPieces: f.TotalPieces || '',
+      ShipperNumber: f.ShipperNumber || '',
+      Contract: f.Contract || '',
+
+      // -------------------------
+      // BILLING INFO
+      // -------------------------
+      PermitsEscortFees: f.Permits_x002f_Escort_x0020_Fees_ || '',
+      EstimatedDriverPay: f.EstimatedDriverPay || '',
+      NoOfTarpsNeeded: f.No_x002e_ofTarpsNeeded || '',
+      TarpingBilled: f.TarpingBilled || '',
+      FuelSurchargeBilled: f.FuelSurchargeBilled || '',
+      LinehaulBilled: f.LinehaulBilled || '',
+      TarpingDriverPay: f.TarpingDriverPay || '',
+      FuelSurchargeDriverPay: f.FuelSurchargeDriverPay || '',
+      LinehaulDriverPay: f.LinehaulDriverPay || '',
+      Processed: f.Processed ?? '',
+      FinalSettleSent: f.FinalSettleSent ?? '',
+      CustomerCode: f.CustomerCode || '',
+      TMSName: f.TMSName || '',
+      WrittentoExcel: f.WrittentoExcel ?? '',
+      ExcelWriteStatus: f.ExcelWriteStatus || ''
     });
 
   } catch (err) {
@@ -236,7 +285,6 @@ console.log(
     });
   }
 });
-
 
 
     
