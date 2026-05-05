@@ -206,13 +206,14 @@ function formatDateTime(dateValue, timeValue, ampmValue) {
             </div>
 
             <div className="detail-item">
+  <div className="detail-item">
   <span>Pickup</span>
   <strong>
     {formatDateTime(selected.PickupDate, selected.PickupTime, selected.PickupAMPM)}
   </strong>
 </div>
 
-            <<div className="detail-item">
+<div className="detail-item">
   <span>Delivery</span>
   <strong>
     {formatDateTime(selected.DeliveryDate, selected.DeliveryTime, selected.DeliveryAMPM)}
