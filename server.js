@@ -244,3 +244,36 @@ console.log(
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+app.get('/record-fields/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const token = await getGraphToken();
+
+    const response = await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${process.env.BID_LIST_ID}/items/${id}?$expand=fields`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(JSON.stringify(data));
+    }
+
+    res.json({
+      success: true,
+      id: data.id || '',
+      fields: data.fields || {}
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
