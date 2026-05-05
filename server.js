@@ -215,7 +215,7 @@ console.log(
       Width: f.Width || '',
       Height: f.Height || '',
       LoadedMiles: f.Loaded_x0020_Miles || '',
-      EmptyMiles: f.Empty_x0020_Deadhead_x002 || '',
+      EmptyMiles: f.Empty_x0020__x0028_Deadhead_x002 || '',
       QuotedTotal: f.Quoted_x0020_Total || '',
       RatePerMile: f._x0024__x0020_Per_x0020_Mile || '',
       PickupDate: f.Pickup_x0020_Offer_x0020_Date || '',
