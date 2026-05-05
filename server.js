@@ -193,6 +193,11 @@ app.get('/record/:id', async (req, res) => {
 
     const f = data.fields || {};
 
+console.log(
+  Object.keys(f)
+    .filter(k => k.toLowerCase().includes('empty') || k.toLowerCase().includes('deadhead'))
+);
+
     res.json({
       success: true,
       id: data.id || '',
