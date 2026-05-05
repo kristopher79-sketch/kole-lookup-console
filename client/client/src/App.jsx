@@ -206,7 +206,7 @@ function formatDateTime(dateValue, timeValue, ampmValue) {
             </div>
 
             <div className="detail-item">
-  <div className="detail-item">
+
   <span>Pickup</span>
   <strong>
     {formatDateTime(selected.PickupDate, selected.PickupTime, selected.PickupAMPM)}
