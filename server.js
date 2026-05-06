@@ -239,7 +239,7 @@ app.get('/record/:id', async (req, res) => {
       Contract: f.Contract || '',
 
       PermitsEscortFees: f.Permits_x002f_Escort_x0020_Fees_ || '',
-      EstimatedDriverPay: f.EstimatedDriverPay || '',
+      EstimatedDriverPay: f.NetPayabletoDriver || '',
       NoOfTarpsNeeded: f.No_x002e_ofTarpsNeeded || '',
       TarpingBilled: f.TarpingBilled || '',
       FuelSurchargeBilled: f.FuelSurchargeBilled || '',
