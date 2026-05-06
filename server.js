@@ -25,19 +25,6 @@ async function getGraphToken() {
   return tokenResponse.accessToken;
 }
 
-function firstValue(fields, names, fallback = '') {
-  for (const name of names) {
-    const value = fields[name];
-
-    if (value !== undefined && value !== null && value !== '') {
-      if (typeof value === 'object' && value.Value) return value.Value;
-      return value;
-    }
-  }
-
-  return fallback;
-}
-
 function cleanBidItem(item) {
   const fields = item.fields || {};
 
@@ -197,9 +184,6 @@ app.get('/record/:id', async (req, res) => {
       success: true,
       id: data.id || '',
 
-      // -------------------------
-      // BASIC LOAD INFO
-      // -------------------------
       BOL: f.BOLNumber_x0028_Won_x0029_ || '',
       BidID: f.BidID || '',
       Customer: f.Company || '',
@@ -227,14 +211,11 @@ app.get('/record/:id', async (req, res) => {
       TeamRequired: f.Team_x0020_Required || '',
       Route: f.Route || '',
 
-      // -------------------------
-      // DISPATCH INFO
-      // -------------------------
       Pickup1Name: f.Pickup1Name || '',
       Pickup1Address1: f.Pickup1Address1 || '',
       Pickup1City: f.Pickup1City || '',
-      Pickup1State: f.Pickup2State || '',
-      Pickup1Zip: f.Pickup2Zip || '',
+      Pickup1State: f.Pickup1State || '',
+      Pickup1Zip: f.Pickup1Zip || '',
       Pickup1ContactName: f.Pickup1ContactName || '',
       Pickup1ContactNumber: f.Pickup1ContactNumber || '',
       Pickup1TimeSnapshot: f.Pickup1TimeSnapshot || '',
@@ -257,9 +238,6 @@ app.get('/record/:id', async (req, res) => {
       ShipperNumber: f.ShipperNumber || '',
       Contract: f.Contract || '',
 
-      // -------------------------
-      // BILLING INFO
-      // -------------------------
       PermitsEscortFees: f.Permits_x002f_Escort_x0020_Fees_ || '',
       EstimatedDriverPay: f.EstimatedDriverPay || '',
       NoOfTarpsNeeded: f.No_x002e_ofTarpsNeeded || '',
@@ -276,21 +254,14 @@ app.get('/record/:id', async (req, res) => {
       WrittentoExcel: f.WrittentoExcel ?? '',
       ExcelWriteStatus: f.ExcelWriteStatus || ''
     });
-
   } catch (err) {
     console.error(err);
+
     res.status(500).json({
       success: false,
       error: err.message
     });
   }
-});
-
-
-    
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
 });
 
 app.get('/record-fields/:id', async (req, res) => {
@@ -324,4 +295,8 @@ app.get('/record-fields/:id', async (req, res) => {
       error: err.message
     });
   }
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
