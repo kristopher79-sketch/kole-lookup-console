@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import './App.css';
 
 const API = 'https://kole-lookup-console.onrender.com';
+const TOKEN_STORAGE_KEY = 'koleLookupAccessToken';
 
 export default function App() {
   const [query, setQuery] = useState('');
@@ -11,8 +12,45 @@ export default function App() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
-  const [selected, setSelected] = useState(null);
-  const [selectedView, setSelectedView] = useState('basic');
+ const [selected, setSelected] = useState(null);
+const [selectedView, setSelectedView] = useState('basic');
+const [statusFilter, setStatusFilter] = useState('All');
+
+const [accessToken, setAccessToken] = useState(
+  localStorage.getItem(TOKEN_STORAGE_KEY) || ''
+);
+
+function isBolLookup(value) {
+  const q = value.trim().toUpperCase();
+
+  return /^[A-Z]\d{6}$/.test(q);
+}
+
+const showStatusFilter =
+  hasSearched &&
+  !loading &&
+  !error &&
+  results.length > 0 &&
+  !isBolLookup(query);
+
+const statusOptions = [
+  'All',
+  ...Array.from(
+    new Set(
+      results
+        .map((r) => r.Status)
+        .filter(Boolean)
+    )
+  ).sort()
+];
+
+const filteredResults =
+  statusFilter === 'All'
+    ? results
+    : results.filter((r) => r.Status === statusFilter);
+  const [tokenInput, setTokenInput] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [checkingAuth, setCheckingAuth] = useState(false);
 
   useEffect(() => {
     function handleEsc(e) {
@@ -26,6 +64,70 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleEsc);
   }, []);
 
+  async function verifyAccessToken(token) {
+    const candidate = token.trim();
+
+    if (!candidate) {
+      setAuthError('Enter the access code.');
+      return;
+    }
+
+    setCheckingAuth(true);
+    setAuthError('');
+
+    try {
+      const res = await fetch(`${API}/auth-check`, {
+        headers: {
+          'x-lookup-token': candidate
+        }
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Access denied');
+      }
+
+      localStorage.setItem(TOKEN_STORAGE_KEY, candidate);
+      setAccessToken(candidate);
+      setTokenInput('');
+      setAuthError('');
+    } catch (err) {
+      setAuthError('Access code was not accepted.');
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      setAccessToken('');
+    } finally {
+      setCheckingAuth(false);
+    }
+  }
+
+  function clearAccessToken() {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    setAccessToken('');
+    setTokenInput('');
+    setResults([]);
+    setSearchedRecords(0);
+    setSelected(null);
+    setHasSearched(false);
+    setError('');
+    setAuthError('');
+  }
+
+  async function authedFetch(url) {
+    const res = await fetch(url, {
+      headers: {
+        'x-lookup-token': accessToken
+      }
+    });
+
+    if (res.status === 401) {
+      clearAccessToken();
+      throw new Error('Access expired or invalid. Re-enter the access code.');
+    }
+
+    return res;
+  }
+
   async function handleSearch() {
     const q = query.trim();
     if (!q) return;
@@ -34,10 +136,11 @@ export default function App() {
     setError('');
     setHasSearched(true);
     setSelected(null);
-    setSelectedView('basic');
+setSelectedView('basic');
+setStatusFilter('All');
 
     try {
-      const res = await fetch(`${API}/search?q=${encodeURIComponent(q)}`);
+      const res = await authedFetch(`${API}/search?q=${encodeURIComponent(q)}`);
       const data = await res.json();
 
       if (!data.success) throw new Error(data.error || 'Search failed');
@@ -52,30 +155,34 @@ export default function App() {
     }
   }
 
-  async function loadDetails(id, view = 'basic') {
-    if (!id) {
-      setError('This row does not have a record ID.');
-      return;
-    }
-
-    setSelectedView(view);
-    setLoadingDetail(true);
-    setError('');
-
-    try {
-      const res = await fetch(`${API}/record/${id}`);
-      const data = await res.json();
-
-      if (!data.success) throw new Error(data.error || 'Unable to load record details');
-
-      setSelected(data);
-    } catch (err) {
-      setError(err.message);
-      setSelected(null);
-    } finally {
-      setLoadingDetail(false);
-    }
+  async function loadDetails(id, view = 'basic', sourceListId = '') {
+  if (!id) {
+    setError('This row does not have a record ID.');
+    return;
   }
+
+  setSelectedView(view);
+  setLoadingDetail(true);
+  setError('');
+
+  try {
+    const endpoint = sourceListId
+      ? `${API}/record/${encodeURIComponent(sourceListId)}/${encodeURIComponent(id)}`
+      : `${API}/record/${encodeURIComponent(id)}`;
+
+    const res = await authedFetch(endpoint);
+    const data = await res.json();
+
+    if (!data.success) throw new Error(data.error || 'Unable to load record details');
+
+    setSelected(data);
+  } catch (err) {
+    setError(err.message);
+    setSelected(null);
+  } finally {
+    setLoadingDetail(false);
+  }
+}
 
   function closeModal() {
     setSelected(null);
@@ -115,6 +222,20 @@ export default function App() {
     return `${dateText} @ ${timeText}`;
   }
 
+  function formatDateOnly(value) {
+    if (!value) return '-';
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) return value;
+
+    return date.toLocaleDateString('en-US', {
+      month: 'numeric',
+      day: 'numeric',
+      year: '2-digit'
+    });
+  }
+
   function formatMoney(value) {
     if (value === null || value === undefined || value === '') return '-';
 
@@ -131,6 +252,37 @@ export default function App() {
   function formatValue(value) {
     if (value === null || value === undefined || value === '') return '-';
     return value;
+  }
+
+  function getNumber(value) {
+    if (value === null || value === undefined || value === '') return 0;
+
+    const number = Number(String(value).replace(/[$,]/g, ''));
+
+    if (Number.isNaN(number)) return 0;
+
+    return number;
+  }
+
+  function getDriverPayDisplay(record) {
+    const isSettled =
+      record.Processed === true ||
+      String(record.Processed).toLowerCase() === 'true';
+
+    const value =
+      record.NetPayabletoDriver ||
+      record.EstimatedDriverPay ||
+      (
+        getNumber(record.LinehaulDriverPay) +
+        getNumber(record.FuelSurchargeDriverPay) +
+        getNumber(record.TarpingDriverPay) +
+        getNumber(record.AdditionalDriverPay)
+      );
+
+    return {
+      label: isSettled ? 'Net Driver Pay' : 'Estimated Driver Pay',
+      value: value ? formatMoney(value) : '-'
+    };
   }
 
   function viewTitle() {
@@ -161,6 +313,7 @@ export default function App() {
         <DetailItem label="BOL" value={selected.BOL} />
         <DetailItem label="Bid ID" value={selected.BidID} />
         <DetailItem label="Status" value={selected.Status} />
+        <DetailItem label="Source" value={selected.SourceYear || selected.SourceList} />
         <DetailItem label="Requestor" value={selected.Requestor} />
 
         <DetailItem label="Customer" value={selected.Customer} wide />
@@ -279,6 +432,8 @@ export default function App() {
   }
 
   function BillingView() {
+    const driverPayDisplay = getDriverPayDisplay(selected);
+
     return (
       <div className="detail-grid">
         <SectionTitle>Billing Overview</SectionTitle>
@@ -292,28 +447,84 @@ export default function App() {
 
         <DetailItem label="Quoted Total" value={formatMoney(selected.QuotedTotal)} />
         <DetailItem label="$/Mile" value={selected.RatePerMile} />
-        <DetailItem label="Permits/Escort" value={formatMoney(selected.PermitsEscortFees)} />
-        <DetailItem label="Driver Pay" value={formatMoney(selected.EstimatedDriverPay)} />
-
         <DetailItem label="Linehaul Billed" value={formatMoney(selected.LinehaulBilled)} />
         <DetailItem label="Fuel Surcharge Billed" value={formatMoney(selected.FuelSurchargeBilled)} />
+
         <DetailItem label="Tarping Billed" value={formatMoney(selected.TarpingBilled)} />
+        <DetailItem label="Permits/Escort" value={formatMoney(selected.PermitsEscortFees)} />
+        <DetailItem label="Additional Charges" value={formatMoney(selected.AdditionalCharges)} />
         <DetailItem label="Tarps Needed" value={selected.NoOfTarpsNeeded} />
 
         <SectionTitle>Driver Pay Breakdown</SectionTitle>
 
+        <DetailItem label={driverPayDisplay.label} value={driverPayDisplay.value} />
         <DetailItem label="Linehaul Driver Pay" value={formatMoney(selected.LinehaulDriverPay)} />
         <DetailItem label="Fuel Surcharge Driver Pay" value={formatMoney(selected.FuelSurchargeDriverPay)} />
         <DetailItem label="Tarping Driver Pay" value={formatMoney(selected.TarpingDriverPay)} />
+        <DetailItem label="Additional Driver Pay" value={formatMoney(selected.AdditionalDriverPay)} />
 
         <SectionTitle>Processing Status</SectionTitle>
 
-        <DetailItem label="Processed" value={String(selected.Processed)} />
-        <DetailItem label="Final Settlement Sent" value={String(selected.FinalSettleSent)} />
-        <DetailItem label="Written to Excel" value={String(selected.WrittentoExcel)} />
-        <DetailItem label="Excel Status" value={selected.ExcelWriteStatus} />
+        <DetailItem
+          label="Accounting Status"
+          value={
+            selected.Processed === true ||
+            String(selected.Processed).toLowerCase() === 'true'
+              ? 'Sent to Accounting'
+              : 'No'
+          }
+        />
 
-        <DetailItem label="TMS Name" value={selected.TMSName} wide />
+        <DetailItem
+          label="Paperwork Submitted"
+          value={
+            selected.PpwrkSubmitted
+              ? `${formatDateOnly(selected.PpwrkSubmitted)} ${selected.PpwrkSubmittedTime || ''}`.trim()
+              : '-'
+          }
+        />
+
+        <DetailItem label="TMS Name" value={selected.TMSName} />
+      </div>
+    );
+  }
+
+  if (!accessToken) {
+    return (
+      <div className="container">
+        <header className="app-header">
+          <div>
+            <h1>Kole Lookup Console</h1>
+            <p>Enter the access code to continue.</p>
+          </div>
+        </header>
+
+        <div className="search-card">
+          <div className="search-bar">
+            <input
+              type="password"
+              value={tokenInput}
+              onChange={(e) => setTokenInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  verifyAccessToken(tokenInput);
+                }
+              }}
+              placeholder="Access code"
+              autoFocus
+            />
+
+            <button onClick={() => verifyAccessToken(tokenInput)} disabled={checkingAuth}>
+              {checkingAuth ? 'Checking...' : 'Enter'}
+            </button>
+          </div>
+
+          {authError && <div className="msg error">{authError}</div>}
+
+          <div className="msg">
+            All Information Contained Within is Property of Kole Trucking LLC
+          </div>
+        </div>
       </div>
     );
   }
@@ -325,6 +536,10 @@ export default function App() {
           <h1>Kole Lookup Console</h1>
           <p>Search Bid Listing records, review order details, and inspect dispatch or billing data.</p>
         </div>
+
+        <button className="close-button" onClick={clearAccessToken}>
+          Log Off
+        </button>
       </header>
 
       <div className="search-card">
@@ -341,11 +556,31 @@ export default function App() {
           </button>
         </div>
 
-        {hasSearched && !loading && !error && (
-          <div className="summary">
-            {results.length} result{results.length === 1 ? '' : 's'} from {searchedRecords} records
-          </div>
-        )}
+       {hasSearched && !loading && !error && (
+  <div className="summary">
+    {filteredResults.length} result{filteredResults.length === 1 ? '' : 's'} from {searchedRecords} records
+  </div>
+)}
+
+{showStatusFilter && (
+  <div className="filter-bar">
+    <span>Status:</span>
+
+    {statusOptions.map((status) => (
+      <button
+        key={status}
+        className={
+          statusFilter === status
+            ? 'filter-button active-filter'
+            : 'filter-button'
+        }
+        onClick={() => setStatusFilter(status)}
+      >
+        {status}
+      </button>
+    ))}
+  </div>
+)}
 
         {loading && <div className="msg">Searching...</div>}
         {loadingDetail && <div className="msg">Loading record details...</div>}
@@ -361,24 +596,26 @@ export default function App() {
           <table>
             <thead>
               <tr>
-                <th>BOL</th>
-                <th>Customer</th>
-                <th>Origin</th>
-                <th>Destination</th>
-                <th>Driver</th>
-                <th>Truck</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
+  <th>Year</th>
+  <th>BOL</th>
+  <th>Customer</th>
+  <th>Origin</th>
+  <th>Destination</th>
+  <th>Driver</th>
+  <th>Truck</th>
+  <th>Status</th>
+  <th>Actions</th>
+</tr>
             </thead>
 
             <tbody>
-              {results.map((r, i) => (
+              {filteredResults.map((r, i) => (
                 <tr
-                  key={r.id || i}
-                  className={selected?.id === r.id ? 'selected-row' : ''}
-                  onClick={() => loadDetails(r.id, 'basic')}
-                >
+  key={`${r.SourceListId || 'current'}-${r.id || i}`}
+  className={selected?.id === r.id && selected?.SourceListId === r.SourceListId ? 'selected-row' : ''}
+  onClick={() => loadDetails(r.id, 'basic', r.SourceListId)}
+>
+<td>{r.SourceYear || '-'}</td>
                   <td>{r.BOL || '-'}</td>
                   <td>{r.Customer || '-'}</td>
                   <td>{r.Origin || '-'}</td>
@@ -396,7 +633,7 @@ export default function App() {
                         className="view-button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          loadDetails(r.id, 'basic');
+                          loadDetails(r.id, 'basic', r.SourceListId);
                         }}
                       >
                         Basic
@@ -408,7 +645,7 @@ export default function App() {
                             className="view-button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              loadDetails(r.id, 'dispatch');
+                              loadDetails(r.id, 'dispatch', r.SourceListId);
                             }}
                           >
                             Dispatch
@@ -418,7 +655,7 @@ export default function App() {
                             className="view-button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              loadDetails(r.id, 'billing');
+                              loadDetails(r.id, 'billing', r.SourceListId);
                             }}
                           >
                             Billing
