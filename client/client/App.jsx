@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import './App.css';
 
 const API =
@@ -22,6 +22,9 @@ export default function App() {
   const [includeArchives, setIncludeArchives] = useState(false);
   const [documentLoading, setDocumentLoading] = useState('');
   const [documentError, setDocumentError] = useState('');
+
+  const [sortField, setSortField] = useState('');
+  const [sortDirection, setSortDirection] = useState('asc');
 
   const [accessToken, setAccessToken] = useState(
     localStorage.getItem(TOKEN_STORAGE_KEY) || ''
@@ -55,6 +58,34 @@ export default function App() {
       ? results
       : results.filter((r) => r.Status === statusFilter);
 
+  const sortedResults = useMemo(() => {
+    if (!sortField) {
+      return filteredResults;
+    }
+
+    const sorted = [...filteredResults];
+
+    sorted.sort((a, b) => {
+      const aValue = String(a?.[sortField] || '').toLowerCase();
+      const bValue = String(b?.[sortField] || '').toLowerCase();
+
+      const aNum = Number(aValue);
+      const bNum = Number(bValue);
+
+      let comparison = 0;
+
+      if (!Number.isNaN(aNum) && !Number.isNaN(bNum) && aValue !== '' && bValue !== '') {
+        comparison = aNum - bNum;
+      } else {
+        comparison = aValue.localeCompare(bValue);
+      }
+
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+
+    return sorted;
+  }, [filteredResults, sortField, sortDirection]);
+
   useEffect(() => {
     function handleEsc(e) {
       if (e.key === 'Escape') {
@@ -65,6 +96,22 @@ export default function App() {
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, []);
+
+  function toggleSort(field) {
+    if (sortField === field) {
+      setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+
+    setSortField(field);
+    setSortDirection('asc');
+  }
+
+  function getSortIndicator(field) {
+    if (sortField !== field) return '↕';
+
+    return sortDirection === 'asc' ? '▲' : '▼';
+  }
 
   async function verifyAccessToken(token) {
     const candidate = token.trim();
@@ -115,6 +162,8 @@ export default function App() {
     setError('');
     setAuthError('');
     setDocumentError('');
+    setSortField('');
+    setSortDirection('asc');
   }
 
   async function authedFetch(url) {
@@ -141,6 +190,8 @@ export default function App() {
     setError('');
     setStatusFilter('All');
     setDocumentError('');
+    setSortField('');
+    setSortDirection('asc');
   }
 
   async function handleSearch() {
@@ -154,6 +205,8 @@ export default function App() {
     setSelectedView('basic');
     setStatusFilter('All');
     setDocumentError('');
+    setSortField('');
+    setSortDirection('asc');
 
     try {
       const res = await authedFetch(
@@ -299,6 +352,43 @@ export default function App() {
     }
   }
 
+  async function openLoadPhotosFolder() {
+    if (!selected?.BOL) {
+      setDocumentError('This record does not have a BOL number.');
+      return;
+    }
+
+    if (!selected?.Driver) {
+      setDocumentError('This record does not have an operator/driver name.');
+      return;
+    }
+
+    setDocumentLoading('loadphotos');
+    setDocumentError('');
+
+    try {
+      const res = await authedFetch(
+        `${API}/documents/loadphotos?bol=${encodeURIComponent(selected.BOL)}&driver=${encodeURIComponent(selected.Driver || '')}&operatorInactive=${encodeURIComponent(selected.OperatorInactive || false)}`
+      );
+
+      const data = await res.json();
+
+      if (!data.success) {
+        throw new Error(data.error || 'Unable to find Load Photos folder.');
+      }
+
+      if (!data.webUrl) {
+        throw new Error('Load Photos folder was found, but no OneDrive link was returned.');
+      }
+
+      window.open(data.webUrl, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      setDocumentError(err.message);
+    } finally {
+      setDocumentLoading('');
+    }
+  }
+
   function closeModal() {
     setSelected(null);
     setDocumentError('');
@@ -318,6 +408,22 @@ export default function App() {
   function canShowOrderViews(status) {
     const s = (status || '').toLowerCase();
     return s === 'won' || s === 'tonu';
+  }
+
+  function SortableHeader({ field, label }) {
+    return (
+      <th
+        className="sortable-header"
+        onClick={() => toggleSort(field)}
+      >
+        <div className="sortable-header-content">
+          <span>{label}</span>
+          <span className="sort-indicator">
+            {getSortIndicator(field)}
+          </span>
+        </div>
+      </th>
+    );
   }
 
   function formatDateTime(dateValue, timeValue, ampmValue) {
@@ -647,10 +753,16 @@ export default function App() {
         />
 
         <DocumentCard
-          title="Loading Photos"
-          description="Coming next: open the matching load photo folder."
-          buttonText="Coming Soon"
-          disabled
+          title="Load Photos"
+          description={
+            selected.BOL
+              ? `Open Load Photo Folder for ${selected.BOL}`
+              : 'No BOL number found'
+          }
+          buttonText="Open Load Photos"
+          onClick={openLoadPhotosFolder}
+          disabled={!selected.BOL}
+          loading={documentLoading === 'loadphotos'}
         />
 
         <DocumentCard
@@ -752,6 +864,8 @@ export default function App() {
                 setError('');
                 setStatusFilter('All');
                 setDocumentError('');
+                setSortField('');
+                setSortDirection('asc');
               }}
             />
             <span>Include archive years</span>
@@ -760,7 +874,7 @@ export default function App() {
 
         {hasSearched && !loading && !error && (
           <div className="summary">
-            {filteredResults.length} result{filteredResults.length === 1 ? '' : 's'} from {searchedRecords} records
+            {sortedResults.length} result{sortedResults.length === 1 ? '' : 's'} from {searchedRecords} records
           </div>
         )}
 
@@ -794,24 +908,24 @@ export default function App() {
       </div>
 
       <div className="results-panel">
-        {results.length > 0 && (
+        {sortedResults.length > 0 && (
           <table>
             <thead>
               <tr>
-                <th>Year</th>
-                <th>BOL</th>
-                <th>Customer</th>
-                <th>Origin</th>
-                <th>Destination</th>
-                <th>Driver</th>
-                <th>Truck</th>
-                <th>Status</th>
+                <SortableHeader field="SourceYear" label="Year" />
+                <SortableHeader field="BOL" label="BOL" />
+                <SortableHeader field="Customer" label="Customer" />
+                <SortableHeader field="Origin" label="Origin" />
+                <SortableHeader field="Destination" label="Destination" />
+                <SortableHeader field="Driver" label="Driver" />
+                <SortableHeader field="Truck" label="Truck" />
+                <SortableHeader field="Status" label="Status" />
                 <th>Actions</th>
               </tr>
             </thead>
 
             <tbody>
-              {filteredResults.map((r, i) => (
+              {sortedResults.map((r, i) => (
                 <tr
                   key={`${r.SourceListId || 'current'}-${r.id || i}`}
                   className={selected?.id === r.id && selected?.SourceListId === r.SourceListId ? 'selected-row' : ''}
@@ -862,6 +976,18 @@ export default function App() {
                           >
                             Billing
                           </button>
+
+                          {r.BOL && (
+                            <button
+                              className="view-button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                loadDetails(r.id, 'documents', r.SourceListId);
+                              }}
+                            >
+                              Documents
+                            </button>
+                          )}
                         </>
                       )}
                     </div>

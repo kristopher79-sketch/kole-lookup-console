@@ -85,6 +85,161 @@ function normalizeText(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function normalizeSearchValue(value) {
+  return normalizeText(value)
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function compactSearchValue(value) {
+  return normalizeSearchValue(value).replace(/\s+/g, '');
+}
+
+function parseBoolean(value) {
+  const normalized = normalizeText(value);
+
+  return (
+    value === true ||
+    normalized === 'true' ||
+    normalized === 'yes' ||
+    normalized === '1'
+  );
+}
+
+function getNameParts(value) {
+  const normalized = normalizeSearchValue(value);
+  if (!normalized) return [];
+
+  return normalized
+    .split(' ')
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function getLikelyLastName(value) {
+  const parts = getNameParts(value);
+  if (parts.length === 0) return '';
+  return parts[parts.length - 1];
+}
+
+function isExactBolSearch(value) {
+  return /^[a-z]\d{6}$/i.test(String(value || '').trim());
+}
+
+function isLikelyTruckSearch(value) {
+  return /^[a-z0-9-]{1,10}$/i.test(String(value || '').trim());
+}
+
+function getSourceSortValue(item) {
+  if (!item.SourceYear || item.SourceYear === 'Current') return 9999;
+
+  const year = Number(item.SourceYear);
+  return Number.isNaN(year) ? 0 : year;
+}
+
+function getBolSortValue(item) {
+  const bol = String(item.BOL || '').trim().toUpperCase();
+  const match = bol.match(/[A-Z](\d{6})/);
+  if (!match) return 0;
+  return Number(match[1]) || 0;
+}
+
+function getPickupSortValue(item) {
+  if (!item.PickupDate) return 0;
+
+  const date = new Date(item.PickupDate);
+  const time = date.getTime();
+
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function compareRecordsDefault(a, b) {
+  const sourceDiff = getSourceSortValue(b) - getSourceSortValue(a);
+  if (sourceDiff !== 0) return sourceDiff;
+
+  const bolDiff = getBolSortValue(b) - getBolSortValue(a);
+  if (bolDiff !== 0) return bolDiff;
+
+  const pickupDiff = getPickupSortValue(b) - getPickupSortValue(a);
+  if (pickupDiff !== 0) return pickupDiff;
+
+  return String(a.Customer || '').localeCompare(String(b.Customer || ''));
+}
+
+function getSearchScore(item, rawQuery) {
+  const query = normalizeSearchValue(rawQuery);
+  const queryCompact = compactSearchValue(rawQuery);
+
+  if (!query) return 0;
+
+  const bol = normalizeSearchValue(item.BOL);
+  const bidId = normalizeSearchValue(item.BidID);
+  const customer = normalizeSearchValue(item.Customer);
+  const truck = normalizeSearchValue(item.Truck);
+  const operator = normalizeSearchValue(item.Driver);
+  const tmsName = normalizeSearchValue(item.TMSName);
+
+  const operatorCompact = compactSearchValue(item.Driver);
+  const tmsCompact = compactSearchValue(item.TMSName);
+
+  const operatorLast = getLikelyLastName(item.Driver);
+  const tmsLast = getLikelyLastName(item.TMSName);
+
+  let score = 0;
+
+  if (bol && bol === query) score += 1000;
+  else if (bol && bol.startsWith(query)) score += 850;
+  else if (bol && bol.includes(query)) score += 700;
+
+  if (bidId && bidId === query) score += 750;
+  else if (bidId && bidId.startsWith(query)) score += 600;
+  else if (bidId && bidId.includes(query)) score += 450;
+
+  if (truck && truck === query) score += 700;
+  else if (truck && truck.startsWith(query)) score += 550;
+  else if (truck && truck.includes(query) && isLikelyTruckSearch(rawQuery)) score += 350;
+
+  if (customer && customer === query) score += 650;
+  else if (customer && customer.startsWith(query)) score += 500;
+  else if (customer && customer.includes(query)) score += 325;
+
+  if (operator && operator === query) score += 625;
+  else if (operatorLast && operatorLast === query) score += 575;
+  else if (operator && operator.startsWith(query)) score += 450;
+  else if (operator && operator.includes(query)) score += 300;
+  else if (operatorCompact && queryCompact && operatorCompact.includes(queryCompact)) score += 275;
+
+  if (tmsName && tmsName === query) score += 625;
+  else if (tmsLast && tmsLast === query) score += 575;
+  else if (tmsName && tmsName.startsWith(query)) score += 450;
+  else if (tmsName && tmsName.includes(query)) score += 300;
+  else if (tmsCompact && queryCompact && tmsCompact.includes(queryCompact)) score += 275;
+
+  if (isExactBolSearch(rawQuery) && bol !== query) {
+    score = Math.min(score, 250);
+  }
+
+  return score;
+}
+
+function searchAndRankRecords(records, rawQuery) {
+  return records
+    .map((item) => ({
+      ...item,
+      SearchScore: getSearchScore(item, rawQuery)
+    }))
+    .filter((item) => item.SearchScore > 0)
+    .sort((a, b) => {
+      const scoreDiff = b.SearchScore - a.SearchScore;
+      if (scoreDiff !== 0) return scoreDiff;
+
+      return compareRecordsDefault(a, b);
+    })
+    .map(({ SearchScore, ...item }) => item);
+}
+
 function findBestBolMatch(items, bol, bidId) {
   const cleanBol = normalizeText(bol);
   const cleanBidId = normalizeText(bidId);
@@ -137,6 +292,30 @@ function findBestDispatchSheetMatch(items, bol) {
   if (exactMatch) return exactMatch;
 
   return files.find((item) => normalizeText(item.name).includes(cleanBol)) || null;
+}
+
+function findFolderByExactName(items, folderName) {
+  const target = normalizeSearchValue(folderName);
+
+  if (!target) return null;
+
+  return (
+    items.find((item) => item.folder && normalizeSearchValue(item.name) === target) ||
+    null
+  );
+}
+
+function findFolderByBolPrefix(items, bol) {
+  const cleanBol = normalizeText(bol);
+
+  if (!cleanBol) return null;
+
+  return (
+    items.find((item) => {
+      const name = normalizeText(item.name);
+      return item.folder && name.startsWith(cleanBol);
+    }) || null
+  );
 }
 
 function getArchiveYear(displayName) {
@@ -213,7 +392,10 @@ function cleanBidItem(item, sourceList) {
     Destination: fields.Shipment_x0020_Destination || '',
     Status: fields.Status || '',
     Truck: fields.Truck_x0020_Number || '',
-    Driver: fields.Operator_x002f_Team || ''
+    Driver: fields.Operator_x002f_Team || '',
+    TMSName: fields.TMSName || '',
+    OperatorInactive: fields.OperatorInactive ?? false,
+    PickupDate: fields.Pickup_x0020_Offer_x0020_Date || ''
   };
 }
 
@@ -266,6 +448,7 @@ function buildRecordResponse(data, sourceList) {
     AircraftRelated: f.Aircraft_x0020_Related_x003f_ || '',
     TeamRequired: f.Team_x0020_Required || '',
     Route: f.Route || '',
+    OperatorInactive: f.OperatorInactive ?? false,
 
     Pickup1Name: f.Pickup1Name || '',
     Pickup1Address1: f.Pickup1Address1 || '',
@@ -403,7 +586,7 @@ app.get('/bids-test', requireLookupAccess, async (req, res) => {
 app.get('/search', requireLookupAccess, async (req, res) => {
   try {
     const token = await getGraphToken();
-    const q = (req.query.q || '').toString().trim().toLowerCase();
+    const q = (req.query.q || '').toString().trim();
     const includeArchives =
       String(req.query.includeArchives || '').toLowerCase() === 'true';
 
@@ -439,11 +622,7 @@ app.get('/search', requireLookupAccess, async (req, res) => {
         error: entry.result.reason?.message || 'Unknown list search failure'
       }));
 
-    const results = successfulGroups.filter((item) =>
-      Object.values(item).some((value) =>
-        value.toString().toLowerCase().includes(q)
-      )
-    );
+    const results = searchAndRankRecords(successfulGroups, q);
 
     res.json({
       success: true,
@@ -607,6 +786,111 @@ app.get('/documents/dispatchsheet', requireLookupAccess, async (req, res) => {
       webUrl: match.webUrl,
       id: match.id,
       lastModifiedDateTime: match.lastModifiedDateTime || ''
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/documents/loadphotos', requireLookupAccess, async (req, res) => {
+  try {
+    const bol = (req.query.bol || '').toString().trim();
+    const driver = (req.query.driver || '').toString().trim();
+    const operatorInactive = parseBoolean(req.query.operatorInactive);
+
+    if (!bol) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing BOL number.'
+      });
+    }
+
+    if (!driver) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing driver/operator name.'
+      });
+    }
+
+    if (!process.env.DISPATCH_ONEDRIVE_ID || !process.env.LOAD_PICTURES_FOLDER_ID) {
+      return res.status(500).json({
+        success: false,
+        error: 'Load Pictures folder environment variables are not configured.'
+      });
+    }
+
+    const token = await getGraphToken();
+
+    const rootItems = await getAllChildrenFromFolder(
+      token,
+      process.env.DISPATCH_ONEDRIVE_ID,
+      process.env.LOAD_PICTURES_FOLDER_ID
+    );
+
+    let driverSearchItems = rootItems;
+    let inactiveFolder = null;
+
+    if (operatorInactive) {
+      inactiveFolder = findFolderByExactName(rootItems, 'Inactive');
+
+      if (!inactiveFolder) {
+        return res.status(404).json({
+          success: false,
+          error: 'Inactive folder was not found inside Load Pictures and BOLs.',
+          searchedFor: { bol, driver, operatorInactive }
+        });
+      }
+
+      driverSearchItems = await getAllChildrenFromFolder(
+        token,
+        process.env.DISPATCH_ONEDRIVE_ID,
+        inactiveFolder.id
+      );
+    }
+
+    const driverFolder = findFolderByExactName(driverSearchItems, driver);
+
+    if (!driverFolder) {
+      return res.status(404).json({
+        success: false,
+        error: operatorInactive
+          ? 'No inactive driver photo folder was found for this operator.'
+          : 'No active driver photo folder was found for this operator.',
+        searchedFor: { bol, driver, operatorInactive }
+      });
+    }
+
+    const loadFolders = await getAllChildrenFromFolder(
+      token,
+      process.env.DISPATCH_ONEDRIVE_ID,
+      driverFolder.id
+    );
+
+    const loadFolder = findFolderByBolPrefix(loadFolders, bol);
+
+    if (!loadFolder) {
+      return res.status(404).json({
+        success: false,
+        error: 'No load photo folder was found for this BOL under the operator folder.',
+        searchedFor: {
+          bol,
+          driver,
+          operatorInactive,
+          driverFolder: driverFolder.name
+        }
+      });
+    }
+
+    res.json({
+      success: true,
+      documentType: 'Load Photos',
+      name: loadFolder.name,
+      webUrl: loadFolder.webUrl,
+      id: loadFolder.id,
+      driverFolder: driverFolder.name,
+      operatorInactive,
+      lastModifiedDateTime: loadFolder.lastModifiedDateTime || ''
     });
   } catch (error) {
     console.error(error);

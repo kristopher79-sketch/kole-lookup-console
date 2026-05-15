@@ -443,3 +443,39 @@ tbody tr:hover {
   height: 16px;
   cursor: pointer;
 }
+.document-button {
+  width: 100%;
+  border: none;
+  border-radius: 10px;
+  background: #1e293b;
+  color: #ffffff;
+  padding: 14px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  text-align: left;
+}
+
+.document-button:hover {
+  background: #334155;
+}
+
+.document-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.document-button-title {
+  display: block;
+  font-size: 15px;
+  color: #facc15;
+  margin-bottom: 4px;
+}
+
+.document-button-subtitle {
+  display: block;
+  font-size: 12px;
+  color: #cbd5e1;
+  font-weight: 400;
+}
