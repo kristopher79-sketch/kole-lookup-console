@@ -3,6 +3,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const msal = require('@azure/msal-node');
+const jwt = require('jsonwebtoken');
+const jwksRsa = require('jwks-rsa');
 
 const app = express();
 app.use(cors());
@@ -16,24 +18,92 @@ let cachedBidLists = null;
 let cachedBidListsAt = 0;
 const BID_LIST_CACHE_MS = 5 * 60 * 1000;
 
-function requireLookupAccess(req, res, next) {
-  const token = req.headers['x-lookup-token'];
+const entraJwksClient = jwksRsa({
+  jwksUri: `https://login.microsoftonline.com/${process.env.TENANT_ID}/discovery/v2.0/keys`,
+  cache: true,
+  rateLimit: true
+});
 
-  if (!process.env.LOOKUP_ACCESS_TOKEN) {
+function getSigningKey(header, callback) {
+  entraJwksClient.getSigningKey(header.kid, (error, key) => {
+    if (error) return callback(error);
+    callback(null, key.getPublicKey());
+  });
+}
+
+function getAllowedLookupUsers() {
+  return String(process.env.ALLOWED_KOLE_USERS || '')
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function getTokenFromRequest(req) {
+  const authHeader = req.headers.authorization || '';
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1] : '';
+}
+
+function requireLookupAccess(req, res, next) {
+  const token = getTokenFromRequest(req);
+
+  if (!process.env.TENANT_ID || !process.env.MSAL_CLIENT_ID) {
     return res.status(500).json({
       success: false,
-      error: 'Lookup access token is not configured on the server.'
+      error: 'Microsoft login validation is not configured on the server.'
     });
   }
 
-  if (!token || token !== process.env.LOOKUP_ACCESS_TOKEN) {
+  if (!token) {
     return res.status(401).json({
       success: false,
-      error: 'Unauthorized'
+      error: 'Missing Microsoft bearer token.'
     });
   }
 
-  next();
+  jwt.verify(
+    token,
+    getSigningKey,
+    {
+      algorithms: ['RS256'],
+      audience: process.env.MSAL_CLIENT_ID,
+      issuer: `https://login.microsoftonline.com/${process.env.TENANT_ID}/v2.0`
+    },
+    (error, decoded) => {
+      if (error) {
+        return res.status(401).json({
+          success: false,
+          error: 'Microsoft token was not accepted.',
+          detail: error.message
+        });
+      }
+
+      const email = String(
+        decoded.preferred_username ||
+        decoded.email ||
+        decoded.upn ||
+        decoded.unique_name ||
+        ''
+      ).toLowerCase();
+
+      const allowedUsers = getAllowedLookupUsers();
+
+      if (allowedUsers.length > 0 && !allowedUsers.includes(email)) {
+        return res.status(403).json({
+          success: false,
+          error: 'This Microsoft account is not authorized for Kole Connect.'
+        });
+      }
+
+      req.user = {
+        name: decoded.name || '',
+        email,
+        oid: decoded.oid || ''
+      };
+
+      next();
+    }
+  );
 }
 
 const msalClient = new msal.ConfidentialClientApplication({

@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useMsal, useIsAuthenticated } from '@azure/msal-react';
+import { InteractionStatus } from '@azure/msal-browser';
+import { loginRequest } from './authConfig';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import './App.css';
 
@@ -7,9 +10,12 @@ const API =
     ? 'http://localhost:5000'
     : 'https://kole-lookup-console.onrender.com';
 
-const TOKEN_STORAGE_KEY = 'koleLookupAccessToken';
 
 export default function App() {
+  const { instance, accounts, inProgress } = useMsal();
+  const isAuthenticated = useIsAuthenticated();
+const activeAccount = instance.getActiveAccount() || accounts[0] || null;
+
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searchedRecords, setSearchedRecords] = useState(0);
@@ -27,13 +33,7 @@ export default function App() {
   const [sortField, setSortField] = useState('');
   const [sortDirection, setSortDirection] = useState('asc');
 
-  const [accessToken, setAccessToken] = useState(
-    localStorage.getItem(TOKEN_STORAGE_KEY) || ''
-  );
-
-  const [tokenInput, setTokenInput] = useState('');
   const [authError, setAuthError] = useState('');
-  const [checkingAuth, setCheckingAuth] = useState(false);
 
   function isBolLookup(value) {
     const q = value.trim().toUpperCase();
@@ -114,47 +114,7 @@ export default function App() {
     return sortDirection === 'asc' ? '▲' : '▼';
   }
 
-  async function verifyAccessToken(token) {
-    const candidate = token.trim();
-
-    if (!candidate) {
-      setAuthError('Enter the access code.');
-      return;
-    }
-
-    setCheckingAuth(true);
-    setAuthError('');
-
-    try {
-      const res = await fetch(`${API}/auth-check`, {
-        headers: {
-          'x-lookup-token': candidate
-        }
-      });
-
-      const data = await res.json();
-
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Access denied');
-      }
-
-      localStorage.setItem(TOKEN_STORAGE_KEY, candidate);
-      setAccessToken(candidate);
-      setTokenInput('');
-      setAuthError('');
-    } catch (err) {
-      setAuthError('Access code was not accepted.');
-      localStorage.removeItem(TOKEN_STORAGE_KEY);
-      setAccessToken('');
-    } finally {
-      setCheckingAuth(false);
-    }
-  }
-
-  function clearAccessToken() {
-    localStorage.removeItem(TOKEN_STORAGE_KEY);
-    setAccessToken('');
-    setTokenInput('');
+  function resetAppState() {
     setQuery('');
     setResults([]);
     setSearchedRecords(0);
@@ -167,16 +127,60 @@ export default function App() {
     setSortDirection('asc');
   }
 
+  async function handleLogin() {
+  setAuthError('');
+
+  try {
+    await instance.loginRedirect(loginRequest);
+  } catch (err) {
+    setAuthError(err.message || 'Microsoft sign-in failed.');
+  }
+}
+
+async function handleLogout() {
+  resetAppState();
+
+  try {
+    await instance.logoutRedirect({
+      account: activeAccount,
+      postLogoutRedirectUri: window.location.origin
+    });
+
+    } catch (err) {
+      setAuthError(err.message || 'Microsoft sign-out failed.');
+    }
+  }
+
+  async function getMicrosoftAccessToken() {
+    if (!activeAccount) {
+      throw new Error('No Microsoft account is currently signed in.');
+    }
+
+    const request = {
+      ...loginRequest,
+      account: activeAccount
+    };
+
+    try {
+      const response = await instance.acquireTokenSilent(request);
+      return response.idToken;
+    } catch {
+      const response = await instance.acquireTokenPopup(request);
+      return response.idToken;
+    }
+  }
+
   async function authedFetch(url) {
+    const microsoftToken = await getMicrosoftAccessToken();
+
     const res = await fetch(url, {
       headers: {
-        'x-lookup-token': accessToken
+        Authorization: `Bearer ${microsoftToken}`
       }
     });
 
-    if (res.status === 401) {
-      clearAccessToken();
-      throw new Error('Access expired or invalid. Re-enter the access code.');
+    if (res.status === 401 || res.status === 403) {
+      throw new Error('Microsoft access was denied for this app.');
     }
 
     return res;
@@ -784,35 +788,23 @@ export default function App() {
     );
   }
 
-  if (!accessToken) {
+  if (!isAuthenticated) {
     return (
       <div className="container">
         <header className="app-header">
           <div>
             <h1>Kole Connect</h1>
-            <p>Enter the access code to continue.</p>
+            <p>Sign in with your Kole Trucking Microsoft 365 account to continue.</p>
           </div>
         </header>
 
         <div className="search-card">
-          <div className="search-bar">
-            <input
-              type="password"
-              value={tokenInput}
-              onChange={(e) => setTokenInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  verifyAccessToken(tokenInput);
-                }
-              }}
-              placeholder="Access code"
-              autoFocus
-            />
-
-            <button onClick={() => verifyAccessToken(tokenInput)} disabled={checkingAuth}>
-              {checkingAuth ? 'Checking...' : 'Enter'}
-            </button>
-          </div>
+          <button
+            onClick={handleLogin}
+            disabled={inProgress !== InteractionStatus.None}
+          >
+            {inProgress !== InteractionStatus.None ? 'Signing in...' : 'Sign in with Microsoft'}
+          </button>
 
           {authError && <div className="msg error">{authError}</div>}
 
@@ -832,7 +824,7 @@ export default function App() {
           <p>Search Bid Listing records, review order details, and inspect dispatch or billing data.</p>
         </div>
 
-        <button className="close-button" onClick={clearAccessToken}>
+        <button className="close-button" onClick={handleLogout}>
           Log Off
         </button>
       </header>
