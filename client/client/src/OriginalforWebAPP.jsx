@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import './App.css';
 
 const API =
@@ -281,7 +280,7 @@ export default function App() {
         throw new Error('BOL document was found, but no SharePoint link was returned.');
       }
 
-      await openUrl(data.webUrl);
+      window.open(data.webUrl, '_blank', 'noopener,noreferrer');
     } catch (err) {
       setDocumentError(err.message);
     } finally {
@@ -313,7 +312,7 @@ export default function App() {
         throw new Error('Final Settle document was found, but no SharePoint link was returned.');
       }
 
-      await openUrl(data.webUrl);
+      window.open(data.webUrl, '_blank', 'noopener,noreferrer');
     } catch (err) {
       setDocumentError(err.message);
     } finally {
@@ -345,7 +344,7 @@ export default function App() {
         throw new Error('Dispatch Sheet was found, but no SharePoint link was returned.');
       }
 
-      await openUrl(data.webUrl);
+      window.open(data.webUrl, '_blank', 'noopener,noreferrer');
     } catch (err) {
       setDocumentError(err.message);
     } finally {
@@ -382,7 +381,7 @@ export default function App() {
         throw new Error('Load Photos folder was found, but no OneDrive link was returned.');
       }
 
-      await openUrl(data.webUrl);
+      window.open(data.webUrl, '_blank', 'noopener,noreferrer');
     } catch (err) {
       setDocumentError(err.message);
     } finally {
