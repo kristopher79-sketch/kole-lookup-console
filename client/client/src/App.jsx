@@ -26,11 +26,14 @@ export default function App() {
   const [includeArchives, setIncludeArchives] = useState(false);
   const [documentLoading, setDocumentLoading] = useState('');
   const [documentError, setDocumentError] = useState('');
-
+  const [operationsData, setOperationsData] = useState(null);
+  const [operationsLoading, setOperationsLoading] = useState(false);
+  const [operationsError, setOperationsError] = useState('');
   const [sortField, setSortField] = useState('');
   const [sortDirection, setSortDirection] = useState('asc');
 
   const [authError, setAuthError] = useState('');
+  
 
   function isBolLookup(value) {
     const q = value.trim().toUpperCase();
@@ -94,6 +97,12 @@ export default function App() {
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, []);
+
+  useEffect(() => {
+  if (isAuthenticated && !operationsData && !operationsLoading) {
+    loadOperationsDashboard();
+  }
+}, [isAuthenticated]);
 
   function toggleSort(field) {
     if (sortField === field) {
@@ -222,7 +231,30 @@ export default function App() {
       setLoading(false);
     }
   }
+  
+async function loadOperationsDashboard() {
+  setOperationsLoading(true);
+  setOperationsError('');
 
+  try {
+    const res = await authedFetch(
+      `${API}/operations/today`
+    );
+
+    const data = await res.json();
+
+    if (!data.success) {
+      throw new Error(data.error || 'Unable to load operations dashboard.');
+    }
+
+    setOperationsData(data);
+  } catch (err) {
+    setOperationsError(err.message);
+    setOperationsData(null);
+  } finally {
+    setOperationsLoading(false);
+  }
+}
   async function loadDetails(id, view = 'basic', sourceListId = '') {
     if (!id) {
       setError('This row does not have a record ID.');
@@ -904,6 +936,199 @@ export default function App() {
         {hasSearched && !loading && !error && results.length === 0 && (
           <div className="msg">No results found</div>
         )}
+{!hasSearched && (
+  <div className="search-card operations-panel">
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
+      <div>
+        <h2>Today&apos;s Operations</h2>
+        {operationsData?.generatedAt && (
+          <p>Generated: {operationsData.generatedAt}</p>
+        )}
+      </div>
+
+      <button onClick={loadOperationsDashboard} disabled={operationsLoading}>
+        {operationsLoading ? 'Refreshing...' : 'Refresh Operations'}
+      </button>
+    </div>
+
+    {operationsError && <div className="msg error">{operationsError}</div>}
+    {operationsLoading && !operationsData && <div className="msg">Loading operations...</div>}
+
+    {operationsData && (
+      <>
+        <div className="operations-grid">
+          <div className="operations-card">
+            <span>Active Today</span>
+            <strong>{operationsData.counts.activeToday}</strong>
+          </div>
+
+          <div className="operations-card">
+            <span>Loading Today</span>
+            <strong>{operationsData.counts.loadingToday}</strong>
+          </div>
+
+          <div className="operations-card">
+            <span>Delivering Today</span>
+            <strong>{operationsData.counts.deliveringToday}</strong>
+          </div>
+
+          <div className="operations-card">
+            <span>Loading Next 7 Days</span>
+            <strong>{operationsData.counts.loadingNext7}</strong>
+          </div>
+        </div>
+
+        <div style={{ marginTop: '24px' }}>
+          <h3 style={{ marginBottom: '12px' }}>Active Today</h3>
+
+          <div className="operations-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>BOL</th>
+                  <th>Driver</th>
+                  <th>Origin</th>
+                  <th>Destination</th>
+                  <th>Delivery</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {operationsData.activeToday.map((r, i) => (
+                  <tr
+                    key={`active-${r.id || i}`}
+                    onClick={() => loadDetails(r.id, 'basic', r.SourceListId)}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <td>{r.BOL || '-'}</td>
+                    <td>{r.Driver || '-'}</td>
+                    <td>{r.Origin || '-'}</td>
+                    <td>{r.Destination || '-'}</td>
+                    <td>{formatDateOnly(r.DeliveryDate)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div style={{ marginTop: '32px' }}>
+          <h3 style={{ marginBottom: '12px' }}>Loading Today</h3>
+
+          {operationsData.loadingToday.length === 0 ? (
+            <div className="msg">No loads scheduled to load today.</div>
+          ) : (
+            <div className="operations-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>BOL</th>
+                    <th>Driver</th>
+                    <th>Origin</th>
+                    <th>Destination</th>
+                    <th>Pickup</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {operationsData.loadingToday.map((r, i) => (
+                    <tr
+                      key={`loading-${r.id || i}`}
+                      onClick={() => loadDetails(r.id, 'basic', r.SourceListId)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <td>{r.BOL || '-'}</td>
+                      <td>{r.Driver || '-'}</td>
+                      <td>{r.Origin || '-'}</td>
+                      <td>{r.Destination || '-'}</td>
+                      <td>{formatDateOnly(r.PickupDate)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div style={{ marginTop: '32px' }}>
+          <h3 style={{ marginBottom: '12px' }}>Delivering Today</h3>
+
+          {operationsData.deliveringToday.length === 0 ? (
+            <div className="msg">No deliveries scheduled today.</div>
+          ) : (
+            <div className="operations-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>BOL</th>
+                    <th>Driver</th>
+                    <th>Origin</th>
+                    <th>Destination</th>
+                    <th>Delivery</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {operationsData.deliveringToday.map((r, i) => (
+                    <tr
+                      key={`delivering-${r.id || i}`}
+                      onClick={() => loadDetails(r.id, 'basic', r.SourceListId)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <td>{r.BOL || '-'}</td>
+                      <td>{r.Driver || '-'}</td>
+                      <td>{r.Origin || '-'}</td>
+                      <td>{r.Destination || '-'}</td>
+                      <td>{formatDateOnly(r.DeliveryDate)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div style={{ marginTop: '32px' }}>
+          <h3 style={{ marginBottom: '12px' }}>Loading Next 7 Days</h3>
+
+          {operationsData.loadingNext7.length === 0 ? (
+            <div className="msg">No upcoming loads in the next 7 days.</div>
+          ) : (
+            <div className="operations-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>BOL</th>
+                    <th>Driver</th>
+                    <th>Origin</th>
+                    <th>Destination</th>
+                    <th>Pickup</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {operationsData.loadingNext7.map((r, i) => (
+                    <tr
+                      key={`next7-${r.id || i}`}
+                      onClick={() => loadDetails(r.id, 'basic', r.SourceListId)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <td>{r.BOL || '-'}</td>
+                      <td>{r.Driver || '-'}</td>
+                      <td>{r.Origin || '-'}</td>
+                      <td>{r.Destination || '-'}</td>
+                      <td>{formatDateOnly(r.PickupDate)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </>
+    )}
+  </div>
+)}
       </div>
 
       <div className="results-panel">

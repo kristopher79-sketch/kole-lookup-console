@@ -533,7 +533,49 @@ function buildRecordResponse(data, sourceList) {
     ExcelWriteStatus: f.ExcelWriteStatus || ''
   };
 }
+function formatEasternDate(date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(date);
+}
 
+function formatEasternTimestamp(date = new Date()) {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    month: '2-digit',
+    day: '2-digit',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  }).format(date);
+}
+
+function buildOperationsRecord(item, sourceList) {
+  const fields = item.fields || {};
+
+  return {
+    id: item.id || '',
+    SourceListId: sourceList.listId,
+    SourceYear: sourceList.year,
+
+    BOL: fields.BOLNumber_x0028_Won_x0029_ || '',
+    BidID: fields.BidID || '',
+    Customer: fields.Company || '',
+    Origin: fields.Shipment_x0020_Origin || '',
+    Destination: fields.Shipment_x0020_Destination || '',
+    Driver: fields.Operator_x002f_Team || '',
+    Truck: fields.Truck_x0020_Number || '',
+
+    PickupDate: fields.Pickup_x0020_Offer_x0020_Date || '',
+    DeliveryDate: fields.Expected_x0020_Delivery_x0020_Da || '',
+
+    Status: fields.Status || '',
+    Processed: fields.Processed ?? false
+  };
+}
 app.get('/', (req, res) => {
   res.send('Kole Lookup API is running');
 });
@@ -1078,7 +1120,98 @@ app.get('/sharepoint-docs-debug', requireLookupAccess, async (req, res) => {
     });
   }
 });
+app.get('/operations/today', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
 
+    const lists = await getSearchableBidLists(token);
+
+    const currentList = lists.find(
+      (list) => list.label === 'Bid Listing'
+    );
+
+    if (!currentList) {
+      return res.status(404).json({
+        success: false,
+        error: 'Bid Listing not found.'
+      });
+    }
+
+    const data = await graphGet(
+      token,
+      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}/items?$expand=fields&$top=999`
+    );
+
+    const today = formatEasternDate();
+    const plus7 = formatEasternDate(
+      new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    );
+
+    const all = (data.value || [])
+      .map((item) => buildOperationsRecord(item, currentList))
+      .filter(
+        (r) =>
+          r.Status === 'Won' &&
+          (r.Processed === false ||
+            r.Processed === null ||
+            r.Processed === '')
+      );
+
+    function normalizeDate(value) {
+      if (!value) return '';
+
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/New_York',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).format(new Date(value));
+    }
+
+    const activeToday = all.filter((r) => {
+      const pickup = normalizeDate(r.PickupDate);
+      const delivery = normalizeDate(r.DeliveryDate);
+
+      return pickup && delivery && pickup <= today && delivery >= today;
+    });
+
+    const loadingToday = all.filter(
+      (r) => normalizeDate(r.PickupDate) === today
+    );
+
+    const deliveringToday = all.filter(
+      (r) => normalizeDate(r.DeliveryDate) === today
+    );
+
+    const loadingNext7 = all.filter((r) => {
+      const pickup = normalizeDate(r.PickupDate);
+      return pickup > today && pickup <= plus7;
+    });
+
+    res.json({
+      success: true,
+      generatedAt: `${formatEasternTimestamp()} Eastern`,
+      targetDate: today,
+      counts: {
+        activeToday: activeToday.length,
+        loadingToday: loadingToday.length,
+        deliveringToday: deliveringToday.length,
+        loadingNext7: loadingNext7.length
+      },
+      activeToday,
+      loadingToday,
+      deliveringToday,
+      loadingNext7
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
