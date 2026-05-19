@@ -1,7 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useMsal, useIsAuthenticated } from '@azure/msal-react';
-import { InteractionStatus } from '@azure/msal-browser';
-import { loginRequest } from './authConfig';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import './App.css';
 
@@ -12,9 +9,9 @@ const API =
 
 
 export default function App() {
-  const { instance, accounts, inProgress } = useMsal();
-  const isAuthenticated = useIsAuthenticated();
-const activeAccount = instance.getActiveAccount() || accounts[0] || null;
+  const [accessToken, setAccessToken] = useState(() => sessionStorage.getItem('koleLookupToken') || '');
+  const [password, setPassword] = useState('');
+  const isAuthenticated = Boolean(accessToken);
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
@@ -128,59 +125,54 @@ const activeAccount = instance.getActiveAccount() || accounts[0] || null;
   }
 
   async function handleLogin() {
-  setAuthError('');
+    const token = password.trim();
 
-  try {
-    await instance.loginRedirect(loginRequest);
-  } catch (err) {
-    setAuthError(err.message || 'Microsoft sign-in failed.');
-  }
-}
-
-async function handleLogout() {
-  resetAppState();
-
-  try {
-    await instance.logoutRedirect({
-      account: activeAccount,
-      postLogoutRedirectUri: window.location.origin
-    });
-
-    } catch (err) {
-      setAuthError(err.message || 'Microsoft sign-out failed.');
-    }
-  }
-
-  async function getMicrosoftAccessToken() {
-    if (!activeAccount) {
-      throw new Error('No Microsoft account is currently signed in.');
+    if (!token) {
+      setAuthError('Enter an access token.');
+      return;
     }
 
-    const request = {
-      ...loginRequest,
-      account: activeAccount
-    };
+    setAuthError('');
 
     try {
-      const response = await instance.acquireTokenSilent(request);
-      return response.idToken;
-    } catch {
-      const response = await instance.acquireTokenPopup(request);
-      return response.idToken;
+      const res = await fetch(`${API}/auth-check`, {
+        headers: {
+          'X-Lookup-Token': token
+        }
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Access token was not accepted.');
+      }
+
+      sessionStorage.setItem('koleLookupToken', token);
+      setAccessToken(token);
+      setPassword('');
+    } catch (err) {
+      setAuthError(err.message || 'Login failed.');
     }
+  }
+
+  function handleLogout() {
+    sessionStorage.removeItem('koleLookupToken');
+    setAccessToken('');
+    setPassword('');
+    resetAppState();
   }
 
   async function authedFetch(url) {
-    const microsoftToken = await getMicrosoftAccessToken();
-
     const res = await fetch(url, {
       headers: {
-        Authorization: `Bearer ${microsoftToken}`
+        'X-Lookup-Token': accessToken
       }
     });
 
     if (res.status === 401 || res.status === 403) {
-      throw new Error('Microsoft access was denied for this app.');
+      sessionStorage.removeItem('koleLookupToken');
+      setAccessToken('');
+      throw new Error('Access was denied. Please log in again.');
     }
 
     return res;
@@ -794,17 +786,31 @@ async function handleLogout() {
         <header className="app-header">
           <div>
             <h1>Kole Connect</h1>
-            <p>Sign in with your Kole Trucking Microsoft 365 account to continue.</p>
+            <p>Enter your Kole Connect access token to continue.</p>
           </div>
         </header>
 
         <div className="search-card">
-          <button
-            onClick={handleLogin}
-            disabled={inProgress !== InteractionStatus.None}
-          >
-            {inProgress !== InteractionStatus.None ? 'Signing in...' : 'Sign in with Microsoft'}
-          </button>
+          <div className="search-bar">
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setAuthError('');
+              }}
+              onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+              placeholder="Access token"
+              autoFocus
+            />
+
+            <button
+              onClick={handleLogin}
+              disabled={!password.trim()}
+            >
+              Log In
+            </button>
+          </div>
 
           {authError && <div className="msg error">{authError}</div>}
 

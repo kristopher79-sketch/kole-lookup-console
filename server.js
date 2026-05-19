@@ -2,9 +2,6 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
-const msal = require('@azure/msal-node');
-const jwt = require('jsonwebtoken');
-const jwksRsa = require('jwks-rsa');
 
 const app = express();
 app.use(cors());
@@ -18,108 +15,75 @@ let cachedBidLists = null;
 let cachedBidListsAt = 0;
 const BID_LIST_CACHE_MS = 5 * 60 * 1000;
 
-const entraJwksClient = jwksRsa({
-  jwksUri: `https://login.microsoftonline.com/${process.env.TENANT_ID}/discovery/v2.0/keys`,
-  cache: true,
-  rateLimit: true
-});
-
-function getSigningKey(header, callback) {
-  entraJwksClient.getSigningKey(header.kid, (error, key) => {
-    if (error) return callback(error);
-    callback(null, key.getPublicKey());
-  });
+function getAllowedLookupTokens() {
+  return [
+    process.env.LOOKUP_ACCESS_TOKEN,
+    ...(String(process.env.ADDITIONAL_LOOKUP_ACCESS_TOKENS || '')
+      .split(',')
+      .map((token) => token.trim()))
+  ].filter(Boolean);
 }
 
-function getAllowedLookupUsers() {
-  return String(process.env.ALLOWED_KOLE_USERS || '')
-    .split(',')
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
-}
+function getLookupTokenFromRequest(req) {
+  const directToken = req.headers['x-lookup-token'];
+  if (directToken) return String(directToken).trim();
 
-function getTokenFromRequest(req) {
   const authHeader = req.headers.authorization || '';
   const match = authHeader.match(/^Bearer\s+(.+)$/i);
-  return match ? match[1] : '';
+  return match ? match[1].trim() : '';
 }
 
 function requireLookupAccess(req, res, next) {
-  const token = getTokenFromRequest(req);
+  const allowedTokens = getAllowedLookupTokens();
+  const token = getLookupTokenFromRequest(req);
 
-  if (!process.env.TENANT_ID || !process.env.MSAL_CLIENT_ID) {
+  if (allowedTokens.length === 0) {
     return res.status(500).json({
       success: false,
-      error: 'Microsoft login validation is not configured on the server.'
+      error: 'Lookup access token is not configured on the server.'
     });
   }
 
-  if (!token) {
+  if (!token || !allowedTokens.includes(token)) {
     return res.status(401).json({
       success: false,
-      error: 'Missing Microsoft bearer token.'
+      error: 'Invalid or missing lookup access token.'
     });
   }
 
-  jwt.verify(
-    token,
-    getSigningKey,
-    {
-      algorithms: ['RS256'],
-      audience: process.env.MSAL_CLIENT_ID,
-      issuer: `https://login.microsoftonline.com/${process.env.TENANT_ID}/v2.0`
-    },
-    (error, decoded) => {
-      if (error) {
-        return res.status(401).json({
-          success: false,
-          error: 'Microsoft token was not accepted.',
-          detail: error.message
-        });
-      }
-
-      const email = String(
-        decoded.preferred_username ||
-        decoded.email ||
-        decoded.upn ||
-        decoded.unique_name ||
-        ''
-      ).toLowerCase();
-
-      const allowedUsers = getAllowedLookupUsers();
-
-      if (allowedUsers.length > 0 && !allowedUsers.includes(email)) {
-        return res.status(403).json({
-          success: false,
-          error: 'This Microsoft account is not authorized for Kole Connect.'
-        });
-      }
-
-      req.user = {
-        name: decoded.name || '',
-        email,
-        oid: decoded.oid || ''
-      };
-
-      next();
-    }
-  );
+  next();
 }
 
-const msalClient = new msal.ConfidentialClientApplication({
-  auth: {
-    clientId: process.env.CLIENT_ID,
-    authority: `https://login.microsoftonline.com/${process.env.TENANT_ID}`,
-    clientSecret: process.env.CLIENT_SECRET
-  }
-});
-
 async function getGraphToken() {
-  const tokenResponse = await msalClient.acquireTokenByClientCredential({
-    scopes: ['https://graph.microsoft.com/.default']
+  if (!process.env.TENANT_ID || !process.env.CLIENT_ID || !process.env.CLIENT_SECRET) {
+    throw new Error('Graph client credentials are not configured on the server.');
+  }
+
+  const body = new URLSearchParams({
+    client_id: process.env.CLIENT_ID,
+    client_secret: process.env.CLIENT_SECRET,
+    scope: 'https://graph.microsoft.com/.default',
+    grant_type: 'client_credentials'
   });
 
-  return tokenResponse.accessToken;
+  const response = await fetch(
+    `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/token`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body
+    }
+  );
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.error_description || data.error || 'Unable to acquire Graph token.');
+  }
+
+  return data.access_token;
 }
 
 async function graphGet(token, url) {
