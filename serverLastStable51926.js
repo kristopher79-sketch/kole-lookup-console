@@ -10,8 +10,6 @@ const PORT = process.env.PORT || 5000;
 
 const ARCHIVE_YEAR_MIN = 2024;
 const ARCHIVE_YEAR_MAX = 2030;
-const DEFAULT_UPLOAD_DIGEST_LIST_ID = 'c9e907f9-cdac-4657-9da6-cc6ecfaa19a8';
-
 
 let cachedBidLists = null;
 let cachedBidListsAt = 0;
@@ -576,81 +574,6 @@ function buildOperationsRecord(item, sourceList) {
 
     Status: fields.Status || '',
     Processed: fields.Processed ?? false
-  };
-}
-
-function normalizeBolKey(value) {
-  return String(value || '').trim().toUpperCase();
-}
-
-async function getAllListItemsWithFields(token, listId, fieldSelect = '') {
-  const expandFields = fieldSelect
-    ? `fields($select=${fieldSelect})`
-    : 'fields';
-
-  let url = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/items?$expand=${expandFields}&$top=999`;
-  const allItems = [];
-
-  while (url) {
-    const data = await graphGet(token, url);
-    allItems.push(...(data.value || []));
-    url = data['@odata.nextLink'] || null;
-  }
-
-  return allItems;
-}
-
-async function getUploadEvidenceSets(token) {
-  const uploadDigestListId =
-    process.env.UPLOAD_DIGEST_LIST_ID || DEFAULT_UPLOAD_DIGEST_LIST_ID;
-
-  if (!uploadDigestListId) {
-    return {
-      pickupEvidenceBols: new Set(),
-      deliveryEvidenceBols: new Set(),
-      uploadDigestCount: 0
-    };
-  }
-
-  const uploadItems = await getAllListItemsWithFields(
-    token,
-    uploadDigestListId,
-    'BOLNumber,UploadType,UploadDate,CompositeKey'
-  );
-
-  const pickupEvidenceBols = new Set();
-  const deliveryEvidenceBols = new Set();
-
-  uploadItems.forEach((item) => {
-    const fields = item.fields || {};
-    const bol = normalizeBolKey(fields.BOLNumber);
-    const uploadType = normalizeText(fields.UploadType);
-
-    if (!bol) return;
-
-    if (uploadType === 'pickup') {
-      pickupEvidenceBols.add(bol);
-    }
-
-    if (uploadType === 'delivery') {
-      deliveryEvidenceBols.add(bol);
-    }
-  });
-
-  return {
-    pickupEvidenceBols,
-    deliveryEvidenceBols,
-    uploadDigestCount: uploadItems.length
-  };
-}
-
-function addUploadEvidence(record, evidenceSets) {
-  const bol = normalizeBolKey(record.BOL);
-
-  return {
-    ...record,
-    hasPickupEvidence: bol ? evidenceSets.pickupEvidenceBols.has(bol) : false,
-    hasDeliveryEvidence: bol ? evidenceSets.deliveryEvidenceBols.has(bol) : false
   };
 }
 app.get('/', (req, res) => {
@@ -1245,31 +1168,25 @@ app.get('/operations/today', requireLookupAccess, async (req, res) => {
       }).format(new Date(value));
     }
 
-    const evidenceSets = await getUploadEvidenceSets(token);
+    const activeToday = all.filter((r) => {
+      const pickup = normalizeDate(r.PickupDate);
+      const delivery = normalizeDate(r.DeliveryDate);
 
-    const activeToday = all
-      .filter((r) => {
-        const pickup = normalizeDate(r.PickupDate);
-        const delivery = normalizeDate(r.DeliveryDate);
+      return pickup && delivery && pickup <= today && delivery >= today;
+    });
 
-        return pickup && delivery && pickup <= today && delivery >= today;
-      })
-      .map((r) => addUploadEvidence(r, evidenceSets));
+    const loadingToday = all.filter(
+      (r) => normalizeDate(r.PickupDate) === today
+    );
 
-    const loadingToday = all
-      .filter((r) => normalizeDate(r.PickupDate) === today)
-      .map((r) => addUploadEvidence(r, evidenceSets));
+    const deliveringToday = all.filter(
+      (r) => normalizeDate(r.DeliveryDate) === today
+    );
 
-    const deliveringToday = all
-      .filter((r) => normalizeDate(r.DeliveryDate) === today)
-      .map((r) => addUploadEvidence(r, evidenceSets));
-
-    const loadingNext7 = all
-      .filter((r) => {
-        const pickup = normalizeDate(r.PickupDate);
-        return pickup > today && pickup <= plus7;
-      })
-      .map((r) => addUploadEvidence(r, evidenceSets));
+    const loadingNext7 = all.filter((r) => {
+      const pickup = normalizeDate(r.PickupDate);
+      return pickup > today && pickup <= plus7;
+    });
 
     res.json({
       success: true,
@@ -1280,10 +1197,6 @@ app.get('/operations/today', requireLookupAccess, async (req, res) => {
         loadingToday: loadingToday.length,
         deliveringToday: deliveringToday.length,
         loadingNext7: loadingNext7.length
-      },
-      uploadDigest: {
-        checked: true,
-        recordsScanned: evidenceSets.uploadDigestCount
       },
       activeToday,
       loadingToday,

@@ -99,16 +99,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!isAuthenticated) return undefined;
-
+  if (isAuthenticated && !operationsData && !operationsLoading) {
     loadOperationsDashboard();
-
-    const interval = window.setInterval(() => {
-      loadOperationsDashboard({ silent: true });
-    }, 10 * 60 * 1000);
-
-    return () => window.clearInterval(interval);
-  }, [isAuthenticated, accessToken]);
+  }
+}, [isAuthenticated]);
 
   function toggleSort(field) {
     if (sortField === field) {
@@ -238,13 +232,8 @@ export default function App() {
     }
   }
   
-async function loadOperationsDashboard(options = {}) {
-  const { silent = false } = options;
-
-  if (!silent) {
-    setOperationsLoading(true);
-  }
-
+async function loadOperationsDashboard() {
+  setOperationsLoading(true);
   setOperationsError('');
 
   try {
@@ -261,14 +250,9 @@ async function loadOperationsDashboard(options = {}) {
     setOperationsData(data);
   } catch (err) {
     setOperationsError(err.message);
-
-    if (!silent) {
-      setOperationsData(null);
-    }
+    setOperationsData(null);
   } finally {
-    if (!silent) {
-      setOperationsLoading(false);
-    }
+    setOperationsLoading(false);
   }
 }
   async function loadDetails(id, view = 'basic', sourceListId = '') {
@@ -587,24 +571,6 @@ async function loadOperationsDashboard(options = {}) {
           {loading ? 'Opening...' : buttonText}
         </button>
       </div>
-    );
-  }
-
-
-  function EvidenceDot({ hasEvidence, label }) {
-    return (
-      <span
-        title={hasEvidence ? `${label} evidence received` : `No ${label.toLowerCase()} evidence received yet`}
-        aria-label={hasEvidence ? `${label} evidence received` : `No ${label.toLowerCase()} evidence received yet`}
-        style={{
-          display: 'inline-block',
-          width: '14px',
-          height: '14px',
-          borderRadius: '50%',
-          backgroundColor: hasEvidence ? '#2e9d50' : '#c93f3f',
-          boxShadow: '0 0 0 2px rgba(255,255,255,0.9), 0 1px 4px rgba(0,0,0,0.25)'
-        }}
-      />
     );
   }
 
@@ -980,7 +946,7 @@ async function loadOperationsDashboard(options = {}) {
         )}
       </div>
 
-      <button onClick={() => loadOperationsDashboard()} disabled={operationsLoading}>
+      <button onClick={loadOperationsDashboard} disabled={operationsLoading}>
         {operationsLoading ? 'Refreshing...' : 'Refresh Operations'}
       </button>
     </div>
@@ -1056,7 +1022,6 @@ async function loadOperationsDashboard(options = {}) {
               <table>
                 <thead>
                   <tr>
-                    <th>Picked Up</th>
                     <th>BOL</th>
                     <th>Driver</th>
                     <th>Origin</th>
@@ -1072,9 +1037,6 @@ async function loadOperationsDashboard(options = {}) {
                       onClick={() => loadDetails(r.id, 'basic', r.SourceListId)}
                       style={{ cursor: 'pointer' }}
                     >
-                      <td>
-                        <EvidenceDot hasEvidence={r.hasPickupEvidence} label="Pickup" />
-                      </td>
                       <td>{r.BOL || '-'}</td>
                       <td>{r.Driver || '-'}</td>
                       <td>{r.Origin || '-'}</td>
@@ -1098,7 +1060,6 @@ async function loadOperationsDashboard(options = {}) {
               <table>
                 <thead>
                   <tr>
-                    <th>Delivered</th>
                     <th>BOL</th>
                     <th>Driver</th>
                     <th>Origin</th>
@@ -1114,9 +1075,6 @@ async function loadOperationsDashboard(options = {}) {
                       onClick={() => loadDetails(r.id, 'basic', r.SourceListId)}
                       style={{ cursor: 'pointer' }}
                     >
-                      <td>
-                        <EvidenceDot hasEvidence={r.hasDeliveryEvidence} label="Delivery" />
-                      </td>
                       <td>{r.BOL || '-'}</td>
                       <td>{r.Driver || '-'}</td>
                       <td>{r.Origin || '-'}</td>
