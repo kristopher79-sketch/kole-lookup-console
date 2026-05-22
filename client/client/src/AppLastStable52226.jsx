@@ -436,49 +436,6 @@ async function loadOperationsDashboard(options = {}) {
     }
   }
 
-
-  async function openPermitFolder(record = selected) {
-    if (!record?.BOL) {
-      setDocumentError('This record does not have a BOL number.');
-      return;
-    }
-
-    if (!record?.Driver) {
-      setDocumentError('This record does not have an Operator/Team value.');
-      return;
-    }
-
-    if (!hasPermitFolder(record)) {
-      setDocumentError('This record does not have estimated permits/escorts.');
-      return;
-    }
-
-    setDocumentLoading('permits');
-    setDocumentError('');
-
-    try {
-      const res = await authedFetch(
-        `${API}/documents/permits?bol=${encodeURIComponent(record.BOL)}&operatorTeam=${encodeURIComponent(record.Driver || '')}`
-      );
-
-      const data = await res.json();
-
-      if (!data.success) {
-        throw new Error(data.error || 'Unable to find Permit folder.');
-      }
-
-      if (!data.webUrl) {
-        throw new Error('Permit folder was found, but no OneDrive link was returned.');
-      }
-
-      await openUrl(data.webUrl);
-    } catch (err) {
-      setDocumentError(err.message);
-    } finally {
-      setDocumentLoading('');
-    }
-  }
-
   function closeModal() {
     setSelected(null);
     setDocumentError('');
@@ -574,10 +531,6 @@ async function loadOperationsDashboard(options = {}) {
     if (Number.isNaN(number)) return 0;
 
     return number;
-  }
-
-  function hasPermitFolder(record) {
-    return getNumber(record?.PermitsEscortFees) > 0;
   }
 
   function getDriverPayDisplay(record) {
@@ -876,21 +829,6 @@ async function loadOperationsDashboard(options = {}) {
           disabled={!selected.BOL}
           loading={documentLoading === 'loadphotos'}
         />
-
-        {hasPermitFolder(selected) && (
-          <DocumentCard
-            title="Permits"
-            description={
-              selected.BOL && selected.Driver
-                ? `Open Permit Folder for ${selected.BOL} (${selected.Driver})`
-                : 'BOL number or Operator/Team value missing'
-            }
-            buttonText="Open Permits"
-            onClick={() => openPermitFolder(selected)}
-            disabled={!selected.BOL || !selected.Driver}
-            loading={documentLoading === 'permits'}
-          />
-        )}
 
         <DocumentCard
           title="Final Settle"
@@ -1334,19 +1272,6 @@ async function loadOperationsDashboard(options = {}) {
                               }}
                             >
                               Documents
-                            </button>
-                          )}
-
-                          {r.BOL && hasPermitFolder(r) && (
-                            <button
-                              className="view-button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openPermitFolder(r);
-                              }}
-                              disabled={documentLoading === 'permits'}
-                            >
-                              {documentLoading === 'permits' ? 'Opening...' : 'Permits'}
                             </button>
                           )}
                         </>

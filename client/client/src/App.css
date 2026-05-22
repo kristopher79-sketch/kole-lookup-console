@@ -510,3 +510,43 @@ tbody tr:hover {
 .operations-panel h3 {
   color: #d4a017;
 }
+.brand-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.brand-logo {
+  height: 64px;
+  width: auto;
+  object-fit: contain;
+}
+.app-header-branded {
+  position: relative;
+  justify-content: center;
+  text-align: center;
+}
+
+.brand-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.brand-logo-large {
+  width: 260px;
+  max-width: 45%;
+  height: auto;
+  object-fit: contain;
+  background: white;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.header-logoff {
+  position: absolute;
+  right: 0;
+  top: 12px;
+}

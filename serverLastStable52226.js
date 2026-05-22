@@ -431,8 +431,7 @@ function cleanBidItem(item, sourceList) {
     Driver: fields.Operator_x002f_Team || '',
     TMSName: fields.TMSName || '',
     OperatorInactive: fields.OperatorInactive ?? false,
-    PickupDate: fields.Pickup_x0020_Offer_x0020_Date || '',
-    PermitsEscortFees: fields.Permits_x002f_Escort_x0020_Fees_ || ''
+    PickupDate: fields.Pickup_x0020_Offer_x0020_Date || ''
   };
 }
 
@@ -1045,87 +1044,6 @@ app.get('/documents/loadphotos', requireLookupAccess, async (req, res) => {
       driverFolder: driverFolder.name,
       operatorInactive,
       lastModifiedDateTime: loadFolder.lastModifiedDateTime || ''
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-
-app.get('/documents/permits', requireLookupAccess, async (req, res) => {
-  const bol = (req.query.bol || '').toString().trim();
-  const operatorTeam = (req.query.operatorTeam || '').toString().trim();
-  const officialFolderName = bol && operatorTeam ? `${bol} (${operatorTeam})` : '';
-  const bolWithoutPrefix = bol ? bol.replace(/^[A-Za-z]/, '') : '';
-  const legacyFolderName = bolWithoutPrefix && operatorTeam ? `${bolWithoutPrefix} (${operatorTeam})` : '';
-
-  try {
-    if (!bol) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing BOL number.'
-      });
-    }
-
-    if (!operatorTeam) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing Operator/Team value.'
-      });
-    }
-
-    if (!process.env.DISPATCH_ONEDRIVE_ID || !process.env.PERMIT_REQUESTS_FOLDER_ID) {
-      return res.status(500).json({
-        success: false,
-        error: 'Permit folder environment variables are not configured.'
-      });
-    }
-
-    const token = await getGraphToken();
-
-    // List the children under the configured Permits root and check both supported names:
-    // 1) Current standard: B195567 (Dottore)
-    // 2) Legacy/cloud-side variant: 195567 (Dottore)
-    const items = await getAllChildrenFromFolder(
-      token,
-      process.env.DISPATCH_ONEDRIVE_ID,
-      process.env.PERMIT_REQUESTS_FOLDER_ID
-    );
-
-    const candidates = [officialFolderName, legacyFolderName]
-      .filter(Boolean)
-      .filter((value, index, array) => array.indexOf(value) === index);
-
-    const match = candidates
-      .map((candidate) => ({
-        candidate,
-        item: items.find((item) => item.folder && item.name === candidate)
-      }))
-      .find((entry) => entry.item);
-
-    if (!match?.item) {
-      return res.status(404).json({
-        success: false,
-        error: 'No permit folder was found for this order.',
-        searchedFor: {
-          bol,
-          operatorTeam,
-          officialFolderName,
-          legacyFolderName,
-          candidates
-        }
-      });
-    }
-
-    res.json({
-      success: true,
-      documentType: 'Permits',
-      name: match.item.name,
-      webUrl: match.item.webUrl,
-      id: match.item.id,
-      matchedFolderName: match.candidate,
-      lastModifiedDateTime: match.item.lastModifiedDateTime || ''
     });
   } catch (error) {
     console.error(error);
