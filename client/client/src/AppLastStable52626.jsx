@@ -33,17 +33,6 @@ export default function App() {
   const [operationsError, setOperationsError] = useState('');
   const [sortField, setSortField] = useState('');
   const [sortDirection, setSortDirection] = useState('asc');
-  const initialReportDate = useMemo(() => {
-    const date = new Date();
-    date.setMonth(date.getMonth() - 1);
-    return date;
-  }, []);
-  const [reportMonth, setReportMonth] = useState(() => initialReportDate.getMonth() + 1);
-  const [reportYear, setReportYear] = useState(() => initialReportDate.getFullYear());
-  const [driverSummaryReport, setDriverSummaryReport] = useState(null);
-  const [driverSummaryLoading, setDriverSummaryLoading] = useState(false);
-  const [driverSummaryError, setDriverSummaryError] = useState(null);
-  const [driverSummaryModalOpen, setDriverSummaryModalOpen] = useState(false);
 
   const [authError, setAuthError] = useState('');
   
@@ -104,7 +93,6 @@ export default function App() {
     function handleEsc(e) {
       if (e.key === 'Escape') {
         setSelected(null);
-        setDriverSummaryModalOpen(false);
       }
     }
 
@@ -573,105 +561,6 @@ async function loadOperationsDashboard(options = {}) {
     });
   }
 
-  function formatReportMoney(value) {
-    const number = Number(value || 0);
-
-    return number.toLocaleString('en-US', {
-      style: 'currency',
-      currency: 'USD'
-    });
-  }
-
-  function formatReportNumber(value, digits = 0) {
-    const number = Number(value || 0);
-
-    return number.toLocaleString('en-US', {
-      minimumFractionDigits: digits,
-      maximumFractionDigits: digits
-    });
-  }
-
-  function getReportMonthName(month) {
-    return new Date(2026, Number(month) - 1, 1).toLocaleString('en-US', {
-      month: 'long'
-    });
-  }
-
-  function getReportYears() {
-    const currentYear = new Date().getFullYear();
-    const years = [];
-
-    for (let year = currentYear; year >= 2024; year -= 1) {
-      years.push(year);
-    }
-
-    return years;
-  }
-
-  async function loadDriverSummaryReport() {
-    const selectedMonth = Number(reportMonth);
-    const selectedYear = Number(reportYear);
-    const selectedReportLabel = `${getReportMonthName(selectedMonth)} ${selectedYear}`;
-
-    setDriverSummaryLoading(true);
-    setDriverSummaryError(null);
-    setDriverSummaryReport(null);
-    setDriverSummaryModalOpen(false);
-
-    try {
-      const res = await authedFetch(
-        `${API}/reports/driver-summary?month=${encodeURIComponent(selectedMonth)}&year=${encodeURIComponent(selectedYear)}&includeArchives=true`
-      );
-
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok || !data.success) {
-        setDriverSummaryError({
-          code: data.error || 'REPORT_ERROR',
-          message: data.message || data.error || 'Unable to load Driver Summary Report.',
-          reportLabel: data.reportLabel || selectedReportLabel,
-          unlockLabel: data.unlockLabel || '',
-          lockReason: data.lockReason || ''
-        });
-        return;
-      }
-
-      setDriverSummaryReport({
-        ...data,
-        month: selectedMonth,
-        year: selectedYear,
-        reportLabel: selectedReportLabel
-      });
-      setDriverSummaryModalOpen(true);
-    } catch (err) {
-      setDriverSummaryError({
-        code: 'REPORT_ERROR',
-        message: err.message || 'Unable to load Driver Summary Report.',
-        reportLabel: selectedReportLabel
-      });
-    } finally {
-      setDriverSummaryLoading(false);
-    }
-  }
-
-  function closeDriverSummaryModal() {
-    setDriverSummaryModalOpen(false);
-  }
-
-  function openReportLoadDetails(load) {
-    if (!load?.id) {
-      setDriverSummaryError({
-        code: 'REPORT_ERROR',
-        message: 'This report row does not have a SharePoint item ID to open.',
-        reportLabel: driverSummaryReport?.reportLabel || `${getReportMonthName(reportMonth)} ${reportYear}`
-      });
-      return;
-    }
-
-    setDriverSummaryModalOpen(false);
-    loadDetails(load.id, 'basic', load.SourceListId || '');
-  }
-
   function formatValue(value) {
     if (value === null || value === undefined || value === '') return '-';
     return value;
@@ -1021,227 +910,6 @@ async function loadOperationsDashboard(options = {}) {
     );
   }
 
-
-  function DriverSummaryPreview() {
-    if (!driverSummaryReport) return null;
-
-    return (
-      <div className="driver-report-preview modal-report-preview">
-        <div className="driver-report-title">
-          <div>
-            <h3>{driverSummaryReport.reportLabel} Driver Summary Report</h3>
-            <p>
-              Generated: {driverSummaryReport.generatedAt} · Source: {driverSummaryReport.dataSource} · Anchor: {driverSummaryReport.anchorDate}
-            </p>
-          </div>
-        </div>
-
-        <div className="report-kpi-grid">
-          <div className="report-kpi-card">
-            <span>Loads</span>
-            <strong>{formatReportNumber(driverSummaryReport.totals.loadCount)}</strong>
-          </div>
-          <div className="report-kpi-card">
-            <span>Quoted Total</span>
-            <strong>{formatReportMoney(driverSummaryReport.totals.quotedTotal)}</strong>
-          </div>
-          <div className="report-kpi-card">
-            <span>Loaded Miles</span>
-            <strong>{formatReportNumber(driverSummaryReport.totals.loadedMiles)}</strong>
-          </div>
-          <div className="report-kpi-card">
-            <span>Empty Miles</span>
-            <strong>{formatReportNumber(driverSummaryReport.totals.emptyMiles)}</strong>
-          </div>
-          <div className="report-kpi-card">
-            <span>Revenue / Loaded Mile</span>
-            <strong>{formatReportMoney(driverSummaryReport.totals.revenuePerLoadedMile)}</strong>
-          </div>
-          <div className="report-kpi-card">
-            <span>Net Driver Pay</span>
-            <strong>{formatReportMoney(driverSummaryReport.totals.driverPay)}</strong>
-          </div>
-        </div>
-
-        {driverSummaryReport.drivers.length === 0 ? (
-          <div className="msg">No Won or TONU loads were found for this report month.</div>
-        ) : (
-          driverSummaryReport.drivers.map((driver) => (
-            <div className="driver-report-section" key={driver.truck}>
-              <div className="driver-report-section-header">
-                <div>
-                  <h4>Truck {driver.truck}</h4>
-                  <p>{driver.operator}</p>
-                </div>
-                <div className="driver-report-section-total">
-                  {formatReportMoney(driver.quotedTotal)}
-                </div>
-              </div>
-
-              <div className="driver-report-totals-grid">
-                <div><span>Loads</span><strong>{formatReportNumber(driver.loadCount)}</strong></div>
-                <div><span>Empty Miles</span><strong>{formatReportNumber(driver.emptyMiles)}</strong></div>
-                <div><span>Loaded Miles</span><strong>{formatReportNumber(driver.loadedMiles)}</strong></div>
-                <div><span>$/Loaded Mile</span><strong>{formatReportMoney(driver.revenuePerLoadedMile)}</strong></div>
-                <div><span>Net Driver Pay</span><strong>{formatReportMoney(driver.driverPay)}</strong></div>
-              </div>
-
-              <div className="report-table-wrap">
-                <table className="driver-report-table">
-                  <thead>
-                    <tr>
-                      <th>BOL</th>
-                      <th>Company</th>
-                      <th>Pickup</th>
-                      <th>Delivery</th>
-                      <th>Route</th>
-                      <th>Deadhead</th>
-                      <th>Loaded</th>
-                      <th>Quoted</th>
-                      <th>$/Mile</th>
-                      <th>Driver Pay</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {driver.loads.map((load, index) => (
-                      <tr
-                        key={`${load.BOL || load.id || driver.truck}-${index}`}
-                        className={load.id ? 'report-clickable-row' : ''}
-                        onClick={() => openReportLoadDetails(load)}
-                        title={load.id ? 'Open full order screen' : ''}
-                      >
-                        <td>{load.BOL || '-'}</td>
-                        <td>{load.Customer || '-'}</td>
-                        <td>{load.PickupDateDisplay || '-'}</td>
-                        <td>{load.DeliveryDateDisplay || '-'}</td>
-                        <td>{load.Route || '-'}</td>
-                        <td>{formatReportNumber(load.EmptyMiles)}</td>
-                        <td>{formatReportNumber(load.LoadedMiles)}</td>
-                        <td>{formatReportMoney(load.QuotedTotal)}</td>
-                        <td>{formatReportMoney(load.RatePerMile)}</td>
-                        <td>{formatReportMoney(load.DriverPay)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    );
-  }
-
-  function DriverSummaryReport() {
-    const monthOptions = Array.from({ length: 12 }, (_, index) => index + 1);
-
-    return (
-      <div className="search-card reports-panel">
-        <div className="reports-header">
-          <div>
-            <h2>Reports</h2>
-            <p>Run finalized operational reports from Kole Connect.</p>
-          </div>
-        </div>
-
-        <div className="report-card compact-report-card">
-          <div className="report-card-header centered-report-header">
-            <div>
-              <h3>Monthly Driver Route Summary</h3>
-              <p>
-                Uses Pickup Offer Date as the report month anchor. Reports unlock on the 5th of the following month at 8:00 AM Eastern.
-              </p>
-            </div>
-          </div>
-
-          <div className="report-controls centered-report-controls">
-            <label>
-              <span>Month</span>
-              <select
-                value={reportMonth}
-                onChange={(e) => {
-                  setReportMonth(Number(e.target.value));
-                  setDriverSummaryReport(null);
-                  setDriverSummaryError(null);
-                  setDriverSummaryModalOpen(false);
-                }}
-              >
-                {monthOptions.map((month) => (
-                  <option key={month} value={month}>
-                    {getReportMonthName(month)}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              <span>Year</span>
-              <select
-                value={reportYear}
-                onChange={(e) => {
-                  setReportYear(Number(e.target.value));
-                  setDriverSummaryReport(null);
-                  setDriverSummaryError(null);
-                  setDriverSummaryModalOpen(false);
-                }}
-              >
-                {getReportYears().map((year) => (
-                  <option key={year} value={year}>
-                    {year}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <button onClick={loadDriverSummaryReport} disabled={driverSummaryLoading}>
-              {driverSummaryLoading ? 'Loading Report...' : 'Preview Report'}
-            </button>
-          </div>
-
-          {driverSummaryReport && !driverSummaryModalOpen && (
-            <div className="report-ready-card">
-              <div>
-                <strong>{driverSummaryReport.reportLabel} is ready.</strong>
-                <span> The preview opens in a report window.</span>
-              </div>
-              <button className="view-button" onClick={() => setDriverSummaryModalOpen(true)}>
-                Reopen Preview
-              </button>
-            </div>
-          )}
-
-          {driverSummaryError && (
-            <div className={`report-alert ${driverSummaryError.code === 'REPORT_LOCKED' ? 'locked' : 'error'}`}>
-              <h4>
-                {driverSummaryError.code === 'REPORT_LOCKED'
-                  ? 'This report is not available yet.'
-                  : 'Report could not be loaded.'}
-              </h4>
-              <p>{driverSummaryError.message}</p>
-
-              {driverSummaryError.code === 'REPORT_LOCKED' && (
-                <>
-                  <div className="report-alert-grid">
-                    <div>
-                      <span>Selected report</span>
-                      <strong>{driverSummaryError.reportLabel}</strong>
-                    </div>
-                    <div>
-                      <span>Available starting</span>
-                      <strong>{driverSummaryError.unlockLabel || '-'}</strong>
-                    </div>
-                  </div>
-
-                  {driverSummaryError.lockReason && <p>{driverSummaryError.lockReason}</p>}
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
   if (!isAuthenticated) {
     return (
       <div className="container">
@@ -1385,7 +1053,6 @@ async function loadOperationsDashboard(options = {}) {
           <div className="msg">No results found</div>
         )}
 {!hasSearched && (
-  <>
   <div className="search-card operations-panel">
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
       <div>
@@ -1585,9 +1252,6 @@ async function loadOperationsDashboard(options = {}) {
       </>
     )}
   </div>
-
-  <DriverSummaryReport />
-  </>
 )}
       </div>
 
@@ -1695,29 +1359,6 @@ async function loadOperationsDashboard(options = {}) {
           </table>
         )}
       </div>
-
-      {driverSummaryModalOpen && driverSummaryReport && (
-        <div className="modal-overlay report-modal-overlay" onClick={closeDriverSummaryModal}>
-          <div className="detail-modal report-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="detail-header report-modal-header">
-              <div>
-                <h2>{driverSummaryReport.reportLabel} Driver Summary</h2>
-                <p>
-                  Finalized monthly driver route report · Pickup Offer Date anchor · Click any load row to open the order
-                </p>
-              </div>
-
-              <button className="close-button" onClick={closeDriverSummaryModal}>
-                Close
-              </button>
-            </div>
-
-            <div className="modal-body report-modal-body">
-              <DriverSummaryPreview />
-            </div>
-          </div>
-        </div>
-      )}
 
       {selected && (
         <div className="modal-overlay" onClick={closeModal}>
