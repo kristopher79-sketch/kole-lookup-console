@@ -654,6 +654,325 @@ function addUploadEvidence(record, evidenceSets) {
     hasDeliveryEvidence: bol ? evidenceSets.deliveryEvidenceBols.has(bol) : false
   };
 }
+
+function getEasternParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).formatToParts(date);
+
+  const get = (type) => Number(parts.find((part) => part.type === type)?.value || 0);
+
+  return {
+    year: get('year'),
+    month: get('month'),
+    day: get('day'),
+    hour: get('hour'),
+    minute: get('minute'),
+    second: get('second')
+  };
+}
+
+function getEasternComparable(parts) {
+  return Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour || 0),
+    Number(parts.minute || 0),
+    Number(parts.second || 0)
+  );
+}
+
+function getDriverSummaryUnlockParts(year, month) {
+  let unlockYear = Number(year);
+  let unlockMonth = Number(month) + 1;
+
+  if (unlockMonth === 13) {
+    unlockMonth = 1;
+    unlockYear += 1;
+  }
+
+  return {
+    year: unlockYear,
+    month: unlockMonth,
+    day: 5,
+    hour: 8,
+    minute: 0,
+    second: 0
+  };
+}
+
+function getMonthName(month) {
+  return new Intl.DateTimeFormat('en-US', { month: 'long' }).format(
+    new Date(Date.UTC(2026, Number(month) - 1, 1))
+  );
+}
+
+function getReportMonthLabel(year, month) {
+  return `${getMonthName(month)} ${year}`;
+}
+
+function formatUnlockLabel(unlockParts) {
+  return `${getMonthName(unlockParts.month)} ${unlockParts.day}, ${unlockParts.year} at 8:00 AM Eastern`;
+}
+
+function getDriverSummaryLockStatus(year, month, now = new Date()) {
+  const unlockParts = getDriverSummaryUnlockParts(year, month);
+  const currentEasternParts = getEasternParts(now);
+
+  const isUnlocked =
+    getEasternComparable(currentEasternParts) >= getEasternComparable(unlockParts);
+
+  return {
+    isUnlocked,
+    unlockParts,
+    unlockLabel: formatUnlockLabel(unlockParts),
+    reportLabel: getReportMonthLabel(year, month)
+  };
+}
+
+function parseReportInteger(value, name, min, max) {
+  const number = Number(value);
+
+  if (!Number.isInteger(number) || number < min || number > max) {
+    throw new Error(`${name} must be a whole number between ${min} and ${max}.`);
+  }
+
+  return number;
+}
+
+function getNumberValue(value) {
+  if (value === null || value === undefined || value === '') return 0;
+
+  const number = Number(String(value).replace(/[$,]/g, ''));
+  return Number.isNaN(number) ? 0 : number;
+}
+
+function getChoiceValue(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') return value.Value || value.value || value.Label || '';
+  return value;
+}
+
+function getUtcYearMonth(value) {
+  if (!value) return null;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1
+  };
+}
+
+function formatShortDate(value) {
+  if (!value) return '';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value || '');
+
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    month: '2-digit',
+    day: '2-digit',
+    year: 'numeric'
+  }).format(date);
+}
+
+function formatCurrencyValue(value) {
+  return getNumberValue(value).toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD'
+  });
+}
+
+function getDriverSummaryItem(item, sourceList) {
+  const f = item.fields || {};
+
+  const truck = getChoiceValue(
+    f.Truck_x0020_Number || f['Truck_x0020_Number/Value'] || ''
+  );
+
+  const driver = getChoiceValue(
+    f.Operator_x002f_Team || f['Operator_x002f_Team/Value'] || ''
+  );
+
+  const customer = getChoiceValue(f.Company || f['Company/Value'] || '');
+
+  const quotedTotal = getNumberValue(f.Quoted_x0020_Total);
+  const loadedMiles = getNumberValue(f.Loaded_x0020_Miles);
+  const emptyMiles = getNumberValue(f.Empty_x0020__x0028_Deadhead_x002);
+  const driverPay = getNumberValue(f.NetPayabletoDriver);
+  const totalMiles = loadedMiles + emptyMiles;
+
+  return {
+    id: item.id || '',
+    SourceListId: sourceList.listId,
+    SourceYear: sourceList.year,
+    BOL: f.BOLNumber_x0028_Won_x0029_ || '',
+    BidID: f.BidID || '',
+    Customer: customer,
+    PickupDate: f.Pickup_x0020_Offer_x0020_Date || '',
+    PickupDateDisplay: formatShortDate(f.Pickup_x0020_Offer_x0020_Date),
+    DeliveryDate: f.Expected_x0020_Delivery_x0020_Da || '',
+    DeliveryDateDisplay: formatShortDate(f.Expected_x0020_Delivery_x0020_Da),
+    Route: f.Route || [f.Shipment_x0020_Origin, f.Shipment_x0020_Destination].filter(Boolean).join(' to '),
+    Status: f.Status || '',
+    Truck: truck || 'Unassigned Truck',
+    Driver: driver || 'Unknown Operator',
+    EmptyMiles: emptyMiles,
+    LoadedMiles: loadedMiles,
+    TotalMiles: totalMiles,
+    QuotedTotal: quotedTotal,
+    RatePerMile: loadedMiles > 0 ? quotedTotal / loadedMiles : 0,
+    DriverPay: driverPay
+  };
+}
+
+function getDriverSummaryFieldSelect() {
+  return [
+    'BOLNumber_x0028_Won_x0029_',
+    'BidID',
+    'Company',
+    'Pickup_x0020_Offer_x0020_Date',
+    'Expected_x0020_Delivery_x0020_Da',
+    'Route',
+    'Shipment_x0020_Origin',
+    'Shipment_x0020_Destination',
+    'Empty_x0020__x0028_Deadhead_x002',
+    'Loaded_x0020_Miles',
+    'Quoted_x0020_Total',
+    '_x0024__x0020_Per_x0020_Mile',
+    'OData__x0024__x0020_Per_x0020_Mile',
+    'NetPayabletoDriver',
+    'Truck_x0020_Number',
+    'Operator_x002f_Team',
+    'Status'
+  ].join(',');
+}
+
+async function getDriverSummarySourceList(token, requestedYear) {
+  const lists = await getSearchableBidLists(token);
+  const currentList = lists.find((list) => list.label === 'Bid Listing');
+  const currentEasternYear = getEasternParts().year;
+
+  if (Number(requestedYear) === currentEasternYear) {
+    return currentList || null;
+  }
+
+  return lists.find((list) => String(list.year) === String(requestedYear)) || null;
+}
+
+function buildDriverSummaryResponse(items, sourceList, year, month) {
+  const targetItems = items
+    .map((item) => getDriverSummaryItem(item, sourceList))
+    .filter((record) => {
+      const pickup = getUtcYearMonth(record.PickupDate);
+      if (!pickup) return false;
+
+      const status = String(record.Status || '').trim().toLowerCase();
+
+      return (
+        pickup.year === year &&
+        pickup.month === month &&
+        (status === 'won' || status === 'tonu')
+      );
+    });
+
+  const truckMap = new Map();
+
+  targetItems.forEach((load) => {
+    const key = load.Truck || 'Unassigned Truck';
+
+    if (!truckMap.has(key)) {
+      truckMap.set(key, {
+        truck: key,
+        operator: load.Driver || 'Unknown Operator',
+        loadCount: 0,
+        emptyMiles: 0,
+        loadedMiles: 0,
+        totalMiles: 0,
+        quotedTotal: 0,
+        driverPay: 0,
+        loads: []
+      });
+    }
+
+    const group = truckMap.get(key);
+
+    if ((!group.operator || group.operator === 'Unknown Operator') && load.Driver) {
+      group.operator = load.Driver;
+    }
+
+    group.loadCount += 1;
+    group.emptyMiles += load.EmptyMiles;
+    group.loadedMiles += load.LoadedMiles;
+    group.totalMiles += load.TotalMiles;
+    group.quotedTotal += load.QuotedTotal;
+    group.driverPay += load.DriverPay;
+    group.loads.push(load);
+  });
+
+  const drivers = Array.from(truckMap.values())
+    .map((group) => ({
+      ...group,
+      revenuePerLoadedMile: group.loadedMiles > 0 ? group.quotedTotal / group.loadedMiles : 0,
+      revenuePerTotalMile: group.totalMiles > 0 ? group.quotedTotal / group.totalMiles : 0,
+      loads: group.loads.sort((a, b) => {
+        const aTime = new Date(a.PickupDate).getTime() || 0;
+        const bTime = new Date(b.PickupDate).getTime() || 0;
+        return aTime - bTime;
+      })
+    }))
+    .sort((a, b) => String(a.truck).localeCompare(String(b.truck), undefined, { numeric: true }));
+
+  const totals = drivers.reduce(
+    (acc, group) => {
+      acc.loadCount += group.loadCount;
+      acc.emptyMiles += group.emptyMiles;
+      acc.loadedMiles += group.loadedMiles;
+      acc.totalMiles += group.totalMiles;
+      acc.quotedTotal += group.quotedTotal;
+      acc.driverPay += group.driverPay;
+      return acc;
+    },
+    {
+      loadCount: 0,
+      emptyMiles: 0,
+      loadedMiles: 0,
+      totalMiles: 0,
+      quotedTotal: 0,
+      driverPay: 0
+    }
+  );
+
+  totals.revenuePerLoadedMile = totals.loadedMiles > 0 ? totals.quotedTotal / totals.loadedMiles : 0;
+  totals.revenuePerTotalMile = totals.totalMiles > 0 ? totals.quotedTotal / totals.totalMiles : 0;
+
+  return {
+    success: true,
+    reportType: 'driverSummary',
+    reportLabel: getReportMonthLabel(year, month),
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    dataSource: sourceList?.label || 'Bid Listing',
+    month,
+    year,
+    status: 'available',
+    anchorDate: 'Pickup Offer Date',
+    includedStatuses: ['Won', 'TONU'],
+    totals,
+    drivers
+  };
+}
+
 app.get('/', (req, res) => {
   res.send('Kole Lookup API is running');
 });
@@ -1279,6 +1598,53 @@ app.get('/sharepoint-docs-debug', requireLookupAccess, async (req, res) => {
     });
   }
 });
+
+app.get('/reports/driver-summary', requireLookupAccess, async (req, res) => {
+  try {
+    const month = parseReportInteger(req.query.month, 'month', 1, 12);
+    const year = parseReportInteger(req.query.year, 'year', 2024, 2030);
+    const lockStatus = getDriverSummaryLockStatus(year, month);
+
+    if (!lockStatus.isUnlocked) {
+      return res.status(423).json({
+        success: false,
+        error: 'REPORT_LOCKED',
+        message: `${lockStatus.reportLabel} Driver Summary Report is not available yet.`,
+        reportLabel: lockStatus.reportLabel,
+        unlockLabel: lockStatus.unlockLabel,
+        lockReason:
+          'Monthly Driver Summary Reports unlock at 8:00 AM Eastern on the 5th day of the following month. This allows time for completed settlements, paperwork review, and final corrections before driver performance data is published.'
+      });
+    }
+
+    const token = await getGraphToken();
+    const sourceList = await getDriverSummarySourceList(token, year);
+
+    if (!sourceList) {
+      return res.status(404).json({
+        success: false,
+        error: `No Bid Listing source list was found for ${year}.`
+      });
+    }
+
+    const items = await getAllListItemsWithFields(
+      token,
+      sourceList.listId
+    );
+
+    const report = buildDriverSummaryResponse(items, sourceList, year, month);
+
+    res.json(report);
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 app.get('/operations/today', requireLookupAccess, async (req, res) => {
   try {
     const token = await getGraphToken();
