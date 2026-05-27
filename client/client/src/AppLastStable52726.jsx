@@ -10,21 +10,6 @@ const API =
     
 
 
-function getDefaultSettlementCutoffDate() {
-  const today = new Date();
-  const day = today.getDay(); // Sunday = 0, Thursday = 4
-  const diffToMostRecentThursday = day >= 4 ? day - 4 : day + 3;
-  const cutoff = new Date(today);
-  cutoff.setDate(today.getDate() - diffToMostRecentThursday);
-
-  return [
-    cutoff.getFullYear(),
-    String(cutoff.getMonth() + 1).padStart(2, '0'),
-    String(cutoff.getDate()).padStart(2, '0')
-  ].join('-');
-}
-
-
 export default function App() {
   const [accessToken, setAccessToken] = useState(() => sessionStorage.getItem('koleLookupToken') || '');
   const [password, setPassword] = useState('');
@@ -59,11 +44,6 @@ export default function App() {
   const [driverSummaryLoading, setDriverSummaryLoading] = useState(false);
   const [driverSummaryError, setDriverSummaryError] = useState(null);
   const [driverSummaryModalOpen, setDriverSummaryModalOpen] = useState(false);
-  const [settlementCutoffDate, setSettlementCutoffDate] = useState(getDefaultSettlementCutoffDate);
-  const [weeklySettlementReport, setWeeklySettlementReport] = useState(null);
-  const [weeklySettlementLoading, setWeeklySettlementLoading] = useState(false);
-  const [weeklySettlementError, setWeeklySettlementError] = useState(null);
-  const [weeklySettlementModalOpen, setWeeklySettlementModalOpen] = useState(false);
 
   const [authError, setAuthError] = useState('');
   
@@ -125,7 +105,6 @@ export default function App() {
       if (e.key === 'Escape') {
         setSelected(null);
         setDriverSummaryModalOpen(false);
-        setWeeklySettlementModalOpen(false);
       }
     }
 
@@ -214,10 +193,8 @@ export default function App() {
 
   async function authedFetch(url) {
     const res = await fetch(url, {
-      cache: 'no-store',
       headers: {
-        'X-Lookup-Token': accessToken,
-        'Cache-Control': 'no-cache'
+        'X-Lookup-Token': accessToken
       }
     });
 
@@ -681,59 +658,19 @@ async function loadOperationsDashboard(options = {}) {
     setDriverSummaryModalOpen(false);
   }
 
-  async function loadWeeklySettlementReport() {
-    if (!settlementCutoffDate) {
-      setWeeklySettlementError({
+  function openReportLoadDetails(load) {
+    if (!load?.id) {
+      setDriverSummaryError({
         code: 'REPORT_ERROR',
-        message: 'Choose a cutoff date before previewing the Weekly Settlement Report.'
+        message: 'This report row does not have a SharePoint item ID to open.',
+        reportLabel: driverSummaryReport?.reportLabel || `${getReportMonthName(reportMonth)} ${reportYear}`
       });
       return;
     }
 
-    setWeeklySettlementLoading(true);
-    setWeeklySettlementError(null);
-    setWeeklySettlementReport(null);
-    setWeeklySettlementModalOpen(false);
-
-    try {
-      const res = await authedFetch(
-        `${API}/reports/weekly-settlement?cutoffDate=${encodeURIComponent(settlementCutoffDate)}`
-      );
-
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || data.message || 'Unable to load Weekly Settlement Report.');
-      }
-
-      setWeeklySettlementReport(data);
-      setWeeklySettlementModalOpen(true);
-    } catch (err) {
-      setWeeklySettlementError({
-        code: 'REPORT_ERROR',
-        message: err.message || 'Unable to load Weekly Settlement Report.'
-      });
-    } finally {
-      setWeeklySettlementLoading(false);
-    }
+    setDriverSummaryModalOpen(false);
+    loadDetails(load.id, 'basic', load.SourceListId || '');
   }
-
-  function closeWeeklySettlementModal() {
-    setWeeklySettlementModalOpen(false);
-  }
-
-function openReportLoadDetails(load) {
-  if (!load?.id) {
-    setDriverSummaryError({
-      code: 'REPORT_ERROR',
-      message: 'This report row does not have a SharePoint item ID to open.',
-      reportLabel: driverSummaryReport?.reportLabel || `${getReportMonthName(reportMonth)} ${reportYear}`
-    });
-    return;
-  }
-
-  loadDetails(load.id, 'basic', load.SourceListId || '');
-}
 
   function formatValue(value) {
     if (value === null || value === undefined || value === '') return '-';
@@ -1094,7 +1031,7 @@ function openReportLoadDetails(load) {
           <div>
             <h3>{driverSummaryReport.reportLabel} Driver Summary Report</h3>
             <p>
-              Generated: {driverSummaryReport.generatedAt}
+              Generated: {driverSummaryReport.generatedAt} · Source: {driverSummaryReport.dataSource} · Anchor: {driverSummaryReport.anchorDate}
             </p>
           </div>
         </div>
@@ -1190,138 +1127,6 @@ function openReportLoadDetails(load) {
               </div>
             </div>
           ))
-        )}
-      </div>
-    );
-  }
-
-
-  function SettlementTotalsGrid({ totals }) {
-    return (
-      <div className="settlement-totals-grid">
-        <div><span>Orders</span><strong>{formatReportNumber(totals?.orderCount)}</strong></div>
-        <div><span>Drivers</span><strong>{formatReportNumber(totals?.driverCount)}</strong></div>
-        <div><span>Customers</span><strong>{formatReportNumber(totals?.customerCount)}</strong></div>
-        <div><span>Bid Total</span><strong>{formatReportMoney(totals?.bidTotal)}</strong></div>
-        <div><span>Driver Pay</span><strong>{formatReportMoney(totals?.driverPayTotal)}</strong></div>
-        <div><span>Margin</span><strong>{formatReportMoney(totals?.margin)}</strong></div>
-      </div>
-    );
-  }
-
-  function SettlementRows({ rows }) {
-    if (!rows || rows.length === 0) {
-      return <div className="msg">No orders were found for this settlement bucket.</div>;
-    }
-
-    return (
-      <div className="report-table-wrap">
-        <table className="settlement-report-table">
-          <thead>
-            <tr>
-              <th>BOL</th>
-              <th>Operator</th>
-              <th>Truck</th>
-              <th>Customer</th>
-              <th>Pickup</th>
-              <th>Route</th>
-              <th>Submitted</th>
-              <th>Bid Amount</th>
-              <th>Driver Pay</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((load, index) => (
-              <tr
-                key={`${load.BOL || load.id || index}-${index}`}
-                className={load.id ? 'report-clickable-row' : ''}
-                onClick={() => openReportLoadDetails(load)}
-                title={load.id ? 'Open full order screen' : ''}
-              >
-                <td>
-                  {load.Starred && <span className="settlement-star">*</span>}
-                  {load.BOL || '-'}
-                </td>
-                <td>{load.Operator || '-'}</td>
-                <td>{load.Truck || '-'}</td>
-                <td>{load.Customer || '-'}</td>
-                <td>{load.PUDateDisplay || '-'}</td>
-                <td>{load.Route || [load.OriginST, load.DestST].filter(Boolean).join(' to ') || '-'}</td>
-                <td>
-                  {[load.SubmitDateDisplay, load.SubmitTimeDisplay].filter(Boolean).join(' ') || '-'}
-                </td>
-                <td>{formatReportMoney(load.BidAmount)}</td>
-                <td>{formatReportMoney(load.DriverPay)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-
-  function WeeklySettlementPreview() {
-    if (!weeklySettlementReport) return null;
-
-    return (
-      <div className="settlement-report-preview modal-report-preview">
-        <div className="driver-report-title">
-          <div>
-            <h3>{weeklySettlementReport.reportLabel}</h3>
-            <p>
-              Generated: {weeklySettlementReport.generatedAt}
-            </p>
-                </div>
-        </div>
-
-        <div className="settlement-window-note">
-          <strong>Main settlement window:</strong> {weeklySettlementReport.mainWindowLabel}
-          <br />
-          <strong>Likely next week:</strong> {weeklySettlementReport.suggestWindowLabel}
-        </div>
-
-        <div className="settlement-report-section">
-          <div className="driver-report-section-header">
-            <div>
-              <h4>Main Settlement</h4>
-              <p>Orders submitted after the prior Thursday noon cutoff through the selected cutoff.</p>
-            </div>
-            <div className="driver-report-section-total">
-              {formatReportMoney(weeklySettlementReport.totals?.main?.driverPayTotal)}
-            </div>
-          </div>
-
-          <SettlementTotalsGrid totals={weeklySettlementReport.totals?.main} />
-          <SettlementRows rows={weeklySettlementReport.main} />
-
-          <div className="settlement-footnote">
-            * Submitted after the prior cutoff but before the end of that prior cutoff date.
-          </div>
-        </div>
-
-        <div className="settlement-report-section suggest">
-          <div className="driver-report-section-header">
-            <div>
-              <h4>Likely for Next Week</h4>
-              <p>Orders submitted after the selected cutoff but before the end of that same day.</p>
-            </div>
-            <div className="driver-report-section-total">
-              {formatReportMoney(weeklySettlementReport.totals?.suggest?.driverPayTotal)}
-            </div>
-          </div>
-
-          <SettlementTotalsGrid totals={weeklySettlementReport.totals?.suggest} />
-          <SettlementRows rows={weeklySettlementReport.suggest} />
-        </div>
-
-        {weeklySettlementReport.counts?.excludedProcessedRecordsMissingSubmissionTimestamp > 0 && (
-          <div className="report-alert locked">
-            <h4>Some processed orders were skipped.</h4>
-            <p>
-              {weeklySettlementReport.counts.excludedProcessedRecordsMissingSubmissionTimestamp} processed order(s)
-              did not have a usable paperwork submitted date/time.
-            </p>
-          </div>
         )}
       </div>
     );
@@ -1426,53 +1231,6 @@ function openReportLoadDetails(load) {
                   {driverSummaryError.lockReason && <p>{driverSummaryError.lockReason}</p>}
                 </>
               )}
-            </div>
-          )}
-        </div>
-
-        <div className="report-card compact-report-card settlement-report-card">
-          <div className="report-card-header centered-report-header">
-            <div>
-              <h3>Weekly Settlement Report</h3>
-                  </div>
-          </div>
-
-          <div className="report-controls centered-report-controls">
-            <label>
-              <span>Cutoff Date</span>
-              <input
-                type="date"
-                value={settlementCutoffDate}
-                onChange={(e) => {
-                  setSettlementCutoffDate(e.target.value);
-                  setWeeklySettlementReport(null);
-                  setWeeklySettlementError(null);
-                  setWeeklySettlementModalOpen(false);
-                }}
-              />
-            </label>
-
-            <button onClick={loadWeeklySettlementReport} disabled={weeklySettlementLoading}>
-              {weeklySettlementLoading ? 'Loading Report...' : 'Preview Report'}
-            </button>
-          </div>
-
-          {weeklySettlementReport && !weeklySettlementModalOpen && (
-            <div className="report-ready-card">
-              <div>
-                <strong>{weeklySettlementReport.reportLabel} is ready.</strong>
-                <span> The preview opens in a report window.</span>
-              </div>
-              <button className="view-button" onClick={() => setWeeklySettlementModalOpen(true)}>
-                Reopen Preview
-              </button>
-            </div>
-          )}
-
-          {weeklySettlementError && (
-            <div className="report-alert error">
-              <h4>Report could not be loaded.</h4>
-              <p>{weeklySettlementError.message}</p>
             </div>
           )}
         </div>
@@ -1950,27 +1708,6 @@ function openReportLoadDetails(load) {
 
             <div className="modal-body report-modal-body">
               <DriverSummaryPreview />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {weeklySettlementModalOpen && weeklySettlementReport && (
-        <div className="modal-overlay report-modal-overlay" onClick={closeWeeklySettlementModal}>
-          <div className="detail-modal report-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="detail-header report-modal-header">
-              <div>
-                <h2>{weeklySettlementReport.reportLabel}</h2>
-                <p>{weeklySettlementReport.cutoffLabel}</p>
-              </div>
-
-              <button className="close-button" onClick={closeWeeklySettlementModal}>
-                Close
-              </button>
-            </div>
-
-            <div className="modal-body report-modal-body">
-              <WeeklySettlementPreview />
             </div>
           </div>
         </div>
