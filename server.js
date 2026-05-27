@@ -973,6 +973,298 @@ function buildDriverSummaryResponse(items, sourceList, year, month) {
   };
 }
 
+
+
+function parseCutoffDateValue(value) {
+  const raw = String(value || '').trim();
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    throw new Error('cutoffDate must be provided as YYYY-MM-DD.');
+  }
+
+  const [year, month, day] = raw.split('-').map(Number);
+  const check = new Date(Date.UTC(year, month - 1, day));
+
+  if (
+    check.getUTCFullYear() !== year ||
+    check.getUTCMonth() + 1 !== month ||
+    check.getUTCDate() !== day
+  ) {
+    throw new Error('cutoffDate is not a valid calendar date.');
+  }
+
+  return { raw, year, month, day };
+}
+
+function addDaysToDateParts(parts, days) {
+  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + Number(days || 0)));
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate()
+  };
+}
+
+function formatIsoDateParts(parts) {
+  return [
+    String(parts.year).padStart(4, '0'),
+    String(parts.month).padStart(2, '0'),
+    String(parts.day).padStart(2, '0')
+  ].join('-');
+}
+
+function formatDisplayDateParts(parts) {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    month: '2-digit',
+    day: '2-digit',
+    year: 'numeric'
+  }).format(new Date(Date.UTC(parts.year, parts.month - 1, parts.day)));
+}
+
+function getEasternComparableFromDateParts(parts, hour = 0, minute = 0, second = 0) {
+  return Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(hour || 0),
+    Number(minute || 0),
+    Number(second || 0)
+  );
+}
+
+function parsePaperworkSubmittedTimestamp(dateValue, timeValue) {
+  const dateRaw = String(dateValue || '').trim();
+  const timeRaw = String(timeValue || '').trim();
+
+  if (!dateRaw || !timeRaw) return null;
+
+  let year;
+  let month;
+  let day;
+
+  const isoDateMatch = dateRaw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const usDateMatch = dateRaw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+
+  if (isoDateMatch) {
+    year = Number(isoDateMatch[1]);
+    month = Number(isoDateMatch[2]);
+    day = Number(isoDateMatch[3]);
+  } else if (usDateMatch) {
+    month = Number(usDateMatch[1]);
+    day = Number(usDateMatch[2]);
+    year = Number(usDateMatch[3]);
+    if (year < 100) year += 2000;
+  } else {
+    const parsedDate = new Date(dateRaw);
+    if (Number.isNaN(parsedDate.getTime())) return null;
+    year = parsedDate.getUTCFullYear();
+    month = parsedDate.getUTCMonth() + 1;
+    day = parsedDate.getUTCDate();
+  }
+
+  const compactTime = timeRaw.toUpperCase().replace(/\s+/g, '');
+  const timeMatch = compactTime.match(/^(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?(AM|PM)?$/);
+
+  if (!timeMatch) return null;
+
+  let hour = Number(timeMatch[1]);
+  const minute = Number(timeMatch[2] || 0);
+  const second = Number(timeMatch[3] || 0);
+  const ampm = timeMatch[4] || '';
+
+  if (ampm === 'PM' && hour < 12) hour += 12;
+  if (ampm === 'AM' && hour === 12) hour = 0;
+
+  if (hour > 23 || minute > 59 || second > 59) return null;
+
+  return {
+    comparable: getEasternComparableFromDateParts({ year, month, day }, hour, minute, second),
+    isoDate: formatIsoDateParts({ year, month, day }),
+    displayDate: formatDisplayDateParts({ year, month, day }),
+    displayTime: timeRaw,
+    hour,
+    minute,
+    second
+  };
+}
+
+function getSettlementFieldSelect() {
+  return [
+    'BOLNumber_x0028_Won_x0029_',
+    'BidID',
+    'Company',
+    'Pickup_x0020_Offer_x0020_Date',
+    'Pickup2State',
+    'Delivery1State',
+    'Shipment_x0020_Origin',
+    'Shipment_x0020_Destination',
+    'Truck_x0020_Number',
+    'Operator_x002f_Team',
+    'TMSName',
+    'Status',
+    'Processed',
+    'PpwrkSubmitted',
+    'PpwrkSubmittedTime',
+    'FinalBillableTotal',
+    'NetPayabletoDriver'
+  ].join(',');
+}
+
+function getSettlementReportItem(item, sourceList) {
+  const f = item.fields || {};
+  const truck = getChoiceValue(f.Truck_x0020_Number || f['Truck_x0020_Number/Value'] || '');
+  const operatorTeam = getChoiceValue(f.Operator_x002f_Team || f['Operator_x002f_Team/Value'] || '');
+  const customer = getChoiceValue(f.Company || f['Company/Value'] || '');
+  const submitted = parsePaperworkSubmittedTimestamp(f.PpwrkSubmitted, f.PpwrkSubmittedTime);
+
+  return {
+    id: item.id || '',
+    SourceListId: sourceList.listId,
+    SourceYear: sourceList.year,
+    BOL: f.BOLNumber_x0028_Won_x0029_ || '',
+    BidID: f.BidID || '',
+    Operator: f.TMSName || operatorTeam || 'Unknown Operator',
+    OperatorTeam: operatorTeam || '',
+    Truck: truck || '',
+    Customer: customer || '',
+    Status: f.Status || '',
+    Processed: f.Processed ?? false,
+    PUDate: f.Pickup_x0020_Offer_x0020_Date || '',
+    PUDateDisplay: formatShortDate(f.Pickup_x0020_Offer_x0020_Date),
+    OriginST: f.Pickup2State || '',
+    DestST: f.Delivery1State || '',
+    Route: [f.Shipment_x0020_Origin, f.Shipment_x0020_Destination].filter(Boolean).join(' to '),
+    BidAmount: getNumberValue(f.FinalBillableTotal),
+    DriverPay: getNumberValue(f.NetPayabletoDriver),
+    SubmitDate: f.PpwrkSubmitted || '',
+    SubmitTime: f.PpwrkSubmittedTime || '',
+    SubmitDateDisplay: submitted?.displayDate || '',
+    SubmitTimeDisplay: submitted?.displayTime || '',
+    SubmittedComparable: submitted?.comparable || null
+  };
+}
+
+function getSettlementTotals(records) {
+  const drivers = new Set();
+  const customers = new Set();
+
+  const totals = records.reduce(
+    (acc, record) => {
+      acc.orderCount += 1;
+      acc.bidTotal += getNumberValue(record.BidAmount);
+      acc.driverPayTotal += getNumberValue(record.DriverPay);
+
+      if (record.Operator) drivers.add(record.Operator);
+      if (record.Customer) customers.add(record.Customer);
+
+      return acc;
+    },
+    {
+      orderCount: 0,
+      driverCount: 0,
+      customerCount: 0,
+      bidTotal: 0,
+      driverPayTotal: 0
+    }
+  );
+
+  totals.driverCount = drivers.size;
+  totals.customerCount = customers.size;
+  totals.margin = totals.bidTotal - totals.driverPayTotal;
+
+  return totals;
+}
+
+function sortSettlementRows(a, b) {
+  const operatorDiff = String(a.Operator || '').localeCompare(String(b.Operator || ''), undefined, { numeric: true });
+  if (operatorDiff !== 0) return operatorDiff;
+
+  const submitDiff = (a.SubmittedComparable || 0) - (b.SubmittedComparable || 0);
+  if (submitDiff !== 0) return submitDiff;
+
+  return String(a.BOL || '').localeCompare(String(b.BOL || ''), undefined, { numeric: true });
+}
+
+function buildWeeklySettlementResponse(items, sourceLists, cutoffDateValue) {
+  const cutoff = parseCutoffDateValue(cutoffDateValue);
+  const previousCutoff = addDaysToDateParts(cutoff, -7);
+
+  const previousCutoffNoon = getEasternComparableFromDateParts(previousCutoff, 12, 0, 0);
+  const previousCutoffEndOfDay = getEasternComparableFromDateParts(previousCutoff, 23, 59, 59);
+  const currentCutoffNoon = getEasternComparableFromDateParts(cutoff, 12, 0, 0);
+  const currentCutoffEndOfDay = getEasternComparableFromDateParts(cutoff, 23, 59, 59);
+
+  const sourceById = new Map(sourceLists.map((list) => [list.listId, list]));
+
+  const usableRecords = items
+    .map((entry) => getSettlementReportItem(entry.item, sourceById.get(entry.sourceListId) || entry.sourceList))
+    .filter((record) => parseBoolean(record.Processed))
+    .filter((record) => record.SubmittedComparable !== null);
+
+  const main = [];
+  const suggest = [];
+
+  usableRecords.forEach((record) => {
+    if (
+      record.SubmittedComparable > previousCutoffNoon &&
+      record.SubmittedComparable <= currentCutoffNoon
+    ) {
+      main.push({
+        ...record,
+        Starred:
+          record.SubmittedComparable > previousCutoffNoon &&
+          record.SubmittedComparable <= previousCutoffEndOfDay
+      });
+      return;
+    }
+
+    if (
+      record.SubmittedComparable > currentCutoffNoon &&
+      record.SubmittedComparable <= currentCutoffEndOfDay
+    ) {
+      suggest.push({
+        ...record,
+        Starred: false
+      });
+    }
+  });
+
+  main.sort(sortSettlementRows);
+  suggest.sort(sortSettlementRows);
+
+  const excludedCount = items
+    .map((entry) => getSettlementReportItem(entry.item, sourceById.get(entry.sourceListId) || entry.sourceList))
+    .filter((record) => parseBoolean(record.Processed))
+    .filter((record) => record.SubmittedComparable === null).length;
+
+  return {
+    success: true,
+    reportType: 'weeklySettlement',
+    reportLabel: `Weekly Settlement Report - Cutoff ${formatDisplayDateParts(cutoff)}`,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    dataSource: sourceLists.map((list) => list.label).join(', '),
+    cutoffDate: cutoff.raw,
+    cutoffLabel: `${formatDisplayDateParts(cutoff)} at 12:00 PM Eastern`,
+    previousCutoffDate: formatIsoDateParts(previousCutoff),
+    previousCutoffLabel: `${formatDisplayDateParts(previousCutoff)} at 12:00 PM Eastern`,
+    mainWindowLabel: `After ${formatDisplayDateParts(previousCutoff)} 12:00 PM through ${formatDisplayDateParts(cutoff)} 12:00 PM Eastern`,
+    suggestWindowLabel: `After ${formatDisplayDateParts(cutoff)} 12:00 PM through ${formatDisplayDateParts(cutoff)} 11:59 PM Eastern`,
+    totals: {
+      main: getSettlementTotals(main),
+      suggest: getSettlementTotals(suggest),
+      combined: getSettlementTotals([...main, ...suggest])
+    },
+    counts: {
+      scannedRecords: items.length,
+      usableProcessedRecords: usableRecords.length,
+      excludedProcessedRecordsMissingSubmissionTimestamp: excludedCount
+    },
+    main,
+    suggest
+  };
+}
+
 app.get('/', (req, res) => {
   res.send('Kole Lookup API is running');
 });
@@ -1598,6 +1890,74 @@ app.get('/sharepoint-docs-debug', requireLookupAccess, async (req, res) => {
     });
   }
 });
+
+
+app.get('/reports/weekly-settlement', requireLookupAccess, async (req, res) => {
+  try {
+    const cutoffDate = String(req.query.cutoffDate || '').trim();
+    const cutoff = parseCutoffDateValue(cutoffDate);
+    const previousCutoff = addDaysToDateParts(cutoff, -7);
+    const neededYears = new Set([String(cutoff.year), String(previousCutoff.year)]);
+
+    const token = await getGraphToken();
+    const allLists = await getSearchableBidLists(token);
+
+    const sourceLists = allLists.filter((list) => {
+      const currentEasternYear = getEasternParts().year;
+
+      if (list.label === 'Bid Listing' && neededYears.has(String(currentEasternYear))) {
+        return true;
+      }
+
+      return neededYears.has(String(list.year));
+    });
+
+    if (sourceLists.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: `No Bid Listing source list was found for settlement cutoff ${cutoffDate}.`
+      });
+    }
+
+    const settled = await Promise.allSettled(
+      sourceLists.map(async (sourceList) => {
+        const listItems = await getAllListItemsWithFields(token, sourceList.listId);
+        return listItems.map((item) => ({
+          item,
+          sourceList,
+          sourceListId: sourceList.listId
+        }));
+      })
+    );
+
+    const successfulItems = settled
+      .filter((result) => result.status === 'fulfilled')
+      .flatMap((result) => result.value);
+
+    const failedLists = settled
+      .map((result, index) => ({ result, list: sourceLists[index] }))
+      .filter((entry) => entry.result.status === 'rejected')
+      .map((entry) => ({
+        SourceList: entry.list.label,
+        error: entry.result.reason?.message || 'Unknown settlement report list failure'
+      }));
+
+    const report = buildWeeklySettlementResponse(successfulItems, sourceLists, cutoffDate);
+
+    res.json({
+      ...report,
+      failedLists
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 
 app.get('/reports/driver-summary', requireLookupAccess, async (req, res) => {
   try {
