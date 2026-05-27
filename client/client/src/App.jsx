@@ -1140,18 +1140,14 @@ async function loadOperationsDashboard(options = {}) {
         <div className="reports-header">
           <div>
             <h2>Reports</h2>
-            <p>Run finalized operational reports from Kole Connect.</p>
-          </div>
+                </div>
         </div>
 
         <div className="report-card compact-report-card">
           <div className="report-card-header centered-report-header">
             <div>
               <h3>Monthly Driver Route Summary</h3>
-              <p>
-                Uses Pickup Offer Date as the report month anchor. Reports unlock on the 5th of the following month at 8:00 AM Eastern.
-              </p>
-            </div>
+                  </div>
           </div>
 
           <div className="report-controls centered-report-controls">
@@ -1389,7 +1385,7 @@ async function loadOperationsDashboard(options = {}) {
   <div className="search-card operations-panel">
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
       <div>
-        <h2>Today&apos;s Operations</h2>
+    <h2>Today&apos;s Operations</h2>
         {operationsData?.generatedAt && (
           <p>Generated: {operationsData.generatedAt}</p>
         )}
@@ -1701,10 +1697,8 @@ async function loadOperationsDashboard(options = {}) {
           <div className="detail-modal report-modal" onClick={(e) => e.stopPropagation()}>
             <div className="detail-header report-modal-header">
               <div>
-                <h2>{driverSummaryReport.reportLabel} Driver Summary</h2>
-                <p>
-                  Finalized monthly driver route report · Pickup Offer Date anchor · Click any load row to open the order
-                </p>
+                <h2>{driverSummaryReport.reportLabel} Driver Route Summary</h2>
+           
               </div>
 
               <button className="close-button" onClick={closeDriverSummaryModal}>
