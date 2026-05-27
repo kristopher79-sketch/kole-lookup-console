@@ -1103,3 +1103,76 @@ tbody tr:hover {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+
+/* REPORT ACCORDION */
+.reports-accordion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.report-accordion {
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  background: #0b1220;
+  overflow: hidden;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+}
+
+.report-accordion-button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px;
+  border-radius: 0;
+  background: #1f2937;
+  color: #facc15;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-align: left;
+}
+
+.report-accordion-button:hover {
+  background: #334155;
+}
+
+.report-accordion.open .report-accordion-button {
+  background: #0f172a;
+  border-bottom: 1px solid #1e293b;
+}
+
+.report-accordion-icon {
+  color: #f8fafc;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+.report-accordion-body {
+  padding: 18px;
+  background: #111827;
+}
+
+.accordion-inner-card {
+  max-width: 860px;
+  margin: 0 auto;
+  box-shadow: none;
+}
+
+.report-accordion .settlement-report-card {
+  margin-top: 0;
+}
+
+@media (max-width: 700px) {
+  .report-accordion-button {
+    padding: 14px 16px;
+  }
+
+  .report-accordion-body {
+    padding: 14px;
+  }
+}

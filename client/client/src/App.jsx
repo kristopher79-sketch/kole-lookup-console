@@ -64,6 +64,7 @@ export default function App() {
   const [weeklySettlementLoading, setWeeklySettlementLoading] = useState(false);
   const [weeklySettlementError, setWeeklySettlementError] = useState(null);
   const [weeklySettlementModalOpen, setWeeklySettlementModalOpen] = useState(false);
+  const [activeReportPanel, setActiveReportPanel] = useState('');
 
   const [authError, setAuthError] = useState('');
   
@@ -722,6 +723,10 @@ async function loadOperationsDashboard(options = {}) {
     setWeeklySettlementModalOpen(false);
   }
 
+  function toggleReportPanel(panelName) {
+    setActiveReportPanel((current) => (current === panelName ? '' : panelName));
+  }
+
 function openReportLoadDetails(load) {
   if (!load?.id) {
     setDriverSummaryError({
@@ -1329,152 +1334,186 @@ function openReportLoadDetails(load) {
 
   function DriverSummaryReport() {
     const monthOptions = Array.from({ length: 12 }, (_, index) => index + 1);
+    const isDriverSummaryOpen = activeReportPanel === 'driverSummary';
+    const isWeeklySettlementOpen = activeReportPanel === 'weeklySettlement';
 
     return (
       <div className="search-card reports-panel">
         <div className="reports-header">
           <div>
             <h2>Reports</h2>
+          </div>
+        </div>
+
+        <div className="reports-accordion-list">
+          <div className={`report-accordion ${isDriverSummaryOpen ? 'open' : ''}`}>
+            <button
+              type="button"
+              className="report-accordion-button"
+              onClick={() => toggleReportPanel('driverSummary')}
+            >
+              <span>Monthly Driver Route Summary</span>
+              <span className="report-accordion-icon">{isDriverSummaryOpen ? '▼' : '▶'}</span>
+            </button>
+
+            {isDriverSummaryOpen && (
+              <div className="report-accordion-body">
+                <div className="report-card compact-report-card accordion-inner-card">
+                  <div className="report-card-header centered-report-header">
+                    <div>
+                      <h3>Monthly Driver Route Summary</h3>
+                    </div>
+                  </div>
+
+                  <div className="report-controls centered-report-controls">
+                    <label>
+                      <span>Month</span>
+                      <select
+                        value={reportMonth}
+                        onChange={(e) => {
+                          setReportMonth(Number(e.target.value));
+                          setDriverSummaryReport(null);
+                          setDriverSummaryError(null);
+                          setDriverSummaryModalOpen(false);
+                        }}
+                      >
+                        {monthOptions.map((month) => (
+                          <option key={month} value={month}>
+                            {getReportMonthName(month)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>Year</span>
+                      <select
+                        value={reportYear}
+                        onChange={(e) => {
+                          setReportYear(Number(e.target.value));
+                          setDriverSummaryReport(null);
+                          setDriverSummaryError(null);
+                          setDriverSummaryModalOpen(false);
+                        }}
+                      >
+                        {getReportYears().map((year) => (
+                          <option key={year} value={year}>
+                            {year}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <button onClick={loadDriverSummaryReport} disabled={driverSummaryLoading}>
+                      {driverSummaryLoading ? 'Loading Report...' : 'Preview Report'}
+                    </button>
+                  </div>
+
+                  {driverSummaryReport && !driverSummaryModalOpen && (
+                    <div className="report-ready-card">
+                      <div>
+                        <strong>{driverSummaryReport.reportLabel} is ready.</strong>
+                        <span> The preview opens in a report window.</span>
+                      </div>
+                      <button className="view-button" onClick={() => setDriverSummaryModalOpen(true)}>
+                        Reopen Preview
+                      </button>
+                    </div>
+                  )}
+
+                  {driverSummaryError && (
+                    <div className={`report-alert ${driverSummaryError.code === 'REPORT_LOCKED' ? 'locked' : 'error'}`}>
+                      <h4>
+                        {driverSummaryError.code === 'REPORT_LOCKED'
+                          ? 'This report is not available yet.'
+                          : 'Report could not be loaded.'}
+                      </h4>
+                      <p>{driverSummaryError.message}</p>
+
+                      {driverSummaryError.code === 'REPORT_LOCKED' && (
+                        <>
+                          <div className="report-alert-grid">
+                            <div>
+                              <span>Selected report</span>
+                              <strong>{driverSummaryError.reportLabel}</strong>
+                            </div>
+                            <div>
+                              <span>Available starting</span>
+                              <strong>{driverSummaryError.unlockLabel || '-'}</strong>
+                            </div>
+                          </div>
+
+                          {driverSummaryError.lockReason && <p>{driverSummaryError.lockReason}</p>}
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
-        </div>
-
-        <div className="report-card compact-report-card">
-          <div className="report-card-header centered-report-header">
-            <div>
-              <h3>Monthly Driver Route Summary</h3>
-                  </div>
-          </div>
-
-          <div className="report-controls centered-report-controls">
-            <label>
-              <span>Month</span>
-              <select
-                value={reportMonth}
-                onChange={(e) => {
-                  setReportMonth(Number(e.target.value));
-                  setDriverSummaryReport(null);
-                  setDriverSummaryError(null);
-                  setDriverSummaryModalOpen(false);
-                }}
-              >
-                {monthOptions.map((month) => (
-                  <option key={month} value={month}>
-                    {getReportMonthName(month)}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              <span>Year</span>
-              <select
-                value={reportYear}
-                onChange={(e) => {
-                  setReportYear(Number(e.target.value));
-                  setDriverSummaryReport(null);
-                  setDriverSummaryError(null);
-                  setDriverSummaryModalOpen(false);
-                }}
-              >
-                {getReportYears().map((year) => (
-                  <option key={year} value={year}>
-                    {year}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <button onClick={loadDriverSummaryReport} disabled={driverSummaryLoading}>
-              {driverSummaryLoading ? 'Loading Report...' : 'Preview Report'}
-            </button>
-          </div>
-
-          {driverSummaryReport && !driverSummaryModalOpen && (
-            <div className="report-ready-card">
-              <div>
-                <strong>{driverSummaryReport.reportLabel} is ready.</strong>
-                <span> The preview opens in a report window.</span>
               </div>
-              <button className="view-button" onClick={() => setDriverSummaryModalOpen(true)}>
-                Reopen Preview
-              </button>
-            </div>
-          )}
+            )}
+          </div>
 
-          {driverSummaryError && (
-            <div className={`report-alert ${driverSummaryError.code === 'REPORT_LOCKED' ? 'locked' : 'error'}`}>
-              <h4>
-                {driverSummaryError.code === 'REPORT_LOCKED'
-                  ? 'This report is not available yet.'
-                  : 'Report could not be loaded.'}
-              </h4>
-              <p>{driverSummaryError.message}</p>
+          <div className={`report-accordion ${isWeeklySettlementOpen ? 'open' : ''}`}>
+            <button
+              type="button"
+              className="report-accordion-button"
+              onClick={() => toggleReportPanel('weeklySettlement')}
+            >
+              <span>Weekly Settlement Report</span>
+              <span className="report-accordion-icon">{isWeeklySettlementOpen ? '▼' : '▶'}</span>
+            </button>
 
-              {driverSummaryError.code === 'REPORT_LOCKED' && (
-                <>
-                  <div className="report-alert-grid">
+            {isWeeklySettlementOpen && (
+              <div className="report-accordion-body">
+                <div className="report-card compact-report-card settlement-report-card accordion-inner-card">
+                  <div className="report-card-header centered-report-header">
                     <div>
-                      <span>Selected report</span>
-                      <strong>{driverSummaryError.reportLabel}</strong>
-                    </div>
-                    <div>
-                      <span>Available starting</span>
-                      <strong>{driverSummaryError.unlockLabel || '-'}</strong>
+                      <h3>Weekly Settlement Report</h3>
                     </div>
                   </div>
 
-                  {driverSummaryError.lockReason && <p>{driverSummaryError.lockReason}</p>}
-                </>
-              )}
-            </div>
-          )}
-        </div>
+                  <div className="report-controls centered-report-controls">
+                    <label>
+                      <span>Cutoff Date</span>
+                      <input
+                        type="date"
+                        value={settlementCutoffDate}
+                        onChange={(e) => {
+                          setSettlementCutoffDate(e.target.value);
+                          setWeeklySettlementReport(null);
+                          setWeeklySettlementError(null);
+                          setWeeklySettlementModalOpen(false);
+                        }}
+                      />
+                    </label>
 
-        <div className="report-card compact-report-card settlement-report-card">
-          <div className="report-card-header centered-report-header">
-            <div>
-              <h3>Weekly Settlement Report</h3>
+                    <button onClick={loadWeeklySettlementReport} disabled={weeklySettlementLoading}>
+                      {weeklySettlementLoading ? 'Loading Report...' : 'Preview Report'}
+                    </button>
                   </div>
-          </div>
 
-          <div className="report-controls centered-report-controls">
-            <label>
-              <span>Cutoff Date</span>
-              <input
-                type="date"
-                value={settlementCutoffDate}
-                onChange={(e) => {
-                  setSettlementCutoffDate(e.target.value);
-                  setWeeklySettlementReport(null);
-                  setWeeklySettlementError(null);
-                  setWeeklySettlementModalOpen(false);
-                }}
-              />
-            </label>
+                  {weeklySettlementReport && !weeklySettlementModalOpen && (
+                    <div className="report-ready-card">
+                      <div>
+                        <strong>{weeklySettlementReport.reportLabel} is ready.</strong>
+                        <span> The preview opens in a report window.</span>
+                      </div>
+                      <button className="view-button" onClick={() => setWeeklySettlementModalOpen(true)}>
+                        Reopen Preview
+                      </button>
+                    </div>
+                  )}
 
-            <button onClick={loadWeeklySettlementReport} disabled={weeklySettlementLoading}>
-              {weeklySettlementLoading ? 'Loading Report...' : 'Preview Report'}
-            </button>
-          </div>
-
-          {weeklySettlementReport && !weeklySettlementModalOpen && (
-            <div className="report-ready-card">
-              <div>
-                <strong>{weeklySettlementReport.reportLabel} is ready.</strong>
-                <span> The preview opens in a report window.</span>
+                  {weeklySettlementError && (
+                    <div className="report-alert error">
+                      <h4>Report could not be loaded.</h4>
+                      <p>{weeklySettlementError.message}</p>
+                    </div>
+                  )}
+                </div>
               </div>
-              <button className="view-button" onClick={() => setWeeklySettlementModalOpen(true)}>
-                Reopen Preview
-              </button>
-            </div>
-          )}
-
-          {weeklySettlementError && (
-            <div className="report-alert error">
-              <h4>Report could not be loaded.</h4>
-              <p>{weeklySettlementError.message}</p>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     );
