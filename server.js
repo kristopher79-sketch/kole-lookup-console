@@ -1896,21 +1896,30 @@ app.get('/reports/weekly-settlement', requireLookupAccess, async (req, res) => {
   try {
     const cutoffDate = String(req.query.cutoffDate || '').trim();
     const cutoff = parseCutoffDateValue(cutoffDate);
-    const previousCutoff = addDaysToDateParts(cutoff, -7);
-    const neededYears = new Set([String(cutoff.year), String(previousCutoff.year)]);
 
     const token = await getGraphToken();
     const allLists = await getSearchableBidLists(token);
 
-    const sourceLists = allLists.filter((list) => {
-      const currentEasternYear = getEasternParts().year;
+    // Settlement is anchored to paperwork submission date/time, not pickup/delivery year.
+    // Because older orders can be submitted/processed later, accounting reports must scan
+    // every available archive from the first archive year through the selected cutoff year,
+    // plus the live Bid Listing.
+    // Example: a December 2025 cutoff scans Archive 2024, Archive 2025, and Bid Listing.
+    const sourceLists = allLists
+      .filter((list) => {
+        if (list.label === 'Bid Listing') return true;
 
-      if (list.label === 'Bid Listing' && neededYears.has(String(currentEasternYear))) {
-        return true;
-      }
+        const sourceYear = Number(list.year);
+        if (!Number.isInteger(sourceYear)) return false;
 
-      return neededYears.has(String(list.year));
-    });
+        return sourceYear >= ARCHIVE_YEAR_MIN && sourceYear <= cutoff.year;
+      })
+      .sort((a, b) => {
+        if (a.label === 'Bid Listing') return 1;
+        if (b.label === 'Bid Listing') return -1;
+
+        return Number(a.year || 0) - Number(b.year || 0);
+      });
 
     if (sourceLists.length === 0) {
       return res.status(404).json({
@@ -1921,7 +1930,12 @@ app.get('/reports/weekly-settlement', requireLookupAccess, async (req, res) => {
 
     const settled = await Promise.allSettled(
       sourceLists.map(async (sourceList) => {
-        const listItems = await getAllListItemsWithFields(token, sourceList.listId);
+        const listItems = await getAllListItemsWithFields(
+          token,
+          sourceList.listId,
+          getSettlementFieldSelect()
+        );
+
         return listItems.map((item) => ({
           item,
           sourceList,
