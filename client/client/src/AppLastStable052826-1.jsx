@@ -46,9 +46,6 @@ export default function App() {
   const [operationsData, setOperationsData] = useState(null);
   const [operationsLoading, setOperationsLoading] = useState(false);
   const [operationsError, setOperationsError] = useState('');
-  const [driverPositionsData, setDriverPositionsData] = useState(null);
-  const [driverPositionsLoading, setDriverPositionsLoading] = useState(false);
-  const [driverPositionsError, setDriverPositionsError] = useState('');
   const [sortField, setSortField] = useState('');
   const [sortDirection, setSortDirection] = useState('asc');
   const initialReportDate = useMemo(() => {
@@ -141,11 +138,9 @@ export default function App() {
     if (!isAuthenticated) return undefined;
 
     loadOperationsDashboard();
-    loadDriverPositions();
 
     const interval = window.setInterval(() => {
       loadOperationsDashboard({ silent: true });
-      loadDriverPositions({ silent: true });
     }, 10 * 60 * 1000);
 
     return () => window.clearInterval(interval);
@@ -313,82 +308,6 @@ async function loadOperationsDashboard(options = {}) {
       setOperationsLoading(false);
     }
   }
-}
-
-async function loadDriverPositions(options = {}) {
-  const { silent = false } = options;
-
-  if (!silent) {
-    setDriverPositionsLoading(true);
-  }
-
-  setDriverPositionsError('');
-
-  try {
-    const res = await authedFetch(
-      `${API}/tracking/driver-positions`
-    );
-
-    const data = await res.json();
-
-    if (!data.success) {
-      throw new Error(data.error || 'Unable to load driver position tracking.');
-    }
-
-    setDriverPositionsData(data);
-  } catch (err) {
-    setDriverPositionsError(err.message);
-
-    if (!silent) {
-      setDriverPositionsData(null);
-    }
-  } finally {
-    if (!silent) {
-      setDriverPositionsLoading(false);
-    }
-  }
-}
-
-function refreshOperationsAndTracking() {
-  loadOperationsDashboard();
-  loadDriverPositions();
-}
-
-function formatTrackingTimestamp(value) {
-  if (!value) return '-';
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) return value;
-
-  return date.toLocaleString('en-US', {
-    timeZone: 'America/New_York',
-    month: 'numeric',
-    day: 'numeric',
-    year: '2-digit',
-    hour: 'numeric',
-    minute: '2-digit'
-  });
-}
-
-function formatSpeed(value) {
-  const number = Number(value);
-
-  if (Number.isNaN(number)) return '-';
-
-  return `${number.toLocaleString('en-US', { maximumFractionDigits: 0 })} mph`;
-}
-
-function getPositionStatusClass(position) {
-  if (position?.isStale) return 'tracking-pill stale';
-  if (Number(position?.speed || 0) > 0) return 'tracking-pill moving';
-  return 'tracking-pill stopped';
-}
-
-function getPositionStatusLabel(position) {
-  if (position?.isStale) return 'Stale';
-  if (Number(position?.speed || 0) > 0) return 'Moving';
-  return 'Stopped';
 }
   async function loadDetails(id, view = 'basic', sourceListId = '') {
     if (!id) {
@@ -1411,75 +1330,6 @@ function openReportLoadDetails(load) {
     );
   }
 
-
-  function DriverPositionTrackingPanel() {
-    const positions = driverPositionsData?.positions || [];
-
-    return (
-      <div className="driver-position-panel">
-        <div className="driver-position-header">
-          <div>
-            <h3>Driver Position Tracking</h3>
-          
-          </div>
-
-          {driverPositionsData?.counts && (
-            <div className="driver-position-counts">
-              <span>{driverPositionsData.counts.total} units</span>
-              <span>{driverPositionsData.counts.moving} moving</span>
-              <span>{driverPositionsData.counts.stale} stale</span>
-            </div>
-          )}
-        </div>
-
-        {driverPositionsError && <div className="msg error">{driverPositionsError}</div>}
-        {driverPositionsLoading && !driverPositionsData && <div className="msg">Loading driver positions...</div>}
-
-        {driverPositionsData && positions.length === 0 && (
-          <div className="msg">No current driver position rows were found.</div>
-        )}
-
-        {positions.length > 0 && (
-          <div className="operations-table-wrap driver-position-table-wrap">
-            <table className="driver-position-table">
-              <thead>
-                <tr>
-                  <th>Status</th>
-                  <th>Truck</th>
-                  <th>Driver</th>
-                  <th>Location</th>
-                  <th>Speed</th>
-                  <th>Ignition</th>
-                  <th>Position Time</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {positions.map((position) => (
-                  <tr key={position.id || position.equipmentId}>
-                    <td>
-                      <span className={getPositionStatusClass(position)}>
-                        {getPositionStatusLabel(position)}
-                      </span>
-                    </td>
-                    <td>{position.equipmentId || '-'}</td>
-                    <td>
-                      <strong>{position.driverName || 'Unmatched'}</strong>
-                    </td>
-                    <td>{position.currentCityState || '-'}</td>
-                    <td>{formatSpeed(position.speed)}</td>
-                    <td>{position.ignitionStatusLabel || '-'}</td>
-                    <td>{formatTrackingTimestamp(position.positionTimeUtc)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    );
-  }
-
   function DriverSummaryReport() {
     const monthOptions = Array.from({ length: 12 }, (_, index) => index + 1);
     const isDriverSummaryOpen = activeReportPanel === 'driverSummary';
@@ -1820,8 +1670,8 @@ function openReportLoadDetails(load) {
         )}
       </div>
 
-      <button onClick={refreshOperationsAndTracking} disabled={operationsLoading || driverPositionsLoading}>
-        {operationsLoading || driverPositionsLoading ? 'Refreshing...' : 'Refresh Operations'}
+      <button onClick={() => loadOperationsDashboard()} disabled={operationsLoading}>
+        {operationsLoading ? 'Refreshing...' : 'Refresh Operations'}
       </button>
     </div>
 
@@ -1851,8 +1701,6 @@ function openReportLoadDetails(load) {
             <strong>{operationsData.counts.loadingNext7}</strong>
           </div>
         </div>
-
-        <DriverPositionTrackingPanel />
 
         <div style={{ marginTop: '24px' }}>
           <h3 style={{ marginBottom: '12px' }}>Active Today</h3>
