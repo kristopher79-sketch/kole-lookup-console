@@ -1216,6 +1216,71 @@ function parsePaperworkSubmittedTimestamp(dateValue, timeValue) {
   };
 }
 
+
+function getWonNotRegisteredFieldSelect() {
+  return [
+    'BOLNumber_x0028_Won_x0029_',
+    'BidID',
+    'Company',
+    'Pickup_x0020_Offer_x0020_Date',
+    'Shipment_x0020_Origin',
+    'Shipment_x0020_Destination',
+    'Operator_x002f_Team',
+    'Truck_x0020_Number',
+    'Status'
+  ].join(',');
+}
+
+function getWonNotRegisteredItem(item, sourceList) {
+  const f = item.fields || {};
+
+  const customer = getChoiceValue(f.Company || f['Company/Value'] || '');
+  const driver = getChoiceValue(f.Operator_x002f_Team || f['Operator_x002f_Team/Value'] || '');
+  const truck = getChoiceValue(f.Truck_x0020_Number || f['Truck_x0020_Number/Value'] || '');
+
+  return {
+    id: item.id || '',
+    SourceListId: sourceList.listId,
+    SourceList: sourceList.label,
+    SourceYear: sourceList.year,
+    BOL: f.BOLNumber_x0028_Won_x0029_ || '',
+    BidID: f.BidID || '',
+    Customer: customer || '',
+    Driver: driver || '',
+    Truck: truck || '',
+    Status: f.Status || '',
+    PickupDate: f.Pickup_x0020_Offer_x0020_Date || '',
+    PickupDateDisplay: formatShortDate(f.Pickup_x0020_Offer_x0020_Date),
+    Origin: f.Shipment_x0020_Origin || '',
+    Destination: f.Shipment_x0020_Destination || ''
+  };
+}
+
+function sortWonNotRegisteredRows(a, b) {
+  const pickupDiff = getPickupSortValue(a) - getPickupSortValue(b);
+  if (pickupDiff !== 0) return pickupDiff;
+
+  return String(a.BidID || '').localeCompare(String(b.BidID || ''));
+}
+
+function buildWonNotRegisteredResponse(items, sourceList) {
+  const rows = items
+    .map((item) => getWonNotRegisteredItem(item, sourceList))
+    .filter((record) => normalizeText(record.Status) === 'won')
+    .filter((record) => !String(record.BOL || '').trim())
+    .sort(sortWonNotRegisteredRows);
+
+  return {
+    success: true,
+    reportType: 'wonNotRegistered',
+    reportLabel: 'Orders Won and Not Registered',
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    dataSource: sourceList.label,
+    count: rows.length,
+    rows
+  };
+}
+
 function getSettlementFieldSelect() {
   return [
     'BOLNumber_x0028_Won_x0029_',
@@ -2018,6 +2083,39 @@ app.get('/sharepoint-docs-debug', requireLookupAccess, async (req, res) => {
   } catch (err) {
     res.status(500).json({
       error: err.message
+    });
+  }
+});
+
+
+
+app.get('/reports/won-not-registered', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const lists = await getSearchableBidLists(token);
+    const currentList = lists.find((list) => list.label === 'Bid Listing');
+
+    if (!currentList) {
+      return res.status(404).json({
+        success: false,
+        error: 'Bid Listing was not found.'
+      });
+    }
+
+    const items = await getAllListItemsWithFields(
+      token,
+      currentList.listId,
+      getWonNotRegisteredFieldSelect()
+    );
+
+    const report = buildWonNotRegisteredResponse(items, currentList);
+    res.json(report);
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });

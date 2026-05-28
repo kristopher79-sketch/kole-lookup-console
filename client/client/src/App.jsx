@@ -67,6 +67,10 @@ export default function App() {
   const [weeklySettlementLoading, setWeeklySettlementLoading] = useState(false);
   const [weeklySettlementError, setWeeklySettlementError] = useState(null);
   const [weeklySettlementModalOpen, setWeeklySettlementModalOpen] = useState(false);
+  const [wonNotRegisteredReport, setWonNotRegisteredReport] = useState(null);
+  const [wonNotRegisteredLoading, setWonNotRegisteredLoading] = useState(false);
+  const [wonNotRegisteredError, setWonNotRegisteredError] = useState(null);
+  const [wonNotRegisteredModalOpen, setWonNotRegisteredModalOpen] = useState(false);
   const [activeReportPanel, setActiveReportPanel] = useState('');
 
   const [authError, setAuthError] = useState('');
@@ -130,6 +134,7 @@ export default function App() {
         setSelected(null);
         setDriverSummaryModalOpen(false);
         setWeeklySettlementModalOpen(false);
+        setWonNotRegisteredModalOpen(false);
       }
     }
 
@@ -804,6 +809,39 @@ function getPositionStatusLabel(position) {
     setWeeklySettlementModalOpen(false);
   }
 
+  async function loadWonNotRegisteredReport() {
+    setWonNotRegisteredLoading(true);
+    setWonNotRegisteredError(null);
+    setWonNotRegisteredReport(null);
+    setWonNotRegisteredModalOpen(false);
+
+    try {
+      const res = await authedFetch(
+        `${API}/reports/won-not-registered`
+      );
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to load Orders Won and Not Registered report.');
+      }
+
+      setWonNotRegisteredReport(data);
+      setWonNotRegisteredModalOpen(true);
+    } catch (err) {
+      setWonNotRegisteredError({
+        code: 'REPORT_ERROR',
+        message: err.message || 'Unable to load Orders Won and Not Registered report.'
+      });
+    } finally {
+      setWonNotRegisteredLoading(false);
+    }
+  }
+
+  function closeWonNotRegisteredModal() {
+    setWonNotRegisteredModalOpen(false);
+  }
+
   function toggleReportPanel(panelName) {
     setActiveReportPanel((current) => (current === panelName ? '' : panelName));
   }
@@ -1412,6 +1450,68 @@ function openReportLoadDetails(load) {
   }
 
 
+  function WonNotRegisteredPreview() {
+    const rows = wonNotRegisteredReport?.rows || [];
+
+    if (!wonNotRegisteredReport) return null;
+
+    return (
+      <div className="driver-report-preview modal-report-preview">
+        <div className="driver-report-generated">
+          Generated: {wonNotRegisteredReport.generatedAt}
+        </div>
+
+        <div className="report-kpi-grid won-not-registered-kpi-grid">
+          <div className="report-kpi-card">
+            <span>Open Orders</span>
+            <strong>{formatReportNumber(wonNotRegisteredReport.count)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Source</span>
+            <strong>{wonNotRegisteredReport.dataSource || 'Bid Listing'}</strong>
+          </div>
+        </div>
+
+        {rows.length === 0 ? (
+          <div className="msg">No won orders are currently missing a BOL number.</div>
+        ) : (
+          <div className="report-table-wrap">
+            <table className="driver-report-table won-not-registered-table">
+              <thead>
+                <tr>
+                  <th>Bid ID</th>
+                  <th>Company</th>
+                  <th>Operator/Team</th>
+                  <th>Pickup Date</th>
+                  <th>Origin</th>
+                  <th>Destination</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((load, index) => (
+                  <tr
+                    key={`${load.BidID || load.id || index}-${index}`}
+                    className={load.id ? 'report-clickable-row' : ''}
+                    onClick={() => loadDetails(load.id, 'basic', load.SourceListId)}
+                    title={load.id ? 'Open full order screen' : ''}
+                  >
+                    <td>{load.BidID || '-'}</td>
+                    <td>{load.Customer || '-'}</td>
+                    <td>{load.Driver || '-'}</td>
+                    <td>{load.PickupDateDisplay || formatDateOnly(load.PickupDate)}</td>
+                    <td>{load.Origin || '-'}</td>
+                    <td>{load.Destination || '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+
   function DriverPositionTrackingPanel() {
     const positions = driverPositionsData?.positions || [];
 
@@ -1484,6 +1584,7 @@ function openReportLoadDetails(load) {
     const monthOptions = Array.from({ length: 12 }, (_, index) => index + 1);
     const isDriverSummaryOpen = activeReportPanel === 'driverSummary';
     const isWeeklySettlementOpen = activeReportPanel === 'weeklySettlement';
+    const isWonNotRegisteredOpen = activeReportPanel === 'wonNotRegistered';
 
     return (
       <div className="search-card reports-panel">
@@ -1656,6 +1757,55 @@ function openReportLoadDetails(load) {
                     <div className="report-alert error">
                       <h4>Report could not be loaded.</h4>
                       <p>{weeklySettlementError.message}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+
+          <div className={`report-accordion ${isWonNotRegisteredOpen ? 'open' : ''}`}>
+            <button
+              type="button"
+              className="report-accordion-button"
+              onClick={() => toggleReportPanel('wonNotRegistered')}
+            >
+              <span>Orders Won and Not Registered</span>
+              <span className="report-accordion-icon">{isWonNotRegisteredOpen ? '▼' : '▶'}</span>
+            </button>
+
+            {isWonNotRegisteredOpen && (
+              <div className="report-accordion-body">
+                <div className="report-card compact-report-card accordion-inner-card">
+                  <div className="report-card-header centered-report-header">
+                    <div>
+                      <h3>Orders Won and Not Registered</h3>
+                    </div>
+                  </div>
+
+                  <div className="report-controls centered-report-controls">
+                    <button onClick={loadWonNotRegisteredReport} disabled={wonNotRegisteredLoading}>
+                      {wonNotRegisteredLoading ? 'Loading Report...' : 'Preview Report'}
+                    </button>
+                  </div>
+
+                  {wonNotRegisteredReport && !wonNotRegisteredModalOpen && (
+                    <div className="report-ready-card">
+                      <div>
+                        <strong>{wonNotRegisteredReport.reportLabel} is ready.</strong>
+                        <span> The preview opens in a report window.</span>
+                      </div>
+                      <button className="view-button" onClick={() => setWonNotRegisteredModalOpen(true)}>
+                        Reopen Preview
+                      </button>
+                    </div>
+                  )}
+
+                  {wonNotRegisteredError && (
+                    <div className="report-alert error">
+                      <h4>Report could not be loaded.</h4>
+                      <p>{wonNotRegisteredError.message}</p>
                     </div>
                   )}
                 </div>
@@ -2160,6 +2310,27 @@ function openReportLoadDetails(load) {
 
             <div className="modal-body report-modal-body">
               <WeeklySettlementPreview />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {wonNotRegisteredModalOpen && wonNotRegisteredReport && (
+        <div className="modal-overlay report-modal-overlay" onClick={closeWonNotRegisteredModal}>
+          <div className="detail-modal report-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="detail-header report-modal-header">
+              <div>
+                <h2>{wonNotRegisteredReport.reportLabel || 'Orders Won and Not Registered'}</h2>
+
+              </div>
+
+              <button className="close-button" onClick={closeWonNotRegisteredModal}>
+                Close
+              </button>
+            </div>
+
+            <div className="modal-body report-modal-body">
+              <WonNotRegisteredPreview />
             </div>
           </div>
         </div>

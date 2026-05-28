@@ -1334,3 +1334,11 @@ tbody tr:hover {
     min-width: 760px;
   }
 }
+/* WON / NOT REGISTERED REPORT */
+.won-not-registered-kpi-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.won-not-registered-table {
+  min-width: 900px;
+}
