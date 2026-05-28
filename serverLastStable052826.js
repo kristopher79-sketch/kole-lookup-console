@@ -832,8 +832,6 @@ function getDriverSummaryItem(item, sourceList) {
     LoadedMiles: loadedMiles,
     TotalMiles: totalMiles,
     QuotedTotal: quotedTotal,
-    RatePerLoadedMile: loadedMiles > 0 ? quotedTotal / loadedMiles : 0,
-    RatePerAllMiles: totalMiles > 0 ? quotedTotal / totalMiles : 0,
     RatePerMile: loadedMiles > 0 ? quotedTotal / loadedMiles : 0,
     DriverPay: driverPay
   };
@@ -1006,25 +1004,7 @@ function addDaysToDateParts(parts, days) {
     day: date.getUTCDate()
   };
 }
-function getPayrollDatePartsFromCutoff(cutoffParts) {
-  // Payroll is the Wednesday following the cutoff.
-  // Normal Thursday cutoff = following Wednesday = +6 days.
-  const cutoffDate = new Date(Date.UTC(
-    cutoffParts.year,
-    cutoffParts.month - 1,
-    cutoffParts.day
-  ));
 
-  const cutoffDay = cutoffDate.getUTCDay(); // Sunday = 0, Wednesday = 3
-  let daysUntilWednesday = (3 - cutoffDay + 7) % 7;
-
-  // "Following Wednesday" means not the same day if someone ever picks a Wednesday cutoff.
-  if (daysUntilWednesday === 0) {
-    daysUntilWednesday = 7;
-  }
-
-  return addDaysToDateParts(cutoffParts, daysUntilWednesday);
-}
 function formatIsoDateParts(parts) {
   return [
     String(parts.year).padStart(4, '0'),
@@ -1209,7 +1189,6 @@ function sortSettlementRows(a, b) {
 function buildWeeklySettlementResponse(items, sourceLists, cutoffDateValue) {
   const cutoff = parseCutoffDateValue(cutoffDateValue);
   const previousCutoff = addDaysToDateParts(cutoff, -7);
-const payrollDate = getPayrollDatePartsFromCutoff(cutoff);
 
   const previousCutoffNoon = getEasternComparableFromDateParts(previousCutoff, 12, 0, 0);
   const previousCutoffEndOfDay = getEasternComparableFromDateParts(previousCutoff, 23, 59, 59);
@@ -1262,10 +1241,7 @@ const payrollDate = getPayrollDatePartsFromCutoff(cutoff);
   return {
     success: true,
     reportType: 'weeklySettlement',
-    reportLabel: `Weekly Settlement Report - Payroll Date ${formatDisplayDateParts(payrollDate)}`,
-payrollDate: formatIsoDateParts(payrollDate),
-payrollDateLabel: formatDisplayDateParts(payrollDate),
-
+    reportLabel: `Weekly Settlement Report - Cutoff ${formatDisplayDateParts(cutoff)}`,
     generatedAt: `${formatEasternTimestamp()} Eastern`,
     dataSource: sourceLists.map((list) => list.label).join(', '),
     cutoffDate: cutoff.raw,

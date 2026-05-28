@@ -700,7 +700,7 @@ tbody tr:hover {
 
 .report-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
   margin: 16px 0;
 }
@@ -756,7 +756,7 @@ tbody tr:hover {
 
 .driver-report-totals-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   padding: 14px;
   background: #0b1220;
@@ -874,12 +874,6 @@ tbody tr:hover {
   font-size: 24px;
 }
 
-.driver-report-generated {
-  text-align: center;
-  color: #94a3b8;
-  margin-bottom: 16px;
-}
-
 .modal-report-preview .report-kpi-grid {
   max-width: 1200px;
   margin: 18px auto;
@@ -914,19 +908,19 @@ tbody tr:hover {
 .driver-report-table th:nth-child(3),
 .driver-report-table td:nth-child(3) { width: 9%; }
 .driver-report-table th:nth-child(4),
-.driver-report-table td:nth-child(4) { width: 25%; }
+.driver-report-table td:nth-child(4) { width: 9%; }
 .driver-report-table th:nth-child(5),
-.driver-report-table td:nth-child(5) { width: 8%; text-align: right; }
+.driver-report-table td:nth-child(5) { width: 24%; }
 .driver-report-table th:nth-child(6),
 .driver-report-table td:nth-child(6) { width: 8%; text-align: right; }
 .driver-report-table th:nth-child(7),
-.driver-report-table td:nth-child(7) { width: 10%; text-align: right; }
+.driver-report-table td:nth-child(7) { width: 8%; text-align: right; }
 .driver-report-table th:nth-child(8),
-.driver-report-table td:nth-child(8) { width: 8%; text-align: right; }
+.driver-report-table td:nth-child(8) { width: 10%; text-align: right; }
 .driver-report-table th:nth-child(9),
-.driver-report-table td:nth-child(9) { width: 9%; text-align: right; }
+.driver-report-table td:nth-child(9) { width: 8%; text-align: right; }
 .driver-report-table th:nth-child(10),
-.driver-report-table td:nth-child(10) { width: 10%; text-align: right; }
+.driver-report-table td:nth-child(10) { width: 11%; text-align: right; }
 
 @media (max-width: 900px) {
   .report-ready-card {

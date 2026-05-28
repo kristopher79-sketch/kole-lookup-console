@@ -1095,8 +1095,13 @@ function openReportLoadDetails(load) {
 
     return (
       <div className="driver-report-preview modal-report-preview">
-        <div className="driver-report-generated">
-          Generated: {driverSummaryReport.generatedAt}
+        <div className="driver-report-title">
+          <div>
+            <h3>{driverSummaryReport.reportLabel} Driver Summary Report</h3>
+            <p>
+              Generated: {driverSummaryReport.generatedAt}
+            </p>
+          </div>
         </div>
 
         <div className="report-kpi-grid">
@@ -1117,12 +1122,8 @@ function openReportLoadDetails(load) {
             <strong>{formatReportNumber(driverSummaryReport.totals.emptyMiles)}</strong>
           </div>
           <div className="report-kpi-card">
-            <span>Rev / Load Mile</span>
+            <span>Revenue / Loaded Mile</span>
             <strong>{formatReportMoney(driverSummaryReport.totals.revenuePerLoadedMile)}</strong>
-          </div>
-          <div className="report-kpi-card">
-            <span>Revenue / All Miles</span>
-            <strong>{formatReportMoney(driverSummaryReport.totals.revenuePerTotalMile)}</strong>
           </div>
           <div className="report-kpi-card">
             <span>Net Driver Pay</span>
@@ -1149,8 +1150,7 @@ function openReportLoadDetails(load) {
                 <div><span>Loads</span><strong>{formatReportNumber(driver.loadCount)}</strong></div>
                 <div><span>Empty Miles</span><strong>{formatReportNumber(driver.emptyMiles)}</strong></div>
                 <div><span>Loaded Miles</span><strong>{formatReportNumber(driver.loadedMiles)}</strong></div>
-                <div><span>$/Load Mile</span><strong>{formatReportMoney(driver.revenuePerLoadedMile)}</strong></div>
-                <div><span>$/All Miles</span><strong>{formatReportMoney(driver.revenuePerTotalMile)}</strong></div>
+                <div><span>$/Loaded Mile</span><strong>{formatReportMoney(driver.revenuePerLoadedMile)}</strong></div>
                 <div><span>Net Driver Pay</span><strong>{formatReportMoney(driver.driverPay)}</strong></div>
               </div>
 
@@ -1161,12 +1161,12 @@ function openReportLoadDetails(load) {
                       <th>BOL</th>
                       <th>Company</th>
                       <th>Pickup</th>
+                      <th>Delivery</th>
                       <th>Route</th>
                       <th>Deadhead</th>
                       <th>Loaded</th>
                       <th>Quoted</th>
-                      <th>$/Ld Mile</th>
-                      <th>$/All Miles</th>
+                      <th>$/Mile</th>
                       <th>Driver Pay</th>
                     </tr>
                   </thead>
@@ -1181,12 +1181,12 @@ function openReportLoadDetails(load) {
                         <td>{load.BOL || '-'}</td>
                         <td>{load.Customer || '-'}</td>
                         <td>{load.PickupDateDisplay || '-'}</td>
+                        <td>{load.DeliveryDateDisplay || '-'}</td>
                         <td>{load.Route || '-'}</td>
                         <td>{formatReportNumber(load.EmptyMiles)}</td>
                         <td>{formatReportNumber(load.LoadedMiles)}</td>
                         <td>{formatReportMoney(load.QuotedTotal)}</td>
-                        <td>{formatReportMoney(load.RatePerLoadedMile ?? load.RatePerMile)}</td>
-                        <td>{formatReportMoney(load.RatePerAllMiles)}</td>
+                        <td>{formatReportMoney(load.RatePerMile)}</td>
                         <td>{formatReportMoney(load.DriverPay)}</td>
                       </tr>
                     ))}
@@ -1272,7 +1272,7 @@ function openReportLoadDetails(load) {
       <div className="settlement-report-preview modal-report-preview">
         <div className="driver-report-title">
           <div>
-       
+            <h3>{weeklySettlementReport.reportLabel}</h3>
             <p>
               Generated: {weeklySettlementReport.generatedAt}
             </p>
@@ -1289,7 +1289,8 @@ function openReportLoadDetails(load) {
           <div className="driver-report-section-header">
             <div>
               <h4>Main Settlement</h4>
-                  </div>
+              <p>Orders submitted after the prior Thursday noon cutoff through the selected cutoff.</p>
+            </div>
             <div className="driver-report-section-total">
               {formatReportMoney(weeklySettlementReport.totals?.main?.driverPayTotal)}
             </div>
@@ -1307,7 +1308,8 @@ function openReportLoadDetails(load) {
           <div className="driver-report-section-header">
             <div>
               <h4>Likely for Next Week</h4>
-             </div>
+              <p>Orders submitted after the selected cutoff but before the end of that same day.</p>
+            </div>
             <div className="driver-report-section-total">
               {formatReportMoney(weeklySettlementReport.totals?.suggest?.driverPayTotal)}
             </div>
@@ -1350,7 +1352,7 @@ function openReportLoadDetails(load) {
               className="report-accordion-button"
               onClick={() => toggleReportPanel('driverSummary')}
             >
-              <span>Monthly Driver Summary Report</span>
+              <span>Monthly Driver Route Summary</span>
               <span className="report-accordion-icon">{isDriverSummaryOpen ? '▼' : '▶'}</span>
             </button>
 
@@ -1359,7 +1361,7 @@ function openReportLoadDetails(load) {
                 <div className="report-card compact-report-card accordion-inner-card">
                   <div className="report-card-header centered-report-header">
                     <div>
-                      <h3>Monthly Driver Summary Report</h3>
+                      <h3>Monthly Driver Route Summary</h3>
                     </div>
                   </div>
 
@@ -1976,7 +1978,7 @@ function openReportLoadDetails(load) {
           <div className="detail-modal report-modal" onClick={(e) => e.stopPropagation()}>
             <div className="detail-header report-modal-header">
               <div>
-                <h2>{driverSummaryReport.reportLabel} Driver Summary Report</h2>
+                <h2>{driverSummaryReport.reportLabel} Driver Route Summary</h2>
            
               </div>
 
@@ -1997,9 +1999,9 @@ function openReportLoadDetails(load) {
           <div className="detail-modal report-modal" onClick={(e) => e.stopPropagation()}>
             <div className="detail-header report-modal-header">
               <div>
-  <h2>{weeklySettlementReport.reportLabel || 'Weekly Settlement Report'}</h2>
-  <p>Cutoff {weeklySettlementReport.cutoffLabel}</p>
-</div>
+                <h2>{weeklySettlementReport.reportLabel}</h2>
+                <p>{weeklySettlementReport.cutoffLabel}</p>
+              </div>
 
               <button className="close-button" onClick={closeWeeklySettlementModal}>
                 Close
