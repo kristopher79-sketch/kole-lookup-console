@@ -1033,6 +1033,148 @@ function getPositionAgeMinutes(value) {
   return Math.max(0, Math.round((Date.now() - time) / 60000));
 }
 
+
+function getDriverRosterFieldSelect() {
+  return [
+    'Operator_x002f_TeamName',
+    'PIN',
+    'Trucks',
+    'TMSName',
+    'CellPhone1',
+    'CellPhone2',
+    'DriverType',
+    'Status',
+    'TrailerType',
+    'BOLLetterPrefix',
+    'SoloorTeam',
+    'EmailAddress1',
+    'EmailAddress2',
+    'RegisteredWeight',
+    'TractorPlate',
+    'TractorYear',
+    'TractorVIN',
+    'TrailerUnitNumber',
+    'TrailerLength',
+    'TrailerPlate',
+    'TrailerRegisteredState',
+    'TrailerYear',
+    'TrailerMake',
+    'TrailerVIN',
+    'SteerAxleWeight',
+    'Spacing1to2',
+    'Spacing2to3',
+    'Spacing3to4',
+    'Spacing4to5',
+    'OverallLength',
+    'LowestDeckHeight',
+    'TractorOwner',
+    'TrailerOwner',
+    'TractorAxles',
+    'TractorMake',
+    'TractorRegisteredState',
+    'TrailerAxles',
+    'EmptyWeight',
+    'StartDate',
+    'OrdersTaggedforInactive'
+  ].join(',');
+}
+
+function cleanPhoneText(value) {
+  return String(value || '').replace(/\s+/g, '').trim();
+}
+
+function cleanRosterText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeTruckKey(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function cleanDriverRosterItem(item) {
+  const f = item.fields || {};
+
+  return {
+    id: item.id || '',
+    webUrl: item.webUrl || '',
+
+    operatorTeamName: cleanRosterText(f.Operator_x002f_TeamName),
+    pin: cleanRosterText(f.PIN),
+    truck: cleanRosterText(f.Trucks),
+    tmsName: cleanRosterText(f.TMSName),
+    cellPhone1: cleanPhoneText(f.CellPhone1),
+    cellPhone2: cleanPhoneText(f.CellPhone2),
+    emailAddress1: cleanRosterText(f.EmailAddress1),
+    emailAddress2: cleanRosterText(f.EmailAddress2),
+
+    driverType: cleanRosterText(f.DriverType),
+    status: cleanRosterText(f.Status),
+    trailerType: cleanRosterText(f.TrailerType),
+    bolLetterPrefix: cleanRosterText(f.BOLLetterPrefix),
+    soloOrTeam: cleanRosterText(f.SoloorTeam),
+    registeredWeight: f.RegisteredWeight ?? '',
+    startDate: f.StartDate || '',
+    ordersTaggedForInactive: f.OrdersTaggedforInactive ?? false,
+
+    tractorPlate: cleanRosterText(f.TractorPlate),
+    tractorYear: cleanRosterText(f.TractorYear),
+    tractorMake: cleanRosterText(f.TractorMake),
+    tractorVin: cleanRosterText(f.TractorVIN),
+    tractorOwner: cleanRosterText(f.TractorOwner),
+    tractorAxles: f.TractorAxles ?? '',
+    tractorRegisteredState: cleanRosterText(f.TractorRegisteredState),
+
+    trailerUnitNumber: cleanRosterText(f.TrailerUnitNumber),
+    trailerLength: cleanRosterText(f.TrailerLength),
+    trailerPlate: cleanRosterText(f.TrailerPlate),
+    trailerRegisteredState: cleanRosterText(f.TrailerRegisteredState),
+    trailerYear: f.TrailerYear ?? '',
+    trailerMake: cleanRosterText(f.TrailerMake),
+    trailerVin: cleanRosterText(f.TrailerVIN),
+    trailerOwner: cleanRosterText(f.TrailerOwner),
+    trailerAxles: f.TrailerAxles ?? '',
+
+    emptyWeight: f.EmptyWeight ?? '',
+    steerAxleWeight: f.SteerAxleWeight ?? '',
+    spacing1to2: f.Spacing1to2 ?? '',
+    spacing2to3: f.Spacing2to3 ?? '',
+    spacing3to4: f.Spacing3to4 ?? '',
+    spacing4to5: f.Spacing4to5 ?? '',
+    overallLength: f.OverallLength ?? '',
+    lowestDeckHeight: f.LowestDeckHeight ?? ''
+  };
+}
+
+async function getDriverRosterByTruck(token) {
+  const driverRosterListId = process.env.DRIVER_ROSTER_LIST_ID;
+  const rosterByTruck = new Map();
+
+  if (!driverRosterListId) {
+    return rosterByTruck;
+  }
+
+  const items = await getAllListItemsWithFields(
+    token,
+    driverRosterListId,
+    getDriverRosterFieldSelect()
+  );
+
+  items.map(cleanDriverRosterItem).forEach((roster) => {
+    const truckKey = normalizeTruckKey(roster.truck);
+    if (!truckKey) return;
+
+    const existing = rosterByTruck.get(truckKey);
+    const isActive = normalizeText(roster.status) === 'active';
+    const existingIsActive = normalizeText(existing?.status) === 'active';
+
+    if (!existing || (isActive && !existingIsActive)) {
+      rosterByTruck.set(truckKey, roster);
+    }
+  });
+
+  return rosterByTruck;
+}
+
 function cleanDriverPositionItem(item) {
   const f = item.fields || {};
   const positionAgeMinutes = getPositionAgeMinutes(f.PositionTimeUTC);
@@ -2261,26 +2403,40 @@ app.get('/tracking/driver-positions', requireLookupAccess, async (req, res) => {
     }
 
     const token = await getGraphToken();
-    const items = await getAllListItemsWithFields(
-      token,
-      driverPositionsListId,
-      getDriverPositionFieldSelect()
-    );
+    const [items, rosterByTruck] = await Promise.all([
+      getAllListItemsWithFields(
+        token,
+        driverPositionsListId,
+        getDriverPositionFieldSelect()
+      ),
+      getDriverRosterByTruck(token)
+    ]);
 
     const positions = items
       .map(cleanDriverPositionItem)
+      .map((position) => {
+        const roster = rosterByTruck.get(normalizeTruckKey(position.equipmentId)) || null;
+
+        return {
+          ...position,
+          roster,
+          hasRosterDetails: Boolean(roster)
+        };
+      })
       .sort(sortDriverPositions);
 
     res.json({
       success: true,
       generatedAt: `${formatEasternTimestamp()} Eastern`,
       sourceListId: driverPositionsListId,
+      rosterSourceListId: process.env.DRIVER_ROSTER_LIST_ID || '',
       counts: {
         total: positions.length,
         moving: positions.filter((p) => p.isMoving).length,
         stopped: positions.filter((p) => !p.isMoving).length,
         stale: positions.filter((p) => p.isStale).length,
-        unmatchedRoster: positions.filter((p) => p.rosterMatched !== true).length
+        unmatchedRoster: positions.filter((p) => p.rosterMatched !== true).length,
+        missingRosterDetails: positions.filter((p) => !p.hasRosterDetails).length
       },
       positions
     });

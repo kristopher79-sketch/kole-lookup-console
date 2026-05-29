@@ -49,6 +49,7 @@ export default function App() {
   const [driverPositionsData, setDriverPositionsData] = useState(null);
   const [driverPositionsLoading, setDriverPositionsLoading] = useState(false);
   const [driverPositionsError, setDriverPositionsError] = useState('');
+  const [selectedDriverRoster, setSelectedDriverRoster] = useState(null);
   const [sortField, setSortField] = useState('');
   const [sortDirection, setSortDirection] = useState('asc');
   const initialReportDate = useMemo(() => {
@@ -135,6 +136,7 @@ export default function App() {
         setDriverSummaryModalOpen(false);
         setWeeklySettlementModalOpen(false);
         setWonNotRegisteredModalOpen(false);
+        setSelectedDriverRoster(null);
       }
     }
 
@@ -359,6 +361,10 @@ function refreshOperationsAndTracking() {
   loadDriverPositions();
 }
 
+function closeDriverRosterModal() {
+  setSelectedDriverRoster(null);
+}
+
 function formatTrackingTimestamp(value) {
   if (!value) return '-';
 
@@ -374,6 +380,45 @@ function formatTrackingTimestamp(value) {
     hour: 'numeric',
     minute: '2-digit'
   });
+}
+
+function formatRosterDate(value) {
+  if (!value) return '-';
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return value;
+
+  return date.toLocaleDateString('en-US', {
+    timeZone: 'UTC',
+    month: 'numeric',
+    day: 'numeric',
+    year: '2-digit'
+  });
+}
+
+function formatRosterNumber(value) {
+  if (value === null || value === undefined || value === '') return '-';
+
+  const number = Number(value);
+
+  if (Number.isNaN(number)) return value;
+
+  return number.toLocaleString('en-US');
+}
+
+function formatPhone(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return `(${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+  }
+
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+  }
+
+  return value || '-';
 }
 
 function formatSpeed(value) {
@@ -1519,24 +1564,27 @@ function openReportLoadDetails(load) {
       <div className="driver-position-panel">
         <div className="driver-position-header">
           <div>
-            <h3>Driver Position Tracking</h3>
+            <h3>Active Driver Roster</h3>
           
           </div>
 
           {driverPositionsData?.counts && (
             <div className="driver-position-counts">
-              <span>{driverPositionsData.counts.total} units</span>
+              <span>{driverPositionsData.counts.total} active units</span>
               <span>{driverPositionsData.counts.moving} moving</span>
               <span>{driverPositionsData.counts.stale} stale</span>
+              {driverPositionsData.counts.missingRosterDetails > 0 && (
+                <span>{driverPositionsData.counts.missingRosterDetails} missing roster</span>
+              )}
             </div>
           )}
         </div>
 
         {driverPositionsError && <div className="msg error">{driverPositionsError}</div>}
-        {driverPositionsLoading && !driverPositionsData && <div className="msg">Loading driver positions...</div>}
+        {driverPositionsLoading && !driverPositionsData && <div className="msg">Loading active driver roster...</div>}
 
         {driverPositionsData && positions.length === 0 && (
-          <div className="msg">No current driver position rows were found.</div>
+          <div className="msg">No active driver roster rows were found.</div>
         )}
 
         {positions.length > 0 && (
@@ -1556,7 +1604,12 @@ function openReportLoadDetails(load) {
 
               <tbody>
                 {positions.map((position) => (
-                  <tr key={position.id || position.equipmentId}>
+                  <tr
+                    key={position.id || position.equipmentId}
+                    className={`driver-position-row ${position.hasRosterDetails ? 'has-roster-details' : 'missing-roster-details'}`}
+                    onClick={() => setSelectedDriverRoster(position)}
+                    title={position.hasRosterDetails ? 'Open driver roster details' : 'Open active position details'}
+                  >
                     <td>
                       <span className={getPositionStatusClass(position)}>
                         {getPositionStatusLabel(position)}
@@ -1564,7 +1617,13 @@ function openReportLoadDetails(load) {
                     </td>
                     <td>{position.equipmentId || '-'}</td>
                     <td>
-                      <strong>{position.driverName || 'Unmatched'}</strong>
+                      <strong>{position.roster?.tmsName || position.driverName || 'Unmatched'}</strong>
+                      {position.roster?.operatorTeamName && position.roster.operatorTeamName !== position.roster.tmsName && (
+                        <small>{position.roster.operatorTeamName}</small>
+                      )}
+                      {!position.hasRosterDetails && (
+                        <small className="roster-warning-text">No roster details matched</small>
+                      )}
                     </td>
                     <td>{position.currentCityState || '-'}</td>
                     <td>{formatSpeed(position.speed)}</td>
@@ -1576,6 +1635,99 @@ function openReportLoadDetails(load) {
             </table>
           </div>
         )}
+      </div>
+    );
+  }
+
+
+  function DriverRosterModal() {
+    if (!selectedDriverRoster) return null;
+
+    const roster = selectedDriverRoster.roster || {};
+    const hasRoster = Boolean(selectedDriverRoster.hasRosterDetails && selectedDriverRoster.roster);
+    const displayName = roster.tmsName || selectedDriverRoster.driverName || 'Driver Roster Details';
+    const truck = roster.truck || selectedDriverRoster.equipmentId || '-';
+
+    return (
+      <div className="modal-overlay" onClick={closeDriverRosterModal}>
+        <div className="detail-modal driver-roster-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="detail-header">
+            <div>
+              <h2>Active Driver Roster</h2>
+              <p>{displayName} · Truck {truck}</p>
+            </div>
+
+            <button className="close-button" onClick={closeDriverRosterModal}>
+              Close
+            </button>
+          </div>
+
+          <div className="modal-body">
+            {!hasRoster ? (
+              <div className="report-alert locked">
+                <h4>No roster details matched this active position.</h4>
+                <p>
+                  The position row is active, but Kole Connect could not match truck {selectedDriverRoster.equipmentId || '-'}
+                  {' '}to a Driver Roster record. Check the Driver Positions EquipmentID against Driver Roster Trucks.
+                </p>
+              </div>
+            ) : (
+              <div className="detail-grid driver-roster-grid">
+                <SectionTitle>Driver / Contact</SectionTitle>
+                <DetailItem label="TMS Name" value={roster.tmsName} wide />
+                <DetailItem label="Operator / Team" value={roster.operatorTeamName} />
+                <DetailItem label="Truck" value={roster.truck} />
+                <DetailItem label="Cell Phone 1" value={formatPhone(roster.cellPhone1)} />
+                <DetailItem label="Cell Phone 2" value={formatPhone(roster.cellPhone2)} />
+                <DetailItem label="Email Address 1" value={roster.emailAddress1} wide />
+                <DetailItem label="Email Address 2" value={roster.emailAddress2} wide />
+                <DetailItem label="Driver PIN" value={roster.pin} />
+                <DetailItem label="Start Date" value={formatRosterDate(roster.startDate)} />
+
+                <SectionTitle>Operational</SectionTitle>
+                <DetailItem label="Status" value={roster.status} />
+                <DetailItem label="Driver Type" value={roster.driverType} />
+                <DetailItem label="Solo / Team" value={roster.soloOrTeam} />
+                <DetailItem label="BOL Prefix" value={roster.bolLetterPrefix} />
+                <DetailItem label="Trailer Type" value={roster.trailerType} wide />
+                <DetailItem label="Registered Weight" value={formatRosterNumber(roster.registeredWeight)} />
+                <DetailItem label="Currently Moving" value={selectedDriverRoster.isMoving ? 'Yes' : 'No'} />
+                <DetailItem label="Last Known Location" value={selectedDriverRoster.currentCityState} wide />
+                <DetailItem label="Position Time" value={formatTrackingTimestamp(selectedDriverRoster.positionTimeUtc)} wide />
+
+                <SectionTitle>Tractor</SectionTitle>
+                <DetailItem label="Make" value={roster.tractorMake} />
+                <DetailItem label="Year" value={roster.tractorYear} />
+                <DetailItem label="Plate" value={roster.tractorPlate} />
+                <DetailItem label="Registered State" value={roster.tractorRegisteredState} />
+                <DetailItem label="VIN" value={roster.tractorVin} wide />
+                <DetailItem label="Owner" value={roster.tractorOwner} wide />
+                <DetailItem label="Axles" value={roster.tractorAxles} />
+
+                <SectionTitle>Trailer</SectionTitle>
+                <DetailItem label="Trailer Unit" value={roster.trailerUnitNumber} />
+                <DetailItem label="Length" value={roster.trailerLength} />
+                <DetailItem label="Make" value={roster.trailerMake} />
+                <DetailItem label="Year" value={roster.trailerYear} />
+                <DetailItem label="Plate" value={roster.trailerPlate} />
+                <DetailItem label="Registered State" value={roster.trailerRegisteredState} />
+                <DetailItem label="VIN" value={roster.trailerVin} wide />
+                <DetailItem label="Owner" value={roster.trailerOwner} wide />
+                <DetailItem label="Axles" value={roster.trailerAxles} />
+
+                <SectionTitle>Dimensional / Weight Data</SectionTitle>
+                <DetailItem label="Empty Weight" value={formatRosterNumber(roster.emptyWeight)} />
+                <DetailItem label="Steer Axle Weight" value={formatRosterNumber(roster.steerAxleWeight)} />
+                <DetailItem label="Overall Length" value={formatRosterNumber(roster.overallLength)} />
+                <DetailItem label="Lowest Deck Height" value={formatRosterNumber(roster.lowestDeckHeight)} />
+                <DetailItem label="Spacing 1 to 2" value={formatRosterNumber(roster.spacing1to2)} />
+                <DetailItem label="Spacing 2 to 3" value={formatRosterNumber(roster.spacing2to3)} />
+                <DetailItem label="Spacing 3 to 4" value={formatRosterNumber(roster.spacing3to4)} />
+                <DetailItem label="Spacing 4 to 5" value={formatRosterNumber(roster.spacing4to5)} />
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     );
   }
@@ -2335,6 +2487,8 @@ function openReportLoadDetails(load) {
           </div>
         </div>
       )}
+
+      <DriverRosterModal />
 
       {selected && (
         <div className="modal-overlay" onClick={closeModal}>

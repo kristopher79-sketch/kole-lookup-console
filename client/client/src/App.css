@@ -1342,3 +1342,42 @@ tbody tr:hover {
 .won-not-registered-table {
   min-width: 900px;
 }
+
+/* ACTIVE DRIVER ROSTER */
+.driver-position-row {
+  cursor: pointer;
+}
+
+.driver-position-row td strong {
+  display: block;
+}
+
+.driver-position-row td small {
+  display: block;
+  margin-top: 4px;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.driver-position-row.missing-roster-details {
+  box-shadow: inset 4px 0 0 #78350f;
+}
+
+.roster-warning-text {
+  color: #fbbf24 !important;
+  font-weight: 700;
+}
+
+.driver-roster-modal .detail-header h2 {
+  color: #facc15;
+}
+
+.driver-roster-grid .section-title {
+  background: #d4a017;
+  color: #111827;
+}
+
+.driver-roster-grid .detail-item strong {
+  font-size: 14px;
+}
