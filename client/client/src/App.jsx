@@ -72,6 +72,10 @@ export default function App() {
   const [wonNotRegisteredLoading, setWonNotRegisteredLoading] = useState(false);
   const [wonNotRegisteredError, setWonNotRegisteredError] = useState(null);
   const [wonNotRegisteredModalOpen, setWonNotRegisteredModalOpen] = useState(false);
+  const [inactiveDriverRosterReport, setInactiveDriverRosterReport] = useState(null);
+  const [inactiveDriverRosterLoading, setInactiveDriverRosterLoading] = useState(false);
+  const [inactiveDriverRosterError, setInactiveDriverRosterError] = useState(null);
+  const [inactiveDriverRosterModalOpen, setInactiveDriverRosterModalOpen] = useState(false);
   const [activeReportPanel, setActiveReportPanel] = useState('');
 
   const [authError, setAuthError] = useState('');
@@ -136,6 +140,7 @@ export default function App() {
         setDriverSummaryModalOpen(false);
         setWeeklySettlementModalOpen(false);
         setWonNotRegisteredModalOpen(false);
+        setInactiveDriverRosterModalOpen(false);
         setSelectedDriverRoster(null);
       }
     }
@@ -887,6 +892,58 @@ function getPositionStatusLabel(position) {
     setWonNotRegisteredModalOpen(false);
   }
 
+  async function loadInactiveDriverRosterReport() {
+    setInactiveDriverRosterLoading(true);
+    setInactiveDriverRosterError(null);
+    setInactiveDriverRosterReport(null);
+    setInactiveDriverRosterModalOpen(false);
+
+    try {
+      const res = await authedFetch(
+        `${API}/reports/inactive-driver-roster`
+      );
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to load Inactive Driver Roster.');
+      }
+
+      setInactiveDriverRosterReport(data);
+      setInactiveDriverRosterModalOpen(true);
+    } catch (err) {
+      setInactiveDriverRosterError({
+        code: 'REPORT_ERROR',
+        message: err.message || 'Unable to load Inactive Driver Roster.'
+      });
+    } finally {
+      setInactiveDriverRosterLoading(false);
+    }
+  }
+
+  function closeInactiveDriverRosterModal() {
+    setInactiveDriverRosterModalOpen(false);
+  }
+
+  function openRosterFromReport(roster) {
+    if (!roster) return;
+
+    setSelectedDriverRoster({
+      id: roster.id || '',
+      equipmentId: roster.truck || '',
+      driverName: roster.tmsName || roster.operatorTeamName || '',
+      currentCityState: 'Inactive Driver',
+      positionTimeUtc: '',
+      speed: 0,
+      isMoving: false,
+      isStale: false,
+      hasRosterDetails: true,
+      rosterModalTitle: 'Inactive Driver Roster',
+      rosterModalSubtitle: `${roster.tmsName || roster.operatorTeamName || 'Driver'} · Truck ${roster.truck || '-'}`,
+      roster
+    });
+  }
+
   function toggleReportPanel(panelName) {
     setActiveReportPanel((current) => (current === panelName ? '' : panelName));
   }
@@ -1557,6 +1614,69 @@ function openReportLoadDetails(load) {
   }
 
 
+  function InactiveDriverRosterPreview() {
+    const rows = inactiveDriverRosterReport?.rows || [];
+
+    if (!inactiveDriverRosterReport) return null;
+
+    return (
+      <div className="driver-report-preview modal-report-preview">
+        <div className="driver-report-generated">
+          Generated: {inactiveDriverRosterReport.generatedAt}
+        </div>
+
+        <div className="report-kpi-grid inactive-driver-roster-kpi-grid">
+          <div className="report-kpi-card">
+            <span>Inactive Drivers</span>
+            <strong>{formatReportNumber(inactiveDriverRosterReport.count)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Source</span>
+            <strong>Driver Roster</strong>
+          </div>
+        </div>
+
+        {rows.length === 0 ? (
+          <div className="msg">No inactive drivers were found in the Driver Roster.</div>
+        ) : (
+          <div className="report-table-wrap">
+            <table className="driver-report-table inactive-driver-roster-table">
+              <thead>
+                <tr>
+                  <th>Operator / Team</th>
+                  <th>TMS Name</th>
+                  <th>Truck</th>
+                  <th>Phone</th>
+                  <th>Email</th>
+                  <th>Trailer Type</th>
+                  <th>Start Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((roster, index) => (
+                  <tr
+                    key={`${roster.id || roster.truck || roster.tmsName || index}-${index}`}
+                    className="report-clickable-row"
+                    onClick={() => openRosterFromReport(roster)}
+                    title="Open inactive driver roster details"
+                  >
+                    <td>{roster.operatorTeamName || '-'}</td>
+                    <td>{roster.tmsName || '-'}</td>
+                    <td>{roster.truck || '-'}</td>
+                    <td>{formatPhone(roster.cellPhone1) || '-'}</td>
+                    <td>{roster.emailAddress1 || '-'}</td>
+                    <td>{roster.trailerType || '-'}</td>
+                    <td>{formatRosterDate(roster.startDate)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function DriverPositionTrackingPanel() {
     const positions = driverPositionsData?.positions || [];
 
@@ -1647,14 +1767,17 @@ function openReportLoadDetails(load) {
     const hasRoster = Boolean(selectedDriverRoster.hasRosterDetails && selectedDriverRoster.roster);
     const displayName = roster.tmsName || selectedDriverRoster.driverName || 'Driver Roster Details';
     const truck = roster.truck || selectedDriverRoster.equipmentId || '-';
+    const modalTitle = selectedDriverRoster.rosterModalTitle || 'Active Driver Roster';
+    const modalSubtitle = selectedDriverRoster.rosterModalSubtitle || `${displayName} · Truck ${truck}`;
+    const hasLivePosition = !selectedDriverRoster.rosterModalTitle;
 
     return (
       <div className="modal-overlay" onClick={closeDriverRosterModal}>
         <div className="detail-modal driver-roster-modal" onClick={(e) => e.stopPropagation()}>
           <div className="detail-header">
             <div>
-              <h2>Active Driver Roster</h2>
-              <p>{displayName} · Truck {truck}</p>
+              <h2>{modalTitle}</h2>
+              <p>{modalSubtitle}</p>
             </div>
 
             <button className="close-button" onClick={closeDriverRosterModal}>
@@ -1691,9 +1814,13 @@ function openReportLoadDetails(load) {
                 <DetailItem label="BOL Prefix" value={roster.bolLetterPrefix} />
                 <DetailItem label="Trailer Type" value={roster.trailerType} wide />
                 <DetailItem label="Registered Weight" value={formatRosterNumber(roster.registeredWeight)} />
-                <DetailItem label="Currently Moving" value={selectedDriverRoster.isMoving ? 'Yes' : 'No'} />
-                <DetailItem label="Last Known Location" value={selectedDriverRoster.currentCityState} wide />
-                <DetailItem label="Position Time" value={formatTrackingTimestamp(selectedDriverRoster.positionTimeUtc)} wide />
+                {hasLivePosition && (
+                  <>
+                    <DetailItem label="Currently Moving" value={selectedDriverRoster.isMoving ? 'Yes' : 'No'} />
+                    <DetailItem label="Last Known Location" value={selectedDriverRoster.currentCityState} wide />
+                    <DetailItem label="Position Time" value={formatTrackingTimestamp(selectedDriverRoster.positionTimeUtc)} wide />
+                  </>
+                )}
 
                 <SectionTitle>Tractor</SectionTitle>
                 <DetailItem label="Make" value={roster.tractorMake} />
@@ -1737,6 +1864,7 @@ function openReportLoadDetails(load) {
     const isDriverSummaryOpen = activeReportPanel === 'driverSummary';
     const isWeeklySettlementOpen = activeReportPanel === 'weeklySettlement';
     const isWonNotRegisteredOpen = activeReportPanel === 'wonNotRegistered';
+    const isInactiveDriverRosterOpen = activeReportPanel === 'inactiveDriverRoster';
 
     return (
       <div className="search-card reports-panel">
@@ -1958,6 +2086,55 @@ function openReportLoadDetails(load) {
                     <div className="report-alert error">
                       <h4>Report could not be loaded.</h4>
                       <p>{wonNotRegisteredError.message}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+
+          <div className={`report-accordion ${isInactiveDriverRosterOpen ? 'open' : ''}`}>
+            <button
+              type="button"
+              className="report-accordion-button"
+              onClick={() => toggleReportPanel('inactiveDriverRoster')}
+            >
+              <span>Inactive Driver Roster</span>
+              <span className="report-accordion-icon">{isInactiveDriverRosterOpen ? '▼' : '▶'}</span>
+            </button>
+
+            {isInactiveDriverRosterOpen && (
+              <div className="report-accordion-body">
+                <div className="report-card compact-report-card accordion-inner-card">
+                  <div className="report-card-header centered-report-header">
+                    <div>
+                      <h3>Inactive Driver Roster</h3>
+                    </div>
+                  </div>
+
+                  <div className="report-controls centered-report-controls">
+                    <button onClick={loadInactiveDriverRosterReport} disabled={inactiveDriverRosterLoading}>
+                      {inactiveDriverRosterLoading ? 'Loading Report...' : 'Preview Report'}
+                    </button>
+                  </div>
+
+                  {inactiveDriverRosterReport && !inactiveDriverRosterModalOpen && (
+                    <div className="report-ready-card">
+                      <div>
+                        <strong>{inactiveDriverRosterReport.reportLabel} is ready.</strong>
+                        <span> The preview opens in a report window.</span>
+                      </div>
+                      <button className="view-button" onClick={() => setInactiveDriverRosterModalOpen(true)}>
+                        Reopen Preview
+                      </button>
+                    </div>
+                  )}
+
+                  {inactiveDriverRosterError && (
+                    <div className="report-alert error">
+                      <h4>Report could not be loaded.</h4>
+                      <p>{inactiveDriverRosterError.message}</p>
                     </div>
                   )}
                 </div>
@@ -2483,6 +2660,27 @@ function openReportLoadDetails(load) {
 
             <div className="modal-body report-modal-body">
               <WonNotRegisteredPreview />
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {inactiveDriverRosterModalOpen && inactiveDriverRosterReport && (
+        <div className="modal-overlay report-modal-overlay" onClick={closeInactiveDriverRosterModal}>
+          <div className="detail-modal report-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="detail-header report-modal-header">
+              <div>
+                <h2>{inactiveDriverRosterReport.reportLabel || 'Inactive Driver Roster'}</h2>
+              </div>
+
+              <button className="close-button" onClick={closeInactiveDriverRosterModal}>
+                Close
+              </button>
+            </div>
+
+            <div className="modal-body report-modal-body">
+              <InactiveDriverRosterPreview />
             </div>
           </div>
         </div>

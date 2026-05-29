@@ -1145,12 +1145,11 @@ function cleanDriverRosterItem(item) {
   };
 }
 
-async function getDriverRosterByTruck(token) {
+async function getDriverRosterItems(token) {
   const driverRosterListId = process.env.DRIVER_ROSTER_LIST_ID;
-  const rosterByTruck = new Map();
 
   if (!driverRosterListId) {
-    return rosterByTruck;
+    throw new Error('DRIVER_ROSTER_LIST_ID is not configured on the server.');
   }
 
   const items = await getAllListItemsWithFields(
@@ -1159,7 +1158,19 @@ async function getDriverRosterByTruck(token) {
     getDriverRosterFieldSelect()
   );
 
-  items.map(cleanDriverRosterItem).forEach((roster) => {
+  return items.map(cleanDriverRosterItem);
+}
+
+async function getDriverRosterByTruck(token) {
+  const rosterByTruck = new Map();
+
+  if (!process.env.DRIVER_ROSTER_LIST_ID) {
+    return rosterByTruck;
+  }
+
+  const rosterItems = await getDriverRosterItems(token);
+
+  rosterItems.forEach((roster) => {
     const truckKey = normalizeTruckKey(roster.truck);
     if (!truckKey) return;
 
@@ -1173,6 +1184,16 @@ async function getDriverRosterByTruck(token) {
   });
 
   return rosterByTruck;
+}
+
+function sortDriverRosterRecords(a, b) {
+  const aName = normalizeText(a.operatorTeamName || a.tmsName);
+  const bName = normalizeText(b.operatorTeamName || b.tmsName);
+
+  const nameCompare = aName.localeCompare(bName);
+  if (nameCompare !== 0) return nameCompare;
+
+  return normalizeTruckKey(a.truck).localeCompare(normalizeTruckKey(b.truck));
 }
 
 function cleanDriverPositionItem(item) {
@@ -2552,6 +2573,40 @@ app.get('/operations/today', requireLookupAccess, async (req, res) => {
     });
   }
 });
+app.get('/reports/inactive-driver-roster', requireLookupAccess, async (req, res) => {
+  try {
+    if (!process.env.DRIVER_ROSTER_LIST_ID) {
+      return res.status(500).json({
+        success: false,
+        error: 'DRIVER_ROSTER_LIST_ID is not configured on the server.'
+      });
+    }
+
+    const token = await getGraphToken();
+    const rosterItems = await getDriverRosterItems(token);
+
+    const inactiveDrivers = rosterItems
+      .filter((roster) => normalizeText(roster.status) === 'inactive')
+      .sort(sortDriverRosterRecords);
+
+    res.json({
+      success: true,
+      generatedAt: `${formatEasternTimestamp()} Eastern`,
+      reportLabel: 'Inactive Driver Roster',
+      sourceListId: process.env.DRIVER_ROSTER_LIST_ID,
+      count: inactiveDrivers.length,
+      rows: inactiveDrivers
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to load inactive driver roster.'
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });

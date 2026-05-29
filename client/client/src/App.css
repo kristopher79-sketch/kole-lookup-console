@@ -1381,3 +1381,27 @@ tbody tr:hover {
 .driver-roster-grid .detail-item strong {
   font-size: 14px;
 }
+
+/* Inactive Driver Roster report */
+.inactive-driver-roster-kpi-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.inactive-driver-roster-table {
+  min-width: 1050px;
+}
+
+.inactive-driver-roster-table th:nth-child(1),
+.inactive-driver-roster-table td:nth-child(1) { width: 16%; }
+.inactive-driver-roster-table th:nth-child(2),
+.inactive-driver-roster-table td:nth-child(2) { width: 20%; }
+.inactive-driver-roster-table th:nth-child(3),
+.inactive-driver-roster-table td:nth-child(3) { width: 10%; }
+.inactive-driver-roster-table th:nth-child(4),
+.inactive-driver-roster-table td:nth-child(4) { width: 13%; }
+.inactive-driver-roster-table th:nth-child(5),
+.inactive-driver-roster-table td:nth-child(5) { width: 20%; }
+.inactive-driver-roster-table th:nth-child(6),
+.inactive-driver-roster-table td:nth-child(6) { width: 14%; }
+.inactive-driver-roster-table th:nth-child(7),
+.inactive-driver-roster-table td:nth-child(7) { width: 10%; }
