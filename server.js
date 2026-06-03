@@ -363,6 +363,21 @@ function findFolderByBolPrefix(items, bol) {
   );
 }
 
+function findUploadTypeFolder(items, uploadType) {
+  const target = normalizeText(uploadType);
+
+  if (!target) return null;
+
+  const folderItems = items.filter((item) => item.folder);
+
+  return (
+    folderItems.find((item) => normalizeText(item.name) === target) ||
+    folderItems.find((item) => normalizeText(item.name).startsWith(target)) ||
+    folderItems.find((item) => normalizeText(item.name).includes(target)) ||
+    null
+  );
+}
+
 function getDriverHintFromCompositeKey(compositeKey, bol) {
   const rawKey = String(compositeKey || '').trim();
   const rawBol = String(bol || '').trim();
@@ -2109,6 +2124,7 @@ app.get('/documents/loadphotos/by-bol', requireLookupAccess, async (req, res) =>
     const bol = (req.query.bol || '').toString().trim();
     const driverHint = (req.query.driver || '').toString().trim();
     const compositeKey = (req.query.compositeKey || '').toString().trim();
+    const uploadType = (req.query.uploadType || '').toString().trim();
 
     if (!bol) {
       return res.status(400).json({
@@ -2161,20 +2177,51 @@ app.get('/documents/loadphotos/by-bol', requireLookupAccess, async (req, res) =>
       });
     }
 
+    let targetFolder = photoMatch.loadFolder;
+    let targetFolderType = 'Load Photos';
+
+    if (uploadType) {
+      const loadFolderChildren = await getAllChildrenFromFolder(
+        token,
+        process.env.DISPATCH_ONEDRIVE_ID,
+        photoMatch.loadFolder.id
+      );
+
+      const uploadTypeFolder = findUploadTypeFolder(loadFolderChildren, uploadType);
+
+      if (!uploadTypeFolder) {
+        return res.status(404).json({
+          success: false,
+          error: `The ${uploadType} folder was not found inside the load photo folder.`,
+          searchedFor: {
+            bol,
+            uploadType,
+            loadFolder: photoMatch.loadFolder.name,
+            driverFolder: photoMatch.driverFolder.name
+          }
+        });
+      }
+
+      targetFolder = uploadTypeFolder;
+      targetFolderType = `${uploadType} Load Photos`;
+    }
+
     res.json({
       success: true,
-      documentType: 'Load Photos',
-      name: photoMatch.loadFolder.name,
-      webUrl: photoMatch.loadFolder.webUrl,
-      id: photoMatch.loadFolder.id,
+      documentType: targetFolderType,
+      name: targetFolder.name,
+      webUrl: targetFolder.webUrl,
+      id: targetFolder.id,
+      loadFolder: photoMatch.loadFolder.name,
       driverFolder: photoMatch.driverFolder.name,
       driver: photoMatch.driver,
+      uploadType,
       operatorInactive: photoMatch.operatorInactive,
       matchStrategy: photoMatch.matchStrategy,
       orderId: matchedOrder?.id || '',
       sourceListId: matchedOrder?.SourceListId || '',
       sourceYear: matchedOrder?.SourceYear || '',
-      lastModifiedDateTime: photoMatch.loadFolder.lastModifiedDateTime || ''
+      lastModifiedDateTime: targetFolder.lastModifiedDateTime || ''
     });
   } catch (error) {
     console.error(error);

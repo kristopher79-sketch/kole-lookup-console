@@ -521,6 +521,10 @@ async function openUploadDigestLoadPhotos(record) {
       params.set('driver', record.DriverName);
     }
 
+    if (record?.UploadType) {
+      params.set('uploadType', record.UploadType);
+    }
+
     const res = await authedFetch(
       `${API}/documents/loadphotos/by-bol?${params.toString()}`
     );
@@ -2051,6 +2055,10 @@ function openReportLoadDetails(load) {
 
     return (
       <div className="search-card upload-digest-panel">
+        <div className="upload-digest-section-header">
+          <h2>Uploads</h2>
+        </div>
+
         <div className="upload-digest-header-row">
           <button
             className="upload-digest-arrow"
@@ -2138,7 +2146,7 @@ function openReportLoadDetails(load) {
                           >
                             {documentLoading === `upload-digest-loadphotos-${record.id || record.BOLNumber}`
                               ? 'Opening...'
-                              : 'Open Folder'}
+                              : `${record.UploadType || 'Open'} Folder`}
                           </button>
                         </td>
                       </tr>

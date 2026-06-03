@@ -1973,3 +1973,69 @@ body {
 .header-logoff {
   flex-shrink: 0;
 }
+
+/* PASS 5: SECTION HIERARCHY / COLOR BALANCE */
+.upload-digest-panel {
+  padding: 18px !important;
+  background: #111827;
+}
+
+.upload-digest-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.upload-digest-section-header h2 {
+  color: #d4a017;
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.upload-digest-header-row {
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #0b1220;
+}
+
+.upload-digest-title {
+  color: #f8fafc !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  line-height: 1.25;
+}
+
+.upload-digest-title::before {
+  content: none !important;
+}
+
+.report-accordion-button,
+.report-accordion.open .report-accordion-button {
+  color: #f8fafc;
+}
+
+.report-card h3 {
+  color: #f8fafc;
+}
+
+.upload-digest-body {
+  margin-top: 14px;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+@media (max-width: 900px) {
+  .upload-digest-panel {
+    padding: 14px !important;
+  }
+
+  .upload-digest-section-header h2 {
+    font-size: 22px;
+  }
+}
