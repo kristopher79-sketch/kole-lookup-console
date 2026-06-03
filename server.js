@@ -2488,9 +2488,22 @@ app.get('/operations/today', requireLookupAccess, async (req, res) => {
       });
     }
 
-    const data = await graphGet(
+    const items = await getAllListItemsWithFields(
       token,
-      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}/items?$expand=fields&$top=999`
+      currentList.listId,
+      [
+        'BOLNumber_x0028_Won_x0029_',
+        'BidID',
+        'Company',
+        'Shipment_x0020_Origin',
+        'Shipment_x0020_Destination',
+        'Operator_x002f_Team',
+        'Truck_x0020_Number',
+        'Pickup_x0020_Offer_x0020_Date',
+        'Expected_x0020_Delivery_x0020_Da',
+        'Status',
+        'Processed'
+      ].join(',')
     );
 
     const today = formatEasternDate();
@@ -2498,11 +2511,11 @@ app.get('/operations/today', requireLookupAccess, async (req, res) => {
       new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
     );
 
-    const all = (data.value || [])
+    const all = items
       .map((item) => buildOperationsRecord(item, currentList))
       .filter(
         (r) =>
-          r.Status === 'Won' &&
+          normalizeText(r.Status) === 'won' &&
           (r.Processed === false ||
             r.Processed === null ||
             r.Processed === '')
@@ -2511,12 +2524,22 @@ app.get('/operations/today', requireLookupAccess, async (req, res) => {
     function normalizeDate(value) {
       if (!value) return '';
 
+      const raw = String(value).trim();
+      const dateOnlyMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+
+      if (dateOnlyMatch) {
+        return dateOnlyMatch[1];
+      }
+
+      const parsed = new Date(raw);
+      if (Number.isNaN(parsed.getTime())) return '';
+
       return new Intl.DateTimeFormat('en-CA', {
         timeZone: 'America/New_York',
         year: 'numeric',
         month: '2-digit',
         day: '2-digit'
-      }).format(new Date(value));
+      }).format(parsed);
     }
 
     const evidenceSets = await getUploadEvidenceSets(token);
@@ -2550,6 +2573,8 @@ app.get('/operations/today', requireLookupAccess, async (req, res) => {
       generatedAt: `${formatEasternTimestamp()} Eastern`,
       targetDate: today,
       counts: {
+        rawItemsScanned: items.length,
+        eligibleWonUnprocessed: all.length,
         activeToday: activeToday.length,
         loadingToday: loadingToday.length,
         deliveringToday: deliveringToday.length,
