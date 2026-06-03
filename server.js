@@ -12,6 +12,15 @@ const ARCHIVE_YEAR_MIN = 2024;
 const ARCHIVE_YEAR_MAX = 2030;
 const DEFAULT_UPLOAD_DIGEST_LIST_ID = 'c9e907f9-cdac-4657-9da6-cc6ecfaa19a8';
 
+function getLoadPicturesFolderId() {
+  return (
+    process.env.LOAD_PICTURES_FOLDER_ID ||
+    process.env.LOAD_PHOTOS_FOLDER_ID ||
+    process.env.LOAD_PICTURES_AND_BOLS_FOLDER_ID ||
+    ''
+  );
+}
+
 
 let cachedBidLists = null;
 let cachedBidListsAt = 0;
@@ -354,6 +363,129 @@ function findFolderByBolPrefix(items, bol) {
   );
 }
 
+function getDriverHintFromCompositeKey(compositeKey, bol) {
+  const rawKey = String(compositeKey || '').trim();
+  const rawBol = String(bol || '').trim();
+
+  if (!rawKey || !rawBol) return '';
+
+  const keyLower = rawKey.toLowerCase();
+  const bolLower = rawBol.toLowerCase();
+  const bolIndex = keyLower.indexOf(bolLower);
+
+  if (bolIndex <= 0) return '';
+
+  return rawKey.slice(0, bolIndex).trim();
+}
+
+function uniqueNonEmpty(values) {
+  const seen = new Set();
+  const output = [];
+
+  values.forEach((value) => {
+    const clean = String(value || '').trim();
+    const key = normalizeSearchValue(clean);
+
+    if (!key || seen.has(key)) return;
+
+    seen.add(key);
+    output.push(clean);
+  });
+
+  return output;
+}
+
+async function findLoadPhotoFolderForBol(token, bol, options = {}) {
+  const loadPicturesFolderId = getLoadPicturesFolderId();
+
+  const rootItems = await getAllChildrenFromFolder(
+    token,
+    process.env.DISPATCH_ONEDRIVE_ID,
+    loadPicturesFolderId
+  );
+
+  const inactiveFolder = findFolderByExactName(rootItems, 'Inactive');
+  const candidateDrivers = uniqueNonEmpty(options.candidateDrivers || []);
+  const preferInactive = parseBoolean(options.operatorInactive);
+  const activeDriverFolders = rootItems.filter((item) => item.folder && normalizeSearchValue(item.name) !== 'inactive');
+
+  const scopeDefs = [];
+
+  if (preferInactive && inactiveFolder) {
+    scopeDefs.push({ name: 'Inactive', parentFolder: inactiveFolder, folders: null, operatorInactive: true });
+  }
+
+  scopeDefs.push({ name: 'Active', parentFolder: null, folders: activeDriverFolders, operatorInactive: false });
+
+  if (!preferInactive && inactiveFolder) {
+    scopeDefs.push({ name: 'Inactive', parentFolder: inactiveFolder, folders: null, operatorInactive: true });
+  }
+
+  for (const scope of scopeDefs) {
+    const folders = scope.folders || await getAllChildrenFromFolder(
+      token,
+      process.env.DISPATCH_ONEDRIVE_ID,
+      scope.parentFolder.id
+    );
+
+    for (const driver of candidateDrivers) {
+      const driverFolder = findFolderByExactName(folders, driver);
+      if (!driverFolder) continue;
+
+      const loadFolders = await getAllChildrenFromFolder(
+        token,
+        process.env.DISPATCH_ONEDRIVE_ID,
+        driverFolder.id
+      );
+
+      const loadFolder = findFolderByBolPrefix(loadFolders, bol);
+
+      if (loadFolder) {
+        return {
+          loadFolder,
+          driverFolder,
+          driver: driverFolder.name,
+          operatorInactive: scope.operatorInactive,
+          matchStrategy: 'driver-folder-match'
+        };
+      }
+    }
+  }
+
+  // Last resort: the Upload Digest row only absolutely needs the BOL. If the driver
+  // name from the order/digest does not match the OneDrive folder name exactly,
+  // scan active and inactive driver folders for the BOL-prefixed load folder.
+  for (const scope of scopeDefs) {
+    const folders = scope.folders || await getAllChildrenFromFolder(
+      token,
+      process.env.DISPATCH_ONEDRIVE_ID,
+      scope.parentFolder.id
+    );
+
+    for (const driverFolder of folders.filter((item) => item.folder)) {
+      const loadFolders = await getAllChildrenFromFolder(
+        token,
+        process.env.DISPATCH_ONEDRIVE_ID,
+        driverFolder.id
+      );
+
+      const loadFolder = findFolderByBolPrefix(loadFolders, bol);
+
+      if (loadFolder) {
+        return {
+          loadFolder,
+          driverFolder,
+          driver: driverFolder.name,
+          operatorInactive: scope.operatorInactive,
+          matchStrategy: 'bol-scan-match'
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
 function getArchiveYear(displayName) {
   const match = String(displayName || '').match(/^Bid Listing Archive (\d{4})$/);
   if (!match) return null;
@@ -582,6 +714,60 @@ function buildOperationsRecord(item, sourceList) {
 
 function normalizeBolKey(value) {
   return String(value || '').trim().toUpperCase();
+}
+
+
+function normalizeEasternDateOnly(value) {
+  if (!value) return '';
+
+  const raw = String(value).trim();
+  const dateOnlyMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+
+  if (dateOnlyMatch && !raw.includes('T')) {
+    return dateOnlyMatch[1];
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return '';
+
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(parsed);
+}
+
+function formatUploadDigestTimestamp(value) {
+  if (!value) return '';
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value || '');
+
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    month: '2-digit',
+    day: '2-digit',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  }).format(parsed);
+}
+
+function buildUploadDigestRecord(item) {
+  const f = item.fields || {};
+  const bol = f.BOLNumber || '';
+  const compositeKey = f.CompositeKey || '';
+
+  return {
+    id: item.id || '',
+    BOLNumber: bol,
+    UploadType: f.UploadType || '',
+    UploadDate: f.UploadDate || '',
+    UploadDateDisplay: formatUploadDigestTimestamp(f.UploadDate),
+    CompositeKey: compositeKey,
+    DriverName: getDriverHintFromCompositeKey(compositeKey, bol)
+  };
 }
 
 async function getAllListItemsWithFields(token, listId, fieldSelect = '') {
@@ -1917,6 +2103,85 @@ app.get('/documents/dispatchsheet', requireLookupAccess, async (req, res) => {
   }
 });
 
+
+app.get('/documents/loadphotos/by-bol', requireLookupAccess, async (req, res) => {
+  try {
+    const bol = (req.query.bol || '').toString().trim();
+    const driverHint = (req.query.driver || '').toString().trim();
+    const compositeKey = (req.query.compositeKey || '').toString().trim();
+
+    if (!bol) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing BOL number.'
+      });
+    }
+
+    if (!process.env.DISPATCH_ONEDRIVE_ID || !getLoadPicturesFolderId()) {
+      return res.status(500).json({
+        success: false,
+        error: 'Load Pictures folder environment variables are not configured.'
+      });
+    }
+
+    const token = await getGraphToken();
+    const normalizedBol = normalizeBolKey(bol);
+    const lists = await getSearchableBidLists(token);
+    let matchedOrder = null;
+
+    for (const sourceList of lists) {
+      const records = await getAllBidItemsFromList(token, sourceList);
+      matchedOrder = records.find((record) => normalizeBolKey(record.BOL) === normalizedBol);
+
+      if (matchedOrder) break;
+    }
+
+    const compositeDriverHint = getDriverHintFromCompositeKey(compositeKey, bol);
+    const candidateDrivers = uniqueNonEmpty([
+      matchedOrder?.TMSName,
+      matchedOrder?.Driver,
+      driverHint,
+      compositeDriverHint
+    ]);
+
+    const photoMatch = await findLoadPhotoFolderForBol(token, bol, {
+      candidateDrivers,
+      operatorInactive: matchedOrder?.OperatorInactive
+    });
+
+    if (!photoMatch) {
+      return res.status(404).json({
+        success: false,
+        error: 'No load photo folder was found for this BOL.',
+        searchedFor: {
+          bol,
+          candidateDrivers,
+          orderMatched: Boolean(matchedOrder)
+        }
+      });
+    }
+
+    res.json({
+      success: true,
+      documentType: 'Load Photos',
+      name: photoMatch.loadFolder.name,
+      webUrl: photoMatch.loadFolder.webUrl,
+      id: photoMatch.loadFolder.id,
+      driverFolder: photoMatch.driverFolder.name,
+      driver: photoMatch.driver,
+      operatorInactive: photoMatch.operatorInactive,
+      matchStrategy: photoMatch.matchStrategy,
+      orderId: matchedOrder?.id || '',
+      sourceListId: matchedOrder?.SourceListId || '',
+      sourceYear: matchedOrder?.SourceYear || '',
+      lastModifiedDateTime: photoMatch.loadFolder.lastModifiedDateTime || ''
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.get('/documents/loadphotos', requireLookupAccess, async (req, res) => {
   try {
     const bol = (req.query.bol || '').toString().trim();
@@ -1937,7 +2202,7 @@ app.get('/documents/loadphotos', requireLookupAccess, async (req, res) => {
       });
     }
 
-    if (!process.env.DISPATCH_ONEDRIVE_ID || !process.env.LOAD_PICTURES_FOLDER_ID) {
+    if (!process.env.DISPATCH_ONEDRIVE_ID || !getLoadPicturesFolderId()) {
       return res.status(500).json({
         success: false,
         error: 'Load Pictures folder environment variables are not configured.'
@@ -1949,7 +2214,7 @@ app.get('/documents/loadphotos', requireLookupAccess, async (req, res) => {
     const rootItems = await getAllChildrenFromFolder(
       token,
       process.env.DISPATCH_ONEDRIVE_ID,
-      process.env.LOAD_PICTURES_FOLDER_ID
+      getLoadPicturesFolderId()
     );
 
     let driverSearchItems = rootItems;
@@ -2467,6 +2732,59 @@ app.get('/tracking/driver-positions', requireLookupAccess, async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Unable to load driver position tracking.'
+    });
+  }
+});
+
+
+app.get('/upload-digest', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const targetDate = normalizeEasternDateOnly(req.query.date) || formatEasternDate();
+    const uploadDigestListId =
+      process.env.UPLOAD_DIGEST_LIST_ID || DEFAULT_UPLOAD_DIGEST_LIST_ID;
+
+    if (!uploadDigestListId) {
+      return res.status(500).json({
+        success: false,
+        error: 'UPLOAD_DIGEST_LIST_ID is not configured on the server.'
+      });
+    }
+
+    const uploadItems = await getAllListItemsWithFields(
+      token,
+      uploadDigestListId,
+      'BOLNumber,UploadType,UploadDate,CompositeKey'
+    );
+
+    const records = uploadItems
+      .map(buildUploadDigestRecord)
+      .filter((record) => normalizeEasternDateOnly(record.UploadDate) === targetDate)
+      .sort((a, b) => {
+        const aTime = new Date(a.UploadDate).getTime();
+        const bTime = new Date(b.UploadDate).getTime();
+
+        if (Number.isNaN(aTime) && Number.isNaN(bTime)) return 0;
+        if (Number.isNaN(aTime)) return 1;
+        if (Number.isNaN(bTime)) return -1;
+
+        return bTime - aTime;
+      });
+
+    res.json({
+      success: true,
+      generatedAt: `${formatEasternTimestamp()} Eastern`,
+      targetDate,
+      count: records.length,
+      recordsScanned: uploadItems.length,
+      records
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to load Upload Digest.'
     });
   }
 });

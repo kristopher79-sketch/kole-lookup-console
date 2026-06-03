@@ -3,15 +3,19 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import './App.css';
 import koleLogo from './assets/kole-logo.png';
 
+const isTauriRuntime = Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
+const isViteDev = import.meta.env?.DEV === true;
+const configuredApiBase = String(import.meta.env?.VITE_KOLE_API_BASE || '').trim();
+const isLocalDevHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+
 const API =
-  window.location.hostname === 'localhost'
+  configuredApiBase ||
+  ((isViteDev || isLocalDevHost)
     ? 'http://localhost:5000'
-    : 'https://kole-lookup-console.onrender.com';
+    : 'https://kole-lookup-console.onrender.com');
 
 async function openExternalLink(url) {
   if (!url) return;
-
-  const isTauriRuntime = Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
 
   if (isTauriRuntime) {
     try {
@@ -42,6 +46,59 @@ function getDefaultSettlementCutoffDate() {
     String(cutoff.getMonth() + 1).padStart(2, '0'),
     String(cutoff.getDate()).padStart(2, '0')
   ].join('-');
+}
+
+
+function getEasternDateInputValue(date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(date);
+}
+
+function addDaysToDateInput(dateValue, days) {
+  const [year, month, day] = String(dateValue || getEasternDateInputValue())
+    .split('-')
+    .map(Number);
+
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + days);
+
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, '0'),
+    String(date.getUTCDate()).padStart(2, '0')
+  ].join('-');
+}
+
+function formatDateInputLabel(dateValue) {
+  if (!dateValue) return '';
+
+  const [year, month, day] = String(dateValue).split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  if (Number.isNaN(date.getTime())) return dateValue;
+
+  return date.toLocaleDateString('en-US', {
+    timeZone: 'UTC',
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
+}
+
+function isTodayOrFutureDateInput(dateValue) {
+  return String(dateValue || '') >= getEasternDateInputValue();
+}
+
+function clampUploadDigestDate(dateValue) {
+  const today = getEasternDateInputValue();
+  const value = String(dateValue || today);
+
+  return value > today ? today : value;
 }
 
 
@@ -99,6 +156,12 @@ export default function App() {
   const [activeReportPanel, setActiveReportPanel] = useState('');
 
   const [authError, setAuthError] = useState('');
+  const [uploadDigestDate, setUploadDigestDate] = useState(getEasternDateInputValue);
+  const [uploadDigestData, setUploadDigestData] = useState(null);
+  const [uploadDigestLoading, setUploadDigestLoading] = useState(false);
+  const [uploadDigestError, setUploadDigestError] = useState('');
+  const [uploadDigestActionError, setUploadDigestActionError] = useState('');
+  const [uploadDigestOpen, setUploadDigestOpen] = useState(false);
   
 
   function isBolLookup(value) {
@@ -154,6 +217,13 @@ export default function App() {
   }, [filteredResults, sortField, sortDirection]);
 
   useEffect(() => {
+    const runtimeClass = isTauriRuntime ? 'tauri-runtime' : 'web-runtime';
+    document.body.classList.add(runtimeClass);
+
+    return () => document.body.classList.remove(runtimeClass);
+  }, []);
+
+  useEffect(() => {
     function handleEsc(e) {
       if (e.key === 'Escape') {
         setSelected(null);
@@ -174,14 +244,16 @@ export default function App() {
 
     loadOperationsDashboard();
     loadDriverPositions();
+    loadUploadDigest(uploadDigestDate);
 
     const interval = window.setInterval(() => {
       loadOperationsDashboard({ silent: true });
       loadDriverPositions({ silent: true });
+      loadUploadDigest(uploadDigestDate, { silent: true });
     }, 10 * 60 * 1000);
 
     return () => window.clearInterval(interval);
-  }, [isAuthenticated, accessToken]);
+  }, [isAuthenticated, accessToken, uploadDigestDate]);
 
   function toggleSort(field) {
     if (sortField === field) {
@@ -381,9 +453,100 @@ async function loadDriverPositions(options = {}) {
   }
 }
 
+async function loadUploadDigest(dateValue = uploadDigestDate, options = {}) {
+  const { silent = false } = options;
+  const targetDate = dateValue || getEasternDateInputValue();
+
+  if (!silent) {
+    setUploadDigestLoading(true);
+  }
+
+  setUploadDigestError('');
+  setUploadDigestActionError('');
+
+  try {
+    const res = await authedFetch(
+      `${API}/upload-digest?date=${encodeURIComponent(targetDate)}`
+    );
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Unable to load Upload Digest.');
+    }
+
+    setUploadDigestData(data);
+  } catch (err) {
+    setUploadDigestError(err.message || 'Unable to load Upload Digest.');
+
+    if (!silent) {
+      setUploadDigestData(null);
+    }
+  } finally {
+    if (!silent) {
+      setUploadDigestLoading(false);
+    }
+  }
+}
+
+function changeUploadDigestDate(days) {
+  setUploadDigestDate((current) => clampUploadDigestDate(addDaysToDateInput(current, days)));
+}
+
+function resetUploadDigestToToday() {
+  setUploadDigestDate(getEasternDateInputValue());
+}
+
+async function openUploadDigestLoadPhotos(record) {
+  const bol = String(record?.BOLNumber || '').trim();
+
+  if (!bol) {
+    setUploadDigestActionError('This Upload Digest row does not have a BOL number.');
+    return;
+  }
+
+  const loadingKey = `upload-digest-loadphotos-${record?.id || bol}`;
+
+  setDocumentLoading(loadingKey);
+  setUploadDigestActionError('');
+
+  try {
+    const params = new URLSearchParams({ bol });
+
+    if (record?.CompositeKey) {
+      params.set('compositeKey', record.CompositeKey);
+    }
+
+    if (record?.DriverName) {
+      params.set('driver', record.DriverName);
+    }
+
+    const res = await authedFetch(
+      `${API}/documents/loadphotos/by-bol?${params.toString()}`
+    );
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Unable to find Load Photos folder.');
+    }
+
+    if (!data.webUrl) {
+      throw new Error('Load Photos folder was found, but no OneDrive link was returned.');
+    }
+
+    await openExternalLink(data.webUrl);
+  } catch (err) {
+    setUploadDigestActionError(err.message || 'Unable to open Load Photos folder.');
+  } finally {
+    setDocumentLoading('');
+  }
+}
+
 function refreshOperationsAndTracking() {
   loadOperationsDashboard();
   loadDriverPositions();
+  loadUploadDigest(uploadDigestDate);
 }
 
 function closeDriverRosterModal() {
@@ -1879,6 +2042,118 @@ function openReportLoadDetails(load) {
     );
   }
 
+  function UploadDigestPanel() {
+    const records = uploadDigestData?.records || [];
+    const count = uploadDigestData?.count ?? records.length;
+    const activeDigestDate = uploadDigestData?.targetDate || uploadDigestDate;
+    const dateLabel = formatDateInputLabel(activeDigestDate);
+    const isUploadDigestToday = isTodayOrFutureDateInput(activeDigestDate);
+
+    return (
+      <div className="search-card upload-digest-panel">
+        <div className="upload-digest-header-row">
+          <button
+            className="upload-digest-arrow"
+            onClick={() => changeUploadDigestDate(-1)}
+            disabled={uploadDigestLoading}
+            aria-label="Previous upload digest day"
+            title="Previous day"
+          >
+            ‹
+          </button>
+
+          <button
+            className="upload-digest-summary"
+            onClick={() => setUploadDigestOpen((current) => !current)}
+            aria-expanded={uploadDigestOpen}
+          >
+            <span className="upload-digest-title">
+              Pickup and Delivery Uploads for {dateLabel}
+            </span>
+            <span className="upload-digest-count">
+              {uploadDigestLoading ? 'Loading...' : `${count} logged`}
+            </span>
+            <span className="upload-digest-chevron">
+              {uploadDigestOpen ? '▲' : '▼'}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            className={`upload-digest-today-button ${isUploadDigestToday ? 'hidden' : ''}`}
+            onClick={resetUploadDigestToToday}
+            disabled={uploadDigestLoading || isUploadDigestToday}
+            aria-hidden={isUploadDigestToday}
+            tabIndex={isUploadDigestToday ? -1 : 0}
+            title="Return to today"
+          >
+            Today
+          </button>
+
+          <button
+            className="upload-digest-arrow"
+            onClick={() => changeUploadDigestDate(1)}
+            disabled={uploadDigestLoading || isUploadDigestToday}
+            aria-label="Next upload digest day"
+            title={isUploadDigestToday ? 'Already on today' : 'Next day'}
+          >
+            ›
+          </button>
+        </div>
+
+        {uploadDigestError && <div className="msg error">{uploadDigestError}</div>}
+        {uploadDigestActionError && <div className="msg error">{uploadDigestActionError}</div>}
+
+        {uploadDigestOpen && !uploadDigestError && (
+          <div className="upload-digest-body">
+            {records.length === 0 ? (
+              <div className="msg">No pickup or delivery uploads logged for this date.</div>
+            ) : (
+              <div className="operations-table-wrap upload-digest-table-wrap">
+                <table className="upload-digest-table">
+                  <thead>
+                    <tr>
+                      <th>Upload Time</th>
+                      <th>Type</th>
+                      <th>BOL</th>
+                      <th>Load Photos</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {records.map((record, i) => (
+                      <tr key={record.id || `${record.CompositeKey || record.BOLNumber}-${i}`}>
+                        <td>{record.UploadDateDisplay || formatTrackingTimestamp(record.UploadDate)}</td>
+                        <td>{record.UploadType || '-'}</td>
+                        <td>{record.BOLNumber || '-'}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="table-link-button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openUploadDigestLoadPhotos(record);
+                            }}
+                            disabled={!record.BOLNumber || documentLoading === `upload-digest-loadphotos-${record.id || record.BOLNumber}`}
+                          >
+                            {documentLoading === `upload-digest-loadphotos-${record.id || record.BOLNumber}`
+                              ? 'Opening...'
+                              : 'Open Folder'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function DriverSummaryReport() {
     const monthOptions = Array.from({ length: 12 }, (_, index) => index + 1);
     const isDriverSummaryOpen = activeReportPanel === 'driverSummary';
@@ -2513,6 +2788,8 @@ function openReportLoadDetails(load) {
       </>
     )}
   </div>
+
+  <UploadDigestPanel />
 
   <DriverSummaryReport />
   </>

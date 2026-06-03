@@ -1431,3 +1431,545 @@ tbody tr:hover {
 .inactive-driver-roster-table td:nth-child(6) { width: 14%; }
 .inactive-driver-roster-table th:nth-child(7),
 .inactive-driver-roster-table td:nth-child(7) { width: 10%; }
+
+
+/* APP SHELL WIDTH / RUNTIME DENSITY */
+.container {
+  width: min(1680px, calc(100vw - 40px));
+  max-width: none;
+}
+
+.web-runtime .operations-panel,
+.web-runtime .reports-panel,
+.web-runtime .upload-digest-panel {
+  width: 100%;
+  max-width: none;
+}
+
+.tauri-runtime {
+  font-size: 14px;
+}
+
+.tauri-runtime .container {
+  width: min(1680px, calc(100vw - 24px));
+  margin: 14px auto;
+  padding: 14px;
+}
+
+.tauri-runtime .search-card {
+  padding: 14px;
+  margin-bottom: 16px;
+}
+
+.tauri-runtime .app-header h1 {
+  font-size: 26px;
+}
+
+.tauri-runtime .brand-logo-large {
+  width: 210px;
+}
+
+.tauri-runtime th,
+.tauri-runtime td {
+  padding: 9px 10px;
+}
+
+.tauri-runtime button {
+  padding: 8px 14px;
+}
+
+.tauri-runtime .operations-card {
+  padding: 14px;
+}
+
+.tauri-runtime .operations-card strong {
+  font-size: 1.65rem;
+}
+
+@media (max-width: 700px) {
+  .container,
+  .tauri-runtime .container {
+    width: 100%;
+  }
+}
+
+/* UPLOAD DIGEST */
+.upload-digest-panel {
+  width: min(1100px, 100%);
+  margin: 20px auto 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.upload-digest-header-row {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr) 54px;
+  align-items: stretch;
+  min-height: 64px;
+}
+
+.upload-digest-arrow,
+.upload-digest-summary {
+  border-radius: 0;
+}
+
+.upload-digest-arrow {
+  background: #0f172a;
+  color: #facc15;
+  border-right: 1px solid #1e293b;
+  border-left: 1px solid #1e293b;
+  font-size: 30px;
+  line-height: 1;
+  padding: 0;
+}
+
+.upload-digest-arrow:hover {
+  background: #1e293b;
+}
+
+.upload-digest-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 14px;
+  align-items: center;
+  width: 100%;
+  padding: 16px 18px;
+  background: #0b1220;
+  color: #e5e7eb;
+  text-align: left;
+}
+
+.upload-digest-summary:hover {
+  background: #111827;
+}
+
+.upload-digest-title {
+  color: #d4a017;
+  font-size: 18px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-digest-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.06);
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.upload-digest-chevron {
+  color: #facc15;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.upload-digest-body {
+  padding: 18px;
+  border-top: 1px solid #1e293b;
+  background: #111827;
+}
+
+.upload-digest-table-wrap {
+  max-height: 360px;
+  overflow: auto;
+}
+
+.upload-digest-table {
+  min-width: 760px;
+}
+
+.upload-digest-table th:nth-child(1),
+.upload-digest-table td:nth-child(1) { width: 190px; }
+.upload-digest-table th:nth-child(2),
+.upload-digest-table td:nth-child(2) { width: 120px; }
+.upload-digest-table th:nth-child(3),
+.upload-digest-table td:nth-child(3) { width: 140px; }
+
+.upload-digest-footnote {
+  margin: 12px 0 0;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+@media (max-width: 700px) {
+  .upload-digest-header-row {
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+  }
+
+  .upload-digest-summary {
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+
+  .upload-digest-title {
+    white-space: normal;
+  }
+}
+
+.table-link-button {
+  border: 1px solid rgba(250, 204, 21, 0.45);
+  background: rgba(250, 204, 21, 0.1);
+  color: #fde68a;
+  padding: 7px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.table-link-button:hover {
+  background: rgba(250, 204, 21, 0.18);
+}
+
+.table-link-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.upload-digest-table {
+  min-width: 900px;
+}
+
+.upload-digest-table th:nth-child(5),
+.upload-digest-table td:nth-child(5) { width: 150px; }
+
+
+/* DISPLAY WIDTH / OVERFLOW TUNE-UP */
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.container {
+  max-width: calc(100vw - 32px);
+  overflow-x: hidden;
+}
+
+.search-card,
+.app-header,
+.operations-panel,
+.reports-panel,
+.upload-digest-panel {
+  max-width: 100%;
+}
+
+.search-bar,
+.search-options,
+.reports-header,
+.report-card-header {
+  min-width: 0;
+}
+
+input,
+.search-bar input {
+  min-width: 0;
+}
+
+.search-bar button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.header-logoff {
+  right: 12px;
+}
+
+.tauri-runtime .container {
+  max-width: calc(100vw - 28px);
+}
+
+.tauri-runtime .brand-logo-large {
+  width: 180px;
+  max-width: 34%;
+}
+
+.tauri-runtime .app-header {
+  margin-bottom: 16px;
+}
+
+.tauri-runtime .app-header h1 {
+  font-size: 24px;
+}
+
+.tauri-runtime .app-header p {
+  font-size: 14px;
+}
+
+/* UPLOAD DIGEST REFINEMENTS */
+.upload-digest-header-row {
+  grid-template-columns: 54px minmax(0, 1fr) auto 54px;
+}
+
+.upload-digest-today-button {
+  align-self: stretch;
+  border-radius: 0;
+  border-left: 1px solid #1e293b;
+  border-right: 1px solid #1e293b;
+  background: #172033;
+  color: #fde68a;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.upload-digest-today-button:hover {
+  background: #243044;
+}
+
+.upload-digest-today-button.hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.upload-digest-arrow:disabled {
+  opacity: 0.35;
+}
+
+.upload-digest-table {
+  min-width: 680px;
+}
+
+.upload-digest-table th:nth-child(1),
+.upload-digest-table td:nth-child(1) { width: 210px; }
+.upload-digest-table th:nth-child(2),
+.upload-digest-table td:nth-child(2) { width: 130px; }
+.upload-digest-table th:nth-child(3),
+.upload-digest-table td:nth-child(3) { width: 140px; }
+.upload-digest-table th:nth-child(4),
+.upload-digest-table td:nth-child(4) { width: 150px; }
+
+.upload-digest-footnote {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .upload-digest-header-row {
+    grid-template-columns: 44px minmax(0, 1fr) auto 44px;
+  }
+
+  .upload-digest-today-button {
+    padding: 0 10px;
+  }
+}
+
+/* PASS 3: WIDTH CORRECTION + LESS-YELLOW UPLOAD DIGEST */
+html,
+body,
+#root {
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+}
+
+body {
+  position: relative;
+}
+
+.container,
+.tauri-runtime .container,
+.web-runtime .container {
+  width: calc(100vw - 32px) !important;
+  max-width: 1500px !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  overflow-x: hidden !important;
+}
+
+.tauri-runtime .container {
+  padding-left: 12px !important;
+  padding-right: 12px !important;
+}
+
+.search-card,
+.app-header,
+.operations-panel,
+.reports-panel,
+.upload-digest-panel,
+.web-runtime .operations-panel,
+.web-runtime .reports-panel,
+.web-runtime .upload-digest-panel {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+
+.search-card,
+.operations-panel,
+.reports-panel,
+.upload-digest-panel,
+.report-card,
+.driver-report-section {
+  overflow-x: hidden;
+}
+
+.search-bar {
+  width: 100%;
+  min-width: 0;
+}
+
+.search-bar input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.search-bar button {
+  flex: 0 0 auto;
+  max-width: 180px;
+}
+
+.operations-grid,
+.report-kpi-grid,
+.driver-report-totals-grid {
+  min-width: 0;
+}
+
+.operations-card,
+.report-kpi-card {
+  min-width: 0;
+}
+
+.operations-table-wrap,
+.results-panel,
+.upload-digest-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.upload-digest-panel {
+  border-color: #243044;
+}
+
+.upload-digest-arrow {
+  background: #111827;
+  color: #cbd5e1;
+}
+
+.upload-digest-arrow:hover {
+  background: #1f2937;
+  color: #f8fafc;
+}
+
+.upload-digest-summary {
+  background: #111827;
+}
+
+.upload-digest-summary:hover {
+  background: #172033;
+}
+
+.upload-digest-title {
+  color: #e5e7eb;
+}
+
+.upload-digest-title::before {
+  content: 'Uploads';
+  display: inline-flex;
+  align-items: center;
+  margin-right: 12px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  color: #cbd5e1;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: 2px;
+}
+
+.upload-digest-chevron {
+  color: #cbd5e1;
+}
+
+.upload-digest-count {
+  background: rgba(148, 163, 184, 0.12);
+  color: #e5e7eb;
+}
+
+.upload-digest-today-button {
+  background: #1f2937;
+  color: #e5e7eb;
+}
+
+.upload-digest-today-button:hover {
+  background: #334155;
+}
+
+.table-link-button {
+  border-color: rgba(96, 165, 250, 0.45);
+  background: rgba(37, 99, 235, 0.16);
+  color: #bfdbfe;
+}
+
+.table-link-button:hover {
+  background: rgba(37, 99, 235, 0.26);
+}
+
+.upload-digest-table {
+  min-width: 620px !important;
+}
+
+.upload-digest-table th:nth-child(1),
+.upload-digest-table td:nth-child(1) { width: 38%; }
+.upload-digest-table th:nth-child(2),
+.upload-digest-table td:nth-child(2) { width: 18%; }
+.upload-digest-table th:nth-child(3),
+.upload-digest-table td:nth-child(3) { width: 20%; }
+.upload-digest-table th:nth-child(4),
+.upload-digest-table td:nth-child(4) { width: 24%; }
+
+@media (max-width: 900px) {
+  .container,
+  .tauri-runtime .container,
+  .web-runtime .container {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .operations-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* PASS 4: API rollback companion sizing guard */
+.container,
+.tauri-runtime .container,
+.web-runtime .container {
+  max-width: min(1500px, calc(100vw - 48px)) !important;
+}
+
+.search-card,
+.operations-panel,
+.upload-digest-panel,
+.reports-panel {
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+.operations-header,
+.reports-header,
+.report-card-header,
+.driver-report-title,
+.upload-digest-header-row {
+  min-width: 0;
+}
+
+.operations-header button,
+.search-bar button,
+.header-logoff {
+  flex-shrink: 0;
+}
