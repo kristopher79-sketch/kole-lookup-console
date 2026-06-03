@@ -7,7 +7,27 @@ const API =
   window.location.hostname === 'localhost'
     ? 'http://localhost:5000'
     : 'https://kole-lookup-console.onrender.com';
-    
+
+async function openExternalLink(url) {
+  if (!url) return;
+
+  const isTauriRuntime = Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
+
+  if (isTauriRuntime) {
+    try {
+      await openUrl(url);
+      return;
+    } catch (err) {
+      console.warn('Tauri link opener failed. Falling back to browser open.', err);
+    }
+  }
+
+  const openedWindow = window.open(url, '_blank', 'noopener,noreferrer');
+
+  if (!openedWindow) {
+    window.location.href = url;
+  }
+}
 
 
 function getDefaultSettlementCutoffDate() {
@@ -499,7 +519,7 @@ function getPositionStatusLabel(position) {
         throw new Error('BOL document was found, but no SharePoint link was returned.');
       }
 
-      await openUrl(data.webUrl);
+      await openExternalLink(data.webUrl);
     } catch (err) {
       setDocumentError(err.message);
     } finally {
@@ -531,7 +551,7 @@ function getPositionStatusLabel(position) {
         throw new Error('Final Settle document was found, but no SharePoint link was returned.');
       }
 
-      await openUrl(data.webUrl);
+      await openExternalLink(data.webUrl);
     } catch (err) {
       setDocumentError(err.message);
     } finally {
@@ -563,7 +583,7 @@ function getPositionStatusLabel(position) {
         throw new Error('Dispatch Sheet was found, but no SharePoint link was returned.');
       }
 
-      await openUrl(data.webUrl);
+      await openExternalLink(data.webUrl);
     } catch (err) {
       setDocumentError(err.message);
     } finally {
@@ -600,7 +620,7 @@ function getPositionStatusLabel(position) {
         throw new Error('Load Photos folder was found, but no OneDrive link was returned.');
       }
 
-      await openUrl(data.webUrl);
+      await openExternalLink(data.webUrl);
     } catch (err) {
       setDocumentError(err.message);
     } finally {
@@ -643,7 +663,7 @@ function getPositionStatusLabel(position) {
         throw new Error('Permit folder was found, but no OneDrive link was returned.');
       }
 
-      await openUrl(data.webUrl);
+      await openExternalLink(data.webUrl);
     } catch (err) {
       setDocumentError(err.message);
     } finally {
@@ -2002,11 +2022,12 @@ function openReportLoadDetails(load) {
                   </div>
 
                   <div className="report-controls centered-report-controls">
-                    <label>
+                    <label className="settlement-date-control">
                       <span>Cutoff Date</span>
                       <input
                         type="date"
                         value={settlementCutoffDate}
+                        aria-label="Weekly settlement cutoff date"
                         onChange={(e) => {
                           setSettlementCutoffDate(e.target.value);
                           setWeeklySettlementReport(null);
@@ -2014,6 +2035,7 @@ function openReportLoadDetails(load) {
                           setWeeklySettlementModalOpen(false);
                         }}
                       />
+                      <small>Pick the Thursday cutoff date, then preview the report.</small>
                     </label>
 
                     <button onClick={loadWeeklySettlementReport} disabled={weeklySettlementLoading}>

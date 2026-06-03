@@ -988,18 +988,43 @@ tbody tr:hover {
 }
 
 .report-controls input[type="date"] {
-  padding: 11px 12px;
-  border-radius: 8px;
-  border: 1px solid #334155;
+  min-width: 220px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 2px solid #facc15;
   background: #020617;
-  color: #e5e7eb;
-  font-size: 15px;
+  color: #f8fafc;
+  color-scheme: dark;
+  font-size: 16px;
+  font-weight: 700;
   outline: none;
+  box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.12);
+}
+
+.report-controls input[type="date"]:hover {
+  border-color: #fde68a;
+  box-shadow: 0 0 0 4px rgba(250, 204, 21, 0.16);
 }
 
 .report-controls input[type="date"]:focus {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.22);
+  border-color: #facc15;
+  box-shadow: 0 0 0 4px rgba(250, 204, 21, 0.24);
+}
+
+.settlement-date-control {
+  position: relative;
+  padding: 12px;
+  border: 1px solid rgba(250, 204, 21, 0.24);
+  border-radius: 14px;
+  background: rgba(250, 204, 21, 0.06);
+}
+
+.settlement-date-control small {
+  display: block;
+  margin-top: 8px;
+  color: #fde68a;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .settlement-window-note {
@@ -1374,8 +1399,9 @@ tbody tr:hover {
 }
 
 .driver-roster-grid .section-title {
-  background: #d4a017;
+  background: #e5e7eb;
   color: #111827;
+  border-left: 5px solid #d4a017;
 }
 
 .driver-roster-grid .detail-item strong {
