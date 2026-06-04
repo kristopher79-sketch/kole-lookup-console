@@ -136,11 +136,21 @@ export default function App() {
   }, []);
   const [reportMonth, setReportMonth] = useState(() => initialReportDate.getMonth() + 1);
   const [reportYear, setReportYear] = useState(() => initialReportDate.getFullYear());
+  const [grossRevenueYear, setGrossRevenueYear] = useState(() => new Date().getFullYear());
+  const [grossRevenueReport, setGrossRevenueReport] = useState(null);
+  const [grossRevenueLoading, setGrossRevenueLoading] = useState(false);
+  const [grossRevenueError, setGrossRevenueError] = useState(null);
+  const [grossRevenueModalOpen, setGrossRevenueModalOpen] = useState(false);
+  const [openGrossRevenueQuarters, setOpenGrossRevenueQuarters] = useState([]);
   const [driverSummaryReport, setDriverSummaryReport] = useState(null);
   const [driverSummaryLoading, setDriverSummaryLoading] = useState(false);
   const [driverSummaryError, setDriverSummaryError] = useState(null);
   const [driverSummaryModalOpen, setDriverSummaryModalOpen] = useState(false);
   const [settlementCutoffDate, setSettlementCutoffDate] = useState(getDefaultSettlementCutoffDate);
+  const [ordersDueSettlementReport, setOrdersDueSettlementReport] = useState(null);
+  const [ordersDueSettlementLoading, setOrdersDueSettlementLoading] = useState(false);
+  const [ordersDueSettlementError, setOrdersDueSettlementError] = useState(null);
+  const [ordersDueSettlementModalOpen, setOrdersDueSettlementModalOpen] = useState(false);
   const [weeklySettlementReport, setWeeklySettlementReport] = useState(null);
   const [weeklySettlementLoading, setWeeklySettlementLoading] = useState(false);
   const [weeklySettlementError, setWeeklySettlementError] = useState(null);
@@ -227,7 +237,9 @@ export default function App() {
     function handleEsc(e) {
       if (e.key === 'Escape') {
         setSelected(null);
+        setGrossRevenueModalOpen(false);
         setDriverSummaryModalOpen(false);
+        setOrdersDueSettlementModalOpen(false);
         setWeeklySettlementModalOpen(false);
         setWonNotRegisteredModalOpen(false);
         setInactiveDriverRosterModalOpen(false);
@@ -955,6 +967,63 @@ function getPositionStatusLabel(position) {
     return years;
   }
 
+
+  function getDefaultGrossRevenueQuarter(reportYear) {
+    const currentDate = new Date();
+    const currentYear = currentDate.getFullYear();
+
+    if (Number(reportYear) !== currentYear) {
+      return 'Q1';
+    }
+
+    return `Q${Math.floor(currentDate.getMonth() / 3) + 1}`;
+  }
+
+  function toggleGrossRevenueQuarter(quarterLabel) {
+    setOpenGrossRevenueQuarters((current) => (
+      current.includes(quarterLabel)
+        ? current.filter((label) => label !== quarterLabel)
+        : [...current, quarterLabel]
+    ));
+  }
+
+
+  async function loadGrossRevenueReport() {
+    const selectedYear = Number(grossRevenueYear);
+
+    setGrossRevenueLoading(true);
+    setGrossRevenueError(null);
+    setGrossRevenueReport(null);
+    setGrossRevenueModalOpen(false);
+
+    try {
+      const res = await authedFetch(
+        `${API}/reports/gross-revenue-totals?year=${encodeURIComponent(selectedYear)}`
+      );
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to load Gross Revenue Totals.');
+      }
+
+      setGrossRevenueReport(data);
+      setOpenGrossRevenueQuarters([getDefaultGrossRevenueQuarter(selectedYear)]);
+      setGrossRevenueModalOpen(true);
+    } catch (err) {
+      setGrossRevenueError({
+        code: 'REPORT_ERROR',
+        message: err.message || 'Unable to load Gross Revenue Totals.'
+      });
+    } finally {
+      setGrossRevenueLoading(false);
+    }
+  }
+
+  function closeGrossRevenueModal() {
+    setGrossRevenueModalOpen(false);
+  }
+
   async function loadDriverSummaryReport() {
     const selectedMonth = Number(reportMonth);
     const selectedYear = Number(reportYear);
@@ -1003,6 +1072,40 @@ function getPositionStatusLabel(position) {
 
   function closeDriverSummaryModal() {
     setDriverSummaryModalOpen(false);
+  }
+
+
+  async function loadOrdersDueSettlementReport() {
+    setOrdersDueSettlementLoading(true);
+    setOrdersDueSettlementError(null);
+    setOrdersDueSettlementReport(null);
+    setOrdersDueSettlementModalOpen(false);
+
+    try {
+      const res = await authedFetch(
+        `${API}/reports/orders-due-for-settlement`
+      );
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to load Orders Due for Settlement.');
+      }
+
+      setOrdersDueSettlementReport(data);
+      setOrdersDueSettlementModalOpen(true);
+    } catch (err) {
+      setOrdersDueSettlementError({
+        code: 'REPORT_ERROR',
+        message: err.message || 'Unable to load Orders Due for Settlement.'
+      });
+    } finally {
+      setOrdersDueSettlementLoading(false);
+    }
+  }
+
+  function closeOrdersDueSettlementModal() {
+    setOrdersDueSettlementModalOpen(false);
   }
 
   async function loadWeeklySettlementReport() {
@@ -1498,6 +1601,137 @@ function openReportLoadDetails(load) {
   }
 
 
+
+  function GrossRevenueTotalsPreview() {
+    if (!grossRevenueReport) return null;
+
+    const months = grossRevenueReport.months || [];
+    const trucks = grossRevenueReport.trucks || [];
+    const monthlyTotals = grossRevenueReport.totals?.monthlyTotals || {};
+    const quarterGroups = [
+      { label: 'Q1', months: months.filter((month) => [1, 2, 3].includes(Number(month.month))) },
+      { label: 'Q2', months: months.filter((month) => [4, 5, 6].includes(Number(month.month))) },
+      { label: 'Q3', months: months.filter((month) => [7, 8, 9].includes(Number(month.month))) },
+      { label: 'Q4', months: months.filter((month) => [10, 11, 12].includes(Number(month.month))) }
+    ].filter((quarter) => quarter.months.length > 0);
+
+    function getQuarterTotalFromMonthlyTotals(quarterMonths) {
+      return quarterMonths.reduce((sum, month) => sum + Number(monthlyTotals[month.month] || 0), 0);
+    }
+
+    function getTruckQuarterTotal(truck, quarterMonths) {
+      return quarterMonths.reduce((sum, month) => sum + Number(truck.monthTotals?.[month.month] || 0), 0);
+    }
+
+    return (
+      <div className="driver-report-preview modal-report-preview gross-revenue-preview">
+        <div className="driver-report-generated">
+          Generated: {grossRevenueReport.generatedAt}
+        </div>
+
+        <div className="report-kpi-grid gross-revenue-kpi-grid">
+          <div className="report-kpi-card">
+            <span>Gross Revenue</span>
+            <strong>{formatReportMoney(grossRevenueReport.totals?.totalGrossRevenue)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Loads</span>
+            <strong>{formatReportNumber(grossRevenueReport.totals?.loadCount)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Permits/Escorts Excluded</span>
+            <strong>{formatReportMoney(grossRevenueReport.totals?.totalPermitEscortExcluded)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Avg / Month</span>
+            <strong>{formatReportMoney(grossRevenueReport.totals?.averageMonthlyRevenue)}</strong>
+          </div>
+        </div>
+
+        <div className="settlement-window-note">
+          <strong>Basis:</strong> {grossRevenueReport.revenueBasis}. Month is based on Pickup Offer Date.
+        </div>
+
+        {trucks.length === 0 ? (
+          <div className="msg">No Won or TONU loads were found for this year.</div>
+        ) : (
+          <div className="gross-revenue-quarter-stack">
+            {quarterGroups.map((quarter) => {
+              const isOpen = openGrossRevenueQuarters.includes(quarter.label);
+              const quarterTotal = getQuarterTotalFromMonthlyTotals(quarter.months);
+
+              return (
+                <section className="gross-revenue-quarter-card" key={quarter.label}>
+                  <button
+                    type="button"
+                    className="gross-revenue-quarter-header"
+                    onClick={() => toggleGrossRevenueQuarter(quarter.label)}
+                    aria-expanded={isOpen}
+                  >
+                    <div className="gross-revenue-quarter-title">
+                      <span className={`quarter-caret ${isOpen ? 'open' : ''}`}>▸</span>
+                      <div>
+                        <h3>{quarter.label}</h3>
+                        <p>{quarter.months.map((month) => month.shortName || month.name).join(' / ')}</p>
+                      </div>
+                    </div>
+                    <div className="gross-revenue-quarter-total">
+                      <span>Quarter Total</span>
+                      <strong>{formatReportMoney(quarterTotal)}</strong>
+                    </div>
+                  </button>
+
+                  {isOpen && (
+                    <div className="report-table-wrap gross-revenue-quarter-table-wrap">
+                      <table className="driver-report-table gross-revenue-quarter-table">
+                        <thead>
+                          <tr>
+                            <th>Truck</th>
+                            <th>Operator</th>
+                            {quarter.months.map((month) => (
+                              <th key={month.month}>{month.shortName || month.name}</th>
+                            ))}
+                            <th>{quarter.label} Total</th>
+                            <th>Year Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr className="report-total-row">
+                            <td></td>
+                            <td>Grand Total / Month</td>
+                            {quarter.months.map((month) => (
+                              <td key={month.month}>{formatReportMoney(monthlyTotals[month.month])}</td>
+                            ))}
+                            <td>{formatReportMoney(quarterTotal)}</td>
+                            <td>{formatReportMoney(grossRevenueReport.totals?.totalGrossRevenue)}</td>
+                          </tr>
+
+                          {trucks.map((truck) => (
+                            <tr key={`${quarter.label}-${truck.truck}`}>
+                              <td>{truck.truck || '-'}</td>
+                              <td>{truck.operator || '-'}</td>
+                              {quarter.months.map((month) => (
+                                <td key={`${quarter.label}-${truck.truck}-${month.month}`}>
+                                  {formatReportMoney(truck.monthTotals?.[month.month])}
+                                </td>
+                              ))}
+                              <td>{formatReportMoney(getTruckQuarterTotal(truck, quarter.months))}</td>
+                              <td>{formatReportMoney(truck.totalGrossRevenue)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function DriverSummaryPreview() {
     if (!driverSummaryReport) return null;
 
@@ -1673,6 +1907,80 @@ function openReportLoadDetails(load) {
     );
   }
 
+
+  function OrdersDueSettlementPreview() {
+    const rows = ordersDueSettlementReport?.rows || [];
+
+    if (!ordersDueSettlementReport) return null;
+
+    return (
+      <div className="settlement-report-preview modal-report-preview">
+        <div className="driver-report-generated">
+          Generated: {ordersDueSettlementReport.generatedAt}
+        </div>
+
+        <div className="report-kpi-grid won-not-registered-kpi-grid">
+          <div className="report-kpi-card">
+            <span>Orders Due</span>
+            <strong>{formatReportNumber(ordersDueSettlementReport.count)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Bid Total</span>
+            <strong>{formatReportMoney(ordersDueSettlementReport.totals?.bidTotal)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Driver Pay</span>
+            <strong>{formatReportMoney(ordersDueSettlementReport.totals?.driverPayTotal)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Source</span>
+            <strong>{ordersDueSettlementReport.dataSource || 'Bid Listing'}</strong>
+          </div>
+        </div>
+
+        {rows.length === 0 ? (
+          <div className="msg">No delivered Won or TONU orders are currently due for settlement.</div>
+        ) : (
+          <div className="report-table-wrap">
+            <table className="settlement-report-table orders-due-settlement-table">
+              <thead>
+                <tr>
+                  <th>BOL</th>
+                  <th>Operator</th>
+                  <th>Truck</th>
+                  <th>Customer</th>
+                  <th>Delivery</th>
+                  <th>Route</th>
+                  <th>Bid Amount</th>
+                  <th>Driver Pay</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((load, index) => (
+                  <tr
+                    key={`${load.BOL || load.id || index}-${index}`}
+                    className={load.id ? 'report-clickable-row' : ''}
+                    onClick={() => openReportLoadDetails(load)}
+                    title={load.id ? 'Open full order screen' : ''}
+                  >
+                    <td>{load.BOL || '-'}</td>
+                    <td>{load.Operator || '-'}</td>
+                    <td>{load.Truck || '-'}</td>
+                    <td>{load.Customer || '-'}</td>
+                    <td>{load.DeliveryDateDisplay || formatDateOnly(load.DeliveryDate)}</td>
+                    <td>{load.Route || [load.OriginST, load.DestST].filter(Boolean).join(' to ') || '-'}</td>
+                    <td>{formatReportMoney(load.BidAmount)}</td>
+                    <td>{formatReportMoney(load.DriverPay)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function WeeklySettlementPreview() {
     if (!weeklySettlementReport) return null;
 
@@ -1837,6 +2145,7 @@ function openReportLoadDetails(load) {
                   <th>Email</th>
                   <th>Trailer Type</th>
                   <th>Start Date</th>
+                  <th>Term Date</th>
                 </tr>
               </thead>
               <tbody>
@@ -1854,6 +2163,7 @@ function openReportLoadDetails(load) {
                     <td>{roster.emailAddress1 || '-'}</td>
                     <td>{roster.trailerType || '-'}</td>
                     <td>{formatRosterDate(roster.startDate)}</td>
+                    <td>{formatRosterDate(roster.termDate)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1993,6 +2303,7 @@ function openReportLoadDetails(load) {
                 <DetailItem label="Email Address 2" value={roster.emailAddress2} wide />
                 <DetailItem label="Driver PIN" value={roster.pin} />
                 <DetailItem label="Start Date" value={formatRosterDate(roster.startDate)} />
+                <DetailItem label="Term Date" value={formatRosterDate(roster.termDate)} />
 
                 <SectionTitle>Operational</SectionTitle>
                 <DetailItem label="Status" value={roster.status} />
@@ -2164,7 +2475,9 @@ function openReportLoadDetails(load) {
 
   function DriverSummaryReport() {
     const monthOptions = Array.from({ length: 12 }, (_, index) => index + 1);
+    const isGrossRevenueOpen = activeReportPanel === 'grossRevenue';
     const isDriverSummaryOpen = activeReportPanel === 'driverSummary';
+    const isOrdersDueSettlementOpen = activeReportPanel === 'ordersDueSettlement';
     const isWeeklySettlementOpen = activeReportPanel === 'weeklySettlement';
     const isWonNotRegisteredOpen = activeReportPanel === 'wonNotRegistered';
     const isInactiveDriverRosterOpen = activeReportPanel === 'inactiveDriverRoster';
@@ -2178,6 +2491,73 @@ function openReportLoadDetails(load) {
         </div>
 
         <div className="reports-accordion-list">
+          <div className={`report-accordion ${isGrossRevenueOpen ? 'open' : ''}`}>
+            <button
+              type="button"
+              className="report-accordion-button"
+              onClick={() => toggleReportPanel('grossRevenue')}
+            >
+              <span>Gross Revenue Totals</span>
+              <span className="report-accordion-icon">{isGrossRevenueOpen ? '▼' : '▶'}</span>
+            </button>
+
+            {isGrossRevenueOpen && (
+              <div className="report-accordion-body">
+                <div className="report-card compact-report-card accordion-inner-card">
+                  <div className="report-card-header centered-report-header">
+                    <div>
+                      <h3>Gross Revenue Totals</h3>
+                    </div>
+                  </div>
+
+                  <div className="report-controls centered-report-controls">
+                    <label>
+                      <span>Year</span>
+                      <select
+                        value={grossRevenueYear}
+                        onChange={(e) => {
+                          setGrossRevenueYear(Number(e.target.value));
+                          setGrossRevenueReport(null);
+                          setGrossRevenueError(null);
+                          setGrossRevenueModalOpen(false);
+                        }}
+                      >
+                        {getReportYears().map((year) => (
+                          <option key={year} value={year}>
+                            {year}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <button onClick={loadGrossRevenueReport} disabled={grossRevenueLoading}>
+                      {grossRevenueLoading ? 'Loading Report...' : 'Preview Report'}
+                    </button>
+                  </div>
+
+                  {grossRevenueReport && !grossRevenueModalOpen && (
+                    <div className="report-ready-card">
+                      <div>
+                        <strong>{grossRevenueReport.reportLabel} is ready.</strong>
+                        <span> The preview opens in a report window.</span>
+                      </div>
+                      <button className="view-button" onClick={() => setGrossRevenueModalOpen(true)}>
+                        Reopen Preview
+                      </button>
+                    </div>
+                  )}
+
+                  {grossRevenueError && (
+                    <div className="report-alert error">
+                      <h4>Report could not be loaded.</h4>
+                      <p>{grossRevenueError.message}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className={`report-accordion ${isDriverSummaryOpen ? 'open' : ''}`}>
             <button
               type="button"
@@ -2278,6 +2658,54 @@ function openReportLoadDetails(load) {
                           {driverSummaryError.lockReason && <p>{driverSummaryError.lockReason}</p>}
                         </>
                       )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className={`report-accordion ${isOrdersDueSettlementOpen ? 'open' : ''}`}>
+            <button
+              type="button"
+              className="report-accordion-button"
+              onClick={() => toggleReportPanel('ordersDueSettlement')}
+            >
+              <span>Orders Due for Settlement</span>
+              <span className="report-accordion-icon">{isOrdersDueSettlementOpen ? '▼' : '▶'}</span>
+            </button>
+
+            {isOrdersDueSettlementOpen && (
+              <div className="report-accordion-body">
+                <div className="report-card compact-report-card accordion-inner-card">
+                  <div className="report-card-header centered-report-header">
+                    <div>
+                      <h3>Orders Due for Settlement</h3>
+                    </div>
+                  </div>
+
+                  <div className="report-controls centered-report-controls">
+                    <button onClick={loadOrdersDueSettlementReport} disabled={ordersDueSettlementLoading}>
+                      {ordersDueSettlementLoading ? 'Loading Report...' : 'Preview Report'}
+                    </button>
+                  </div>
+
+                  {ordersDueSettlementReport && !ordersDueSettlementModalOpen && (
+                    <div className="report-ready-card">
+                      <div>
+                        <strong>{ordersDueSettlementReport.reportLabel} is ready.</strong>
+                        <span> The preview opens in a report window.</span>
+                      </div>
+                      <button className="view-button" onClick={() => setOrdersDueSettlementModalOpen(true)}>
+                        Reopen Preview
+                      </button>
+                    </div>
+                  )}
+
+                  {ordersDueSettlementError && (
+                    <div className="report-alert error">
+                      <h4>Report could not be loaded.</h4>
+                      <p>{ordersDueSettlementError.message}</p>
                     </div>
                   )}
                 </div>
@@ -2457,10 +2885,11 @@ function openReportLoadDetails(load) {
         <header className="app-header app-header-branded">
   <div className="brand-stack">
     <img
-      src={koleLogo}
-      alt="Kole Trucking Logo"
-      className="brand-logo-large"
-    />
+  src={koleLogo}
+  alt="Kole Trucking"
+  className="brand-logo-large"
+  style={{ width: '520px' }}
+/>
 
     <h1>Kole Connect</h1>
 
@@ -2507,10 +2936,11 @@ function openReportLoadDetails(load) {
       <header className="app-header app-header-branded">
   <div className="brand-stack">
     <img
-      src={koleLogo}
-      alt="Kole Trucking Logo"
-      className="brand-logo-large"
-    />
+  src={koleLogo}
+  alt="Kole Trucking"
+  className="brand-logo-large"
+  style={{ width: '520px' }}
+/>
 
     <h1>Kole Connect</h1>
     <p>
@@ -2909,6 +3339,26 @@ function openReportLoadDetails(load) {
         )}
       </div>
 
+      {grossRevenueModalOpen && grossRevenueReport && (
+        <div className="modal-overlay report-modal-overlay" onClick={closeGrossRevenueModal}>
+          <div className="detail-modal report-modal wide-report-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="detail-header report-modal-header">
+              <div>
+                <h2>{grossRevenueReport.reportLabel || 'Gross Revenue Totals'}</h2>
+              </div>
+
+              <button className="close-button" onClick={closeGrossRevenueModal}>
+                Close
+              </button>
+            </div>
+
+            <div className="modal-body report-modal-body">
+              <GrossRevenueTotalsPreview />
+            </div>
+          </div>
+        </div>
+      )}
+
       {driverSummaryModalOpen && driverSummaryReport && (
         <div className="modal-overlay report-modal-overlay" onClick={closeDriverSummaryModal}>
           <div className="detail-modal report-modal" onClick={(e) => e.stopPropagation()}>
@@ -2925,6 +3375,27 @@ function openReportLoadDetails(load) {
 
             <div className="modal-body report-modal-body">
               <DriverSummaryPreview />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {ordersDueSettlementModalOpen && ordersDueSettlementReport && (
+        <div className="modal-overlay report-modal-overlay" onClick={closeOrdersDueSettlementModal}>
+          <div className="detail-modal report-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="detail-header report-modal-header">
+              <div>
+                <h2>{ordersDueSettlementReport.reportLabel || 'Orders Due for Settlement'}</h2>
+                <p>Delivered Won/TONU orders with Final Settle not marked sent.</p>
+              </div>
+
+              <button className="close-button" onClick={closeOrdersDueSettlementModal}>
+                Close
+              </button>
+            </div>
+
+            <div className="modal-body report-modal-body">
+              <OrdersDueSettlementPreview />
             </div>
           </div>
         </div>

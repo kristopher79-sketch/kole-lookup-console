@@ -939,9 +939,17 @@ function getDriverSummaryUnlockParts(year, month) {
 }
 
 function getMonthName(month) {
-  return new Intl.DateTimeFormat('en-US', { month: 'long' }).format(
-    new Date(Date.UTC(2026, Number(month) - 1, 1))
-  );
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    timeZone: 'UTC'
+  }).format(new Date(Date.UTC(2026, Number(month) - 1, 1)));
+}
+
+function getShortMonthName(month) {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    timeZone: 'UTC'
+  }).format(new Date(Date.UTC(2026, Number(month) - 1, 1)));
 }
 
 function getReportMonthLabel(year, month) {
@@ -1204,6 +1212,264 @@ function buildDriverSummaryResponse(items, sourceList, year, month) {
   };
 }
 
+function getGrossRevenueFieldSelect() {
+  return [
+    'BOLNumber_x0028_Won_x0029_',
+    'BidID',
+    'Company',
+    'Pickup_x0020_Offer_x0020_Date',
+    'Truck_x0020_Number',
+    'Operator_x002f_Team',
+    'TMSName',
+    'Status',
+    'Quoted_x0020_Total',
+    'FinalBillableTotal',
+    'Permits_x002f_Escort_x0020_Fees_'
+  ].join(',');
+}
+
+function getGrossRevenueReportItem(item, sourceList) {
+  const f = item.fields || {};
+  const truck = getChoiceValue(f.Truck_x0020_Number || f['Truck_x0020_Number/Value'] || '');
+  const operatorTeam = getChoiceValue(f.Operator_x002f_Team || f['Operator_x002f_Team/Value'] || '');
+  const customer = getChoiceValue(f.Company || f['Company/Value'] || '');
+  const quotedTotal = getNumberValue(f.Quoted_x0020_Total);
+  const permitsEscortFees = getNumberValue(f.Permits_x002f_Escort_x0020_Fees_);
+  const grossRevenue = Math.max(0, quotedTotal - permitsEscortFees);
+
+  return {
+    id: item.id || '',
+    SourceListId: sourceList.listId,
+    SourceYear: sourceList.year,
+    BOL: f.BOLNumber_x0028_Won_x0029_ || '',
+    BidID: f.BidID || '',
+    Customer: customer || '',
+    Truck: truck || 'Unassigned Truck',
+    Operator: f.TMSName || operatorTeam || 'Unknown Operator',
+    Status: f.Status || '',
+    PickupDate: f.Pickup_x0020_Offer_x0020_Date || '',
+    PickupDateDisplay: formatShortDate(f.Pickup_x0020_Offer_x0020_Date),
+    QuotedTotal: quotedTotal,
+    PermitsEscortFees: permitsEscortFees,
+    GrossRevenue: grossRevenue
+  };
+}
+
+function buildGrossRevenueTotalsResponse(items, sourceList, year) {
+  const monthNames = Array.from({ length: 12 }, (_, index) => getMonthName(index + 1));
+  const monthKeys = monthNames.map((name, index) => ({
+    month: index + 1,
+    name,
+    shortName: getShortMonthName(index + 1)
+  }));
+
+  const targetItems = items
+    .map((item) => getGrossRevenueReportItem(item, sourceList))
+    .filter((record) => {
+      const pickup = getUtcYearMonth(record.PickupDate);
+      if (!pickup) return false;
+
+      const status = normalizeText(record.Status);
+
+      return (
+        pickup.year === Number(year) &&
+        (status === 'won' || status === 'tonu')
+      );
+    });
+
+  const truckMap = new Map();
+
+  targetItems.forEach((load) => {
+    const key = load.Truck || 'Unassigned Truck';
+
+    if (!truckMap.has(key)) {
+      truckMap.set(key, {
+        truck: key,
+        operator: load.Operator || 'Unknown Operator',
+        monthTotals: Object.fromEntries(monthKeys.map((month) => [month.month, 0])),
+        totalGrossRevenue: 0,
+        loadCount: 0,
+        permitEscortTotal: 0,
+        loads: []
+      });
+    }
+
+    const group = truckMap.get(key);
+    const pickup = getUtcYearMonth(load.PickupDate);
+
+    if ((!group.operator || group.operator === 'Unknown Operator') && load.Operator) {
+      group.operator = load.Operator;
+    }
+
+    group.monthTotals[pickup.month] += load.GrossRevenue;
+    group.totalGrossRevenue += load.GrossRevenue;
+    group.permitEscortTotal += load.PermitsEscortFees;
+    group.loadCount += 1;
+    group.loads.push(load);
+  });
+
+  const trucks = Array.from(truckMap.values())
+    .map((group) => ({
+      ...group,
+      averageMonthlyRevenue: group.totalGrossRevenue / 12,
+      monthsWithRevenue: monthKeys.filter((month) => group.monthTotals[month.month] > 0).length
+    }))
+    .sort((a, b) => String(a.truck).localeCompare(String(b.truck), undefined, { numeric: true }));
+
+  const monthlyTotals = Object.fromEntries(monthKeys.map((month) => [month.month, 0]));
+  let totalGrossRevenue = 0;
+  let totalPermitEscortExcluded = 0;
+  let totalLoadCount = 0;
+
+  trucks.forEach((truck) => {
+    monthKeys.forEach((month) => {
+      monthlyTotals[month.month] += truck.monthTotals[month.month] || 0;
+    });
+
+    totalGrossRevenue += truck.totalGrossRevenue;
+    totalPermitEscortExcluded += truck.permitEscortTotal;
+    totalLoadCount += truck.loadCount;
+  });
+
+  return {
+    success: true,
+    reportType: 'grossRevenueTotals',
+    reportLabel: `${year} Gross Revenue Totals`,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    dataSource: sourceList?.label || 'Bid Listing',
+    year: Number(year),
+    anchorDate: 'Pickup Offer Date',
+    includedStatuses: ['Won', 'TONU'],
+    revenueBasis: 'Quoted/final billable total less permits and escort fees',
+    months: monthKeys,
+    totals: {
+      loadCount: totalLoadCount,
+      totalGrossRevenue,
+      totalPermitEscortExcluded,
+      averageMonthlyRevenue: totalGrossRevenue / 12,
+      monthlyTotals
+    },
+    trucks
+  };
+}
+
+function getOrdersDueForSettlementFieldSelect() {
+  return [
+    'BOLNumber_x0028_Won_x0029_',
+    'BidID',
+    'Company',
+    'Expected_x0020_Delivery_x0020_Da',
+    'Pickup_x0020_Offer_x0020_Date',
+    'Shipment_x0020_Origin',
+    'Shipment_x0020_Destination',
+    'Pickup2State',
+    'Delivery1State',
+    'Truck_x0020_Number',
+    'Operator_x002f_Team',
+    'TMSName',
+    'Status',
+    'FinalSettleSent',
+    'FinalBillableTotal',
+    'NetPayabletoDriver'
+  ].join(',');
+}
+
+function getOrdersDueForSettlementItem(item, sourceList) {
+  const f = item.fields || {};
+  const truck = getChoiceValue(f.Truck_x0020_Number || f['Truck_x0020_Number/Value'] || '');
+  const operatorTeam = getChoiceValue(f.Operator_x002f_Team || f['Operator_x002f_Team/Value'] || '');
+  const customer = getChoiceValue(f.Company || f['Company/Value'] || '');
+
+  return {
+    id: item.id || '',
+    webUrl: item.webUrl || '',
+    SourceListId: sourceList.listId,
+    SourceYear: sourceList.year,
+    BOL: f.BOLNumber_x0028_Won_x0029_ || '',
+    BidID: f.BidID || '',
+    Customer: customer || '',
+    Operator: f.TMSName || operatorTeam || 'Unknown Operator',
+    OperatorTeam: operatorTeam || '',
+    Truck: truck || '',
+    Status: f.Status || '',
+    FinalSettleSent: f.FinalSettleSent ?? false,
+    PickupDate: f.Pickup_x0020_Offer_x0020_Date || '',
+    PickupDateDisplay: formatShortDate(f.Pickup_x0020_Offer_x0020_Date),
+    DeliveryDate: f.Expected_x0020_Delivery_x0020_Da || '',
+    DeliveryDateDisplay: formatShortDate(f.Expected_x0020_Delivery_x0020_Da),
+    Origin: f.Shipment_x0020_Origin || '',
+    Destination: f.Shipment_x0020_Destination || '',
+    OriginST: f.Pickup2State || '',
+    DestST: f.Delivery1State || '',
+    Route: [f.Shipment_x0020_Origin, f.Shipment_x0020_Destination].filter(Boolean).join(' to '),
+    BidAmount: getNumberValue(f.FinalBillableTotal),
+    DriverPay: getNumberValue(f.NetPayabletoDriver)
+  };
+}
+
+function getDateOnlyComparable(value) {
+  if (!value) return '';
+
+  const raw = String(value).trim();
+  const dateOnlyMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (dateOnlyMatch) return dateOnlyMatch[1];
+
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return '';
+
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(date);
+}
+
+function sortOrdersDueForSettlementRows(a, b) {
+  const deliveryDiff = String(a.DeliveryDate || '').localeCompare(String(b.DeliveryDate || ''));
+  if (deliveryDiff !== 0) return deliveryDiff;
+
+  const operatorDiff = String(a.Operator || '').localeCompare(String(b.Operator || ''), undefined, { numeric: true });
+  if (operatorDiff !== 0) return operatorDiff;
+
+  return String(a.BOL || '').localeCompare(String(b.BOL || ''), undefined, { numeric: true });
+}
+
+function buildOrdersDueForSettlementResponse(items, sourceList) {
+  const today = formatEasternDate();
+
+  const rows = items
+    .map((item) => getOrdersDueForSettlementItem(item, sourceList))
+    .filter((record) => {
+      const status = normalizeText(record.Status);
+      const delivery = getDateOnlyComparable(record.DeliveryDate);
+
+      return (
+        (status === 'won' || status === 'tonu') &&
+        !parseBoolean(record.FinalSettleSent) &&
+        delivery &&
+        delivery < today
+      );
+    })
+    .sort(sortOrdersDueForSettlementRows);
+
+  const totals = getSettlementTotals(rows);
+
+  return {
+    success: true,
+    reportType: 'ordersDueForSettlement',
+    reportLabel: 'Orders Due for Settlement',
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    dataSource: sourceList.label,
+    targetDate: today,
+    count: rows.length,
+    totals,
+    rows
+  };
+}
+
+
+
 
 
 
@@ -1304,6 +1570,7 @@ function getDriverRosterFieldSelect() {
     'TrailerAxles',
     'EmptyWeight',
     'StartDate',
+    'TermDate',
     'OrdersTaggedforInactive'
   ].join(',');
 }
@@ -1343,6 +1610,7 @@ function cleanDriverRosterItem(item) {
     soloOrTeam: cleanRosterText(f.SoloorTeam),
     registeredWeight: f.RegisteredWeight ?? '',
     startDate: f.StartDate || '',
+    termDate: f.TermDate || '',
     ordersTaggedForInactive: f.OrdersTaggedforInactive ?? false,
 
     tractorPlate: cleanRosterText(f.TractorPlate),
@@ -2619,6 +2887,67 @@ app.get('/reports/won-not-registered', requireLookupAccess, async (req, res) => 
     res.status(500).json({
       success: false,
       error: error.message
+    });
+  }
+});
+
+
+app.get('/reports/gross-revenue-totals', requireLookupAccess, async (req, res) => {
+  try {
+    const year = parseReportInteger(req.query.year || getEasternParts().year, 'year', 2024, 2030);
+    const token = await getGraphToken();
+    const sourceList = await getDriverSummarySourceList(token, year);
+
+    if (!sourceList) {
+      return res.status(404).json({
+        success: false,
+        error: `No Bid Listing source list was found for ${year}.`
+      });
+    }
+
+    const items = await getAllListItemsWithFields(
+      token,
+      sourceList.listId,
+      getGrossRevenueFieldSelect()
+    );
+
+    res.json(buildGrossRevenueTotalsResponse(items, sourceList, year));
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to load Gross Revenue Totals.'
+    });
+  }
+});
+
+app.get('/reports/orders-due-for-settlement', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const lists = await getSearchableBidLists(token);
+    const currentList = lists.find((list) => list.label === 'Bid Listing');
+
+    if (!currentList) {
+      return res.status(404).json({
+        success: false,
+        error: 'Bid Listing not found.'
+      });
+    }
+
+    const items = await getAllListItemsWithFields(
+      token,
+      currentList.listId,
+      getOrdersDueForSettlementFieldSelect()
+    );
+
+    res.json(buildOrdersDueForSettlementResponse(items, currentList));
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to load Orders Due for Settlement.'
     });
   }
 });

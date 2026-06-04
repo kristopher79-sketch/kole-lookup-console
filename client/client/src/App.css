@@ -2061,3 +2061,191 @@ body {
 .upload-digest-table td:nth-child(3) { width: 18% !important; }
 .upload-digest-table th:nth-child(4),
 .upload-digest-table td:nth-child(4) { width: 26% !important; }
+
+/* PASS 8: Gross Revenue / Orders Due / Inactive Driver Term Date */
+.wide-report-modal {
+  width: min(1700px, 96vw);
+}
+
+.wide-report-table-wrap {
+  overflow-x: auto;
+}
+
+.gross-revenue-table {
+  min-width: 1620px;
+  table-layout: fixed;
+  font-size: 12px;
+}
+
+.gross-revenue-table th,
+.gross-revenue-table td {
+  white-space: nowrap;
+  text-align: right;
+  padding: 9px 8px;
+}
+
+.gross-revenue-table th:nth-child(1),
+.gross-revenue-table td:nth-child(1) {
+  width: 90px;
+}
+
+.gross-revenue-table th:nth-child(2),
+.gross-revenue-table td:nth-child(2) {
+  width: 210px;
+}
+
+.gross-revenue-table th:last-child,
+.gross-revenue-table td:last-child {
+  width: 135px;
+}
+
+.gross-revenue-table th:nth-child(1),
+.gross-revenue-table td:nth-child(1),
+.gross-revenue-table th:nth-child(2),
+.gross-revenue-table td:nth-child(2) {
+  text-align: left;
+}
+
+.report-total-row td {
+  background: rgba(212, 160, 23, 0.14);
+  color: #f8fafc;
+  font-weight: 800;
+}
+
+.gross-revenue-kpi-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.orders-due-settlement-table {
+  min-width: 1100px;
+}
+
+@media (max-width: 900px) {
+  .gross-revenue-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* PASS 9: Gross Revenue quarter display to avoid 12-month compression */
+.gross-revenue-quarter-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.gross-revenue-quarter-card {
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  background: #0b1220;
+  overflow: hidden;
+}
+
+.gross-revenue-quarter-header {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 0;
+  border-bottom: 1px solid #1e293b;
+  border-radius: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gross-revenue-quarter-header:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.gross-revenue-quarter-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.quarter-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(212, 160, 23, 0.16);
+  color: #facc15;
+  font-size: 14px;
+  transition: transform 0.15s ease;
+}
+
+.quarter-caret.open {
+  transform: rotate(90deg);
+}
+
+.gross-revenue-quarter-header h3 {
+  margin: 0 0 4px;
+  color: #d4a017;
+  font-size: 18px;
+}
+
+.gross-revenue-quarter-header p {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.gross-revenue-quarter-total {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.gross-revenue-quarter-total span {
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.gross-revenue-quarter-header strong {
+  color: #f8fafc;
+  font-size: 18px;
+  white-space: nowrap;
+}
+
+.gross-revenue-quarter-table-wrap {
+  overflow-x: auto;
+}
+
+.gross-revenue-quarter-table {
+  min-width: 920px;
+  table-layout: fixed;
+}
+
+.gross-revenue-quarter-table th,
+.gross-revenue-quarter-table td {
+  white-space: nowrap;
+  text-align: right;
+  padding: 10px 10px;
+}
+
+.gross-revenue-quarter-table th:nth-child(1),
+.gross-revenue-quarter-table td:nth-child(1) {
+  width: 80px;
+  text-align: left;
+}
+
+.gross-revenue-quarter-table th:nth-child(2),
+.gross-revenue-quarter-table td:nth-child(2) {
+  width: 230px;
+  text-align: left;
+}
+
+.gross-revenue-quarter-table th:last-child,
+.gross-revenue-quarter-table td:last-child,
+.gross-revenue-quarter-table th:nth-last-child(2),
+.gross-revenue-quarter-table td:nth-last-child(2) {
+  width: 140px;
+}
