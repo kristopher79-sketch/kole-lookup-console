@@ -2121,19 +2121,19 @@ function openReportLoadDetails(load) {
                 <table className="upload-digest-table">
                   <thead>
                     <tr>
-                      <th>Upload Time</th>
-                      <th>Type</th>
                       <th>BOL</th>
-                      <th>Load Photos</th>
+                      <th>Driver</th>
+                      <th>Type</th>
+                      <th>Folder</th>
                     </tr>
                   </thead>
 
                   <tbody>
                     {records.map((record, i) => (
                       <tr key={record.id || `${record.CompositeKey || record.BOLNumber}-${i}`}>
-                        <td>{record.UploadDateDisplay || formatTrackingTimestamp(record.UploadDate)}</td>
-                        <td>{record.UploadType || '-'}</td>
                         <td>{record.BOLNumber || '-'}</td>
+                        <td>{record.DriverName || '-'}</td>
+                        <td>{record.UploadType || '-'}</td>
                         <td>
                           <button
                             type="button"

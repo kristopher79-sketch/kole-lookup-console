@@ -769,6 +769,34 @@ function formatUploadDigestTimestamp(value) {
   }).format(parsed);
 }
 
+function getUploadDigestDriverName(fields, compositeKey, bol) {
+  const directValue =
+    fields.DriverName ||
+    fields.driverName ||
+    fields.Driver_x0020_Name ||
+    fields.OperatorName ||
+    fields.Operator_x0020_Name ||
+    fields.Title ||
+    '';
+
+  if (directValue) return directValue;
+
+  const normalizedDriverKey = (key) =>
+    String(key || '')
+      .replace(/_x0020_/gi, '')
+      .replace(/[^a-z0-9]/gi, '')
+      .toLowerCase();
+
+  const matchedKey = Object.keys(fields || {}).find((key) => {
+    const normalized = normalizedDriverKey(key);
+    return normalized === 'drivername' || normalized === 'driver' || normalized.includes('drivername');
+  });
+
+  if (matchedKey && fields[matchedKey]) return fields[matchedKey];
+
+  return getDriverHintFromCompositeKey(compositeKey, bol);
+}
+
 function buildUploadDigestRecord(item) {
   const f = item.fields || {};
   const bol = f.BOLNumber || '';
@@ -781,7 +809,7 @@ function buildUploadDigestRecord(item) {
     UploadDate: f.UploadDate || '',
     UploadDateDisplay: formatUploadDigestTimestamp(f.UploadDate),
     CompositeKey: compositeKey,
-    DriverName: getDriverHintFromCompositeKey(compositeKey, bol)
+    DriverName: getUploadDigestDriverName(f, compositeKey, bol)
   };
 }
 
@@ -817,7 +845,7 @@ async function getUploadEvidenceSets(token) {
   const uploadItems = await getAllListItemsWithFields(
     token,
     uploadDigestListId,
-    'BOLNumber,UploadType,UploadDate,CompositeKey'
+    'BOLNumber,DriverName,UploadType,UploadDate,CompositeKey'
   );
 
   const pickupEvidenceBols = new Set();
@@ -2800,8 +2828,7 @@ app.get('/upload-digest', requireLookupAccess, async (req, res) => {
 
     const uploadItems = await getAllListItemsWithFields(
       token,
-      uploadDigestListId,
-      'BOLNumber,UploadType,UploadDate,CompositeKey'
+      uploadDigestListId
     );
 
     const records = uploadItems
