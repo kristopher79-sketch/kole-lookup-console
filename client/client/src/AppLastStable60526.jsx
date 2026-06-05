@@ -164,15 +164,6 @@ export default function App() {
   const [inactiveDriverRosterError, setInactiveDriverRosterError] = useState(null);
   const [inactiveDriverRosterModalOpen, setInactiveDriverRosterModalOpen] = useState(false);
   const [activeReportPanel, setActiveReportPanel] = useState('');
-  const [openReportGroups, setOpenReportGroups] = useState([]);
-  const [salesLeadsView, setSalesLeadsView] = useState('all');
-  const [salesLeadsSort, setSalesLeadsSort] = useState('name');
-  const [salesLeadsReport, setSalesLeadsReport] = useState(null);
-  const [salesLeadsLoading, setSalesLeadsLoading] = useState(false);
-  const [salesLeadsError, setSalesLeadsError] = useState(null);
-  const [selectedSalesLead, setSelectedSalesLead] = useState(null);
-  const [customerLookupLoading, setCustomerLookupLoading] = useState(false);
-  const [customerLookupError, setCustomerLookupError] = useState('');
 
   const [authError, setAuthError] = useState('');
   const [uploadDigestDate, setUploadDigestDate] = useState(getEasternDateInputValue);
@@ -253,7 +244,6 @@ export default function App() {
         setWonNotRegisteredModalOpen(false);
         setInactiveDriverRosterModalOpen(false);
         setSelectedDriverRoster(null);
-        setSelectedSalesLead(null);
       }
     }
 
@@ -285,8 +275,6 @@ export default function App() {
 
     setSortField(field);
     setSortDirection('asc');
-    setSelectedSalesLead(null);
-    setCustomerLookupError('');
   }
 
   function getSortIndicator(field) {
@@ -1227,128 +1215,6 @@ function getPositionStatusLabel(position) {
     setInactiveDriverRosterModalOpen(false);
   }
 
-
-  const salesLeadViewOptions = [
-    { value: 'all', label: 'Customer Cards' },
-    { value: 'followUpDue', label: 'Follow-up Due' },
-    { value: 'unconverted', label: 'Unconverted Leads' },
-    { value: 'aviation', label: 'Aviation Leads' },
-    { value: 'suppressed', label: 'Suppressed / Ignored Leads' }
-  ];
-
-  function toggleReportGroup(groupName) {
-    setOpenReportGroups((current) => (
-      current.includes(groupName)
-        ? current.filter((name) => name !== groupName)
-        : [...current, groupName]
-    ));
-  }
-
-  function isReportGroupOpen(groupName) {
-    return openReportGroups.includes(groupName);
-  }
-
-  function getSalesLeadViewLabel(view = salesLeadsView) {
-    return salesLeadViewOptions.find((option) => option.value === view)?.label || 'Customer Cards';
-  }
-
-  function normalizeSalesLeadDate(value) {
-    if (!value) return '';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return '';
-    return date.toISOString().slice(0, 10);
-  }
-
-  function isPlaceholderSalesDate(value) {
-    const normalized = normalizeSalesLeadDate(value);
-    return normalized >= '2099-01-01';
-  }
-
-  function formatSalesDate(value) {
-    if (!value || isPlaceholderSalesDate(value)) return '-';
-    return formatDateOnly(value);
-  }
-
-  function formatPercent(value) {
-    const number = Number(value || 0);
-    return `${(number * 100).toLocaleString('en-US', { maximumFractionDigits: 1 })}%`;
-  }
-
-  function getSalesLeadStatusClass(status) {
-    const s = String(status || '').toLowerCase();
-    if (s === 'converted') return 'sales-status converted';
-    if (s === 'unconverted') return 'sales-status unconverted';
-    if (s === 'ignore') return 'sales-status ignored';
-    if (s === 'inactive') return 'sales-status inactive';
-    return 'sales-status';
-  }
-
-  async function loadSalesLeadsReport(view = salesLeadsView, sort = salesLeadsSort) {
-    setSalesLeadsLoading(true);
-    setSalesLeadsError(null);
-    setSalesLeadsReport(null);
-
-    try {
-      const params = new URLSearchParams({ view, sort });
-      const res = await authedFetch(`${API}/reports/sales-leads?${params.toString()}`);
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || data.message || 'Unable to load Sales Leads.');
-      }
-
-      setSalesLeadsReport(data);
-    } catch (err) {
-      setSalesLeadsError({
-        code: 'REPORT_ERROR',
-        message: err.message || 'Unable to load Sales Leads.'
-      });
-    } finally {
-      setSalesLeadsLoading(false);
-    }
-  }
-
-  async function openCustomerCardForName(customerName) {
-    const cleanName = String(customerName || '').trim();
-
-    if (!cleanName) {
-      setCustomerLookupError('This order does not have a customer name to match.');
-      return;
-    }
-
-    setCustomerLookupLoading(true);
-    setCustomerLookupError('');
-
-    try {
-      const params = new URLSearchParams({ customer: cleanName });
-      const res = await authedFetch(`${API}/sales-leads/by-customer?${params.toString()}`);
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || data.message || 'Unable to lookup customer card.');
-      }
-
-      if (!data.matches || data.matches.length === 0) {
-        throw new Error(`No Sales Leads customer card matched ${cleanName}.`);
-      }
-
-      setSelectedSalesLead(data.matches[0]);
-    } catch (err) {
-      setCustomerLookupError(err.message || 'Unable to lookup customer card.');
-    } finally {
-      setCustomerLookupLoading(false);
-    }
-  }
-
-  function openSalesLeadCard(lead) {
-    setSelectedSalesLead(lead);
-    setCustomerLookupError('');
-  }
-
-  function closeSalesLeadModal() {
-    setSelectedSalesLead(null);
-  }
-
   function openRosterFromReport(roster) {
     if (!roster) return;
 
@@ -1492,17 +1358,7 @@ function openReportLoadDetails(load) {
         <DetailItem label="Source" value={selected.SourceYear || selected.SourceList} />
         <DetailItem label="Requestor" value={selected.Requestor} />
 
-        <DetailItem label="Customer" value={selected.Customer} wide>
-          <button
-            type="button"
-            className="view-button customer-card-button"
-            onClick={() => openCustomerCardForName(selected.Customer)}
-            disabled={!selected.Customer || customerLookupLoading}
-          >
-            {customerLookupLoading ? 'Looking up...' : 'View Customer Card'}
-          </button>
-          {customerLookupError && <small className="inline-error">{customerLookupError}</small>}
-        </DetailItem>
+        <DetailItem label="Customer" value={selected.Customer} wide />
         <DetailItem label="Freight" value={selected.Freight} />
 
         <SectionTitle>Route & Schedule</SectionTitle>
@@ -2511,7 +2367,7 @@ function openReportLoadDetails(load) {
     return (
       <div className="search-card upload-digest-panel">
         <div className="upload-digest-section-header">
-          <h2>Job Photo Uploads</h2>
+          <h2>Uploads</h2>
         </div>
 
         <div className="upload-digest-header-row">
@@ -2531,7 +2387,7 @@ function openReportLoadDetails(load) {
             aria-expanded={uploadDigestOpen}
           >
             <span className="upload-digest-title">
-              Pickup and Delivery Photos for {dateLabel}
+              Pickup and Delivery Uploads for {dateLabel}
             </span>
             <span className="upload-digest-count">
               {uploadDigestLoading ? 'Loading...' : `${count} logged`}
@@ -2617,247 +2473,6 @@ function openReportLoadDetails(load) {
     );
   }
 
-
-  function SalesLeadCard({ lead }) {
-    const winRate = lead.QuoteCount > 0 ? lead.QuotesWon / lead.QuoteCount : 0;
-    const followUpLabel = lead.FollowUpDue
-      ? `Due ${formatSalesDate(lead.NextTouchDate)}`
-      : lead.FollowUpHandling === 'Suppressed'
-        ? 'Suppressed'
-        : 'None due';
-
-    return (
-      <button
-        type="button"
-        className={`sales-lead-card ${lead.FollowUpDue ? 'follow-up-due' : ''}`}
-        onClick={() => openSalesLeadCard(lead)}
-      >
-        <div className="sales-lead-card-header">
-          <div>
-            <h4>{lead.CompanyName || 'Unnamed customer'}</h4>
-            <p>{lead.CustomerCode || 'No customer code'}</p>
-          </div>
-          <div className="sales-lead-badges">
-            <span className={getSalesLeadStatusClass(lead.Status)}>{lead.Status || '-'}</span>
-            {lead.AviationRelated && <span className="sales-status aviation">Aviation</span>}
-          </div>
-        </div>
-
-        <div className="sales-lead-metrics">
-          <div>
-            <span>Quotes</span>
-            <strong>{formatReportNumber(lead.QuoteCount)}</strong>
-          </div>
-          <div>
-            <span>Wins</span>
-            <strong>{formatReportNumber(lead.QuotesWon)}</strong>
-          </div>
-          <div>
-            <span>Win Rate</span>
-            <strong>{formatPercent(winRate)}</strong>
-          </div>
-        </div>
-
-        <div className="sales-lead-footer">
-          <span>Last quote: {formatSalesDate(lead.LastQuoteDate)}</span>
-          <strong>{followUpLabel}</strong>
-        </div>
-      </button>
-    );
-  }
-
-  function SalesLeadsReportPanel() {
-    const summary = salesLeadsReport?.summary || {};
-    const records = salesLeadsReport?.records || [];
-
-    return (
-      <div className="report-card compact-report-card accordion-inner-card sales-report-card">
-        <div className="report-card-header centered-report-header">
-          <div>
-            <h3>{getSalesLeadViewLabel()}</h3>
-            <p>Browse Sales Leads as reusable customer cards.</p>
-          </div>
-        </div>
-
-        <div className="sales-summary-grid">
-          <div><span>Total</span><strong>{formatReportNumber(summary.total)}</strong></div>
-          <div><span>Converted</span><strong>{formatReportNumber(summary.converted)}</strong></div>
-          <div><span>Unconverted</span><strong>{formatReportNumber(summary.unconverted)}</strong></div>
-          <div><span>Follow-up Due</span><strong>{formatReportNumber(summary.followUpDue)}</strong></div>
-          <div><span>Aviation</span><strong>{formatReportNumber(summary.aviation)}</strong></div>
-        </div>
-
-        <div className="report-controls centered-report-controls sales-report-controls">
-          <label>
-            <span>Sales View</span>
-            <select
-              value={salesLeadsView}
-              onChange={(e) => {
-                const nextView = e.target.value;
-                const nextSort = nextView === 'followUpDue'
-                  ? 'followUp'
-                  : (nextView === 'unconverted' || nextView === 'aviation')
-                    ? 'quotes'
-                    : 'name';
-
-                setSalesLeadsView(nextView);
-                setSalesLeadsSort(nextSort);
-                setSalesLeadsReport(null);
-                setSalesLeadsError(null);
-              }}
-            >
-              {salesLeadViewOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            <span>Sort</span>
-            <select
-              value={salesLeadsSort}
-              onChange={(e) => {
-                setSalesLeadsSort(e.target.value);
-                setSalesLeadsReport(null);
-                setSalesLeadsError(null);
-              }}
-            >
-              <option value="name">Alphabetical</option>
-              <option value="quotes">Most quotes</option>
-              <option value="wins">Most wins</option>
-              <option value="lastQuote">Recently quoted</option>
-              <option value="followUp">Follow-up due</option>
-            </select>
-          </label>
-
-          <button onClick={() => loadSalesLeadsReport()} disabled={salesLeadsLoading}>
-            {salesLeadsLoading ? 'Loading Customers...' : 'Load Customer Cards'}
-          </button>
-        </div>
-
-        {salesLeadsError && (
-          <div className="report-alert error">
-            <h4>Sales report could not be loaded.</h4>
-            <p>{salesLeadsError.message}</p>
-          </div>
-        )}
-
-        {salesLeadsReport && (
-          <div className="sales-report-results">
-            <div className="report-ready-card">
-              <div>
-                <strong>{salesLeadsReport.count} customer card{salesLeadsReport.count === 1 ? '' : 's'} loaded.</strong>
-                <span> Source: Sales Leads.</span>
-              </div>
-            </div>
-
-            {records.length === 0 ? (
-              <div className="msg">No customers matched this sales view.</div>
-            ) : (
-              <div className="sales-lead-card-grid">
-                {records.map((lead) => (
-                  <SalesLeadCard key={lead.id || lead.CompanyName} lead={lead} />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  function SalesLeadProfileModal() {
-    if (!selectedSalesLead) return null;
-
-    const lead = selectedSalesLead;
-    const winRate = lead.QuoteCount > 0 ? lead.QuotesWon / lead.QuoteCount : 0;
-    const activeYears = (lead.YearDetails || []).filter((year) => year.quotes || year.wins || year.firstQuote || year.lastQuote);
-
-    return (
-      <div className="modal-overlay report-modal-overlay sales-profile-overlay" onClick={closeSalesLeadModal}>
-        <div className="detail-modal report-modal sales-profile-modal" onClick={(e) => e.stopPropagation()}>
-          <div className="detail-header report-modal-header">
-            <div>
-              <h2>{lead.CompanyName || 'Customer Card'}</h2>
-              <p>{lead.CustomerCode || 'No customer code'} · {lead.Status || 'No status'}</p>
-            </div>
-
-            <button className="close-button" onClick={closeSalesLeadModal}>
-              Close
-            </button>
-          </div>
-
-          <div className="modal-body report-modal-body">
-            <div className="detail-grid sales-profile-grid">
-              <SectionTitle>Customer Summary</SectionTitle>
-              <DetailItem label="Company" value={lead.CompanyName} wide />
-              <DetailItem label="Customer Code" value={lead.CustomerCode} />
-              <DetailItem label="Status" value={lead.Status} />
-              <DetailItem label="Aviation Related" value={lead.AviationRelated ? 'Yes' : 'No'} />
-              <DetailItem label="Converted Cold" value={lead.ConvertedCold ? 'Yes' : 'No'} />
-              <DetailItem label="First Seen" value={formatSalesDate(lead.FirstSeen)} />
-              <DetailItem label="Conversion Date" value={formatSalesDate(lead.ConversionDate)} />
-
-              <SectionTitle>Activity</SectionTitle>
-              <DetailItem label="Quote Count" value={formatReportNumber(lead.QuoteCount)} />
-              <DetailItem label="Quotes Won" value={formatReportNumber(lead.QuotesWon)} />
-              <DetailItem label="Win Rate" value={formatPercent(winRate)} />
-              <DetailItem label="First Quote" value={formatSalesDate(lead.FirstQuoteDate)} />
-              <DetailItem label="Last Quote" value={formatSalesDate(lead.LastQuoteDate)} />
-              <DetailItem label="Touch Count" value={formatReportNumber(lead.TouchCount)} />
-
-              <SectionTitle>Follow-up</SectionTitle>
-              <DetailItem label="Follow-up Pending" value={lead.FollowUpPending ? 'Yes' : 'No'} />
-              <DetailItem label="Follow-up Due" value={lead.FollowUpDue ? 'Yes' : 'No'} />
-              <DetailItem label="Next Touch" value={formatSalesDate(lead.NextTouchDate)} />
-              <DetailItem label="Handling" value={lead.FollowUpHandling} />
-              <DetailItem label="Suppression Date" value={formatSalesDate(lead.SuppressionDate)} />
-              <DetailItem label="Suppression Reason" value={lead.SuppressionReason} className="full" />
-            </div>
-
-            <div className="driver-report-section sales-year-section">
-              <div className="driver-report-section-header">
-                <div>
-                  <h4>Year-by-Year Quote Activity</h4>
-                  <p>Quote and win counts from the Sales Leads list.</p>
-                </div>
-              </div>
-
-              {activeYears.length === 0 ? (
-                <div className="msg">No yearly quote activity recorded.</div>
-              ) : (
-                <div className="report-table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Year</th>
-                        <th>Quotes</th>
-                        <th>Wins</th>
-                        <th>First Quote</th>
-                        <th>Last Quote</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {activeYears.map((year) => (
-                        <tr key={year.year}>
-                          <td>{year.year}</td>
-                          <td>{formatReportNumber(year.quotes)}</td>
-                          <td>{formatReportNumber(year.wins)}</td>
-                          <td>{formatSalesDate(year.firstQuote)}</td>
-                          <td>{formatSalesDate(year.lastQuote)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   function DriverSummaryReport() {
     const monthOptions = Array.from({ length: 12 }, (_, index) => index + 1);
     const isGrossRevenueOpen = activeReportPanel === 'grossRevenue';
@@ -2866,8 +2481,6 @@ function openReportLoadDetails(load) {
     const isWeeklySettlementOpen = activeReportPanel === 'weeklySettlement';
     const isWonNotRegisteredOpen = activeReportPanel === 'wonNotRegistered';
     const isInactiveDriverRosterOpen = activeReportPanel === 'inactiveDriverRoster';
-    const isOperationalReportsOpen = isReportGroupOpen('operational');
-    const isSalesReportsOpen = isReportGroupOpen('sales');
 
     return (
       <div className="search-card reports-panel">
@@ -2878,21 +2491,6 @@ function openReportLoadDetails(load) {
         </div>
 
         <div className="reports-accordion-list">
-          <div className={`report-group-accordion ${isOperationalReportsOpen ? 'open' : ''}`}>
-            <button
-              type="button"
-              className="report-group-button"
-              onClick={() => toggleReportGroup('operational')}
-            >
-              <div>
-                <strong>Operational Reports</strong>
-                <span>Revenue, settlements, driver/order reporting</span>
-              </div>
-              <span className="report-accordion-icon">{isOperationalReportsOpen ? '▼' : '▶'}</span>
-            </button>
-
-            {isOperationalReportsOpen && (
-              <div className="report-group-body">
           <div className={`report-accordion ${isGrossRevenueOpen ? 'open' : ''}`}>
             <button
               type="button"
@@ -3276,44 +2874,6 @@ function openReportLoadDetails(load) {
               </div>
             )}
           </div>
-              </div>
-            )}
-          </div>
-
-          <div className={`report-group-accordion ${isSalesReportsOpen ? 'open' : ''}`}>
-            <button
-              type="button"
-              className="report-group-button"
-              onClick={() => toggleReportGroup('sales')}
-            >
-              <div>
-                <strong>Sales Reports</strong>
-                <span>Customers, leads, follow-ups, aviation prospects</span>
-              </div>
-              <span className="report-accordion-icon">{isSalesReportsOpen ? '▼' : '▶'}</span>
-            </button>
-
-            {isSalesReportsOpen && (
-              <div className="report-group-body">
-                <div className={`report-accordion ${activeReportPanel === 'salesLeads' ? 'open' : ''}`}>
-                  <button
-                    type="button"
-                    className="report-accordion-button"
-                    onClick={() => toggleReportPanel('salesLeads')}
-                  >
-                    <span>{getSalesLeadViewLabel()}</span>
-                    <span className="report-accordion-icon">{activeReportPanel === 'salesLeads' ? '▼' : '▶'}</span>
-                  </button>
-
-                  {activeReportPanel === 'salesLeads' && (
-                    <div className="report-accordion-body">
-                      <SalesLeadsReportPanel />
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
         </div>
       </div>
     );
@@ -3384,7 +2944,7 @@ function openReportLoadDetails(load) {
 
     <h1>Kole Connect</h1>
     <p>
-      Search orders, BOLs, customers, drivers,
+      Search Bid Listing records, review order details,
       and inspect dispatch or billing data.
     </p>
   </div>
@@ -3905,7 +3465,6 @@ function openReportLoadDetails(load) {
       )}
 
       <DriverRosterModal />
-      <SalesLeadProfileModal />
 
       {selected && (
         <div className="modal-overlay" onClick={closeModal}>
