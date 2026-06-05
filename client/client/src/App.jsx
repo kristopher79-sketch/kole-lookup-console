@@ -2675,8 +2675,7 @@ function openReportLoadDetails(load) {
         <div className="report-card-header centered-report-header">
           <div>
             <h3>{getSalesLeadViewLabel()}</h3>
-            <p>Browse Sales Leads as reusable customer cards.</p>
-          </div>
+               </div>
         </div>
 
         <div className="sales-summary-grid">
@@ -2744,13 +2743,6 @@ function openReportLoadDetails(load) {
 
         {salesLeadsReport && (
           <div className="sales-report-results">
-            <div className="report-ready-card">
-              <div>
-                <strong>{salesLeadsReport.count} customer card{salesLeadsReport.count === 1 ? '' : 's'} loaded.</strong>
-                <span> Source: Sales Leads.</span>
-              </div>
-            </div>
-
             {records.length === 0 ? (
               <div className="msg">No customers matched this sales view.</div>
             ) : (
@@ -2840,7 +2832,7 @@ function openReportLoadDetails(load) {
                     <tbody>
                       {activeYears.map((year) => (
                         <tr key={year.year}>
-                          <td>{year.year}</td>
+                          <td>{year.year}{year.isCurrentYear ? ' (Current)' : ''}</td>
                           <td>{formatReportNumber(year.quotes)}</td>
                           <td>{formatReportNumber(year.wins)}</td>
                           <td>{formatSalesDate(year.firstQuote)}</td>

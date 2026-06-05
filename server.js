@@ -874,13 +874,29 @@ function cleanSalesLeadItem(item) {
   const quotesWon = Number(f.QuotesWon || 0) || 0;
   const winRate = quoteCount > 0 ? quotesWon / quoteCount : 0;
 
-  const yearDetails = [2024, 2025, 2026, 2027, 2028, 2029, 2030].map((year) => ({
-    year,
-    quotes: Number(f[`Quotes${year}`] || 0) || 0,
-    wins: Number(f[`Wins${year}`] || 0) || 0,
-    firstQuote: f[`FirstQuote${year}`] || '',
-    lastQuote: f[`LastQuote${year}`] || ''
-  }));
+  const currentYear = Number(formatEasternDate().slice(0, 4));
+  const archiveYears = [2024, 2025].filter((year) => year < currentYear);
+  const archiveQuoteTotal = archiveYears.reduce((sum, year) => sum + (Number(f[`Quotes${year}`] || 0) || 0), 0);
+  const archiveWinTotal = archiveYears.reduce((sum, year) => sum + (Number(f[`Wins${year}`] || 0) || 0), 0);
+
+  const yearDetails = [2024, 2025, 2026, 2027, 2028, 2029, 2030].map((year) => {
+    const isCurrentYear = year === currentYear;
+    const quotes = isCurrentYear
+      ? Math.max(0, quoteCount - archiveQuoteTotal)
+      : (Number(f[`Quotes${year}`] || 0) || 0);
+    const wins = isCurrentYear
+      ? Math.max(0, quotesWon - archiveWinTotal)
+      : (Number(f[`Wins${year}`] || 0) || 0);
+
+    return {
+      year,
+      isCurrentYear,
+      quotes,
+      wins,
+      firstQuote: f[`FirstQuote${year}`] || '',
+      lastQuote: f[`LastQuote${year}`] || ''
+    };
+  });
 
   const record = {
     id: item.id || f.id || '',
@@ -3443,7 +3459,7 @@ app.get('/upload-digest', requireLookupAccess, async (req, res) => {
       uploadDigestListId
     );
 
-    const records = uploadItems
+    const rawRecords = uploadItems
       .map(buildUploadDigestRecord)
       .filter((record) => normalizeEasternDateOnly(record.UploadDate) === targetDate)
       .sort((a, b) => {
@@ -3457,11 +3473,26 @@ app.get('/upload-digest', requireLookupAccess, async (req, res) => {
         return bTime - aTime;
       });
 
+    const seenUploadKeys = new Set();
+    const records = [];
+
+    rawRecords.forEach((record) => {
+      const bolKey = normalizeBolKey(record.BOLNumber);
+      const typeKey = normalizeText(record.UploadType) || 'unknown';
+      const uploadKey = `${bolKey}|${typeKey}`;
+
+      if (!bolKey || seenUploadKeys.has(uploadKey)) return;
+
+      seenUploadKeys.add(uploadKey);
+      records.push(record);
+    });
+
     res.json({
       success: true,
       generatedAt: `${formatEasternTimestamp()} Eastern`,
       targetDate,
       count: records.length,
+      rawCount: rawRecords.length,
       recordsScanned: uploadItems.length,
       records
     });

@@ -2464,11 +2464,6 @@ body {
   color: #f87171 !important;
 }
 
-
-.sales-profile-overlay {
-  z-index: 1200;
-}
-
 .sales-profile-modal {
   width: min(1200px, 94vw);
 }
@@ -2502,4 +2497,8 @@ body {
     flex-direction: row;
     flex-wrap: wrap;
   }
+}
+
+.sales-profile-overlay {
+  z-index: 1200;
 }
