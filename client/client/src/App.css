@@ -475,28 +475,35 @@ tbody tr:hover {
 }
 
 .operations-card {
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid #9ca3af;
   border-radius: 14px;
   padding: 18px;
-  background: rgba(255,255,255,0.04);
+  background: #d1d5db;
+  color: #111827;
   text-align: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
 }
 
 .operations-card span {
   display: block;
   font-size: 0.85rem;
-  opacity: 0.75;
+  color: #374151;
   margin-bottom: 8px;
+  font-weight: 700;
 }
 
 .operations-card strong {
+  display: block;
+  color: #000000;
   font-size: 2rem;
-}
-.operations-panel {
+}.operations-panel {
   width: min(1100px, 100%);
   margin: 20px auto 0;
 }
-
+.operations-card:hover {
+  background: #e5e7eb;
+  transform: translateY(-1px);
+}
 .operations-table-wrap {
   overflow-x: auto;
   border-radius: 12px;
@@ -2812,4 +2819,15 @@ body {
     flex-direction: column;
     align-items: flex-start;
   }
+}
+
+/* FRONT SEARCH WIDTH TUNING */
+.container > .search-card {
+  width: 100% !important;
+  max-width: 1000px !important;
+}
+
+/* Login token box: shorter than the normal search bar */
+.container > .search-card:has(input[type="password"]) {
+  max-width: 400px !important;
 }
