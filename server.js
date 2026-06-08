@@ -5,6 +5,7 @@ const cors = require('cors');
 
 const app = express();
 app.use(cors());
+app.use(express.json({ limit: '256kb' }));
 
 const PORT = process.env.PORT || 5000;
 
@@ -12,6 +13,8 @@ const ARCHIVE_YEAR_MIN = 2024;
 const ARCHIVE_YEAR_MAX = 2030;
 const DEFAULT_UPLOAD_DIGEST_LIST_ID = 'c9e907f9-cdac-4657-9da6-cc6ecfaa19a8';
 const DEFAULT_SALES_LEADS_LIST_ID = '86cc3352-fb75-421d-a5e4-4b16d011fd1e';
+const DEFAULT_SALES_LEADS_NOTES_LIST_NAME = 'Sales Leads Notes Log';
+const SALES_LEAD_NOTE_MAX_LENGTH = 63000;
 
 function getLoadPicturesFolderId() {
   return (
@@ -25,6 +28,8 @@ function getLoadPicturesFolderId() {
 
 let cachedBidLists = null;
 let cachedBidListsAt = 0;
+let cachedSalesLeadsNotesListId = null;
+let cachedSalesLeadsNotesListIdAt = 0;
 const BID_LIST_CACHE_MS = 5 * 60 * 1000;
 
 function getAllowedLookupTokens() {
@@ -106,6 +111,26 @@ async function graphGet(token, url) {
   });
 
   const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(JSON.stringify(data));
+  }
+
+  return data;
+}
+
+
+async function graphPost(token, url, body) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+
+  const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
     throw new Error(JSON.stringify(data));
@@ -821,6 +846,55 @@ function getSalesLeadsListId() {
   return process.env.SALES_LEADS_LIST_ID || DEFAULT_SALES_LEADS_LIST_ID;
 }
 
+function normalizeGraphName(value) {
+  return String(value || '')
+    .replace(/_x0020_/gi, ' ')
+    .replace(/[^a-z0-9]+/gi, '')
+    .toLowerCase();
+}
+
+async function getListIdByDisplayName(token, displayName) {
+  const target = normalizeGraphName(displayName);
+  if (!target) return '';
+
+  const data = await graphGet(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists?$select=id,displayName,list`
+  );
+
+  const lists = (data.value || []).filter((list) => list?.list?.hidden !== true);
+
+  const exactMatch = lists.find((list) => normalizeGraphName(list.displayName) === target);
+  if (exactMatch?.id) return exactMatch.id;
+
+  const fuzzyMatch = lists.find((list) => {
+    const normalized = normalizeGraphName(list.displayName);
+    return normalized.includes('salesleadsnoteslog') || (
+      normalized.includes('sales') &&
+      normalized.includes('lead') &&
+      normalized.includes('note')
+    );
+  });
+
+  return fuzzyMatch?.id || '';
+}
+
+async function getSalesLeadsNotesListId(token) {
+  const configured = String(process.env.SALES_LEADS_NOTES_LIST_ID || '').trim();
+  if (configured) return configured;
+
+  const now = Date.now();
+  if (cachedSalesLeadsNotesListId && now - cachedSalesLeadsNotesListIdAt < BID_LIST_CACHE_MS) {
+    return cachedSalesLeadsNotesListId;
+  }
+
+  const discovered = await getListIdByDisplayName(token, DEFAULT_SALES_LEADS_NOTES_LIST_NAME);
+  cachedSalesLeadsNotesListId = discovered || '';
+  cachedSalesLeadsNotesListIdAt = now;
+
+  return cachedSalesLeadsNotesListId;
+}
+
 function getSalesLeadFieldSelect() {
   return [
     'CompanyName',
@@ -946,6 +1020,207 @@ function enrichSalesLeadWithRevenue(record, customerRevenueIndex) {
       revenueWonLoads: revenue.wonLoadsByYear[year.year] || 0
     }))
   };
+}
+
+function getFlexibleFieldValue(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') {
+    return value.Value || value.value || value.Label || value.label || value.DisplayName || value.displayName || value.Title || value.title || '';
+  }
+  return value;
+}
+
+function getFlexibleField(fields, candidateNames) {
+  for (const name of candidateNames) {
+    if (fields[name] !== undefined && fields[name] !== null && fields[name] !== '') {
+      return getFlexibleFieldValue(fields[name]);
+    }
+  }
+
+  const normalizedCandidates = candidateNames.map(normalizeGraphName);
+  const matchedKey = Object.keys(fields || {}).find((key) => normalizedCandidates.includes(normalizeGraphName(key)));
+
+  return matchedKey ? getFlexibleFieldValue(fields[matchedKey]) : '';
+}
+
+function stripHtml(value) {
+  return String(value || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+function cleanSalesLeadNoteItem(item) {
+  const f = item.fields || {};
+  const noteDate = getFlexibleField(f, [
+    'TouchDate',
+    'Touch_x0020_Date',
+    'NoteDate',
+    'Note_x0020_Date',
+    'ActivityDate',
+    'Activity_x0020_Date',
+    'CreatedDate',
+    'Created'
+  ]) || item.createdDateTime || '';
+
+  const noteText = stripHtml(getFlexibleField(f, [
+    'Note',
+    'Notes',
+    'NoteText',
+    'Note_x0020_Text',
+    'Comments',
+    'Comment',
+    'Body',
+    'Description'
+  ]) || f.Title || '');
+
+  const title = stripHtml(getFlexibleField(f, [
+    'Subject',
+    'Title',
+    'Topic'
+  ]));
+
+  return {
+    id: item.id || '',
+    CustomerCode: getFlexibleField(f, ['CustomerCode', 'Customer_x0020_Code', 'Customer']) || '',
+    NoteDate: noteDate,
+    NoteDateDisplay: formatShortDate(noteDate),
+    NoteType: getFlexibleField(f, ['NoteType', 'Note_x0020_Type', 'ActivityType', 'Type']) || '',
+    Title: title,
+    Note: noteText,
+    Author: getFlexibleField(f, ['Author', 'CreatedBy', 'Created_x0020_By', 'EnteredBy', 'Entered_x0020_By']) || item.createdBy?.user?.displayName || '',
+    NextTouchDate: getFlexibleField(f, ['NextTouchDate', 'Next_x0020_Touch', 'FollowUpDate', 'Follow_x0020_Up_x0020_Date']) || '',
+    webUrl: item.webUrl || ''
+  };
+}
+
+async function getSalesLeadNotesBundle(token) {
+  try {
+    const notesListId = await getSalesLeadsNotesListId(token);
+
+    if (!notesListId) {
+      return {
+        notesIndex: new Map(),
+        sourceListId: '',
+        status: 'notFound',
+        error: `${DEFAULT_SALES_LEADS_NOTES_LIST_NAME} was not found. Set SALES_LEADS_NOTES_LIST_ID or confirm the list display name.`,
+        recordsScanned: 0
+      };
+    }
+
+    const items = await getAllListItemsWithFields(token, notesListId);
+    const notes = items
+      .map(cleanSalesLeadNoteItem)
+      .filter((note) => normalizeText(note.CustomerCode) && (note.Note || note.Title));
+
+    const notesIndex = new Map();
+
+    notes.forEach((note) => {
+      const key = normalizeText(note.CustomerCode);
+      if (!notesIndex.has(key)) notesIndex.set(key, []);
+      notesIndex.get(key).push(note);
+    });
+
+    notesIndex.forEach((customerNotes) => {
+      customerNotes.sort((a, b) => {
+        const aTime = new Date(a.NoteDate || 0).getTime() || 0;
+        const bTime = new Date(b.NoteDate || 0).getTime() || 0;
+        return bTime - aTime;
+      });
+    });
+
+    return {
+      notesIndex,
+      sourceListId: notesListId,
+      status: 'available',
+      error: '',
+      recordsScanned: notes.length
+    };
+  } catch (error) {
+    return {
+      notesIndex: new Map(),
+      sourceListId: '',
+      status: 'error',
+      error: error.message || 'Unable to load Sales Leads Notes Log.',
+      recordsScanned: 0
+    };
+  }
+}
+
+function enrichSalesLeadWithNotes(record, notesIndex) {
+  const customerCode = normalizeText(record.CustomerCode);
+  const notes = customerCode ? notesIndex.get(customerCode) || [] : [];
+
+  return {
+    ...record,
+    SalesNotes: notes,
+    SalesNotesCount: notes.length,
+    LastSalesNoteDate: notes[0]?.NoteDate || ''
+  };
+}
+
+
+function cleanSalesLeadNoteInput(value) {
+  return String(value || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+}
+
+function getSalesLeadNoteTitle(customerName, customerCode, touchDate) {
+  const customer = String(customerName || customerCode || 'Sales Note').trim();
+  return `${customer} - ${touchDate}`.slice(0, 255);
+}
+
+async function createSalesLeadNote(token, input) {
+  const notesListId = await getSalesLeadsNotesListId(token);
+
+  if (!notesListId) {
+    throw new Error(`${DEFAULT_SALES_LEADS_NOTES_LIST_NAME} was not found. Set SALES_LEADS_NOTES_LIST_ID or confirm the list display name.`);
+  }
+
+  const customerCode = String(input.customerCode || '').trim();
+  const customerName = String(input.customerName || '').trim();
+  const noteText = cleanSalesLeadNoteInput(input.note || input.notes || '');
+  const touchDate = formatEasternDate();
+
+  if (!customerCode) {
+    const error = new Error('Customer Code is required before adding a sales note.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!noteText) {
+    const error = new Error('Enter a note before saving.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (noteText.length > SALES_LEAD_NOTE_MAX_LENGTH) {
+    const error = new Error(`Sales note is too long. Limit notes to ${SALES_LEAD_NOTE_MAX_LENGTH.toLocaleString('en-US')} characters.`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const item = await graphPost(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${notesListId}/items`,
+    {
+      fields: {
+        Title: getSalesLeadNoteTitle(customerName, customerCode, touchDate),
+        CustomerCode: customerCode,
+        CustomerName: customerName,
+        TouchDate: touchDate,
+        Notes: noteText
+      }
+    }
+  );
+
+  return cleanSalesLeadNoteItem(item);
 }
 
 async function getCustomerOrdersByCodeAndYear(token, customerCode, year) {
@@ -3175,13 +3450,15 @@ app.get('/reports/sales-leads', requireLookupAccess, async (req, res) => {
     const view = String(req.query.view || 'all').trim() || 'all';
     const sort = String(req.query.sort || '').trim();
     const token = await getGraphToken();
-    const [items, customerRevenueIndex] = await Promise.all([
+    const [items, customerRevenueIndex, notesBundle] = await Promise.all([
       getAllListItemsWithFields(token, salesLeadsListId, getSalesLeadFieldSelect()),
-      buildCustomerRevenueIndex(token)
+      buildCustomerRevenueIndex(token),
+      getSalesLeadNotesBundle(token)
     ]);
     const records = items
       .map(cleanSalesLeadItem)
-      .map((record) => enrichSalesLeadWithRevenue(record, customerRevenueIndex));
+      .map((record) => enrichSalesLeadWithRevenue(record, customerRevenueIndex))
+      .map((record) => enrichSalesLeadWithNotes(record, notesBundle.notesIndex));
     const filtered = filterSalesLeads(records, view);
 
     let sortMode = sort || 'name';
@@ -3194,6 +3471,10 @@ app.get('/reports/sales-leads', requireLookupAccess, async (req, res) => {
       generatedAt: `${formatEasternTimestamp()} Eastern`,
       reportLabel: 'Sales Leads',
       sourceListId: salesLeadsListId,
+      notesSourceListId: notesBundle.sourceListId,
+      notesStatus: notesBundle.status,
+      notesError: notesBundle.error,
+      notesScanned: notesBundle.recordsScanned,
       view,
       sort: sortMode,
       recordsScanned: records.length,
@@ -3252,6 +3533,28 @@ app.get('/reports/sales-leads/orders', requireLookupAccess, async (req, res) => 
   }
 });
 
+
+app.post('/sales-leads/notes', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const note = await createSalesLeadNote(token, req.body || {});
+
+    res.status(201).json({
+      success: true,
+      message: 'Sales note added. Refresh the Sales Leads customer cards to see the new note in the log.',
+      maxLength: SALES_LEAD_NOTE_MAX_LENGTH,
+      note
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to add sales note.'
+    });
+  }
+});
+
 app.get('/sales-leads/by-customer', requireLookupAccess, async (req, res) => {
   try {
     const salesLeadsListId = getSalesLeadsListId();
@@ -3273,13 +3576,15 @@ app.get('/sales-leads/by-customer', requireLookupAccess, async (req, res) => {
     }
 
     const token = await getGraphToken();
-    const [items, customerRevenueIndex] = await Promise.all([
+    const [items, customerRevenueIndex, notesBundle] = await Promise.all([
       getAllListItemsWithFields(token, salesLeadsListId, getSalesLeadFieldSelect()),
-      buildCustomerRevenueIndex(token)
+      buildCustomerRevenueIndex(token),
+      getSalesLeadNotesBundle(token)
     ]);
     const records = items
       .map(cleanSalesLeadItem)
-      .map((record) => enrichSalesLeadWithRevenue(record, customerRevenueIndex));
+      .map((record) => enrichSalesLeadWithRevenue(record, customerRevenueIndex))
+      .map((record) => enrichSalesLeadWithNotes(record, notesBundle.notesIndex));
     const customerKey = normalizeCustomerName(customer);
     const codeKey = normalizeText(customerCode);
 
@@ -3306,6 +3611,10 @@ app.get('/sales-leads/by-customer', requireLookupAccess, async (req, res) => {
       success: true,
       generatedAt: `${formatEasternTimestamp()} Eastern`,
       sourceListId: salesLeadsListId,
+      notesSourceListId: notesBundle.sourceListId,
+      notesStatus: notesBundle.status,
+      notesError: notesBundle.error,
+      notesScanned: notesBundle.recordsScanned,
       query: { customer, customerCode },
       count: matches.length,
       matches

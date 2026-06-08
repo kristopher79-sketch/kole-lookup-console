@@ -14,6 +14,8 @@ const API =
     ? 'http://localhost:5000'
     : 'https://kole-lookup-console.onrender.com');
 
+const SALES_NOTE_MAX_LENGTH = 63000;
+
 async function openExternalLink(url) {
   if (!url) return;
 
@@ -174,6 +176,10 @@ export default function App() {
   const [customerLookupLoading, setCustomerLookupLoading] = useState(false);
   const [customerLookupError, setCustomerLookupError] = useState('');
   const [salesSearchReturnLead, setSalesSearchReturnLead] = useState(null);
+  const [salesNoteDraft, setSalesNoteDraft] = useState('');
+  const [salesNoteSaving, setSalesNoteSaving] = useState(false);
+  const [salesNoteMessage, setSalesNoteMessage] = useState('');
+  const [salesNoteError, setSalesNoteError] = useState('');
 
   const [authError, setAuthError] = useState('');
   const [uploadDigestDate, setUploadDigestDate] = useState(getEasternDateInputValue);
@@ -348,12 +354,14 @@ export default function App() {
     resetAppState();
   }
 
-  async function authedFetch(url) {
+  async function authedFetch(url, options = {}) {
     const res = await fetch(url, {
       cache: 'no-store',
+      ...options,
       headers: {
         'X-Lookup-Token': accessToken,
-        'Cache-Control': 'no-cache'
+        'Cache-Control': 'no-cache',
+        ...(options.headers || {})
       }
     });
 
@@ -1456,6 +1464,9 @@ function getPositionStatusLabel(position) {
       }
 
       setSelectedSalesLead(data.matches[0]);
+      setSalesNoteDraft('');
+      setSalesNoteMessage('');
+      setSalesNoteError('');
     } catch (err) {
       setCustomerLookupError(err.message || 'Unable to lookup customer card.');
     } finally {
@@ -1510,13 +1521,71 @@ function getPositionStatusLabel(position) {
     }
   }
 
+  async function submitSalesLeadNote() {
+    if (!selectedSalesLead) return;
+
+    const note = salesNoteDraft.trim();
+
+    if (!selectedSalesLead.CustomerCode) {
+      setSalesNoteError('This customer card does not have a Customer Code, so a note cannot be saved.');
+      return;
+    }
+
+    if (!note) {
+      setSalesNoteError('Enter a note before saving.');
+      return;
+    }
+
+    if (note.length > SALES_NOTE_MAX_LENGTH) {
+      setSalesNoteError(`Sales note is too long. Limit notes to ${SALES_NOTE_MAX_LENGTH.toLocaleString('en-US')} characters.`);
+      return;
+    }
+
+    setSalesNoteSaving(true);
+    setSalesNoteError('');
+    setSalesNoteMessage('');
+
+    try {
+      const res = await authedFetch(`${API}/sales-leads/notes`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          customerCode: selectedSalesLead.CustomerCode,
+          customerName: selectedSalesLead.CompanyName,
+          note
+        })
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to save sales note.');
+      }
+
+      setSalesNoteDraft('');
+      setSalesNoteMessage(data.message || 'Sales note added. Refresh the Sales Leads customer cards to see it in the log.');
+    } catch (err) {
+      setSalesNoteError(err.message || 'Unable to save sales note.');
+    } finally {
+      setSalesNoteSaving(false);
+    }
+  }
+
   function openSalesLeadCard(lead) {
     setSelectedSalesLead(lead);
     setCustomerLookupError('');
+    setSalesNoteDraft('');
+    setSalesNoteMessage('');
+    setSalesNoteError('');
   }
 
   function closeSalesLeadModal() {
     setSelectedSalesLead(null);
+    setSalesNoteDraft('');
+    setSalesNoteMessage('');
+    setSalesNoteError('');
   }
 
   function openRosterFromReport(roster) {
@@ -2832,6 +2901,12 @@ function openReportLoadDetails(load) {
           <span>Last quote: {formatSalesDate(lead.LastQuoteDate)}</span>
           <strong>{followUpLabel}</strong>
         </div>
+
+        {Number(lead.SalesNotesCount || 0) > 0 && (
+          <div className="sales-lead-note-count">
+            {formatReportNumber(lead.SalesNotesCount)} note{Number(lead.SalesNotesCount || 0) === 1 ? '' : 's'} logged
+          </div>
+        )}
       </button>
     );
   }
@@ -2910,6 +2985,13 @@ function openReportLoadDetails(load) {
           </div>
         )}
 
+        {hasSalesLeadsReport && salesLeadsReport.notesStatus && salesLeadsReport.notesStatus !== 'available' && (
+          <div className="report-alert locked sales-notes-alert">
+            <h4>Sales notes are not connected yet.</h4>
+            <p>{salesLeadsReport.notesError || 'Confirm the Sales Leads Notes Log list name or set SALES_LEADS_NOTES_LIST_ID on the server.'}</p>
+          </div>
+        )}
+
         {hasSalesLeadsReport && (
           <>
             <div className="sales-summary-grid sales-summary-button-grid">
@@ -2974,6 +3056,7 @@ function openReportLoadDetails(load) {
     if (!selectedSalesLead) return null;
 
     const lead = selectedSalesLead;
+    const salesNotes = Array.isArray(lead.SalesNotes) ? lead.SalesNotes : [];
     const winRate = lead.QuoteCount > 0 ? lead.QuotesWon / lead.QuoteCount : 0;
     const activeYears = (lead.YearDetails || []).filter((year) => (
       year.quotes ||
@@ -2997,7 +3080,7 @@ function openReportLoadDetails(load) {
             </button>
           </div>
 
-          <div className="modal-body report-modal-body">
+          <div className="modal-body report-modal-body" id="sales-profile-modal-body">
             <div className="sales-profile-headline-grid">
               <div>
                 <span>Revenue Won</span>
@@ -3045,11 +3128,80 @@ function openReportLoadDetails(load) {
               <DetailItem label="Suppression Reason" value={lead.SuppressionReason} className="full" />
             </div>
 
+            <div className="driver-report-section sales-notes-section">
+              <div className="driver-report-section-header">
+                <div>
+                  <h4>Sales Notes Log</h4>
+                </div>
+                <div className="driver-report-section-total">
+                  {formatReportNumber(salesNotes.length)} note{salesNotes.length === 1 ? '' : 's'}
+                </div>
+              </div>
+
+              <div className="sales-note-composer">
+                <label>
+                  <span>Add Note</span>
+                  <textarea
+                    value={salesNoteDraft}
+                    maxLength={SALES_NOTE_MAX_LENGTH}
+                    placeholder={`Add a note for ${lead.CustomerCode || 'this customer'}...`}
+                    onChange={(e) => {
+                      const modalBody = document.getElementById('sales-profile-modal-body');
+                      const scrollTop = modalBody?.scrollTop || 0;
+
+                      setSalesNoteDraft(e.target.value);
+                      setSalesNoteError('');
+                      setSalesNoteMessage('');
+
+                      window.requestAnimationFrame(() => {
+                        const nextModalBody = document.getElementById('sales-profile-modal-body');
+                        if (nextModalBody) {
+                          nextModalBody.scrollTop = scrollTop;
+                        }
+                      });
+                    }}
+                  />
+                </label>
+
+                <div className="sales-note-composer-footer">
+                  <small>
+                    Note Date: today · {salesNoteDraft.length.toLocaleString('en-US')} / {SALES_NOTE_MAX_LENGTH.toLocaleString('en-US')} characters. New notes will not show below until the Sales Leads customer cards are refreshed.
+                  </small>
+                  <button
+                    type="button"
+                    onClick={submitSalesLeadNote}
+                    disabled={salesNoteSaving || !salesNoteDraft.trim() || !lead.CustomerCode}
+                  >
+                    {salesNoteSaving ? 'Saving...' : 'Add Note'}
+                  </button>
+                </div>
+
+                {salesNoteMessage && <div className="msg sales-note-save-message">{salesNoteMessage}</div>}
+                {salesNoteError && <div className="msg error sales-note-save-message">{salesNoteError}</div>}
+              </div>
+
+              {salesNotes.length === 0 ? (
+                <div className="msg">No sales notes logged for this customer code.</div>
+              ) : (
+                <div className="sales-notes-list">
+                  {salesNotes.map((note) => (
+                    <article key={note.id || `${note.NoteDate}-${note.Title}`} className="sales-note-card">
+                      <div className="sales-note-card-header">
+                        <div>
+                          <strong>Note Date: {formatSalesDate(note.NoteDate)}</strong>
+                        </div>
+                      </div>
+                      <p>{note.Note || '-'}</p>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="driver-report-section sales-year-section">
               <div className="driver-report-section-header">
                 <div>
                   <h4>Year-by-Year Quote Activity</h4>
-                  <p>Quote and win counts from Sales Leads; revenue won is joined from Bid Listing records by Customer Code. Click a year row to search that customer's orders for the year.</p>
                 </div>
               </div>
 
@@ -4162,7 +4314,7 @@ function openReportLoadDetails(load) {
       )}
 
       <DriverRosterModal />
-      <SalesLeadProfileModal />
+      {SalesLeadProfileModal()}
 
       {selected && (
         <div className="modal-overlay" onClick={closeModal}>
