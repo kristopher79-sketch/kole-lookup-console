@@ -173,6 +173,7 @@ export default function App() {
   const [selectedSalesLead, setSelectedSalesLead] = useState(null);
   const [customerLookupLoading, setCustomerLookupLoading] = useState(false);
   const [customerLookupError, setCustomerLookupError] = useState('');
+  const [salesSearchReturnLead, setSalesSearchReturnLead] = useState(null);
 
   const [authError, setAuthError] = useState('');
   const [uploadDigestDate, setUploadDigestDate] = useState(getEasternDateInputValue);
@@ -306,6 +307,7 @@ export default function App() {
     setDocumentError('');
     setSortField('');
     setSortDirection('asc');
+    setSalesSearchReturnLead(null);
   }
 
   async function handleLogin() {
@@ -375,6 +377,41 @@ export default function App() {
     setDocumentError('');
     setSortField('');
     setSortDirection('asc');
+    setSalesSearchReturnLead(null);
+  }
+
+  function clearOrderSearch() {
+    setQuery('');
+    setResults([]);
+    setSearchedRecords(0);
+    setSelected(null);
+    setHasSearched(false);
+    setError('');
+    setStatusFilter('All');
+    setDocumentError('');
+    setSortField('');
+    setSortDirection('asc');
+    setSalesSearchReturnLead(null);
+  }
+
+  function returnToCustomerCard() {
+    if (!salesSearchReturnLead) return;
+
+    const customerToRestore = salesSearchReturnLead;
+
+    setQuery('');
+    setResults([]);
+    setSearchedRecords(0);
+    setSelected(null);
+    setHasSearched(false);
+    setError('');
+    setStatusFilter('All');
+    setDocumentError('');
+    setSortField('');
+    setSortDirection('asc');
+    setSalesSearchReturnLead(null);
+    setSelectedSalesLead(customerToRestore);
+    setCustomerLookupError('');
   }
 
   async function handleSearch() {
@@ -390,6 +427,7 @@ export default function App() {
     setDocumentError('');
     setSortField('');
     setSortDirection('asc');
+    setSalesSearchReturnLead(null);
 
     try {
       const res = await authedFetch(
@@ -1229,11 +1267,12 @@ function getPositionStatusLabel(position) {
 
 
   const salesLeadViewOptions = [
-    { value: 'all', label: 'Customer Cards' },
-    { value: 'followUpDue', label: 'Follow-up Due' },
-    { value: 'unconverted', label: 'Unconverted Leads' },
-    { value: 'aviation', label: 'Aviation Leads' },
-    { value: 'suppressed', label: 'Suppressed / Ignored Leads' }
+    { value: 'all', label: 'Total Customers', summaryKey: 'total', defaultSort: 'name' },
+    { value: 'converted', label: 'Converted', summaryKey: 'converted', defaultSort: 'wins' },
+    { value: 'unconverted', label: 'Unconverted', summaryKey: 'unconverted', defaultSort: 'quotes' },
+    { value: 'followUpDue', label: 'Follow-up Due', summaryKey: 'followUpDue', defaultSort: 'followUp' },
+    { value: 'aviation', label: 'Aviation', summaryKey: 'aviation', defaultSort: 'quotes' },
+    { value: 'suppressed', label: 'Suppressed / Ignored', summaryKey: 'suppressed', defaultSort: 'name' }
   ];
 
   function toggleReportGroup(groupName) {
@@ -1250,6 +1289,10 @@ function getPositionStatusLabel(position) {
 
   function getSalesLeadViewLabel(view = salesLeadsView) {
     return salesLeadViewOptions.find((option) => option.value === view)?.label || 'Customer Cards';
+  }
+
+  function getDefaultSalesLeadSort(view = salesLeadsView) {
+    return salesLeadViewOptions.find((option) => option.value === view)?.defaultSort || 'name';
   }
 
   function normalizeSalesLeadDate(value) {
@@ -1283,13 +1326,86 @@ function getPositionStatusLabel(position) {
     return 'sales-status';
   }
 
-  async function loadSalesLeadsReport(view = salesLeadsView, sort = salesLeadsSort) {
+  function normalizeSalesLeadText(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function filterSalesLeadRecords(records, view = 'all') {
+    const normalized = normalizeSalesLeadText(view);
+
+    if (normalized === 'converted') {
+      return records.filter((record) => normalizeSalesLeadText(record.Status) === 'converted');
+    }
+
+    if (normalized === 'unconverted') {
+      return records.filter((record) => normalizeSalesLeadText(record.Status) === 'unconverted');
+    }
+
+    if (normalized === 'followupdue' || normalized === 'follow-up due') {
+      return records.filter((record) => record.FollowUpDue === true);
+    }
+
+    if (normalized === 'aviation') {
+      return records.filter((record) => record.AviationRelated === true);
+    }
+
+    if (normalized === 'suppressed') {
+      return records.filter((record) => (
+        normalizeSalesLeadText(record.FollowUpHandling) === 'suppressed' ||
+        normalizeSalesLeadText(record.Status) === 'ignore' ||
+        normalizeSalesLeadText(record.Status) === 'inactive'
+      ));
+    }
+
+    return records;
+  }
+
+  function sortSalesLeadRecords(records, sortMode = 'name') {
+    const sorted = [...records];
+
+    sorted.sort((a, b) => {
+      if (sortMode === 'quotes') {
+        const diff = Number(b.QuoteCount || 0) - Number(a.QuoteCount || 0);
+        if (diff !== 0) return diff;
+      }
+
+      if (sortMode === 'wins') {
+        const diff = Number(b.QuotesWon || 0) - Number(a.QuotesWon || 0);
+        if (diff !== 0) return diff;
+      }
+
+      if (sortMode === 'revenue') {
+        const diff = Number(b.RevenueWon || 0) - Number(a.RevenueWon || 0);
+        if (diff !== 0) return diff;
+      }
+
+      if (sortMode === 'lastQuote') {
+        const aTime = new Date(a.LastQuoteDate || 0).getTime() || 0;
+        const bTime = new Date(b.LastQuoteDate || 0).getTime() || 0;
+        const diff = bTime - aTime;
+        if (diff !== 0) return diff;
+      }
+
+      if (sortMode === 'followUp') {
+        const aDate = normalizeSalesLeadDate(a.NextTouchDate) || '9999-12-31';
+        const bDate = normalizeSalesLeadDate(b.NextTouchDate) || '9999-12-31';
+        const diff = aDate.localeCompare(bDate);
+        if (diff !== 0) return diff;
+      }
+
+      return String(a.CompanyName || '').localeCompare(String(b.CompanyName || ''));
+    });
+
+    return sorted;
+  }
+
+  async function loadSalesLeadsReport() {
     setSalesLeadsLoading(true);
     setSalesLeadsError(null);
-    setSalesLeadsReport(null);
 
     try {
-      const params = new URLSearchParams({ view, sort });
+      // Heavy Graph poll happens here only. Filters/sorts are local after this returns.
+      const params = new URLSearchParams({ view: 'all', sort: 'name' });
       const res = await authedFetch(`${API}/reports/sales-leads?${params.toString()}`);
       const data = await res.json().catch(() => ({}));
 
@@ -1297,7 +1413,11 @@ function getPositionStatusLabel(position) {
         throw new Error(data.error || data.message || 'Unable to load Sales Leads.');
       }
 
-      setSalesLeadsReport(data);
+      setSalesLeadsReport({
+        ...data,
+        view: 'all',
+        sort: 'name'
+      });
     } catch (err) {
       setSalesLeadsError({
         code: 'REPORT_ERROR',
@@ -1308,11 +1428,12 @@ function getPositionStatusLabel(position) {
     }
   }
 
-  async function openCustomerCardForName(customerName) {
+  async function openCustomerCardForName(customerName, customerCode = '') {
     const cleanName = String(customerName || '').trim();
+    const cleanCode = String(customerCode || '').trim();
 
-    if (!cleanName) {
-      setCustomerLookupError('This order does not have a customer name to match.');
+    if (!cleanName && !cleanCode) {
+      setCustomerLookupError('This order does not have a customer name or customer code to match.');
       return;
     }
 
@@ -1320,7 +1441,9 @@ function getPositionStatusLabel(position) {
     setCustomerLookupError('');
 
     try {
-      const params = new URLSearchParams({ customer: cleanName });
+      const params = new URLSearchParams();
+      if (cleanName) params.set('customer', cleanName);
+      if (cleanCode) params.set('customerCode', cleanCode);
       const res = await authedFetch(`${API}/sales-leads/by-customer?${params.toString()}`);
       const data = await res.json().catch(() => ({}));
 
@@ -1337,6 +1460,53 @@ function getPositionStatusLabel(position) {
       setCustomerLookupError(err.message || 'Unable to lookup customer card.');
     } finally {
       setCustomerLookupLoading(false);
+    }
+  }
+
+  async function loadCustomerYearOrders(lead, yearDetail) {
+    const customerCode = String(lead?.CustomerCode || '').trim();
+    const year = Number(yearDetail?.year || 0);
+
+    if (!customerCode || !year) {
+      setCustomerLookupError('This customer/year row does not have enough information to search orders.');
+      return;
+    }
+
+    setSelectedSalesLead(null);
+    setSalesSearchReturnLead(lead);
+    setLoading(true);
+    setError('');
+    setCustomerLookupError('');
+    setHasSearched(true);
+    setSelected(null);
+    setSelectedView('basic');
+    setStatusFilter('All');
+    setDocumentError('');
+    setSortField('');
+    setSortDirection('asc');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    try {
+      const params = new URLSearchParams({
+        customerCode,
+        year: String(year)
+      });
+
+      const res = await authedFetch(`${API}/reports/sales-leads/orders?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to load customer orders for that year.');
+      }
+
+      setQuery(`${lead.CompanyName || customerCode} - ${year}`);
+      setResults(data.results || []);
+      setSearchedRecords(data.searchedRecords || (data.results || []).length || 0);
+    } catch (err) {
+      setError(err.message || 'Unable to load customer orders for that year.');
+      setResults([]);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -1496,7 +1666,7 @@ function openReportLoadDetails(load) {
           <button
             type="button"
             className="view-button customer-card-button"
-            onClick={() => openCustomerCardForName(selected.Customer)}
+            onClick={() => openCustomerCardForName(selected.Customer, selected.CustomerCode)}
             disabled={!selected.Customer || customerLookupLoading}
           >
             {customerLookupLoading ? 'Looking up...' : 'View Customer Card'}
@@ -2668,71 +2838,70 @@ function openReportLoadDetails(load) {
 
   function SalesLeadsReportPanel() {
     const summary = salesLeadsReport?.summary || {};
-    const records = salesLeadsReport?.records || [];
+    const allRecords = salesLeadsReport?.records || [];
+    const hasSalesLeadsReport = Boolean(salesLeadsReport);
+    const activeReportView = salesLeadsView;
+    const activeReportSort = salesLeadsSort;
+    const activeViewLabel = getSalesLeadViewLabel(activeReportView);
+    const records = sortSalesLeadRecords(
+      filterSalesLeadRecords(allRecords, activeReportView),
+      activeReportSort
+    );
+    const summaryButtons = salesLeadViewOptions.map((option) => ({
+      ...option,
+      count: Number(summary?.[option.summaryKey] || 0)
+    }));
+
+    function loadInitialSalesCards() {
+      const initialView = 'all';
+      const initialSort = getDefaultSalesLeadSort(initialView);
+
+      setSalesLeadsView(initialView);
+      setSalesLeadsSort(initialSort);
+      loadSalesLeadsReport();
+    }
+
+    function changeSalesLeadView(nextView) {
+      const nextSort = getDefaultSalesLeadSort(nextView);
+
+      setSalesLeadsView(nextView);
+      setSalesLeadsSort(nextSort);
+      setSelectedSalesLead(null);
+      setSalesLeadsError(null);
+    }
+
+    function changeSalesLeadSort(nextSort) {
+      setSalesLeadsSort(nextSort);
+      setSelectedSalesLead(null);
+      setSalesLeadsError(null);
+    }
 
     return (
       <div className="report-card compact-report-card accordion-inner-card sales-report-card">
         <div className="report-card-header centered-report-header">
           <div>
-            <h3>{getSalesLeadViewLabel()}</h3>
-               </div>
+            <h3>{hasSalesLeadsReport ? activeViewLabel : 'Customer Cards'}</h3>
+            {hasSalesLeadsReport && (
+              <p>
+                {formatReportNumber(records.length)} shown · {formatReportNumber(salesLeadsReport.recordsScanned || 0)} scanned · {salesLeadsReport.generatedAt || ''}
+              </p>
+            )}
+          </div>
         </div>
 
-        <div className="sales-summary-grid">
-          <div><span>Total</span><strong>{formatReportNumber(summary.total)}</strong></div>
-          <div><span>Converted</span><strong>{formatReportNumber(summary.converted)}</strong></div>
-          <div><span>Unconverted</span><strong>{formatReportNumber(summary.unconverted)}</strong></div>
-          <div><span>Follow-up Due</span><strong>{formatReportNumber(summary.followUpDue)}</strong></div>
-          <div><span>Aviation</span><strong>{formatReportNumber(summary.aviation)}</strong></div>
-        </div>
+        {!hasSalesLeadsReport && !salesLeadsLoading && (
+          <div className="sales-report-start">
+            <button onClick={loadInitialSalesCards} disabled={salesLeadsLoading}>
+              Load Customer Cards
+            </button>
+          </div>
+        )}
 
-        <div className="report-controls centered-report-controls sales-report-controls">
-          <label>
-            <span>Sales View</span>
-            <select
-              value={salesLeadsView}
-              onChange={(e) => {
-                const nextView = e.target.value;
-                const nextSort = nextView === 'followUpDue'
-                  ? 'followUp'
-                  : (nextView === 'unconverted' || nextView === 'aviation')
-                    ? 'quotes'
-                    : 'name';
-
-                setSalesLeadsView(nextView);
-                setSalesLeadsSort(nextSort);
-                setSalesLeadsReport(null);
-                setSalesLeadsError(null);
-              }}
-            >
-              {salesLeadViewOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            <span>Sort</span>
-            <select
-              value={salesLeadsSort}
-              onChange={(e) => {
-                setSalesLeadsSort(e.target.value);
-                setSalesLeadsReport(null);
-                setSalesLeadsError(null);
-              }}
-            >
-              <option value="name">Alphabetical</option>
-              <option value="quotes">Most quotes</option>
-              <option value="wins">Most wins</option>
-              <option value="lastQuote">Recently quoted</option>
-              <option value="followUp">Follow-up due</option>
-            </select>
-          </label>
-
-          <button onClick={() => loadSalesLeadsReport()} disabled={salesLeadsLoading}>
-            {salesLeadsLoading ? 'Loading Customers...' : 'Load Customer Cards'}
-          </button>
-        </div>
+        {salesLeadsLoading && (
+          <div className="sales-report-loading">
+            Polling customer cards...
+          </div>
+        )}
 
         {salesLeadsError && (
           <div className="report-alert error">
@@ -2741,18 +2910,61 @@ function openReportLoadDetails(load) {
           </div>
         )}
 
-        {salesLeadsReport && (
-          <div className="sales-report-results">
-            {records.length === 0 ? (
-              <div className="msg">No customers matched this sales view.</div>
-            ) : (
-              <div className="sales-lead-card-grid">
-                {records.map((lead) => (
-                  <SalesLeadCard key={lead.id || lead.CompanyName} lead={lead} />
-                ))}
-              </div>
-            )}
-          </div>
+        {hasSalesLeadsReport && (
+          <>
+            <div className="sales-summary-grid sales-summary-button-grid">
+              {summaryButtons.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`sales-summary-button ${activeReportView === option.value ? 'active-sales-summary-button' : ''}`}
+                  onClick={() => changeSalesLeadView(option.value)}
+                  disabled={salesLeadsLoading}
+                >
+                  <span>{option.label}</span>
+                  <strong>{formatReportNumber(option.count)}</strong>
+                </button>
+              ))}
+            </div>
+
+            <p className="sales-summary-helper">
+              Click a card to filter the customer cards below.
+            </p>
+
+            <div className="report-controls centered-report-controls sales-report-controls">
+              <label>
+                <span>Sort</span>
+                <select
+                  value={activeReportSort}
+                  onChange={(e) => changeSalesLeadSort(e.target.value)}
+                  disabled={salesLeadsLoading}
+                >
+                  <option value="name">Alphabetical</option>
+                  <option value="quotes">Most quotes</option>
+                  <option value="wins">Most wins</option>
+                  <option value="revenue">Most revenue won</option>
+                  <option value="lastQuote">Recently quoted</option>
+                  <option value="followUp">Follow-up due</option>
+                </select>
+              </label>
+
+              <button onClick={loadSalesLeadsReport} disabled={salesLeadsLoading}>
+                {salesLeadsLoading ? 'Refreshing Customers...' : 'Refresh Customer Cards'}
+              </button>
+            </div>
+
+            <div className="sales-report-results">
+              {records.length === 0 ? (
+                <div className="msg">No customers matched this sales view.</div>
+              ) : (
+                <div className="sales-lead-card-grid">
+                  {records.map((lead) => (
+                    <SalesLeadCard key={lead.id || lead.CompanyName} lead={lead} />
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
         )}
       </div>
     );
@@ -2763,7 +2975,13 @@ function openReportLoadDetails(load) {
 
     const lead = selectedSalesLead;
     const winRate = lead.QuoteCount > 0 ? lead.QuotesWon / lead.QuoteCount : 0;
-    const activeYears = (lead.YearDetails || []).filter((year) => year.quotes || year.wins || year.firstQuote || year.lastQuote);
+    const activeYears = (lead.YearDetails || []).filter((year) => (
+      year.quotes ||
+      year.wins ||
+      year.revenueWon ||
+      year.firstQuote ||
+      year.lastQuote
+    ));
 
     return (
       <div className="modal-overlay report-modal-overlay sales-profile-overlay" onClick={closeSalesLeadModal}>
@@ -2780,6 +2998,25 @@ function openReportLoadDetails(load) {
           </div>
 
           <div className="modal-body report-modal-body">
+            <div className="sales-profile-headline-grid">
+              <div>
+                <span>Revenue Won</span>
+                <strong>{formatReportMoney(lead.RevenueWon)}</strong>
+              </div>
+              <div>
+                <span>Quotes</span>
+                <strong>{formatReportNumber(lead.QuoteCount)}</strong>
+              </div>
+              <div>
+                <span>Wins</span>
+                <strong>{formatReportNumber(lead.QuotesWon)}</strong>
+              </div>
+              <div>
+                <span>Win Rate</span>
+                <strong>{formatPercent(winRate)}</strong>
+              </div>
+            </div>
+
             <div className="detail-grid sales-profile-grid">
               <SectionTitle>Customer Summary</SectionTitle>
               <DetailItem label="Company" value={lead.CompanyName} wide />
@@ -2791,6 +3028,7 @@ function openReportLoadDetails(load) {
               <DetailItem label="Conversion Date" value={formatSalesDate(lead.ConversionDate)} />
 
               <SectionTitle>Activity</SectionTitle>
+              <DetailItem label="Revenue Won" value={formatReportMoney(lead.RevenueWon)} />
               <DetailItem label="Quote Count" value={formatReportNumber(lead.QuoteCount)} />
               <DetailItem label="Quotes Won" value={formatReportNumber(lead.QuotesWon)} />
               <DetailItem label="Win Rate" value={formatPercent(winRate)} />
@@ -2811,7 +3049,7 @@ function openReportLoadDetails(load) {
               <div className="driver-report-section-header">
                 <div>
                   <h4>Year-by-Year Quote Activity</h4>
-                  <p>Quote and win counts from the Sales Leads list.</p>
+                  <p>Quote and win counts from Sales Leads; revenue won is joined from Bid Listing records by Customer Code. Click a year row to search that customer's orders for the year.</p>
                 </div>
               </div>
 
@@ -2825,16 +3063,23 @@ function openReportLoadDetails(load) {
                         <th>Year</th>
                         <th>Quotes</th>
                         <th>Wins</th>
+                        <th>Revenue Won</th>
                         <th>First Quote</th>
                         <th>Last Quote</th>
                       </tr>
                     </thead>
                     <tbody>
                       {activeYears.map((year) => (
-                        <tr key={year.year}>
+                        <tr
+                          key={year.year}
+                          className="sales-year-clickable-row"
+                          onClick={() => loadCustomerYearOrders(lead, year)}
+                          title={`Search ${lead.CompanyName || lead.CustomerCode || 'this customer'} orders for ${year.year}`}
+                        >
                           <td>{year.year}{year.isCurrentYear ? ' (Current)' : ''}</td>
                           <td>{formatReportNumber(year.quotes)}</td>
                           <td>{formatReportNumber(year.wins)}</td>
+                          <td>{formatReportMoney(year.revenueWon)}</td>
                           <td>{formatSalesDate(year.firstQuote)}</td>
                           <td>{formatSalesDate(year.lastQuote)}</td>
                         </tr>
@@ -3398,6 +3643,25 @@ function openReportLoadDetails(load) {
           <button onClick={handleSearch} disabled={loading}>
             {loading ? 'Searching...' : 'Search'}
           </button>
+
+          <button
+            type="button"
+            className="search-secondary-button"
+            onClick={clearOrderSearch}
+            disabled={loading && !hasSearched}
+          >
+            Clear
+          </button>
+
+          {salesSearchReturnLead && (
+            <button
+              type="button"
+              className="search-return-button"
+              onClick={returnToCustomerCard}
+            >
+              Return to customer
+            </button>
+          )}
         </div>
 
         <div className="search-options">
@@ -3416,6 +3680,7 @@ function openReportLoadDetails(load) {
                 setDocumentError('');
                 setSortField('');
                 setSortDirection('asc');
+                setSalesSearchReturnLead(null);
               }}
             />
             <span>Include archive years</span>

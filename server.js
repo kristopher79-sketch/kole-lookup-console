@@ -572,6 +572,7 @@ function cleanBidItem(item, sourceList) {
     BOL: fields.BOLNumber_x0028_Won_x0029_ || '',
     BidID: fields.BidID || '',
     Customer: fields.Company || '',
+    CustomerCode: fields.CustomerCode || '',
     Origin: fields.Shipment_x0020_Origin || '',
     Destination: fields.Shipment_x0020_Destination || '',
     Status: fields.Status || '',
@@ -715,6 +716,7 @@ function buildOperationsRecord(item, sourceList) {
     BOL: fields.BOLNumber_x0028_Won_x0029_ || '',
     BidID: fields.BidID || '',
     Customer: fields.Company || '',
+    CustomerCode: fields.CustomerCode || '',
     Origin: fields.Shipment_x0020_Origin || '',
     Destination: fields.Shipment_x0020_Destination || '',
     Driver: fields.Operator_x002f_Team || '',
@@ -868,6 +870,109 @@ function isSalesFollowUpDue(record, targetDate = formatEasternDate()) {
   return nextTouch <= targetDate;
 }
 
+function getCustomerRevenueFieldSelect() {
+  return [
+    'CustomerCode',
+    'Status',
+    'Pickup_x0020_Offer_x0020_Date',
+    'Quoted_x0020_Total'
+  ].join(',');
+}
+
+function getRevenueYearFromBidRecord(fields, sourceList) {
+  const pickup = getUtcYearMonth(fields.Pickup_x0020_Offer_x0020_Date);
+  if (pickup?.year) return pickup.year;
+
+  const sourceYear = Number(sourceList?.year);
+  if (!Number.isNaN(sourceYear) && sourceYear > 0) return sourceYear;
+
+  return Number(formatEasternDate().slice(0, 4));
+}
+
+function emptyCustomerRevenueSummary() {
+  return {
+    totalRevenueWon: 0,
+    revenueByYear: {},
+    wonLoadsByYear: {},
+    revenueRecordCount: 0
+  };
+}
+
+async function buildCustomerRevenueIndex(token) {
+  const lists = await getSearchableBidLists(token);
+  const index = new Map();
+
+  for (const sourceList of lists) {
+    const items = await getAllListItemsWithFields(token, sourceList.listId, getCustomerRevenueFieldSelect());
+
+    items.forEach((item) => {
+      const fields = item.fields || {};
+      const customerCode = normalizeText(fields.CustomerCode);
+      const status = normalizeText(fields.Status);
+
+      if (!customerCode || status !== 'won') return;
+
+      const revenue = getNumberValue(fields.Quoted_x0020_Total);
+      const year = getRevenueYearFromBidRecord(fields, sourceList);
+
+      if (!index.has(customerCode)) {
+        index.set(customerCode, emptyCustomerRevenueSummary());
+      }
+
+      const summary = index.get(customerCode);
+      summary.totalRevenueWon += revenue;
+      summary.revenueByYear[year] = (summary.revenueByYear[year] || 0) + revenue;
+      summary.wonLoadsByYear[year] = (summary.wonLoadsByYear[year] || 0) + 1;
+      summary.revenueRecordCount += 1;
+    });
+  }
+
+  return index;
+}
+
+function enrichSalesLeadWithRevenue(record, customerRevenueIndex) {
+  const customerCode = normalizeText(record.CustomerCode);
+  const revenue = customerCode
+    ? customerRevenueIndex.get(customerCode) || emptyCustomerRevenueSummary()
+    : emptyCustomerRevenueSummary();
+
+  return {
+    ...record,
+    RevenueWon: revenue.totalRevenueWon,
+    RevenueWonRecordCount: revenue.revenueRecordCount,
+    YearDetails: (record.YearDetails || []).map((year) => ({
+      ...year,
+      revenueWon: revenue.revenueByYear[year.year] || 0,
+      revenueWonLoads: revenue.wonLoadsByYear[year.year] || 0
+    }))
+  };
+}
+
+async function getCustomerOrdersByCodeAndYear(token, customerCode, year) {
+  const cleanCode = normalizeText(customerCode);
+  const targetYear = Number(year);
+
+  if (!cleanCode || Number.isNaN(targetYear)) return [];
+
+  const lists = await getSearchableBidLists(token);
+  const matches = [];
+
+  for (const sourceList of lists) {
+    const items = await getAllBidItemsFromList(token, sourceList);
+
+    items.forEach((record) => {
+      const pickup = getUtcYearMonth(record.PickupDate);
+
+      if (!pickup || pickup.year !== targetYear) return;
+      if (normalizeText(record.CustomerCode) !== cleanCode) return;
+
+      matches.push(record);
+    });
+  }
+
+  return matches.sort(compareRecordsDefault);
+}
+
 function cleanSalesLeadItem(item) {
   const f = item.fields || {};
   const quoteCount = Number(f.QuoteCount || 0) || 0;
@@ -943,6 +1048,11 @@ function sortSalesLeads(records, sortMode = 'name') {
 
     if (sortMode === 'wins') {
       const diff = Number(b.QuotesWon || 0) - Number(a.QuotesWon || 0);
+      if (diff !== 0) return diff;
+    }
+
+    if (sortMode === 'revenue') {
+      const diff = Number(b.RevenueWon || 0) - Number(a.RevenueWon || 0);
       if (diff !== 0) return diff;
     }
 
@@ -3065,8 +3175,13 @@ app.get('/reports/sales-leads', requireLookupAccess, async (req, res) => {
     const view = String(req.query.view || 'all').trim() || 'all';
     const sort = String(req.query.sort || '').trim();
     const token = await getGraphToken();
-    const items = await getAllListItemsWithFields(token, salesLeadsListId, getSalesLeadFieldSelect());
-    const records = items.map(cleanSalesLeadItem);
+    const [items, customerRevenueIndex] = await Promise.all([
+      getAllListItemsWithFields(token, salesLeadsListId, getSalesLeadFieldSelect()),
+      buildCustomerRevenueIndex(token)
+    ]);
+    const records = items
+      .map(cleanSalesLeadItem)
+      .map((record) => enrichSalesLeadWithRevenue(record, customerRevenueIndex));
     const filtered = filterSalesLeads(records, view);
 
     let sortMode = sort || 'name';
@@ -3096,6 +3211,47 @@ app.get('/reports/sales-leads', requireLookupAccess, async (req, res) => {
   }
 });
 
+
+app.get('/reports/sales-leads/orders', requireLookupAccess, async (req, res) => {
+  try {
+    const customerCode = String(req.query.customerCode || '').trim();
+    const year = Number(req.query.year || 0);
+
+    if (!customerCode) {
+      return res.status(400).json({
+        success: false,
+        error: 'Provide a customerCode query value.'
+      });
+    }
+
+    if (!year) {
+      return res.status(400).json({
+        success: false,
+        error: 'Provide a valid year query value.'
+      });
+    }
+
+    const token = await getGraphToken();
+    const results = await getCustomerOrdersByCodeAndYear(token, customerCode, year);
+
+    res.json({
+      success: true,
+      reportType: 'salesLeadYearOrders',
+      customerCode,
+      year,
+      searchedRecords: results.length,
+      results
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to load customer orders for that year.'
+    });
+  }
+});
+
 app.get('/sales-leads/by-customer', requireLookupAccess, async (req, res) => {
   try {
     const salesLeadsListId = getSalesLeadsListId();
@@ -3117,8 +3273,13 @@ app.get('/sales-leads/by-customer', requireLookupAccess, async (req, res) => {
     }
 
     const token = await getGraphToken();
-    const items = await getAllListItemsWithFields(token, salesLeadsListId, getSalesLeadFieldSelect());
-    const records = items.map(cleanSalesLeadItem);
+    const [items, customerRevenueIndex] = await Promise.all([
+      getAllListItemsWithFields(token, salesLeadsListId, getSalesLeadFieldSelect()),
+      buildCustomerRevenueIndex(token)
+    ]);
+    const records = items
+      .map(cleanSalesLeadItem)
+      .map((record) => enrichSalesLeadWithRevenue(record, customerRevenueIndex));
     const customerKey = normalizeCustomerName(customer);
     const codeKey = normalizeText(customerCode);
 

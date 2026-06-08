@@ -2474,7 +2474,8 @@ body {
 
 @media (max-width: 1100px) {
   .sales-lead-card-grid,
-  .sales-summary-grid {
+  .sales-summary-grid,
+  .sales-profile-headline-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -2482,7 +2483,8 @@ body {
 @media (max-width: 700px) {
   .sales-lead-card-grid,
   .sales-summary-grid,
-  .sales-lead-metrics {
+  .sales-lead-metrics,
+  .sales-profile-headline-grid {
     grid-template-columns: 1fr;
   }
 
@@ -2499,6 +2501,159 @@ body {
   }
 }
 
+
+.sales-profile-headline-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.sales-profile-headline-grid div {
+  border: 1px solid rgba(250, 204, 21, 0.22);
+  border-radius: 14px;
+  padding: 14px;
+  background: rgba(250, 204, 21, 0.08);
+}
+
+.sales-profile-headline-grid span {
+  display: block;
+  color: #fde68a;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 7px;
+}
+
+.sales-profile-headline-grid strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 20px;
+}
+
 .sales-profile-overlay {
   z-index: 1200;
+}
+
+
+/* PASS 10: Sales customer cards load-first view buttons */
+.sales-report-start,
+.sales-report-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 86px;
+  border: 1px dashed rgba(148, 163, 184, 0.28);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.48);
+  color: #cbd5e1;
+  margin-bottom: 16px;
+}
+
+.sales-summary-button-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.sales-summary-button {
+  width: 100%;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255,255,255,0.04);
+  color: #e5e7eb;
+  text-align: left;
+}
+
+.sales-summary-button:hover {
+  background: rgba(255,255,255,0.07);
+  border-color: rgba(250, 204, 21, 0.35);
+}
+
+.sales-summary-button span {
+  display: block;
+  color: #94a3b8;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 5px;
+}
+
+.sales-summary-button strong {
+  color: #f8fafc;
+  font-size: 18px;
+}
+
+.active-sales-summary-button {
+  background: rgba(212, 160, 23, 0.16);
+  border-color: rgba(250, 204, 21, 0.55);
+  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.12);
+}
+
+.active-sales-summary-button span,
+.active-sales-summary-button strong {
+  color: #facc15;
+}
+
+.sales-summary-helper {
+  margin: 0 0 30px;
+  color: #94a3b8;
+  font-size: 13px;
+  text-align: center;
+}
+
+.sales-report-controls {
+  margin-top: 12px;
+  margin-bottom: 22px;
+}
+
+.sales-report-results {
+  margin-top: 18px;
+}
+
+.sales-year-section .driver-report-section-header {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.sales-year-section .driver-report-section-header > div {
+  width: 100%;
+}
+
+.sales-year-clickable-row {
+  cursor: pointer;
+}
+
+.sales-year-clickable-row:hover {
+  background: #1f2937;
+}
+
+@media (max-width: 1100px) {
+  .sales-summary-button-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .sales-summary-button-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* SALES CUSTOMER ORDER SEARCH HANDOFF */
+.search-secondary-button {
+  background: #334155;
+}
+
+.search-secondary-button:hover {
+  background: #475569;
+}
+
+.search-return-button {
+  background: #78350f;
+  color: #fde68a;
+}
+
+.search-return-button:hover {
+  background: #92400e;
 }
