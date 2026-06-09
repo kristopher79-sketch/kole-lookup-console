@@ -3082,15 +3082,6 @@ function openReportLoadDetails(load) {
 
     return (
       <div className="modal-report-preview sales-activity-preview">
-        <div className="driver-report-title sales-activity-modal-title">
-          <div>
-            <h3>Sales Activity Snapshot</h3>
-            <p>
-              Activity: {report.activityPeriodLabel || '-'} · Due window: {report.duePeriodLabel || '-'} · Generated {report.generatedAt || ''}
-            </p>
-          </div>
-        </div>
-
         {report.notesStatus && report.notesStatus !== 'available' && (
           <div className="report-alert locked sales-notes-alert">
             <h4>Sales notes are not connected yet.</h4>

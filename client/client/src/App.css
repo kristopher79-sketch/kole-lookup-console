@@ -2832,7 +2832,478 @@ body {
   max-width: 400px !important;
 }
 
-/* PASS 12: Sales Activity Snapshot */
+
+/* PASS 11: Navy relief / slate surface hierarchy
+   Goal: keep the KOLE dark console look, but create clearer depth between
+   page background, panels, section headers, tables, and clickable report rows. */
+:root {
+  --kole-page-bg: #0f172a;
+  --kole-shell: #111827;
+  --kole-surface: #182033;
+  --kole-surface-2: #202a3b;
+  --kole-table-body: #0b1220;
+  --kole-table-row: #111827;
+  --kole-table-head: #273244;
+  --kole-border: #2b364a;
+  --kole-border-strong: #3a475d;
+  --kole-text: #f8fafc;
+  --kole-muted: #aab6c7;
+  --kole-gold: #d4a017;
+  --kole-gold-bright: #facc15;
+}
+
+body {
+  background:
+    radial-gradient(circle at 50% -180px, rgba(59, 76, 112, 0.24), transparent 420px),
+    var(--kole-page-bg) !important;
+}
+
+.search-card,
+.operations-panel,
+.reports-panel,
+.upload-digest-panel,
+.results-panel,
+.report-card,
+.driver-report-section,
+.settlement-report-section,
+.gross-revenue-quarter-card,
+.sales-lead-card,
+.sales-note-card {
+  border-color: var(--kole-border) !important;
+  background: var(--kole-shell) !important;
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035) !important;
+}
+
+.container > .search-card:not(:has(input[type="password"])),
+.operations-panel,
+.reports-panel,
+.upload-digest-panel {
+  border-color: var(--kole-border-strong) !important;
+}
+
+/* Top bands: gives each major module a clearer beginning. */
+.operations-panel > div:first-child,
+.reports-header,
+.upload-digest-section-header {
+  padding: 14px 16px !important;
+  margin-bottom: 18px !important;
+  border: 1px solid var(--kole-border) !important;
+  border-left: 4px solid var(--kole-gold) !important;
+  border-radius: 12px !important;
+  background: linear-gradient(180deg, var(--kole-surface), #121b2e) !important;
+}
+
+.operations-panel h2,
+.reports-header h2,
+.upload-digest-section-header h2 {
+  color: var(--kole-gold-bright) !important;
+}
+
+.operations-panel p,
+.reports-header p,
+.report-card p,
+.driver-report-title p,
+.upload-digest-footnote {
+  color: var(--kole-muted) !important;
+}
+
+/* KPI cards stay light, but with a little more polish and separation. */
+.operations-grid {
+  gap: 16px !important;
+  margin-top: 18px !important;
+  margin-bottom: 22px !important;
+}
+
+.operations-card {
+  background: linear-gradient(180deg, #e5e7eb, #cbd5e1) !important;
+  border: 1px solid rgba(248, 250, 252, 0.68) !important;
+  box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65) !important;
+}
+
+.operations-card:hover {
+  background: #f1f5f9 !important;
+}
+
+/* Operation sub-sections: title bands before each table. */
+.operations-panel > div > h3 {
+  display: block;
+  margin: 34px 0 12px !important;
+  padding: 10px 14px;
+  border: 1px solid var(--kole-border);
+  border-left: 4px solid var(--kole-gold);
+  border-radius: 10px;
+  background: var(--kole-surface);
+  color: var(--kole-text) !important;
+  text-align: left;
+  letter-spacing: 0.01em;
+}
+
+/* Active driver roster as a proper nested panel, not another navy block. */
+.driver-position-panel {
+  padding: 0 !important;
+  border-color: var(--kole-border-strong) !important;
+  background: var(--kole-table-body) !important;
+}
+
+.driver-position-header {
+  margin: 0 !important;
+  padding: 14px 16px !important;
+  border-bottom: 1px solid var(--kole-border) !important;
+  background: var(--kole-surface) !important;
+}
+
+.driver-position-header h3 {
+  margin: 0 !important;
+  color: var(--kole-gold-bright) !important;
+}
+
+.driver-position-counts span {
+  border-color: rgba(203, 213, 225, 0.24) !important;
+  background: rgba(15, 23, 42, 0.55) !important;
+  color: var(--kole-text) !important;
+}
+
+.driver-position-table-wrap {
+  margin: 14px !important;
+  width: calc(100% - 28px) !important;
+}
+
+/* Tables: stronger header layer, stronger outside edge, softer alternating rows. */
+.results-panel,
+.operations-table-wrap,
+.report-table-wrap,
+.driver-position-table-wrap,
+.upload-digest-table-wrap,
+.gross-revenue-quarter-table-wrap,
+.wide-report-table-wrap {
+  border-color: var(--kole-border-strong) !important;
+  background: var(--kole-table-body) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.035) !important;
+}
+
+table,
+.driver-position-table,
+.upload-digest-table,
+.driver-report-table,
+.settlement-report-table,
+.gross-revenue-quarter-table,
+.gross-revenue-table,
+.orders-due-settlement-table,
+.inactive-driver-roster-table,
+.won-not-registered-table {
+  background: var(--kole-table-body) !important;
+}
+
+th,
+.report-table-wrap th,
+.driver-position-table th,
+.upload-digest-table th,
+.driver-report-table th,
+.settlement-report-table th,
+.gross-revenue-quarter-table th,
+.gross-revenue-table th {
+  background: var(--kole-table-head) !important;
+  color: var(--kole-text) !important;
+  border-bottom: 1px solid #46566e !important;
+}
+
+td,
+.driver-position-table td,
+.upload-digest-table td,
+.report-table-wrap td,
+.driver-report-table td,
+.settlement-report-table td,
+.gross-revenue-quarter-table td,
+.gross-revenue-table td {
+  border-bottom-color: #243044 !important;
+}
+
+tbody tr,
+.driver-position-table tbody tr,
+.upload-digest-table tbody tr,
+.report-table-wrap tbody tr {
+  background: var(--kole-table-row) !important;
+}
+
+tbody tr:nth-child(even),
+.driver-position-table tbody tr:nth-child(even),
+.upload-digest-table tbody tr:nth-child(even),
+.report-table-wrap tbody tr:nth-child(even) {
+  background: var(--kole-table-body) !important;
+}
+
+tbody tr:hover,
+.driver-position-table tbody tr:hover,
+.upload-digest-table tbody tr:hover,
+.report-table-wrap tbody tr:hover,
+.sales-year-clickable-row:hover {
+  background: #1f2937 !important;
+}
+
+.selected-row {
+  background: #263f63 !important;
+  box-shadow: inset 4px 0 0 var(--kole-gold) !important;
+}
+
+/* Upload Digest: make the date bar a raised slate control. */
+.upload-digest-header-row {
+  border-color: var(--kole-border-strong) !important;
+  background: var(--kole-table-body) !important;
+  box-shadow: 0 8px 18px rgba(0,0,0,0.18) !important;
+}
+
+.upload-digest-summary,
+.upload-digest-arrow,
+.upload-digest-today-button {
+  background: var(--kole-surface) !important;
+}
+
+.upload-digest-summary:hover,
+.upload-digest-arrow:hover,
+.upload-digest-today-button:hover {
+  background: var(--kole-surface-2) !important;
+}
+
+.upload-digest-body {
+  background: var(--kole-table-body) !important;
+  border-color: var(--kole-border-strong) !important;
+}
+
+.upload-digest-title {
+  color: var(--kole-text) !important;
+}
+
+/* Report accordions: clearer clickable cards and open-state left rail. */
+.report-group-accordion,
+.report-accordion {
+  border-color: var(--kole-border) !important;
+  background: var(--kole-table-body) !important;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.2) !important;
+}
+
+.report-group-button,
+.report-accordion-button {
+  background: var(--kole-surface) !important;
+  border-left: 4px solid transparent !important;
+  color: var(--kole-text) !important;
+}
+
+.report-group-button:hover,
+.report-accordion-button:hover {
+  background: var(--kole-surface-2) !important;
+}
+
+.report-group-accordion.open > .report-group-button,
+.report-accordion.open > .report-accordion-button {
+  background: var(--kole-surface-2) !important;
+  border-left-color: var(--kole-gold) !important;
+  border-bottom: 1px solid var(--kole-border) !important;
+}
+
+.report-group-button strong,
+.report-accordion-button span:first-child {
+  color: var(--kole-gold-bright) !important;
+}
+
+.report-group-body,
+.report-accordion-body {
+  background: var(--kole-table-body) !important;
+  border-top: 1px solid var(--kole-border) !important;
+}
+
+.accordion-inner-card,
+.report-ready-card,
+.settlement-report-card {
+  background: var(--kole-shell) !important;
+  border-color: var(--kole-border) !important;
+}
+
+.report-kpi-card,
+.driver-report-totals-grid div,
+.sales-summary-grid div,
+.sales-summary-button,
+.sales-lead-metrics div,
+.sales-profile-headline-grid div {
+  border-color: rgba(203, 213, 225, 0.14) !important;
+  background: rgba(24, 32, 51, 0.88) !important;
+}
+
+.driver-report-title,
+.driver-report-section-header,
+.gross-revenue-quarter-header {
+  background: var(--kole-surface) !important;
+  border-bottom-color: var(--kole-border) !important;
+}
+
+.driver-report-section-header h4,
+.gross-revenue-quarter-header h3 {
+  color: var(--kole-gold-bright) !important;
+}
+
+.report-total-row td {
+  background: rgba(212, 160, 23, 0.18) !important;
+}
+
+/* Sales cards: same dark family, but less flat. */
+.sales-lead-card {
+  background: #121b2e !important;
+  border-color: var(--kole-border) !important;
+}
+
+.sales-lead-card:hover {
+  background: var(--kole-surface) !important;
+  border-color: var(--kole-border-strong) !important;
+}
+
+.sales-lead-card.follow-up-due {
+  border-color: rgba(250, 204, 21, 0.72) !important;
+  box-shadow:
+    0 10px 24px rgba(0,0,0,0.22),
+    inset 4px 0 0 rgba(250, 204, 21, 0.82) !important;
+}
+
+/* Search/control polish. */
+input,
+.report-controls select,
+.report-controls input[type="date"],
+.sales-note-composer textarea {
+  border-color: var(--kole-border-strong) !important;
+  background: #050a18 !important;
+}
+
+input:focus,
+.report-controls select:focus,
+.report-controls input[type="date"]:focus,
+.sales-note-composer textarea:focus {
+  border-color: #60a5fa !important;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.20) !important;
+}
+
+@media (max-width: 900px) {
+  .operations-panel > div:first-child,
+  .reports-header,
+  .upload-digest-section-header {
+    padding: 12px 14px !important;
+  }
+
+  .operations-panel > div > h3 {
+    margin-top: 26px !important;
+  }
+}
+
+/* PASS 12: De-yellow nested report hierarchy
+   Goal: keep gold as a major landmark only, while nested report drawers,
+   report section headers, and active filter/KPI cards use slate/white instead.
+   This keeps the separation from PASS 11 without creating a clump of yellow. */
+
+:root {
+  --kole-secondary-rail: #64748b;
+  --kole-secondary-rail-soft: rgba(100, 116, 139, 0.62);
+  --kole-active-slate: rgba(71, 85, 105, 0.34);
+}
+
+/* Report accordion titles are structural, not major section landmarks. */
+.report-group-button strong,
+.report-accordion-button,
+.report-accordion-button span:first-child,
+.report-group-accordion.open > .report-group-button strong,
+.report-accordion.open > .report-accordion-button span:first-child {
+  color: var(--kole-text) !important;
+}
+
+.report-group-button span span,
+.report-group-button div span,
+.report-accordion-button span:not(:first-child) {
+  color: var(--kole-muted) !important;
+}
+
+.report-group-accordion.open > .report-group-button,
+.report-accordion.open > .report-accordion-button {
+  border-left-color: var(--kole-secondary-rail) !important;
+}
+
+.report-group-button:hover,
+.report-accordion-button:hover {
+  border-left-color: var(--kole-secondary-rail-soft) !important;
+}
+
+/* Keep nested report headers readable without making every drawer gold. */
+.driver-report-section-header h4,
+.gross-revenue-quarter-header h3,
+.sales-year-section .driver-report-section-header h4,
+.sales-profile-section h3,
+.sales-notes-section h3,
+.sales-lead-detail h3 {
+  color: var(--kole-text) !important;
+}
+
+.driver-report-section-header,
+.gross-revenue-quarter-header {
+  border-left: 3px solid var(--kole-secondary-rail) !important;
+}
+
+.driver-report-section-total {
+  color: var(--kole-text) !important;
+}
+
+/* Active sales summary/filter cards still show selection, but don't turn yellow. */
+.active-sales-summary-button {
+  background: var(--kole-active-slate) !important;
+  border-color: var(--kole-secondary-rail) !important;
+  box-shadow:
+    inset 3px 0 0 var(--kole-gold),
+    0 0 0 1px rgba(100, 116, 139, 0.18) !important;
+}
+
+.active-sales-summary-button span,
+.active-sales-summary-button strong {
+  color: var(--kole-text) !important;
+}
+
+.sales-summary-button:hover {
+  border-color: var(--kole-secondary-rail) !important;
+}
+
+.sales-summary-grid span,
+.sales-summary-button span,
+.report-kpi-card span,
+.driver-report-totals-grid span,
+.sales-lead-metrics span,
+.sales-profile-headline-grid span {
+  color: var(--kole-muted) !important;
+}
+
+.sales-summary-grid strong,
+.sales-summary-button strong,
+.report-kpi-card strong,
+.driver-report-totals-grid strong,
+.sales-lead-metrics strong,
+.sales-profile-headline-grid strong {
+  color: var(--kole-text) !important;
+}
+
+/* Totals rows get emphasis without becoming another yellow block. */
+.report-total-row td {
+  background: rgba(71, 85, 105, 0.30) !important;
+  border-top: 1px solid rgba(148, 163, 184, 0.28) !important;
+}
+
+/* Preserve gold for true landmarks and small count/status pills. */
+.operations-panel h2,
+.reports-header h2,
+.upload-digest-section-header h2,
+.driver-position-header h3,
+.upload-digest-count,
+.upload-digest-pill,
+.settlement-star {
+  color: var(--kole-gold-bright) !important;
+}
+
+/* PASS 13: Sales Activity Snapshot */
 .sales-activity-card {
   border-color: #263244;
 }
@@ -2952,7 +3423,7 @@ body {
   }
 }
 
-/* PASS 13: Sales Activity Snapshot modal + note alignment */
+/* PASS 14: Sales Activity Snapshot modal + note alignment */
 .sales-activity-modal {
   width: min(1700px, 96vw);
 }
