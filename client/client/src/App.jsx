@@ -172,6 +172,11 @@ export default function App() {
   const [salesLeadsReport, setSalesLeadsReport] = useState(null);
   const [salesLeadsLoading, setSalesLeadsLoading] = useState(false);
   const [salesLeadsError, setSalesLeadsError] = useState(null);
+  const [salesActivityLookbackDays, setSalesActivityLookbackDays] = useState(7);
+  const [salesActivityReport, setSalesActivityReport] = useState(null);
+  const [salesActivityModalOpen, setSalesActivityModalOpen] = useState(false);
+  const [salesActivityLoading, setSalesActivityLoading] = useState(false);
+  const [salesActivityError, setSalesActivityError] = useState(null);
   const [selectedSalesLead, setSelectedSalesLead] = useState(null);
   const [customerLookupLoading, setCustomerLookupLoading] = useState(false);
   const [customerLookupError, setCustomerLookupError] = useState('');
@@ -259,6 +264,7 @@ export default function App() {
         setWeeklySettlementModalOpen(false);
         setWonNotRegisteredModalOpen(false);
         setInactiveDriverRosterModalOpen(false);
+        setSalesActivityModalOpen(false);
         setSelectedDriverRoster(null);
         setSelectedSalesLead(null);
       }
@@ -1320,6 +1326,22 @@ function getPositionStatusLabel(position) {
     return formatDateOnly(value);
   }
 
+  function truncateSalesText(value, maxLength = 170) {
+    const clean = String(value || '').replace(/\s+/g, ' ').trim();
+
+    if (clean.length <= maxLength) return clean;
+
+    return `${clean.slice(0, maxLength - 1).trim()}…`;
+  }
+
+  function formatSalesActivityLabel(value) {
+    return value || '-';
+  }
+
+  function formatSalesActivityDate(value) {
+    return formatSalesDate(value);
+  }
+
   function formatPercent(value) {
     const number = Number(value || 0);
     return `${(number * 100).toLocaleString('en-US', { maximumFractionDigits: 1 })}%`;
@@ -1434,6 +1456,37 @@ function getPositionStatusLabel(position) {
     } finally {
       setSalesLeadsLoading(false);
     }
+  }
+
+  async function loadSalesActivityReport() {
+    setSalesActivityLoading(true);
+    setSalesActivityError(null);
+    setSalesActivityReport(null);
+    setSalesActivityModalOpen(false);
+
+    try {
+      const params = new URLSearchParams({ days: String(salesActivityLookbackDays) });
+      const res = await authedFetch(`${API}/reports/sales-activity?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to load Sales Activity Snapshot.');
+      }
+
+      setSalesActivityReport(data);
+      setSalesActivityModalOpen(true);
+    } catch (err) {
+      setSalesActivityError({
+        code: 'REPORT_ERROR',
+        message: err.message || 'Unable to load Sales Activity Snapshot.'
+      });
+    } finally {
+      setSalesActivityLoading(false);
+    }
+  }
+
+  function closeSalesActivityModal() {
+    setSalesActivityModalOpen(false);
   }
 
   async function openCustomerCardForName(customerName, customerCode = '') {
@@ -2911,6 +2964,265 @@ function openReportLoadDetails(load) {
     );
   }
 
+  function SalesActivityLeadTable({ title, description, rows }) {
+    const safeRows = Array.isArray(rows) ? rows : [];
+
+    return (
+      <div className="driver-report-section sales-activity-section">
+        <div className="driver-report-section-header">
+          <div>
+            <h4>{title}</h4>
+            {description && <p>{description}</p>}
+          </div>
+          <div className="driver-report-section-total">
+            {formatReportNumber(safeRows.length)}
+          </div>
+        </div>
+
+        {safeRows.length === 0 ? (
+          <div className="msg sales-activity-empty">Nothing to show here.</div>
+        ) : (
+          <div className="report-table-wrap sales-activity-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Company</th>
+                  <th>Customer Code</th>
+                  <th>Next Touch</th>
+                  <th>Quote Count</th>
+                  <th>First Quote</th>
+                  <th>Last Quote</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {safeRows.map((row) => (
+                  <tr key={`${title}-${row.id || row.CustomerCode || row.CompanyName}`}>
+                    <td>{formatSalesActivityLabel(row.CompanyName)}</td>
+                    <td>{formatSalesActivityLabel(row.CustomerCode)}</td>
+                    <td>{formatSalesActivityDate(row.NextTouchDate)}</td>
+                    <td>{formatReportNumber(row.QuoteCount)}</td>
+                    <td>{formatSalesActivityDate(row.FirstQuoteDate)}</td>
+                    <td>{formatSalesActivityDate(row.LastQuoteDate)}</td>
+                    <td><span className={getSalesLeadStatusClass(row.Status)}>{row.Status || '-'}</span></td>
+                    <td>
+                      <button
+                        type="button"
+                        className="view-button"
+                        onClick={() => openCustomerCardForName(row.CompanyName, row.CustomerCode)}
+                        disabled={customerLookupLoading}
+                      >
+                        Open Card
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function SalesActivityNoteList({ title, description, rows, dateField = 'ActivityDate' }) {
+    const safeRows = Array.isArray(rows) ? rows : [];
+
+    return (
+      <div className="driver-report-section sales-activity-section">
+        <div className="driver-report-section-header">
+          <div>
+            <h4>{title}</h4>
+            {description && <p>{description}</p>}
+          </div>
+          <div className="driver-report-section-total">
+            {formatReportNumber(safeRows.length)}
+          </div>
+        </div>
+
+        {safeRows.length === 0 ? (
+          <div className="msg sales-activity-empty">Nothing to show here.</div>
+        ) : (
+          <div className="sales-activity-note-list">
+            {safeRows.map((row) => (
+              <article key={`${title}-${row.id || row.CustomerCode || row.ActivityDate}`} className="sales-activity-note-card">
+                <div className="sales-activity-note-card-header">
+                  <div>
+                    <strong>{row.CompanyName || 'Unknown Customer'}</strong>
+                    <span>
+                      {[row.CustomerCode, formatSalesActivityDate(row[dateField]), row.Author].filter(Boolean).join(' · ')}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="view-button"
+                    onClick={() => openCustomerCardForName(row.CompanyName, row.CustomerCode)}
+                    disabled={customerLookupLoading}
+                  >
+                    Open Card
+                  </button>
+                </div>
+                <p>{truncateSalesText(row.Note || row.Title || '-', 260)}</p>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function SalesActivitySnapshotPreview() {
+    const report = salesActivityReport;
+
+    if (!report) return null;
+
+    const summary = report?.summary || {};
+    const sections = report?.sections || {};
+
+    return (
+      <div className="modal-report-preview sales-activity-preview">
+        <div className="driver-report-title sales-activity-modal-title">
+          <div>
+            <h3>Sales Activity Snapshot</h3>
+            <p>
+              Activity: {report.activityPeriodLabel || '-'} · Due window: {report.duePeriodLabel || '-'} · Generated {report.generatedAt || ''}
+            </p>
+          </div>
+        </div>
+
+        {report.notesStatus && report.notesStatus !== 'available' && (
+          <div className="report-alert locked sales-notes-alert">
+            <h4>Sales notes are not connected yet.</h4>
+            <p>{report.notesError || 'Confirm the Sales Leads Notes Log list name or set SALES_LEADS_NOTES_LIST_ID on the server.'}</p>
+          </div>
+        )}
+
+        <div className="sales-summary-grid sales-activity-summary-grid">
+          <div>
+            <span>Overdue</span>
+            <strong>{formatReportNumber(summary.overdueFollowUps)}</strong>
+          </div>
+          <div>
+            <span>Due Window</span>
+            <strong>{formatReportNumber(summary.dueFollowUps)}</strong>
+          </div>
+          <div>
+            <span>Notes Added</span>
+            <strong>{formatReportNumber(summary.notesAdded)}</strong>
+          </div>
+          <div>
+            <span>Completed Touches</span>
+            <strong>{formatReportNumber(summary.completedFollowUps)}</strong>
+          </div>
+          <div>
+            <span>Touched Customers</span>
+            <strong>{formatReportNumber(summary.touchedCustomers)}</strong>
+          </div>
+        </div>
+
+        <div className="sales-activity-split-label">Needs Attention</div>
+        <SalesActivityLeadTable
+          title="Overdue Follow-Ups"
+          description="Follow-up pending and Next Touch before today."
+          rows={sections.overdueFollowUps}
+        />
+        <SalesActivityLeadTable
+          title="Follow-Ups Due in Window"
+          description={`Follow-up pending from ${report.duePeriodLabel || 'the selected due window'}.`}
+          rows={sections.dueFollowUps}
+        />
+
+        <div className="sales-activity-split-label">Recent Activity</div>
+        <SalesActivityNoteList
+          title="Notes Added"
+          description={`Notes created from ${report.activityPeriodLabel || 'the selected activity window'}.`}
+          rows={sections.notesAdded}
+          dateField="ActivityDate"
+        />
+        <SalesActivityNoteList
+          title="Follow-Ups Completed"
+          description={`Touch dates recorded from ${report.activityPeriodLabel || 'the selected activity window'}.`}
+          rows={sections.completedFollowUps}
+          dateField="TouchDate"
+        />
+      </div>
+    );
+  }
+
+  function SalesActivitySnapshotPanel() {
+    const report = salesActivityReport;
+    const hasReport = Boolean(report);
+
+    return (
+      <div className="report-card compact-report-card accordion-inner-card sales-report-card sales-activity-card">
+        <div className="report-card-header centered-report-header">
+          <div>
+            <h3>Sales Activity Snapshot</h3>
+            {hasReport ? (
+              <p>
+                Activity: {report.activityPeriodLabel || '-'} · Due window: {report.duePeriodLabel || '-'} · Generated {report.generatedAt || ''}
+              </p>
+            ) : (
+              <p>Review recent notes, completed touches, overdue follow-ups, and upcoming follow-up obligations.</p>
+            )}
+          </div>
+        </div>
+
+        <div className="report-controls centered-report-controls sales-report-controls sales-activity-controls">
+          <label>
+            <span>Activity Lookback</span>
+            <select
+              value={salesActivityLookbackDays}
+              onChange={(e) => {
+                setSalesActivityLookbackDays(Number(e.target.value));
+                setSalesActivityReport(null);
+                setSalesActivityError(null);
+                setSalesActivityModalOpen(false);
+              }}
+              disabled={salesActivityLoading}
+            >
+              <option value={7}>Last 7 days / Next 7 days due</option>
+              <option value={14}>Last 14 days / Next 14 days due</option>
+              <option value={30}>Last 30 days / Next 30 days due</option>
+              <option value={60}>Last 60 days / Next 60 days due</option>
+              <option value={90}>Last 90 days / Next 90 days due</option>
+            </select>
+          </label>
+
+          <button onClick={loadSalesActivityReport} disabled={salesActivityLoading}>
+            {salesActivityLoading ? 'Loading Snapshot...' : 'Preview Snapshot'}
+          </button>
+        </div>
+
+        {salesActivityLoading && (
+          <div className="sales-report-loading">
+            Polling sales activity...
+          </div>
+        )}
+
+        {salesActivityError && (
+          <div className="report-alert error">
+            <h4>Sales Activity Snapshot could not be loaded.</h4>
+            <p>{salesActivityError.message}</p>
+          </div>
+        )}
+
+        {hasReport && !salesActivityModalOpen && (
+          <div className="report-ready-card">
+            <div>
+              <strong>Sales Activity Snapshot is ready.</strong>
+              <span> The preview opens in a report window.</span>
+            </div>
+            <button className="view-button" onClick={() => setSalesActivityModalOpen(true)}>
+              Reopen Preview
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function SalesLeadsReportPanel() {
     const summary = salesLeadsReport?.summary || {};
     const allRecords = salesLeadsReport?.records || [];
@@ -3255,6 +3567,8 @@ function openReportLoadDetails(load) {
     const isWeeklySettlementOpen = activeReportPanel === 'weeklySettlement';
     const isWonNotRegisteredOpen = activeReportPanel === 'wonNotRegistered';
     const isInactiveDriverRosterOpen = activeReportPanel === 'inactiveDriverRoster';
+    const isSalesActivityOpen = activeReportPanel === 'salesActivity';
+    const isSalesLeadsOpen = activeReportPanel === 'salesLeads';
     const isOperationalReportsOpen = isReportGroupOpen('operational');
     const isSalesReportsOpen = isReportGroupOpen('sales');
 
@@ -3684,17 +3998,34 @@ function openReportLoadDetails(load) {
 
             {isSalesReportsOpen && (
               <div className="report-group-body">
-                <div className={`report-accordion ${activeReportPanel === 'salesLeads' ? 'open' : ''}`}>
+                <div className={`report-accordion ${isSalesActivityOpen ? 'open' : ''}`}>
+                  <button
+                    type="button"
+                    className="report-accordion-button"
+                    onClick={() => toggleReportPanel('salesActivity')}
+                  >
+                    <span>Sales Activity Snapshot</span>
+                    <span className="report-accordion-icon">{isSalesActivityOpen ? '▼' : '▶'}</span>
+                  </button>
+
+                  {isSalesActivityOpen && (
+                    <div className="report-accordion-body">
+                      <SalesActivitySnapshotPanel />
+                    </div>
+                  )}
+                </div>
+
+                <div className={`report-accordion ${isSalesLeadsOpen ? 'open' : ''}`}>
                   <button
                     type="button"
                     className="report-accordion-button"
                     onClick={() => toggleReportPanel('salesLeads')}
                   >
                     <span>{getSalesLeadViewLabel()}</span>
-                    <span className="report-accordion-icon">{activeReportPanel === 'salesLeads' ? '▼' : '▶'}</span>
+                    <span className="report-accordion-icon">{isSalesLeadsOpen ? '▼' : '▶'}</span>
                   </button>
 
-                  {activeReportPanel === 'salesLeads' && (
+                  {isSalesLeadsOpen && (
                     <div className="report-accordion-body">
                       <SalesLeadsReportPanel />
                     </div>
@@ -4308,6 +4639,27 @@ function openReportLoadDetails(load) {
 
             <div className="modal-body report-modal-body">
               <InactiveDriverRosterPreview />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {salesActivityModalOpen && salesActivityReport && (
+        <div className="modal-overlay report-modal-overlay" onClick={closeSalesActivityModal}>
+          <div className="detail-modal report-modal wide-report-modal sales-activity-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="detail-header report-modal-header">
+              <div>
+                <h2>Sales Activity Snapshot</h2>
+                <p>{salesActivityReport.activityPeriodLabel || '-'} · Due window {salesActivityReport.duePeriodLabel || '-'}</p>
+              </div>
+
+              <button className="close-button" onClick={closeSalesActivityModal}>
+                Close
+              </button>
+            </div>
+
+            <div className="modal-body report-modal-body">
+              <SalesActivitySnapshotPreview />
             </div>
           </div>
         </div>

@@ -1059,16 +1059,20 @@ function stripHtml(value) {
 }
 function cleanSalesLeadNoteItem(item) {
   const f = item.fields || {};
-  const noteDate = getFlexibleField(f, [
+  const touchDate = getFlexibleField(f, [
     'TouchDate',
     'Touch_x0020_Date',
     'NoteDate',
     'Note_x0020_Date',
     'ActivityDate',
-    'Activity_x0020_Date',
+    'Activity_x0020_Date'
+  ]) || '';
+  const createdDate = getFlexibleField(f, [
+    'Created',
     'CreatedDate',
-    'Created'
+    'Created_x0020_Date'
   ]) || item.createdDateTime || '';
+  const noteDate = touchDate || createdDate;
 
   const noteText = stripHtml(getFlexibleField(f, [
     'Note',
@@ -1090,8 +1094,11 @@ function cleanSalesLeadNoteItem(item) {
   return {
     id: item.id || '',
     CustomerCode: getFlexibleField(f, ['CustomerCode', 'Customer_x0020_Code', 'Customer']) || '',
+    CustomerName: getFlexibleField(f, ['CustomerName', 'Customer_x0020_Name', 'CompanyName', 'Company_x0020_Name']) || '',
     NoteDate: noteDate,
     NoteDateDisplay: formatShortDate(noteDate),
+    CreatedDate: createdDate,
+    CreatedDateDisplay: formatShortDate(createdDate),
     NoteType: getFlexibleField(f, ['NoteType', 'Note_x0020_Type', 'ActivityType', 'Type']) || '',
     Title: title,
     Note: noteText,
@@ -1385,6 +1392,218 @@ function getSalesLeadSummary(records) {
     followUpDue: records.filter((record) => record.FollowUpDue === true).length,
     aviation: records.filter((record) => record.AviationRelated === true).length,
     suppressed: records.filter((record) => normalizeText(record.FollowUpHandling) === 'suppressed' || normalizeText(record.Status) === 'ignore' || normalizeText(record.Status) === 'inactive').length
+  };
+}
+
+
+function addDaysToDateKey(dateKey, days) {
+  const [year, month, day] = String(dateKey || formatEasternDate())
+    .slice(0, 10)
+    .split('-')
+    .map(Number);
+
+  if (!year || !month || !day) return formatEasternDate();
+
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + Number(days || 0));
+
+  return date.toISOString().slice(0, 10);
+}
+
+function getDateKey(value) {
+  if (!value) return '';
+
+  const raw = String(value || '').trim();
+  const directMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (directMatch) return directMatch[1];
+
+  return normalizeEasternDateOnly(raw);
+}
+
+function clampSalesActivityDays(value) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) return 7;
+
+  return Math.min(Math.max(Math.floor(number), 1), 90);
+}
+
+function getSalesActivityDateRange(query = {}) {
+  const today = formatEasternDate();
+  const lookbackDays = clampSalesActivityDays(query.days || query.lookbackDays || 7);
+  let endDate = getDateKey(query.endDate) || today;
+  let startDate = getDateKey(query.startDate) || addDaysToDateKey(endDate, -(lookbackDays - 1));
+
+  if (startDate > endDate) {
+    const swap = startDate;
+    startDate = endDate;
+    endDate = swap;
+  }
+
+  return {
+    lookbackDays,
+    startDate,
+    endDate,
+    dueStartDate: today,
+    dueEndDate: addDaysToDateKey(today, lookbackDays - 1)
+  };
+}
+
+function isDateKeyInRange(value, startDate, endDate) {
+  const key = getDateKey(value);
+  return Boolean(key && key >= startDate && key <= endDate);
+}
+
+function isSalesLeadActionable(record) {
+  const status = normalizeText(record.Status);
+
+  if (record.FollowUpPending !== true) return false;
+  if (normalizeText(record.FollowUpHandling) === 'suppressed') return false;
+  if (status === 'ignore' || status === 'inactive') return false;
+
+  return true;
+}
+
+function buildSalesActivityLeadRow(record) {
+  return {
+    id: record.id || '',
+    CompanyName: record.CompanyName || '',
+    CustomerCode: record.CustomerCode || '',
+    Status: record.Status || '',
+    NextTouchDate: record.NextTouchDate || '',
+    NextTouchDisplay: formatShortDate(record.NextTouchDate),
+    QuoteCount: Number(record.QuoteCount || 0) || 0,
+    FirstQuoteDate: record.FirstQuoteDate || '',
+    FirstQuoteDisplay: formatShortDate(record.FirstQuoteDate),
+    LastQuoteDate: record.LastQuoteDate || '',
+    LastQuoteDisplay: formatShortDate(record.LastQuoteDate),
+    FollowUpHandling: record.FollowUpHandling || '',
+    AviationRelated: record.AviationRelated === true
+  };
+}
+
+function buildSalesActivityNoteRow(note, lead = {}) {
+  const activityDate = note.CreatedDate || note.NoteDate || '';
+  const touchDate = note.NoteDate || note.CreatedDate || '';
+
+  return {
+    id: note.id || '',
+    CustomerCode: note.CustomerCode || lead.CustomerCode || '',
+    CompanyName: note.CustomerName || lead.CompanyName || '',
+    Status: lead.Status || '',
+    ActivityDate: activityDate,
+    ActivityDateDisplay: formatShortDate(activityDate),
+    TouchDate: touchDate,
+    TouchDateDisplay: formatShortDate(touchDate),
+    Note: note.Note || '',
+    Title: note.Title || '',
+    Author: note.Author || '',
+    NoteType: note.NoteType || '',
+    webUrl: note.webUrl || ''
+  };
+}
+
+function sortByDateThenCompany(records, dateField = 'NextTouchDate', direction = 'asc') {
+  return [...records].sort((a, b) => {
+    const aDate = getDateKey(a[dateField]) || (direction === 'asc' ? '9999-12-31' : '0000-00-00');
+    const bDate = getDateKey(b[dateField]) || (direction === 'asc' ? '9999-12-31' : '0000-00-00');
+    const dateDiff = direction === 'asc' ? aDate.localeCompare(bDate) : bDate.localeCompare(aDate);
+
+    if (dateDiff !== 0) return dateDiff;
+
+    return String(a.CompanyName || '').localeCompare(String(b.CompanyName || ''));
+  });
+}
+
+function getUniqueSalesActivityCustomerCount(...sections) {
+  const keys = new Set();
+
+  sections.flat().forEach((record) => {
+    const key = normalizeText(record.CustomerCode) || normalizeCustomerName(record.CompanyName);
+    if (key) keys.add(key);
+  });
+
+  return keys.size;
+}
+
+function buildSalesActivitySnapshot(records, notesBundle, range) {
+  const today = formatEasternDate();
+  const leadsByCode = new Map();
+
+  records.forEach((record) => {
+    const key = normalizeText(record.CustomerCode);
+    if (key && !leadsByCode.has(key)) leadsByCode.set(key, record);
+  });
+
+  const actionableLeads = records.filter(isSalesLeadActionable);
+
+  const dueFollowUps = sortByDateThenCompany(
+    actionableLeads
+      .filter((record) => isDateKeyInRange(record.NextTouchDate, range.dueStartDate, range.dueEndDate))
+      .map(buildSalesActivityLeadRow),
+    'NextTouchDate',
+    'asc'
+  );
+
+  const overdueFollowUps = sortByDateThenCompany(
+    actionableLeads
+      .filter((record) => {
+        const nextTouch = getDateKey(record.NextTouchDate);
+        return nextTouch && nextTouch < today;
+      })
+      .map(buildSalesActivityLeadRow),
+    'NextTouchDate',
+    'asc'
+  );
+
+  const notes = Array.from(notesBundle.notesIndex.values()).flat();
+
+  const notesAdded = sortByDateThenCompany(
+    notes
+      .filter((note) => isDateKeyInRange(note.CreatedDate || note.NoteDate, range.startDate, range.endDate))
+      .map((note) => buildSalesActivityNoteRow(note, leadsByCode.get(normalizeText(note.CustomerCode)))),
+    'ActivityDate',
+    'desc'
+  );
+
+  const completedFollowUps = sortByDateThenCompany(
+    notes
+      .filter((note) => isDateKeyInRange(note.NoteDate, range.startDate, range.endDate))
+      .map((note) => buildSalesActivityNoteRow(note, leadsByCode.get(normalizeText(note.CustomerCode)))),
+    'TouchDate',
+    'desc'
+  );
+
+  return {
+    success: true,
+    reportType: 'salesActivitySnapshot',
+    reportLabel: 'Sales Activity Snapshot',
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    lookbackDays: range.lookbackDays,
+    activityStartDate: range.startDate,
+    activityEndDate: range.endDate,
+    dueStartDate: range.dueStartDate,
+    dueEndDate: range.dueEndDate,
+    activityPeriodLabel: `${formatShortDate(range.startDate)} to ${formatShortDate(range.endDate)}`,
+    duePeriodLabel: `${formatShortDate(range.dueStartDate)} to ${formatShortDate(range.dueEndDate)}`,
+    notesStatus: notesBundle.status,
+    notesError: notesBundle.error,
+    notesSourceListId: notesBundle.sourceListId,
+    recordsScanned: records.length,
+    notesScanned: notesBundle.recordsScanned,
+    summary: {
+      overdueFollowUps: overdueFollowUps.length,
+      dueFollowUps: dueFollowUps.length,
+      notesAdded: notesAdded.length,
+      completedFollowUps: completedFollowUps.length,
+      touchedCustomers: getUniqueSalesActivityCustomerCount(notesAdded, completedFollowUps)
+    },
+    sections: {
+      overdueFollowUps,
+      dueFollowUps,
+      notesAdded,
+      completedFollowUps
+    }
   };
 }
 
@@ -3434,6 +3653,42 @@ app.get('/sharepoint-docs-debug', requireLookupAccess, async (req, res) => {
 });
 
 
+
+
+app.get('/reports/sales-activity', requireLookupAccess, async (req, res) => {
+  try {
+    const salesLeadsListId = getSalesLeadsListId();
+
+    if (!salesLeadsListId) {
+      return res.status(500).json({
+        success: false,
+        error: 'SALES_LEADS_LIST_ID is not configured on the server.'
+      });
+    }
+
+    const token = await getGraphToken();
+    const range = getSalesActivityDateRange(req.query || {});
+    const [items, notesBundle] = await Promise.all([
+      getAllListItemsWithFields(token, salesLeadsListId, getSalesLeadFieldSelect()),
+      getSalesLeadNotesBundle(token)
+    ]);
+
+    const records = items.map(cleanSalesLeadItem);
+    const report = buildSalesActivitySnapshot(records, notesBundle, range);
+
+    res.json({
+      ...report,
+      sourceListId: salesLeadsListId
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to load Sales Activity Snapshot.'
+    });
+  }
+});
 
 
 app.get('/reports/sales-leads', requireLookupAccess, async (req, res) => {

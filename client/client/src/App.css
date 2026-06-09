@@ -2831,3 +2831,164 @@ body {
 .container > .search-card:has(input[type="password"]) {
   max-width: 400px !important;
 }
+
+/* PASS 12: Sales Activity Snapshot */
+.sales-activity-card {
+  border-color: #263244;
+}
+
+.sales-activity-controls {
+  align-items: flex-end;
+}
+
+.sales-activity-summary-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-top: 4px;
+  margin-bottom: 22px;
+}
+
+.sales-activity-summary-grid div {
+  border-color: rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.58);
+}
+
+.sales-activity-summary-grid span {
+  color: #cbd5e1;
+}
+
+.sales-activity-summary-grid strong {
+  color: #f8fafc;
+}
+
+.sales-activity-split-label {
+  margin: 26px 0 12px;
+  padding: 9px 12px;
+  border-left: 4px solid #64748b;
+  border-radius: 10px;
+  background: #182033;
+  color: #f8fafc;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.sales-activity-section {
+  margin-top: 14px;
+}
+
+.sales-activity-section .driver-report-section-header h4 {
+  color: #f8fafc;
+}
+
+.sales-activity-section .driver-report-section-header p {
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.sales-activity-empty {
+  padding: 16px;
+  margin: 0;
+}
+
+.sales-activity-table-wrap table {
+  min-width: 1050px;
+}
+
+.sales-activity-note-list {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.sales-activity-note-card {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(15, 23, 42, 0.52);
+}
+
+.sales-activity-note-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+.sales-activity-note-card-header strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.sales-activity-note-card-header span {
+  display: block;
+  color: #94a3b8;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.sales-activity-note-card p {
+  margin: 0;
+  color: #e5e7eb;
+  line-height: 1.45;
+}
+
+@media (max-width: 1100px) {
+  .sales-activity-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .sales-activity-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-activity-note-card-header {
+    flex-direction: column;
+  }
+}
+
+/* PASS 13: Sales Activity Snapshot modal + note alignment */
+.sales-activity-modal {
+  width: min(1700px, 96vw);
+}
+
+.sales-activity-preview .driver-report-title,
+.sales-activity-preview .driver-report-title h3,
+.sales-activity-preview .driver-report-title p,
+.sales-activity-preview .driver-report-section-header,
+.sales-activity-preview .driver-report-section-header h4,
+.sales-activity-preview .driver-report-section-header p,
+.sales-activity-note-list,
+.sales-activity-note-card,
+.sales-activity-note-card-header,
+.sales-activity-note-card-header strong,
+.sales-activity-note-card-header span,
+.sales-activity-note-card p,
+.sales-notes-list,
+.sales-note-card,
+.sales-note-card-header,
+.sales-note-card-header strong,
+.sales-note-card-header span,
+.sales-note-card small,
+.sales-note-card p,
+.sales-note-text {
+  text-align: left !important;
+}
+
+.sales-activity-preview .driver-report-title {
+  justify-content: flex-start !important;
+}
+
+.sales-activity-note-card-header > div,
+.sales-note-card-header > div {
+  min-width: 0;
+}
+
+.sales-activity-preview .driver-report-section {
+  max-width: none;
+}
