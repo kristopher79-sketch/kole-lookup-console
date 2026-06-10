@@ -178,6 +178,15 @@ export default function App() {
   const [salesActivityModalOpen, setSalesActivityModalOpen] = useState(false);
   const [salesActivityLoading, setSalesActivityLoading] = useState(false);
   const [salesActivityError, setSalesActivityError] = useState(null);
+  const [customerTrendMonth, setCustomerTrendMonth] = useState(() => initialReportDate.getMonth() + 1);
+  const [customerTrendYear, setCustomerTrendYear] = useState(() => initialReportDate.getFullYear());
+  const [customerTrendReport, setCustomerTrendReport] = useState(null);
+  const [customerTrendModalOpen, setCustomerTrendModalOpen] = useState(false);
+  const [customerTrendLoading, setCustomerTrendLoading] = useState(false);
+  const [customerTrendError, setCustomerTrendError] = useState(null);
+  const [customerTrendBucket, setCustomerTrendBucket] = useState('all');
+  const [customerTrendSort, setCustomerTrendSort] = useState('revenue');
+  const [selectedCustomerTrend, setSelectedCustomerTrend] = useState(null);
   const [selectedSalesLead, setSelectedSalesLead] = useState(null);
   const [customerLookupLoading, setCustomerLookupLoading] = useState(false);
   const [customerLookupError, setCustomerLookupError] = useState('');
@@ -268,6 +277,8 @@ export default function App() {
         setWonNotRegisteredModalOpen(false);
         setInactiveDriverRosterModalOpen(false);
         setSalesActivityModalOpen(false);
+        setCustomerTrendModalOpen(false);
+        setSelectedCustomerTrend(null);
         setSelectedDriverRoster(null);
         setSelectedSalesLead(null);
       }
@@ -1357,6 +1368,86 @@ function getPositionStatusLabel(position) {
     return `${(number * 100).toLocaleString('en-US', { maximumFractionDigits: 1 })}%`;
   }
 
+  function formatTrendChange(value) {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
+
+    const number = Number(value);
+    const prefix = number > 0 ? '+' : '';
+
+    return `${prefix}${(number * 100).toLocaleString('en-US', { maximumFractionDigits: 1 })}%`;
+  }
+
+  function getTrendChangeClass(value) {
+    const number = Number(value);
+    if (Number.isNaN(number)) return 'neutral';
+    if (number > 0) return 'positive';
+    if (number < 0) return 'negative';
+    return 'neutral';
+  }
+
+  function getCustomerTrendBucketLabel(bucket) {
+    switch (bucket) {
+      case 'growing':
+        return 'Growing';
+      case 'declining':
+        return 'Declining';
+      case 'dormant':
+        return 'Dormant';
+      case 'newReturning':
+        return 'New / Returning';
+      case 'steady':
+        return 'Steady';
+      case 'inactive':
+        return 'Inactive';
+      default:
+        return 'All';
+    }
+  }
+
+  function filterCustomerTrendRows(rows, bucket = 'all') {
+    if (bucket === 'all') return rows;
+    return rows.filter((row) => row.bucket === bucket);
+  }
+
+  function sortCustomerTrendRows(rows, sortMode = 'revenue') {
+    const sorted = [...rows];
+
+    sorted.sort((a, b) => {
+      if (sortMode === 'customer') {
+        return String(a.customer || '').localeCompare(String(b.customer || ''));
+      }
+
+      if (sortMode === 'jobs') {
+        const diff = Number(b.currentJobs || 0) - Number(a.currentJobs || 0);
+        if (diff !== 0) return diff;
+      }
+
+      if (sortMode === 'rate') {
+        const diff = Number(b.currentRatePerLoadedMile || 0) - Number(a.currentRatePerLoadedMile || 0);
+        if (diff !== 0) return diff;
+      }
+
+      if (sortMode === 'share') {
+        const diff = Number(b.revenueShare || 0) - Number(a.revenueShare || 0);
+        if (diff !== 0) return diff;
+      }
+
+      if (sortMode === 'yoy') {
+        const aValue = a.yoyRevenueChange === null || a.yoyRevenueChange === undefined ? -999 : Number(a.yoyRevenueChange);
+        const bValue = b.yoyRevenueChange === null || b.yoyRevenueChange === undefined ? -999 : Number(b.yoyRevenueChange);
+        const diff = bValue - aValue;
+        if (diff !== 0) return diff;
+      }
+
+      const revenueDiff = Number(b.currentRevenue || 0) - Number(a.currentRevenue || 0);
+      if (revenueDiff !== 0) return revenueDiff;
+
+      return String(a.customer || '').localeCompare(String(b.customer || ''));
+    });
+
+    return sorted;
+  }
+
   function getSalesLeadStatusClass(status) {
     const s = String(status || '').toLowerCase();
     if (s === 'converted') return 'sales-status converted';
@@ -1497,6 +1588,68 @@ function getPositionStatusLabel(position) {
 
   function closeSalesActivityModal() {
     setSalesActivityModalOpen(false);
+  }
+
+  async function loadCustomerBookingTrendsReport() {
+    const selectedMonth = Number(customerTrendMonth);
+    const selectedYear = Number(customerTrendYear);
+    const selectedReportLabel = `${getReportMonthName(selectedMonth)} ${selectedYear}`;
+
+    setCustomerTrendLoading(true);
+    setCustomerTrendError(null);
+    setCustomerTrendReport(null);
+    setCustomerTrendModalOpen(false);
+    setSelectedCustomerTrend(null);
+
+    try {
+      const res = await authedFetch(
+        `${API}/reports/customer-booking-trends?month=${encodeURIComponent(selectedMonth)}&year=${encodeURIComponent(selectedYear)}`
+      );
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        setCustomerTrendError({
+          code: data.error || 'REPORT_ERROR',
+          message: data.message || data.error || 'Unable to load Customer Booking Trends.',
+          reportLabel: data.reportLabel || selectedReportLabel,
+          unlockLabel: data.unlockLabel || '',
+          lockReason: data.lockReason || ''
+        });
+        return;
+      }
+
+      setCustomerTrendReport(data);
+      setCustomerTrendBucket('all');
+      setCustomerTrendSort('revenue');
+      setCustomerTrendModalOpen(true);
+    } catch (err) {
+      setCustomerTrendError({
+        code: 'REPORT_ERROR',
+        message: err.message || 'Unable to load Customer Booking Trends.',
+        reportLabel: selectedReportLabel
+      });
+    } finally {
+      setCustomerTrendLoading(false);
+    }
+  }
+
+  function closeCustomerTrendModal() {
+    setCustomerTrendModalOpen(false);
+    setSelectedCustomerTrend(null);
+  }
+
+  function closeCustomerTrendDetailModal() {
+    setSelectedCustomerTrend(null);
+  }
+
+  async function openCustomerCardFromTrend(row) {
+    const customerName = String(row?.customer || '').trim();
+
+    if (!customerName) return;
+
+    closeCustomerTrendModal();
+    await openCustomerCardForName(customerName);
   }
 
   async function openCustomerCardForName(customerName, customerCode = '') {
@@ -3399,6 +3552,414 @@ function openReportLoadDetails(load) {
     );
   }
 
+  function CustomerBookingTrendsPreview() {
+    const report = customerTrendReport;
+
+    if (!report) return null;
+
+    const rows = sortCustomerTrendRows(
+      filterCustomerTrendRows(report.rows || [], customerTrendBucket),
+      customerTrendSort
+    );
+
+    const bucketOptions = [
+      { value: 'all', label: 'All' },
+      { value: 'growing', label: 'Growing' },
+      { value: 'declining', label: 'Declining' },
+      { value: 'dormant', label: 'Dormant' },
+      { value: 'newReturning', label: 'New / Returning' },
+      { value: 'steady', label: 'Steady' }
+    ];
+
+    return (
+      <div className="modal-report-preview customer-trends-preview">
+        <div className="sales-summary-grid customer-trends-summary-grid">
+          <div>
+            <span>{report.throughYear} Revenue</span>
+            <strong>{formatReportMoney(report.summary?.currentRevenue)}</strong>
+          </div>
+          <div>
+            <span>{report.throughYear} Jobs</span>
+            <strong>{formatReportNumber(report.summary?.currentJobs)}</strong>
+          </div>
+          <div>
+            <span>$ / Loaded Mile</span>
+            <strong>{formatReportMoney(report.summary?.currentRatePerLoadedMile)}</strong>
+          </div>
+          <div>
+            <span>Active Customers</span>
+            <strong>{formatReportNumber(report.summary?.activeCustomers)}</strong>
+          </div>
+          <div>
+            <span>Top 10 Share</span>
+            <strong>{formatPercent(report.summary?.top10RevenueShare)}</strong>
+          </div>
+        </div>
+
+        <div className="customer-trends-meta-card">
+          <strong>Comparison window:</strong> January through {getReportMonthName(report.throughMonth)} for {report.comparedYears?.join(', ') || 'available years'}.
+          <span> Rows are built from Bid Listing plus available archives, not the old PDF attachment.</span>
+        </div>
+
+        <div className="sales-summary-grid sales-summary-button-grid customer-trends-filter-grid">
+          {bucketOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`sales-summary-button ${customerTrendBucket === option.value ? 'active-sales-summary-button' : ''}`}
+              onClick={() => setCustomerTrendBucket(option.value)}
+            >
+              <span>{option.label}</span>
+              <strong>{formatReportNumber(report.bucketCounts?.[option.value] || 0)}</strong>
+            </button>
+          ))}
+        </div>
+
+        <div className="report-controls centered-report-controls customer-trends-toolbar">
+          <label>
+            <span>Sort</span>
+            <select
+              value={customerTrendSort}
+              onChange={(e) => setCustomerTrendSort(e.target.value)}
+            >
+              <option value="revenue">Most current-year revenue</option>
+              <option value="jobs">Most current-year jobs</option>
+              <option value="rate">Highest $ / loaded mile</option>
+              <option value="share">Highest revenue share</option>
+              <option value="yoy">Largest YoY change</option>
+              <option value="customer">Alphabetical</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="driver-report-section customer-trends-section">
+          <div className="driver-report-section-header">
+            <div>
+              <h4>Customer Trend Table</h4>
+              <p>Click a customer to see the month-by-month comparison.</p>
+            </div>
+            <div className="driver-report-section-total">
+              {formatReportNumber(rows.length)} shown
+            </div>
+          </div>
+
+          {rows.length === 0 ? (
+            <div className="msg sales-activity-empty">No customers matched this trend filter.</div>
+          ) : (
+            <div className="report-table-wrap customer-trends-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>{report.throughYear} Revenue</th>
+                    <th>{report.throughYear} Jobs</th>
+                    <th>$ / Loaded Mile</th>
+                    <th>% Revenue</th>
+                    <th>{report.throughYear - 1} Revenue</th>
+                    <th>YoY</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
+                    <tr
+                      key={row.customer}
+                      className="customer-trend-clickable-row"
+                      onClick={() => setSelectedCustomerTrend(row)}
+                    >
+                      <td>{row.customer || '-'}</td>
+                      <td>{formatReportMoney(row.currentRevenue)}</td>
+                      <td>{formatReportNumber(row.currentJobs)}</td>
+                      <td>{formatReportMoney(row.currentRatePerLoadedMile)}</td>
+                      <td>{formatPercent(row.revenueShare)}</td>
+                      <td>{formatReportMoney(row.previousRevenue)}</td>
+                      <td>
+                        <span className={`customer-trend-change ${getTrendChangeClass(row.yoyRevenueChange)}`}>
+                          {formatTrendChange(row.yoyRevenueChange)}
+                        </span>
+                      </td>
+                      <td><span className={`customer-trend-pill ${row.bucket}`}>{row.bucketLabel || getCustomerTrendBucketLabel(row.bucket)}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function CustomerBookingTrendsPanel() {
+    const hasReport = Boolean(customerTrendReport);
+
+    return (
+      <div className="report-card compact-report-card accordion-inner-card sales-report-card customer-trends-card">
+        <div className="report-card-header centered-report-header">
+          <div>
+            <h3>Customer Booking Trends</h3>
+            {hasReport ? (
+              <p>
+                {customerTrendReport.throughMonthLabel || customerTrendReport.reportLabel} · {formatReportNumber(customerTrendReport.customerCount)} customers · Generated {customerTrendReport.generatedAt || ''}
+              </p>
+            ) : (
+              <p>Compare customer revenue, jobs, rate, share, and YoY movement across every available year.</p>
+            )}
+          </div>
+        </div>
+
+        <div className="report-controls centered-report-controls sales-report-controls customer-trends-controls">
+          <label>
+            <span>Valid Through Month</span>
+            <select
+              value={customerTrendMonth}
+              onChange={(e) => {
+                setCustomerTrendMonth(Number(e.target.value));
+                setCustomerTrendReport(null);
+                setCustomerTrendError(null);
+                setCustomerTrendModalOpen(false);
+                setSelectedCustomerTrend(null);
+              }}
+              disabled={customerTrendLoading}
+            >
+              {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
+                <option key={month} value={month}>
+                  {getReportMonthName(month)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span>Through Year</span>
+            <select
+              value={customerTrendYear}
+              onChange={(e) => {
+                setCustomerTrendYear(Number(e.target.value));
+                setCustomerTrendReport(null);
+                setCustomerTrendError(null);
+                setCustomerTrendModalOpen(false);
+                setSelectedCustomerTrend(null);
+              }}
+              disabled={customerTrendLoading}
+            >
+              {getReportYears().map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <button onClick={loadCustomerBookingTrendsReport} disabled={customerTrendLoading}>
+            {customerTrendLoading ? 'Loading Trends...' : 'Preview Trends'}
+          </button>
+        </div>
+
+        <p className="customer-trends-lock-note">
+          Monthly trend windows unlock at 8:00 AM Eastern on the 5th of the following month.
+        </p>
+
+        {customerTrendLoading && (
+          <div className="sales-report-loading">
+            Building customer trend picture...
+          </div>
+        )}
+
+        {customerTrendError && (
+          <div className={`report-alert ${customerTrendError.code === 'REPORT_LOCKED' ? 'locked' : 'error'}`}>
+            <h4>
+              {customerTrendError.code === 'REPORT_LOCKED'
+                ? 'This report is not available yet.'
+                : 'Customer Booking Trends could not be loaded.'}
+            </h4>
+            <p>{customerTrendError.message}</p>
+
+            {customerTrendError.code === 'REPORT_LOCKED' && (
+              <>
+                <div className="report-alert-grid">
+                  <div>
+                    <span>Selected report</span>
+                    <strong>{customerTrendError.reportLabel}</strong>
+                  </div>
+                  <div>
+                    <span>Available starting</span>
+                    <strong>{customerTrendError.unlockLabel || '-'}</strong>
+                  </div>
+                </div>
+
+                {customerTrendError.lockReason && <p>{customerTrendError.lockReason}</p>}
+              </>
+            )}
+          </div>
+        )}
+
+        {hasReport && !customerTrendModalOpen && (
+          <div className="report-ready-card">
+            <div>
+              <strong>{customerTrendReport.reportLabel || 'Customer Booking Trends'} is ready.</strong>
+              <span> The preview opens in a report window.</span>
+            </div>
+            <button className="view-button" onClick={() => setCustomerTrendModalOpen(true)}>
+              Reopen Preview
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function CustomerTrendDetailModal() {
+    if (!customerTrendReport || !selectedCustomerTrend) return null;
+
+    const row = selectedCustomerTrend;
+    const comparedYears = customerTrendReport.comparedYears || [];
+    const currentYear = customerTrendReport.throughYear;
+    const monthlyRows = (row.monthlyBreakdown || []).filter((month) => month.inComparisonWindow);
+
+    return (
+      <div className="modal-overlay report-modal-overlay nested-report-modal-overlay" onClick={closeCustomerTrendDetailModal}>
+        <div className="detail-modal report-modal wide-report-modal customer-trend-detail-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="detail-header report-modal-header">
+            <div>
+              <h2>{row.customer || 'Customer Trend'}</h2>
+              <p>{customerTrendReport.throughMonthLabel || customerTrendReport.reportLabel} · {row.bucketLabel || getCustomerTrendBucketLabel(row.bucket)}</p>
+            </div>
+
+            <div className="customer-trend-detail-actions">
+              <button
+                type="button"
+                className="view-button"
+                onClick={() => openCustomerCardFromTrend(row)}
+                disabled={customerLookupLoading}
+              >
+                {customerLookupLoading ? 'Opening...' : 'Open Customer Card'}
+              </button>
+              <button className="close-button" onClick={closeCustomerTrendDetailModal}>
+                Close
+              </button>
+            </div>
+          </div>
+
+          <div className="modal-body report-modal-body">
+            <div className="sales-summary-grid customer-trend-detail-grid">
+              <div>
+                <span>{currentYear} Revenue</span>
+                <strong>{formatReportMoney(row.currentRevenue)}</strong>
+              </div>
+              <div>
+                <span>{currentYear} Jobs</span>
+                <strong>{formatReportNumber(row.currentJobs)}</strong>
+              </div>
+              <div>
+                <span>$ / Loaded Mile</span>
+                <strong>{formatReportMoney(row.currentRatePerLoadedMile)}</strong>
+              </div>
+              <div>
+                <span>Revenue Share</span>
+                <strong>{formatPercent(row.revenueShare)}</strong>
+              </div>
+              <div>
+                <span>YoY Change</span>
+                <strong className={`customer-trend-change ${getTrendChangeClass(row.yoyRevenueChange)}`}>
+                  {formatTrendChange(row.yoyRevenueChange)}
+                </strong>
+              </div>
+            </div>
+
+            <div className="driver-report-section customer-trend-insights-section">
+              <div className="driver-report-section-header">
+                <div>
+                  <h4>Trend Notes</h4>
+                  <p>Plain-language flags for the selected comparison window.</p>
+                </div>
+              </div>
+              <div className="customer-trend-insights-list">
+                {(row.insights || []).map((insight, index) => (
+                  <div key={`${row.customer}-insight-${index}`} className="customer-trend-insight-card">
+                    {insight}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="driver-report-section customer-trend-year-section">
+              <div className="driver-report-section-header">
+                <div>
+                  <h4>Year Summary</h4>
+                  <p>Same-month comparison through {getReportMonthName(customerTrendReport.throughMonth)}.</p>
+                </div>
+              </div>
+              <div className="report-table-wrap customer-trends-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Year</th>
+                      <th>Jobs</th>
+                      <th>Revenue</th>
+                      <th>$ / Loaded Mile</th>
+                      <th>Revenue Share</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(row.yearDetails || []).map((detail) => (
+                      <tr key={`${row.customer}-year-${detail.year}`} className={Number(detail.year) === Number(currentYear) ? 'report-total-row' : ''}>
+                        <td>{detail.year}</td>
+                        <td>{formatReportNumber(detail.jobs)}</td>
+                        <td>{formatReportMoney(detail.revenue)}</td>
+                        <td>{formatReportMoney(detail.ratePerLoadedMile)}</td>
+                        <td>{formatPercent(detail.revenueShare)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="driver-report-section customer-trend-month-section">
+              <div className="driver-report-section-header">
+                <div>
+                  <h4>Monthly Breakdown</h4>
+                  <p>Revenue by month, side-by-side across available years.</p>
+                </div>
+              </div>
+              <div className="report-table-wrap customer-trends-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Month</th>
+                      {comparedYears.map((year) => (
+                        <th key={`${row.customer}-month-head-${year}`}>{year} Revenue</th>
+                      ))}
+                      <th>{currentYear} Jobs</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monthlyRows.map((month) => {
+                      const currentDetail = month.years?.[String(currentYear)] || {};
+
+                      return (
+                        <tr key={`${row.customer}-month-${month.month}`}>
+                          <td>{month.monthName}</td>
+                          {comparedYears.map((year) => {
+                            const detail = month.years?.[String(year)] || {};
+                            return <td key={`${row.customer}-month-${month.month}-${year}`}>{formatReportMoney(detail.revenue)}</td>;
+                          })}
+                          <td>{formatReportNumber(currentDetail.jobs)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+
   function SalesLeadsReportPanel() {
     const summary = salesLeadsReport?.summary || {};
     const allRecords = salesLeadsReport?.records || [];
@@ -3743,6 +4304,7 @@ function openReportLoadDetails(load) {
     const isWeeklySettlementOpen = activeReportPanel === 'weeklySettlement';
     const isWonNotRegisteredOpen = activeReportPanel === 'wonNotRegistered';
     const isInactiveDriverRosterOpen = activeReportPanel === 'inactiveDriverRoster';
+    const isCustomerTrendsOpen = activeReportPanel === 'customerBookingTrends';
     const isSalesActivityOpen = activeReportPanel === 'salesActivity';
     const isSalesLeadsOpen = activeReportPanel === 'salesLeads';
     const isOperationalReportsOpen = isReportGroupOpen('operational');
@@ -4174,6 +4736,23 @@ function openReportLoadDetails(load) {
 
             {isSalesReportsOpen && (
               <div className="report-group-body">
+                <div className={`report-accordion ${isCustomerTrendsOpen ? 'open' : ''}`}>
+                  <button
+                    type="button"
+                    className="report-accordion-button"
+                    onClick={() => toggleReportPanel('customerBookingTrends')}
+                  >
+                    <span>Customer Booking Trends</span>
+                    <span className="report-accordion-icon">{isCustomerTrendsOpen ? '▼' : '▶'}</span>
+                  </button>
+
+                  {isCustomerTrendsOpen && (
+                    <div className="report-accordion-body">
+                      <CustomerBookingTrendsPanel />
+                    </div>
+                  )}
+                </div>
+
                 <div className={`report-accordion ${isSalesActivityOpen ? 'open' : ''}`}>
                   <button
                     type="button"
@@ -4827,6 +5406,29 @@ function openReportLoadDetails(load) {
           </div>
         </div>
       )}
+
+      {customerTrendModalOpen && customerTrendReport && (
+        <div className="modal-overlay report-modal-overlay" onClick={closeCustomerTrendModal}>
+          <div className="detail-modal report-modal wide-report-modal customer-trends-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="detail-header report-modal-header">
+              <div>
+                <h2>{customerTrendReport.reportLabel || 'Customer Booking Trends'}</h2>
+                <p>{customerTrendReport.comparedYears?.join(', ') || 'Available years'} · Generated {customerTrendReport.generatedAt || ''}</p>
+              </div>
+
+              <button className="close-button" onClick={closeCustomerTrendModal}>
+                Close
+              </button>
+            </div>
+
+            <div className="modal-body report-modal-body">
+              <CustomerBookingTrendsPreview />
+            </div>
+          </div>
+        </div>
+      )}
+
+      <CustomerTrendDetailModal />
 
       {salesActivityModalOpen && salesActivityReport && (
         <div className="modal-overlay report-modal-overlay" onClick={closeSalesActivityModal}>

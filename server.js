@@ -14,6 +14,7 @@ const ARCHIVE_YEAR_MAX = 2030;
 const DEFAULT_UPLOAD_DIGEST_LIST_ID = 'c9e907f9-cdac-4657-9da6-cc6ecfaa19a8';
 const DEFAULT_SALES_LEADS_LIST_ID = '86cc3352-fb75-421d-a5e4-4b16d011fd1e';
 const DEFAULT_SALES_LEADS_NOTES_LIST_NAME = 'Sales Leads Notes Log';
+const DEFAULT_CUSTOMER_BOOKING_TRENDS_LIST_ID = 'f899ef92-6489-43b1-9a9f-19c5f0ee83b9';
 const SALES_LEAD_NOTE_MAX_LENGTH = 63000;
 
 function getLoadPicturesFolderId() {
@@ -2044,6 +2045,403 @@ function buildDriverSummaryResponse(items, sourceList, year, month) {
     includedStatuses: ['Won', 'TONU'],
     totals,
     drivers
+  };
+}
+
+function getCustomerBookingTrendsListId() {
+  return process.env.CUSTOMER_BOOKING_TRENDS_LIST_ID || DEFAULT_CUSTOMER_BOOKING_TRENDS_LIST_ID;
+}
+
+function getCustomerBookingTrendsSourceFieldSelect() {
+  return [
+    'BOLNumber_x0028_Won_x0029_',
+    'BidID',
+    'Company',
+    'CustomerCode',
+    'Pickup_x0020_Offer_x0020_Date',
+    'Status',
+    'Quoted_x0020_Total',
+    'FinalBillableTotal',
+    'Loaded_x0020_Miles'
+  ].join(',');
+}
+
+function getCustomerBookingTrendRecordFromBidItem(item, sourceList) {
+  const f = item.fields || {};
+  const pickup = getUtcYearMonth(f.Pickup_x0020_Offer_x0020_Date);
+  const status = normalizeText(getChoiceValue(f.Status || f['Status/Value'] || ''));
+
+  if (!pickup) return null;
+  if (status !== 'won' && status !== 'tonu') return null;
+
+  const customer = getChoiceValue(f.Company || f['Company/Value'] || '');
+  const quotedTotal = getNumberValue(f.Quoted_x0020_Total);
+  const finalBillableTotal = getNumberValue(f.FinalBillableTotal);
+  const revenue = finalBillableTotal > 0 ? finalBillableTotal : quotedTotal;
+  const loadedMiles = getNumberValue(f.Loaded_x0020_Miles);
+
+  return {
+    id: item.id || '',
+    SourceListId: sourceList?.listId || '',
+    SourceYear: sourceList?.year || '',
+    BOL: f.BOLNumber_x0028_Won_x0029_ || '',
+    BidID: f.BidID || '',
+    Customer: customer,
+    CustomerCode: f.CustomerCode || '',
+    BookingYear: pickup.year,
+    BookingMonth: pickup.month,
+    Jobs: 1,
+    Revenue: revenue,
+    LoadedMiles: loadedMiles,
+    RatePerLoadedMile: loadedMiles > 0 ? revenue / loadedMiles : 0,
+    Status: getChoiceValue(f.Status || f['Status/Value'] || '')
+  };
+}
+
+function getCustomerBookingTrendsFieldSelect() {
+  return [
+    'Customer',
+    'BookingYear',
+    'BookingMonth',
+    'Jobs',
+    'Revenue',
+    'Average_x0024__x002f_LoadedMile',
+    '_x0025_ofRevenue'
+  ].join(',');
+}
+
+function getCustomerTrendReportLockStatus(year, month, now = new Date()) {
+  return getDriverSummaryLockStatus(year, month, now);
+}
+
+function getTrendPercentChange(currentValue, previousValue) {
+  const current = Number(currentValue || 0);
+  const previous = Number(previousValue || 0);
+
+  if (previous <= 0) return null;
+
+  return (current - previous) / previous;
+}
+
+function getCustomerTrendBucket(currentRevenue, previousRevenue) {
+  const current = Number(currentRevenue || 0);
+  const previous = Number(previousRevenue || 0);
+
+  if (current > 0 && previous <= 0) return 'newReturning';
+  if (current <= 0 && previous > 0) return 'dormant';
+  if (current > previous) return 'growing';
+  if (current < previous) return 'declining';
+  if (current > 0) return 'steady';
+  return 'inactive';
+}
+
+function getCustomerTrendBucketLabel(bucket) {
+  switch (bucket) {
+    case 'growing':
+      return 'Growing';
+    case 'declining':
+      return 'Declining';
+    case 'dormant':
+      return 'Dormant';
+    case 'newReturning':
+      return 'New / Returning';
+    case 'steady':
+      return 'Steady';
+    default:
+      return 'Inactive';
+  }
+}
+
+function getCustomerBookingTrendItem(item) {
+  const f = item.fields || {};
+  const jobs = getNumberValue(f.Jobs);
+  const revenue = getNumberValue(f.Revenue);
+  const ratePerLoadedMile = getNumberValue(f.Average_x0024__x002f_LoadedMile);
+  const percentOfRevenue = getNumberValue(f._x0025_ofRevenue);
+
+  return {
+    id: item.id || '',
+    Customer: getChoiceValue(f.Customer || f['Customer/Value'] || ''),
+    BookingYear: Number(f.BookingYear || 0),
+    BookingMonth: Number(f.BookingMonth || 0),
+    Jobs: jobs,
+    Revenue: revenue,
+    RatePerLoadedMile: ratePerLoadedMile,
+    PercentOfRevenue: percentOfRevenue
+  };
+}
+
+function makeEmptyCustomerTrendYear(year) {
+  return {
+    year,
+    jobs: 0,
+    revenue: 0,
+    ratePerLoadedMile: 0,
+    revenueShare: 0,
+    rateWeightedTotal: 0,
+    rateWeight: 0,
+    activeMonths: 0
+  };
+}
+
+function addRateToCustomerTrendAggregate(target, rate, jobs) {
+  const cleanRate = Number(rate || 0);
+  const cleanJobs = Number(jobs || 0);
+
+  if (cleanRate <= 0) return;
+
+  target.activeMonths += 1;
+
+  if (cleanJobs > 0) {
+    target.rateWeightedTotal += cleanRate * cleanJobs;
+    target.rateWeight += cleanJobs;
+    return;
+  }
+
+  target.rateWeightedTotal += cleanRate;
+  target.rateWeight += 1;
+}
+
+function finalizeCustomerTrendAggregate(target) {
+  return {
+    ...target,
+    ratePerLoadedMile: target.rateWeight > 0 ? target.rateWeightedTotal / target.rateWeight : 0
+  };
+}
+
+function buildCustomerTrendInsights(row, currentYear, previousYear) {
+  const current = row.yearDetailsByYear[String(currentYear)] || makeEmptyCustomerTrendYear(currentYear);
+  const previous = row.yearDetailsByYear[String(previousYear)] || makeEmptyCustomerTrendYear(previousYear);
+  const insights = [];
+
+  if (current.revenue > 0 && previous.revenue > 0) {
+    const change = getTrendPercentChange(current.revenue, previous.revenue);
+    const absChange = current.revenue - previous.revenue;
+    const direction = absChange >= 0 ? 'up' : 'down';
+    insights.push(`Revenue is ${direction} ${Math.abs(change * 100).toLocaleString('en-US', { maximumFractionDigits: 1 })}% versus ${previousYear} through the same month.`);
+  }
+
+  if (current.revenue > 0 && previous.revenue <= 0) {
+    insights.push(`This customer has current-year revenue with no ${previousYear} revenue through the same month.`);
+  }
+
+  if (current.revenue <= 0 && previous.revenue > 0) {
+    insights.push(`This customer had ${previousYear} revenue through this month, but no current-year revenue in the same window.`);
+  }
+
+  if (current.jobs > previous.jobs && current.revenue < previous.revenue && previous.revenue > 0) {
+    insights.push('Job count is higher, but revenue is lower than the prior-year comparison window. Rate/mix may need a closer look.');
+  }
+
+  if (current.ratePerLoadedMile > 0 && previous.ratePerLoadedMile > 0 && current.ratePerLoadedMile < previous.ratePerLoadedMile) {
+    insights.push('Average $ / loaded mile is below the prior-year comparison window.');
+  }
+
+  if (insights.length === 0) {
+    insights.push('No major trend flag was detected for the selected comparison window.');
+  }
+
+  return insights;
+}
+
+function buildCustomerBookingTrendsResponse(items, throughYear, throughMonth) {
+  const startYear = ARCHIVE_YEAR_MIN;
+  const years = [];
+
+  for (let year = startYear; year <= throughYear; year += 1) {
+    years.push(year);
+  }
+
+  const monthKeys = Array.from({ length: 12 }, (_, index) => ({
+    month: index + 1,
+    name: getMonthName(index + 1),
+    shortName: getShortMonthName(index + 1),
+    inComparisonWindow: index + 1 <= throughMonth
+  }));
+
+  const trendItems = items
+    .map((item) => (item?.fields ? getCustomerBookingTrendItem(item) : item))
+    .filter(Boolean)
+    .filter((record) => (
+      record.Customer &&
+      years.includes(record.BookingYear) &&
+      record.BookingMonth >= 1 &&
+      record.BookingMonth <= 12 &&
+      record.BookingMonth <= throughMonth
+    ));
+
+  const totalsByYear = new Map(years.map((year) => [year, makeEmptyCustomerTrendYear(year)]));
+  const customerMap = new Map();
+
+  function ensureCustomer(customer) {
+    const key = normalizeSearchValue(customer);
+
+    if (!customerMap.has(key)) {
+      const yearDetailsByYear = {};
+      const monthlyByMonth = {};
+
+      years.forEach((year) => {
+        yearDetailsByYear[String(year)] = makeEmptyCustomerTrendYear(year);
+      });
+
+      monthKeys.forEach((month) => {
+        monthlyByMonth[String(month.month)] = {
+          month: month.month,
+          monthName: month.name,
+          shortName: month.shortName,
+          years: Object.fromEntries(years.map((year) => [String(year), makeEmptyCustomerTrendYear(year)]))
+        };
+      });
+
+      customerMap.set(key, {
+        customer,
+        yearDetailsByYear,
+        monthlyByMonth
+      });
+    }
+
+    return customerMap.get(key);
+  }
+
+  trendItems.forEach((record) => {
+    const customer = ensureCustomer(record.Customer);
+    const yearKey = String(record.BookingYear);
+    const monthKey = String(record.BookingMonth);
+    const customerYear = customer.yearDetailsByYear[yearKey];
+    const customerMonthYear = customer.monthlyByMonth[monthKey]?.years?.[yearKey];
+    const totalYear = totalsByYear.get(record.BookingYear);
+
+    if (!customerYear || !customerMonthYear || !totalYear) return;
+
+    customerYear.jobs += record.Jobs;
+    customerYear.revenue += record.Revenue;
+    addRateToCustomerTrendAggregate(customerYear, record.RatePerLoadedMile, record.Jobs);
+
+    customerMonthYear.jobs += record.Jobs;
+    customerMonthYear.revenue += record.Revenue;
+    addRateToCustomerTrendAggregate(customerMonthYear, record.RatePerLoadedMile, record.Jobs);
+
+    totalYear.jobs += record.Jobs;
+    totalYear.revenue += record.Revenue;
+    addRateToCustomerTrendAggregate(totalYear, record.RatePerLoadedMile, record.Jobs);
+  });
+
+  const finalizedTotalsByYear = Object.fromEntries(
+    years.map((year) => {
+      const total = finalizeCustomerTrendAggregate(totalsByYear.get(year));
+      return [String(year), total];
+    })
+  );
+
+  const currentYearTotal = finalizedTotalsByYear[String(throughYear)] || makeEmptyCustomerTrendYear(throughYear);
+  const previousYear = throughYear - 1;
+
+  const rows = Array.from(customerMap.values())
+    .map((entry) => {
+      const yearDetailsByYear = Object.fromEntries(
+        years.map((year) => {
+          const detail = finalizeCustomerTrendAggregate(entry.yearDetailsByYear[String(year)]);
+          const total = finalizedTotalsByYear[String(year)] || makeEmptyCustomerTrendYear(year);
+          return [
+            String(year),
+            {
+              ...detail,
+              revenueShare: total.revenue > 0 ? detail.revenue / total.revenue : 0
+            }
+          ];
+        })
+      );
+
+      const monthlyBreakdown = monthKeys.map((month) => ({
+        month: month.month,
+        monthName: month.name,
+        shortName: month.shortName,
+        inComparisonWindow: month.inComparisonWindow,
+        years: Object.fromEntries(
+          years.map((year) => {
+            const monthlyDetail = finalizeCustomerTrendAggregate(entry.monthlyByMonth[String(month.month)].years[String(year)]);
+            return [String(year), monthlyDetail];
+          })
+        )
+      }));
+
+      const current = yearDetailsByYear[String(throughYear)] || makeEmptyCustomerTrendYear(throughYear);
+      const previous = yearDetailsByYear[String(previousYear)] || makeEmptyCustomerTrendYear(previousYear);
+      const bucket = getCustomerTrendBucket(current.revenue, previous.revenue);
+      const yoyRevenueChange = getTrendPercentChange(current.revenue, previous.revenue);
+
+      const row = {
+        customer: entry.customer,
+        currentYear: throughYear,
+        previousYear,
+        bucket,
+        bucketLabel: getCustomerTrendBucketLabel(bucket),
+        currentRevenue: current.revenue,
+        previousRevenue: previous.revenue,
+        currentJobs: current.jobs,
+        previousJobs: previous.jobs,
+        currentRatePerLoadedMile: current.ratePerLoadedMile,
+        previousRatePerLoadedMile: previous.ratePerLoadedMile,
+        revenueShare: currentYearTotal.revenue > 0 ? current.revenue / currentYearTotal.revenue : 0,
+        yoyRevenueChange,
+        yearDetails: years.map((year) => yearDetailsByYear[String(year)]),
+        yearDetailsByYear,
+        monthlyBreakdown
+      };
+
+      return {
+        ...row,
+        insights: buildCustomerTrendInsights(row, throughYear, previousYear)
+      };
+    })
+    .filter((row) => years.some((year) => Number(row.yearDetailsByYear[String(year)]?.revenue || 0) > 0))
+    .sort((a, b) => {
+      const currentDiff = Number(b.currentRevenue || 0) - Number(a.currentRevenue || 0);
+      if (currentDiff !== 0) return currentDiff;
+
+      return String(a.customer || '').localeCompare(String(b.customer || ''));
+    });
+
+  const currentActiveRows = rows.filter((row) => row.currentRevenue > 0);
+  const top10Revenue = currentActiveRows
+    .slice(0, 10)
+    .reduce((sum, row) => sum + Number(row.currentRevenue || 0), 0);
+
+  const bucketCounts = rows.reduce(
+    (acc, row) => {
+      acc.all += 1;
+      acc[row.bucket] = (acc[row.bucket] || 0) + 1;
+      return acc;
+    },
+    { all: 0, growing: 0, declining: 0, dormant: 0, newReturning: 0, steady: 0, inactive: 0 }
+  );
+
+  return {
+    success: true,
+    reportType: 'customerBookingTrends',
+    reportLabel: `Customer Booking Trends through ${getReportMonthLabel(throughYear, throughMonth)}`,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    status: 'available',
+    anchorDate: 'Booking Month',
+    throughYear,
+    throughMonth,
+    throughMonthLabel: getReportMonthLabel(throughYear, throughMonth),
+    comparedYears: years,
+    recordsScanned: items.length,
+    rowsScanned: trendItems.length,
+    customerCount: rows.length,
+    bucketCounts,
+    totalsByYear: finalizedTotalsByYear,
+    summary: {
+      currentYear: throughYear,
+      currentRevenue: currentYearTotal.revenue,
+      currentJobs: currentYearTotal.jobs,
+      currentRatePerLoadedMile: currentYearTotal.ratePerLoadedMile,
+      activeCustomers: currentActiveRows.length,
+      top10RevenueShare: currentYearTotal.revenue > 0 ? top10Revenue / currentYearTotal.revenue : 0
+    },
+    monthKeys,
+    rows
   };
 }
 
@@ -4406,6 +4804,96 @@ app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, asyn
     res.status(500).json({
       success: false,
       error: error.message
+    });
+  }
+});
+
+
+app.get('/reports/customer-booking-trends', requireLookupAccess, async (req, res) => {
+  try {
+    const throughMonth = parseReportInteger(req.query.month, 'month', 1, 12);
+    const throughYear = parseReportInteger(req.query.year, 'year', ARCHIVE_YEAR_MIN, ARCHIVE_YEAR_MAX);
+    const lockStatus = getCustomerTrendReportLockStatus(throughYear, throughMonth);
+
+    if (!lockStatus.isUnlocked) {
+      return res.status(423).json({
+        success: false,
+        error: 'REPORT_LOCKED',
+        message: `${lockStatus.reportLabel} Customer Booking Trends is not available yet.`,
+        reportLabel: lockStatus.reportLabel,
+        unlockLabel: lockStatus.unlockLabel,
+        lockReason:
+          'Customer Booking Trends unlock at 8:00 AM Eastern on the 5th day of the following month. This keeps monthly sales reporting aligned with finalized prior-month activity.'
+      });
+    }
+
+    const token = await getGraphToken();
+    const allLists = await getSearchableBidLists(token);
+    const currentList = allLists.find((list) => list.label === 'Bid Listing') || null;
+    const currentEasternYear = getEasternParts().year;
+    const sourceLists = [];
+
+    for (let year = ARCHIVE_YEAR_MIN; year <= throughYear; year += 1) {
+      const archiveSource = allLists.find((list) => String(list.year) === String(year));
+      const yearSource = Number(year) === Number(currentEasternYear)
+        ? (currentList || archiveSource)
+        : archiveSource;
+
+      if (yearSource) {
+        sourceLists.push(yearSource);
+      }
+    }
+
+    if (sourceLists.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: `No Bid Listing source list was found for customer trends through ${lockStatus.reportLabel}.`
+      });
+    }
+
+    const settled = await Promise.allSettled(
+      sourceLists.map(async (sourceList) => {
+        const listItems = await getAllListItemsWithFields(
+          token,
+          sourceList.listId,
+          getCustomerBookingTrendsSourceFieldSelect()
+        );
+
+        return listItems.map((item) => ({ item, sourceList }));
+      })
+    );
+
+    const successfulItems = settled
+      .filter((result) => result.status === 'fulfilled')
+      .flatMap((result) => result.value);
+
+    const failedLists = settled
+      .map((result, index) => ({ result, list: sourceLists[index] }))
+      .filter((entry) => entry.result.status === 'rejected')
+      .map((entry) => ({
+        SourceList: entry.list.label,
+        error: entry.result.reason?.message || 'Unknown customer trend list failure'
+      }));
+
+    const trendRecords = successfulItems
+      .map(({ item, sourceList }) => getCustomerBookingTrendRecordFromBidItem(item, sourceList))
+      .filter(Boolean);
+
+    const report = buildCustomerBookingTrendsResponse(trendRecords, throughYear, throughMonth);
+
+    res.json({
+      ...report,
+      source: 'Bid Listing + archives',
+      sourceLists: sourceLists.map((list) => ({ label: list.label, year: list.year, listId: list.listId })),
+      sourceRecordsScanned: successfulItems.length,
+      failedLists
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to load Customer Booking Trends.'
     });
   }
 });
