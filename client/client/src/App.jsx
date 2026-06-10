@@ -144,6 +144,7 @@ export default function App() {
   const [grossRevenueError, setGrossRevenueError] = useState(null);
   const [grossRevenueModalOpen, setGrossRevenueModalOpen] = useState(false);
   const [openGrossRevenueQuarters, setOpenGrossRevenueQuarters] = useState([]);
+  const [selectedGrossRevenueTruck, setSelectedGrossRevenueTruck] = useState(null);
   const [driverSummaryReport, setDriverSummaryReport] = useState(null);
   const [driverSummaryLoading, setDriverSummaryLoading] = useState(false);
   const [driverSummaryError, setDriverSummaryError] = useState(null);
@@ -247,6 +248,7 @@ export default function App() {
     return sorted;
   }, [filteredResults, sortField, sortDirection]);
 
+
   useEffect(() => {
     const runtimeClass = isTauriRuntime ? 'tauri-runtime' : 'web-runtime';
     document.body.classList.add(runtimeClass);
@@ -259,6 +261,7 @@ export default function App() {
       if (e.key === 'Escape') {
         setSelected(null);
         setGrossRevenueModalOpen(false);
+        setSelectedGrossRevenueTruck(null);
         setDriverSummaryModalOpen(false);
         setOrdersDueSettlementModalOpen(false);
         setWeeklySettlementModalOpen(false);
@@ -564,6 +567,7 @@ async function loadUploadDigest(dateValue = uploadDigestDate, options = {}) {
     }
   }
 }
+
 
 function changeUploadDigestDate(days) {
   setUploadDigestDate((current) => clampUploadDigestDate(addDaysToDateInput(current, days)));
@@ -1059,6 +1063,7 @@ function getPositionStatusLabel(position) {
     setGrossRevenueError(null);
     setGrossRevenueReport(null);
     setGrossRevenueModalOpen(false);
+    setSelectedGrossRevenueTruck(null);
 
     try {
       const res = await authedFetch(
@@ -1086,6 +1091,11 @@ function getPositionStatusLabel(position) {
 
   function closeGrossRevenueModal() {
     setGrossRevenueModalOpen(false);
+    setSelectedGrossRevenueTruck(null);
+  }
+
+  function closeGrossRevenueTruckModal() {
+    setSelectedGrossRevenueTruck(null);
   }
 
   async function loadDriverSummaryReport() {
@@ -1773,6 +1783,16 @@ function openReportLoadDetails(load) {
     );
   }
 
+  function OperationStatusPill({ record }) {
+    const settled = record?.IsSettled || record?.IsProcessed;
+
+    return (
+      <span className={`operation-status-pill ${settled ? 'settled' : 'open'}`}>
+        {settled ? 'Settled' : 'Open'}
+      </span>
+    );
+  }
+
   function BasicView() {
     return (
       <div className="detail-grid">
@@ -2038,12 +2058,59 @@ function openReportLoadDetails(load) {
 
 
 
+  function getLoadMonthNumber(value) {
+    if (!value) return null;
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+
+    return date.getUTCMonth() + 1;
+  }
+
+  function getTruckMonthLoadCount(truck, monthNumber) {
+    const directCount = Number(truck?.monthLoadCounts?.[monthNumber] || 0);
+    if (directCount) return directCount;
+
+    return (truck?.loads || []).filter((load) => getLoadMonthNumber(load.PickupDate) === Number(monthNumber)).length;
+  }
+
+  function getTruckQuarterTotal(truck, quarterMonths) {
+    return quarterMonths.reduce((sum, month) => sum + Number(truck?.monthTotals?.[month.month] || 0), 0);
+  }
+
+  function getTruckQuarterLoadCount(truck, quarterMonths) {
+    return quarterMonths.reduce((sum, month) => sum + getTruckMonthLoadCount(truck, month.month), 0);
+  }
+
+  function isGrossRevenueDriverTermed(truck) {
+    const status = String(truck?.rosterStatus || '').trim().toLowerCase();
+
+    return Boolean(truck?.rosterTermDate || (status && status !== 'active'));
+  }
+
+  function GrossRevenueDriverPill({ truck }) {
+    const status = String(truck?.rosterStatus || '').trim();
+    const normalizedStatus = status.toLowerCase();
+    const termDate = truck?.rosterTermDate;
+
+    if (termDate) {
+      return <span className="gross-driver-status-pill inactive">Termed {formatDateOnly(termDate)}</span>;
+    }
+
+    if (status && normalizedStatus !== 'active') {
+      return <span className="gross-driver-status-pill inactive">{status}</span>;
+    }
+
+    return null;
+  }
+
   function GrossRevenueTotalsPreview() {
     if (!grossRevenueReport) return null;
 
     const months = grossRevenueReport.months || [];
     const trucks = grossRevenueReport.trucks || [];
     const monthlyTotals = grossRevenueReport.totals?.monthlyTotals || {};
+    const monthlyLoadCounts = grossRevenueReport.totals?.monthlyLoadCounts || {};
     const quarterGroups = [
       { label: 'Q1', months: months.filter((month) => [1, 2, 3].includes(Number(month.month))) },
       { label: 'Q2', months: months.filter((month) => [4, 5, 6].includes(Number(month.month))) },
@@ -2055,8 +2122,8 @@ function openReportLoadDetails(load) {
       return quarterMonths.reduce((sum, month) => sum + Number(monthlyTotals[month.month] || 0), 0);
     }
 
-    function getTruckQuarterTotal(truck, quarterMonths) {
-      return quarterMonths.reduce((sum, month) => sum + Number(truck.monthTotals?.[month.month] || 0), 0);
+    function getQuarterLoadCountFromMonthlyCounts(quarterMonths) {
+      return quarterMonths.reduce((sum, month) => sum + Number(monthlyLoadCounts[month.month] || 0), 0);
     }
 
     return (
@@ -2079,13 +2146,10 @@ function openReportLoadDetails(load) {
             <strong>{formatReportMoney(grossRevenueReport.totals?.totalPermitEscortExcluded)}</strong>
           </div>
           <div className="report-kpi-card">
-            <span>Avg / Month</span>
-            <strong>{formatReportMoney(grossRevenueReport.totals?.averageMonthlyRevenue)}</strong>
+            <span>Avg Rev / Month</span>
+            <strong>{formatReportMoney(grossRevenueReport.totals?.averageActiveMonthRevenue ?? grossRevenueReport.totals?.averageMonthlyRevenue)}</strong>
+            <small>{formatReportNumber(grossRevenueReport.totals?.monthsElapsed || 12)} month basis</small>
           </div>
-        </div>
-
-        <div className="settlement-window-note">
-          <strong>Basis:</strong> {grossRevenueReport.revenueBasis}. Month is based on Pickup Offer Date.
         </div>
 
         {trucks.length === 0 ? (
@@ -2095,6 +2159,12 @@ function openReportLoadDetails(load) {
             {quarterGroups.map((quarter) => {
               const isOpen = openGrossRevenueQuarters.includes(quarter.label);
               const quarterTotal = getQuarterTotalFromMonthlyTotals(quarter.months);
+              const quarterLoadCount = getQuarterLoadCountFromMonthlyCounts(quarter.months);
+              const displayedTrucks = trucks.filter((truck) => {
+                const truckQuarterTotal = getTruckQuarterTotal(truck, quarter.months);
+
+                return truckQuarterTotal > 0 || !isGrossRevenueDriverTermed(truck);
+              });
 
               return (
                 <section className="gross-revenue-quarter-card" key={quarter.label}>
@@ -2114,6 +2184,7 @@ function openReportLoadDetails(load) {
                     <div className="gross-revenue-quarter-total">
                       <span>Quarter Total</span>
                       <strong>{formatReportMoney(quarterTotal)}</strong>
+                      <small>{formatReportNumber(quarterLoadCount)} load{quarterLoadCount === 1 ? '' : 's'}</small>
                     </div>
                   </button>
 
@@ -2142,19 +2213,57 @@ function openReportLoadDetails(load) {
                             <td>{formatReportMoney(grossRevenueReport.totals?.totalGrossRevenue)}</td>
                           </tr>
 
-                          {trucks.map((truck) => (
-                            <tr key={`${quarter.label}-${truck.truck}`}>
-                              <td>{truck.truck || '-'}</td>
-                              <td>{truck.operator || '-'}</td>
-                              {quarter.months.map((month) => (
-                                <td key={`${quarter.label}-${truck.truck}-${month.month}`}>
-                                  {formatReportMoney(truck.monthTotals?.[month.month])}
-                                </td>
-                              ))}
-                              <td>{formatReportMoney(getTruckQuarterTotal(truck, quarter.months))}</td>
-                              <td>{formatReportMoney(truck.totalGrossRevenue)}</td>
+                          {displayedTrucks.length === 0 ? (
+                            <tr>
+                              <td colSpan={quarter.months.length + 4}>No active or revenue-producing drivers were found in this quarter.</td>
                             </tr>
-                          ))}
+                          ) : displayedTrucks.map((truck) => {
+                            const truckQuarterTotal = getTruckQuarterTotal(truck, quarter.months);
+                            const truckQuarterLoads = getTruckQuarterLoadCount(truck, quarter.months);
+                            const isZeroQuarter = truckQuarterTotal === 0;
+
+                            return (
+                              <tr
+                                key={`${quarter.label}-${truck.truck}`}
+                                className={`gross-revenue-driver-row ${isZeroQuarter ? 'gross-revenue-zero-row' : ''}`}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => setSelectedGrossRevenueTruck(truck)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    setSelectedGrossRevenueTruck(truck);
+                                  }
+                                }}
+                                aria-label={`Open 12-month revenue detail for ${truck.operator || 'driver'} truck ${truck.truck || ''}`}
+                              >
+                                <td>{truck.truck || '-'}</td>
+                                <td>
+                                  <button
+                                    type="button"
+                                    className="table-link-button gross-driver-link"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedGrossRevenueTruck(truck);
+                                    }}
+                                  >
+                                    {truck.operator || '-'}
+                                  </button>
+                                  <GrossRevenueDriverPill truck={truck} />
+                                </td>
+                                {quarter.months.map((month) => (
+                                  <td key={`${quarter.label}-${truck.truck}-${month.month}`}>
+                                    {formatReportMoney(truck.monthTotals?.[month.month])}
+                                  </td>
+                                ))}
+                                <td>
+                                  {formatReportMoney(truckQuarterTotal)}
+                                  <small className="gross-load-count-note">{formatReportNumber(truckQuarterLoads)} load{truckQuarterLoads === 1 ? '' : 's'}</small>
+                                </td>
+                                <td>{formatReportMoney(truck.totalGrossRevenue)}</td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -2164,6 +2273,82 @@ function openReportLoadDetails(load) {
             })}
           </div>
         )}
+      </div>
+    );
+  }
+
+  function GrossRevenueDriverDetailModal() {
+    if (!grossRevenueReport || !selectedGrossRevenueTruck) return null;
+
+    const truck = selectedGrossRevenueTruck;
+    const months = grossRevenueReport.months || [];
+    const monthsWithRevenue = Number(truck.monthsWithRevenue || 0);
+    const monthsElapsed = Number(truck.monthsElapsed || grossRevenueReport.totals?.monthsElapsed || 12);
+    const [currentEasternYear, currentEasternMonth] = getEasternDateInputValue().split('-').map(Number);
+    const shouldHighlightCurrentMonth =
+      Number(grossRevenueReport.year) === currentEasternYear && !isGrossRevenueDriverTermed(truck);
+
+    return (
+      <div className="modal-overlay report-modal-overlay nested-report-modal-overlay" onClick={closeGrossRevenueTruckModal}>
+        <div className="detail-modal report-modal gross-driver-detail-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="detail-header report-modal-header">
+            <div>
+              <h2>{truck.operator || 'Driver Revenue Detail'}</h2>
+              <p>12-Month Revenue Detail · Truck {truck.truck || '-'} · {grossRevenueReport.year}</p>
+            </div>
+
+            <button className="close-button" onClick={closeGrossRevenueTruckModal}>
+              Close
+            </button>
+          </div>
+
+          <div className="modal-body report-modal-body">
+            <div className="report-kpi-grid gross-driver-kpi-grid">
+              <div className="report-kpi-card">
+                <span>Year Total</span>
+                <strong>{formatReportMoney(truck.totalGrossRevenue)}</strong>
+              </div>
+              <div className="report-kpi-card">
+                <span>Loads</span>
+                <strong>{formatReportNumber(truck.loadCount)}</strong>
+              </div>
+              <div className="report-kpi-card">
+                <span>Avg Rev / Month</span>
+                <strong>{formatReportMoney(truck.averageActiveMonthRevenue ?? truck.averageMonthlyRevenue)}</strong>
+                <small>{formatReportNumber(monthsElapsed)} month basis</small>
+              </div>
+              <div className="report-kpi-card">
+                <span>Revenue Months</span>
+                <strong>{formatReportNumber(monthsWithRevenue)} / 12</strong>
+              </div>
+              <div className="report-kpi-card">
+                <span>Roster Status</span>
+                <strong>{truck.rosterTermDate ? `Termed ${formatDateOnly(truck.rosterTermDate)}` : (truck.rosterStatus || 'Not Matched')}</strong>
+              </div>
+            </div>
+
+            <div className="gross-driver-month-grid">
+              {months.map((month) => {
+                const revenue = Number(truck.monthTotals?.[month.month] || 0);
+                const loadCount = getTruckMonthLoadCount(truck, month.month);
+
+                const isCurrentMonth = shouldHighlightCurrentMonth && Number(month.month) === currentEasternMonth;
+
+                return (
+                  <div
+                    key={`driver-month-${truck.truck}-${month.month}`}
+                    className={`gross-driver-month-card ${revenue === 0 ? 'zero' : ''} ${isCurrentMonth ? 'current-month' : ''}`}
+                  >
+                    <span>{month.name}</span>
+                    {isCurrentMonth && <em>Current Month</em>}
+                    <strong>{formatReportMoney(revenue)}</strong>
+                    <small>{formatReportNumber(loadCount)} load{loadCount === 1 ? '' : 's'}</small>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -4197,9 +4382,9 @@ function openReportLoadDetails(load) {
 {!hasSearched && (
   <>
   <div className="search-card operations-panel">
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
+    <div className="operations-header-bar">
       <div>
-    <h2>Today&apos;s Operations</h2>
+        <h2>Operations Today</h2>
         {operationsData?.generatedAt && (
           <p>Generated: {operationsData.generatedAt}</p>
         )}
@@ -4242,35 +4427,39 @@ function openReportLoadDetails(load) {
         <div style={{ marginTop: '24px' }}>
           <h3 style={{ marginBottom: '12px' }}>Active Today</h3>
 
-          <div className="operations-table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>BOL</th>
-                  <th>Driver</th>
-                  <th>Origin</th>
-                  <th>Destination</th>
-                  <th>Delivery</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {operationsData.activeToday.map((r, i) => (
-                  <tr
-                    key={`active-${r.id || i}`}
-                    onClick={() => loadDetails(r.id, 'basic', r.SourceListId)}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <td>{r.BOL || '-'}</td>
-                    <td>{r.Driver || '-'}</td>
-                    <td>{r.Origin || '-'}</td>
-                    <td>{r.Destination || '-'}</td>
-                    <td>{formatDateOnly(r.DeliveryDate)}</td>
+          {operationsData.activeToday.length === 0 ? (
+            <div className="msg">No active shipments today.</div>
+          ) : (
+            <div className="operations-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>BOL</th>
+                    <th>Driver</th>
+                    <th>Origin</th>
+                    <th>Destination</th>
+                    <th>Delivery</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+
+                <tbody>
+                  {operationsData.activeToday.map((r, i) => (
+                    <tr
+                      key={`active-${r.id || i}`}
+                      onClick={() => loadDetails(r.id, 'basic', r.SourceListId)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <td>{r.BOL || '-'}</td>
+                      <td>{r.Driver || '-'}</td>
+                      <td>{r.Origin || '-'}</td>
+                      <td>{r.Destination || '-'}</td>
+                      <td>{formatDateOnly(r.DeliveryDate)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         <div style={{ marginTop: '32px' }}>
@@ -4326,6 +4515,7 @@ function openReportLoadDetails(load) {
                 <thead>
                   <tr>
                     <th>Delivered</th>
+                    <th>Status</th>
                     <th>BOL</th>
                     <th>Driver</th>
                     <th>Origin</th>
@@ -4344,6 +4534,7 @@ function openReportLoadDetails(load) {
                       <td>
                         <EvidenceDot hasEvidence={r.hasDeliveryEvidence} label="Delivery" />
                       </td>
+                      <td><OperationStatusPill record={r} /></td>
                       <td>{r.BOL || '-'}</td>
                       <td>{r.Driver || '-'}</td>
                       <td>{r.Origin || '-'}</td>
@@ -4529,6 +4720,8 @@ function openReportLoadDetails(load) {
           </div>
         </div>
       )}
+
+      <GrossRevenueDriverDetailModal />
 
       {driverSummaryModalOpen && driverSummaryReport && (
         <div className="modal-overlay report-modal-overlay" onClick={closeDriverSummaryModal}>

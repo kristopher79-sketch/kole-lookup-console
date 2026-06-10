@@ -730,6 +730,30 @@ function formatEasternTimestamp(date = new Date()) {
   }).format(date);
 }
 
+function isValidDateInput(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim());
+}
+
+function addDaysToDateInput(dateValue, days) {
+  const [year, month, day] = String(dateValue || formatEasternDate())
+    .split('-')
+    .map(Number);
+
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + Number(days || 0));
+
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, '0'),
+    String(date.getUTCDate()).padStart(2, '0')
+  ].join('-');
+}
+
+function getOperationsTargetDate(value) {
+  const candidate = String(value || '').trim();
+  return isValidDateInput(candidate) ? candidate : formatEasternDate();
+}
+
 function buildOperationsRecord(item, sourceList) {
   const fields = item.fields || {};
 
@@ -751,7 +775,9 @@ function buildOperationsRecord(item, sourceList) {
     DeliveryDate: fields.Expected_x0020_Delivery_x0020_Da || '',
 
     Status: fields.Status || '',
-    Processed: fields.Processed ?? false
+    Processed: fields.Processed ?? false,
+    IsProcessed: parseBoolean(fields.Processed),
+    IsSettled: parseBoolean(fields.Processed)
   };
 }
 
@@ -1746,6 +1772,21 @@ function getShortMonthName(month) {
   }).format(new Date(Date.UTC(2026, Number(month) - 1, 1)));
 }
 
+function getElapsedMonthCountForReportYear(year) {
+  const selectedYear = Number(year);
+  const current = getEasternParts();
+
+  if (selectedYear < current.year) return 12;
+  if (selectedYear > current.year) return 12;
+
+  return Math.max(1, current.month);
+}
+
+function safeAverage(total, divisor) {
+  const cleanDivisor = Number(divisor);
+  return cleanDivisor > 0 ? Number(total || 0) / cleanDivisor : 0;
+}
+
 function getReportMonthLabel(year, month) {
   return `${getMonthName(month)} ${year}`;
 }
@@ -2049,13 +2090,41 @@ function getGrossRevenueReportItem(item, sourceList) {
   };
 }
 
-function buildGrossRevenueTotalsResponse(items, sourceList, year) {
+function buildGrossRevenueTotalsResponse(items, sourceList, year, rosterByTruck = new Map()) {
   const monthNames = Array.from({ length: 12 }, (_, index) => getMonthName(index + 1));
   const monthKeys = monthNames.map((name, index) => ({
     month: index + 1,
     name,
     shortName: getShortMonthName(index + 1)
   }));
+  const elapsedMonthCount = getElapsedMonthCountForReportYear(year);
+
+  const makeEmptyMonthlyMap = () => Object.fromEntries(monthKeys.map((month) => [month.month, 0]));
+
+  function ensureTruckGroup(truck, seed = {}) {
+    const key = truck || 'Unassigned Truck';
+
+    if (!truckMap.has(key)) {
+      const roster = rosterByTruck?.get?.(normalizeTruckKey(key)) || null;
+
+      truckMap.set(key, {
+        truck: key,
+        operator: seed.operator || roster?.tmsName || roster?.operatorTeamName || 'Unknown Operator',
+        rosterStatus: seed.rosterStatus || roster?.status || '',
+        rosterTermDate: seed.rosterTermDate || roster?.termDate || '',
+        rosterStartDate: seed.rosterStartDate || roster?.startDate || '',
+        isRosterOnly: seed.isRosterOnly ?? false,
+        monthTotals: makeEmptyMonthlyMap(),
+        monthLoadCounts: makeEmptyMonthlyMap(),
+        totalGrossRevenue: 0,
+        loadCount: 0,
+        permitEscortTotal: 0,
+        loads: []
+      });
+    }
+
+    return truckMap.get(key);
+  }
 
   const targetItems = items
     .map((item) => getGrossRevenueReportItem(item, sourceList))
@@ -2074,28 +2143,17 @@ function buildGrossRevenueTotalsResponse(items, sourceList, year) {
   const truckMap = new Map();
 
   targetItems.forEach((load) => {
-    const key = load.Truck || 'Unassigned Truck';
-
-    if (!truckMap.has(key)) {
-      truckMap.set(key, {
-        truck: key,
-        operator: load.Operator || 'Unknown Operator',
-        monthTotals: Object.fromEntries(monthKeys.map((month) => [month.month, 0])),
-        totalGrossRevenue: 0,
-        loadCount: 0,
-        permitEscortTotal: 0,
-        loads: []
-      });
-    }
-
-    const group = truckMap.get(key);
+    const group = ensureTruckGroup(load.Truck || 'Unassigned Truck');
     const pickup = getUtcYearMonth(load.PickupDate);
+
+    group.isRosterOnly = false;
 
     if ((!group.operator || group.operator === 'Unknown Operator') && load.Operator) {
       group.operator = load.Operator;
     }
 
     group.monthTotals[pickup.month] += load.GrossRevenue;
+    group.monthLoadCounts[pickup.month] += 1;
     group.totalGrossRevenue += load.GrossRevenue;
     group.permitEscortTotal += load.PermitsEscortFees;
     group.loadCount += 1;
@@ -2103,14 +2161,22 @@ function buildGrossRevenueTotalsResponse(items, sourceList, year) {
   });
 
   const trucks = Array.from(truckMap.values())
-    .map((group) => ({
-      ...group,
-      averageMonthlyRevenue: group.totalGrossRevenue / 12,
-      monthsWithRevenue: monthKeys.filter((month) => group.monthTotals[month.month] > 0).length
-    }))
+    .map((group) => {
+      const monthsWithRevenue = monthKeys.filter((month) => group.monthTotals[month.month] > 0).length;
+
+      return {
+        ...group,
+        averageMonthlyRevenue: safeAverage(group.totalGrossRevenue, elapsedMonthCount),
+        averageActiveMonthRevenue: safeAverage(group.totalGrossRevenue, elapsedMonthCount),
+        averageRevenueMonthRevenue: safeAverage(group.totalGrossRevenue, monthsWithRevenue),
+        monthsElapsed: elapsedMonthCount,
+        monthsWithRevenue
+      };
+    })
     .sort((a, b) => String(a.truck).localeCompare(String(b.truck), undefined, { numeric: true }));
 
   const monthlyTotals = Object.fromEntries(monthKeys.map((month) => [month.month, 0]));
+  const monthlyLoadCounts = Object.fromEntries(monthKeys.map((month) => [month.month, 0]));
   let totalGrossRevenue = 0;
   let totalPermitEscortExcluded = 0;
   let totalLoadCount = 0;
@@ -2118,12 +2184,15 @@ function buildGrossRevenueTotalsResponse(items, sourceList, year) {
   trucks.forEach((truck) => {
     monthKeys.forEach((month) => {
       monthlyTotals[month.month] += truck.monthTotals[month.month] || 0;
+      monthlyLoadCounts[month.month] += truck.monthLoadCounts?.[month.month] || 0;
     });
 
     totalGrossRevenue += truck.totalGrossRevenue;
     totalPermitEscortExcluded += truck.permitEscortTotal;
     totalLoadCount += truck.loadCount;
   });
+
+  const reportMonthsWithRevenue = monthKeys.filter((month) => monthlyTotals[month.month] > 0).length;
 
   return {
     success: true,
@@ -2140,8 +2209,13 @@ function buildGrossRevenueTotalsResponse(items, sourceList, year) {
       loadCount: totalLoadCount,
       totalGrossRevenue,
       totalPermitEscortExcluded,
-      averageMonthlyRevenue: totalGrossRevenue / 12,
-      monthlyTotals
+      averageMonthlyRevenue: safeAverage(totalGrossRevenue, elapsedMonthCount),
+      averageActiveMonthRevenue: safeAverage(totalGrossRevenue, elapsedMonthCount),
+      averageRevenueMonthRevenue: safeAverage(totalGrossRevenue, reportMonthsWithRevenue),
+      monthsElapsed: elapsedMonthCount,
+      monthsWithRevenue: reportMonthsWithRevenue,
+      monthlyTotals,
+      monthlyLoadCounts
     },
     trucks
   };
@@ -3935,7 +4009,9 @@ app.get('/reports/gross-revenue-totals', requireLookupAccess, async (req, res) =
       getGrossRevenueFieldSelect()
     );
 
-    res.json(buildGrossRevenueTotalsResponse(items, sourceList, year));
+    const rosterByTruck = await getDriverRosterByTruck(token);
+
+    res.json(buildGrossRevenueTotalsResponse(items, sourceList, year, rosterByTruck));
   } catch (error) {
     console.error(error);
 
@@ -4231,7 +4307,7 @@ app.get('/upload-digest', requireLookupAccess, async (req, res) => {
   }
 });
 
-app.get('/operations/today', requireLookupAccess, async (req, res) => {
+app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, async (req, res) => {
   try {
     const token = await getGraphToken();
 
@@ -4266,75 +4342,50 @@ app.get('/operations/today', requireLookupAccess, async (req, res) => {
       ].join(',')
     );
 
-    const today = formatEasternDate();
-    const plus7 = formatEasternDate(
-      new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-    );
+    const targetDate = formatEasternDate();
+    const plus7 = addDaysToDateInput(targetDate, 7);
 
-    const all = items
+    const allWon = items
       .map((item) => buildOperationsRecord(item, currentList))
-      .filter(
-        (r) =>
-          normalizeText(r.Status) === 'won' &&
-          (r.Processed === false ||
-            r.Processed === null ||
-            r.Processed === '')
-      );
+      .filter((r) => normalizeText(r.Status) === 'won');
 
-    function normalizeDate(value) {
-      if (!value) return '';
-
-      const raw = String(value).trim();
-      const dateOnlyMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
-
-      if (dateOnlyMatch) {
-        return dateOnlyMatch[1];
-      }
-
-      const parsed = new Date(raw);
-      if (Number.isNaN(parsed.getTime())) return '';
-
-      return new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'America/New_York',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit'
-      }).format(parsed);
-    }
+    const openWon = allWon.filter((r) => !parseBoolean(r.Processed));
 
     const evidenceSets = await getUploadEvidenceSets(token);
 
-    const activeToday = all
+    const activeToday = openWon
       .filter((r) => {
-        const pickup = normalizeDate(r.PickupDate);
-        const delivery = normalizeDate(r.DeliveryDate);
+        const pickup = normalizeEasternDateOnly(r.PickupDate);
+        const delivery = normalizeEasternDateOnly(r.DeliveryDate);
 
-        return pickup && delivery && pickup <= today && delivery >= today;
+        return pickup && delivery && pickup <= targetDate && delivery >= targetDate;
       })
       .map((r) => addUploadEvidence(r, evidenceSets));
 
-    const loadingToday = all
-      .filter((r) => normalizeDate(r.PickupDate) === today)
+    const loadingToday = openWon
+      .filter((r) => normalizeEasternDateOnly(r.PickupDate) === targetDate)
       .map((r) => addUploadEvidence(r, evidenceSets));
 
-    const deliveringToday = all
-      .filter((r) => normalizeDate(r.DeliveryDate) === today)
+    const deliveringToday = allWon
+      .filter((r) => normalizeEasternDateOnly(r.DeliveryDate) === targetDate)
       .map((r) => addUploadEvidence(r, evidenceSets));
 
-    const loadingNext7 = all
+    const loadingNext7 = openWon
       .filter((r) => {
-        const pickup = normalizeDate(r.PickupDate);
-        return pickup > today && pickup <= plus7;
+        const pickup = normalizeEasternDateOnly(r.PickupDate);
+        return pickup > targetDate && pickup <= plus7;
       })
       .map((r) => addUploadEvidence(r, evidenceSets));
 
     res.json({
       success: true,
       generatedAt: `${formatEasternTimestamp()} Eastern`,
-      targetDate: today,
+      targetDate,
       counts: {
         rawItemsScanned: items.length,
-        eligibleWonUnprocessed: all.length,
+        eligibleWon: allWon.length,
+        eligibleWonOpen: openWon.length,
+        eligibleWonSettled: allWon.length - openWon.length,
         activeToday: activeToday.length,
         loadingToday: loadingToday.length,
         deliveringToday: deliveringToday.length,
@@ -4358,6 +4409,7 @@ app.get('/operations/today', requireLookupAccess, async (req, res) => {
     });
   }
 });
+
 app.get('/reports/inactive-driver-roster', requireLookupAccess, async (req, res) => {
   try {
     if (!process.env.DRIVER_ROSTER_LIST_ID) {
