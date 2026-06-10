@@ -166,6 +166,11 @@ export default function App() {
   const [inactiveDriverRosterLoading, setInactiveDriverRosterLoading] = useState(false);
   const [inactiveDriverRosterError, setInactiveDriverRosterError] = useState(null);
   const [inactiveDriverRosterModalOpen, setInactiveDriverRosterModalOpen] = useState(false);
+  const [noAvailabilityYear, setNoAvailabilityYear] = useState('all');
+  const [noAvailabilityReport, setNoAvailabilityReport] = useState(null);
+  const [noAvailabilityLoading, setNoAvailabilityLoading] = useState(false);
+  const [noAvailabilityError, setNoAvailabilityError] = useState(null);
+  const [noAvailabilityModalOpen, setNoAvailabilityModalOpen] = useState(false);
   const [activeReportPanel, setActiveReportPanel] = useState('');
   const [openReportGroups, setOpenReportGroups] = useState([]);
   const [salesLeadsView, setSalesLeadsView] = useState('all');
@@ -276,6 +281,7 @@ export default function App() {
         setWeeklySettlementModalOpen(false);
         setWonNotRegisteredModalOpen(false);
         setInactiveDriverRosterModalOpen(false);
+        setNoAvailabilityModalOpen(false);
         setSalesActivityModalOpen(false);
         setCustomerTrendModalOpen(false);
         setSelectedCustomerTrend(null);
@@ -1298,6 +1304,37 @@ function getPositionStatusLabel(position) {
 
   function closeInactiveDriverRosterModal() {
     setInactiveDriverRosterModalOpen(false);
+  }
+
+  async function loadNoAvailabilityReport() {
+    setNoAvailabilityLoading(true);
+    setNoAvailabilityError(null);
+    setNoAvailabilityReport(null);
+    setNoAvailabilityModalOpen(false);
+
+    try {
+      const params = new URLSearchParams({ year: String(noAvailabilityYear || 'all') });
+      const res = await authedFetch(`${API}/reports/no-availability?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to load No Availability report.');
+      }
+
+      setNoAvailabilityReport(data);
+      setNoAvailabilityModalOpen(true);
+    } catch (err) {
+      setNoAvailabilityError({
+        code: 'REPORT_ERROR',
+        message: err.message || 'Unable to load No Availability report.'
+      });
+    } finally {
+      setNoAvailabilityLoading(false);
+    }
+  }
+
+  function closeNoAvailabilityModal() {
+    setNoAvailabilityModalOpen(false);
   }
 
 
@@ -2948,6 +2985,110 @@ function openReportLoadDetails(load) {
     );
   }
 
+  function NoAvailabilityPreview() {
+    const rows = noAvailabilityReport?.rows || [];
+    const summary = noAvailabilityReport?.summary || {};
+    const yearBreakdown = noAvailabilityReport?.yearBreakdown || [];
+
+    if (!noAvailabilityReport) return null;
+
+    return (
+      <div className="driver-report-preview modal-report-preview no-availability-preview">
+        <div className="driver-report-generated">
+          Generated: {noAvailabilityReport.generatedAt}
+        </div>
+
+        <div className="report-kpi-grid no-availability-kpi-grid">
+          <div className="report-kpi-card">
+            <span>No Availability</span>
+            <strong>{formatReportNumber(summary.totalNoAvailability)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Unique Customers</span>
+            <strong>{formatReportNumber(summary.uniqueCustomers)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Top Customer</span>
+            <strong>{summary.topCustomer || '-'}</strong>
+            {summary.topCustomerCount > 0 && <small>{formatReportNumber(summary.topCustomerCount)} request(s)</small>}
+          </div>
+          <div className="report-kpi-card">
+            <span>Missed Miles</span>
+            <strong>{formatReportNumber(summary.totalMissedMiles)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Most Recent</span>
+            <strong>{formatDateOnly(summary.mostRecentSolicitDate)}</strong>
+          </div>
+        </div>
+
+        {summary.duplicateRowsRemoved > 0 && (
+          <div className="no-availability-note-card">
+            Removed {formatReportNumber(summary.duplicateRowsRemoved)} likely duplicate row(s) where the main list and archive list overlapped.
+          </div>
+        )}
+
+        {noAvailabilityReport.failedLists?.length > 0 && (
+          <div className="report-alert error">
+            <h4>Some No Availability source lists could not be loaded.</h4>
+            {noAvailabilityReport.failedLists.map((entry, index) => (
+              <p key={`${entry.sourceLabel || 'source'}-${index}`}>{entry.sourceLabel}: {entry.error}</p>
+            ))}
+          </div>
+        )}
+
+        {yearBreakdown.length > 0 && (
+          <div className="no-availability-year-strip">
+            {yearBreakdown.map((entry) => (
+              <div key={entry.year}>
+                <span>{entry.year}</span>
+                <strong>{formatReportNumber(entry.count)}</strong>
+                <small>{formatReportNumber(entry.miles)} mi · {formatReportNumber(entry.uniqueCustomers)} customer(s)</small>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {rows.length === 0 ? (
+          <div className="msg">No records matched this No Availability report window.</div>
+        ) : (
+          <div className="report-table-wrap">
+            <table className="driver-report-table no-availability-table">
+              <thead>
+                <tr>
+                  <th>Solicit Date</th>
+                  <th>Company</th>
+                  <th>Requestor</th>
+                  <th>Pickup</th>
+                  <th>Delivery</th>
+                  <th>Type</th>
+                  <th>Miles</th>
+                  <th>Year</th>
+                  <th>Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, index) => (
+                  <tr key={`${row.SourceListId || row.sourceLabel}-${row.id || index}-${index}`}>
+                    <td>{formatDateOnly(row.solicitDate)}</td>
+                    <td>{row.company || '-'}</td>
+                    <td>{row.requestor || '-'}</td>
+                    <td>{row.pickupLocation || '-'}</td>
+                    <td>{row.deliveryLocation || '-'}</td>
+                    <td>{row.shipmentType || '-'}</td>
+                    <td>{formatReportNumber(row.totalMiles)}</td>
+                    <td>{row.reportYear || '-'}</td>
+                    <td>{row.sourceLabel || '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function DriverPositionTrackingPanel() {
     const positions = driverPositionsData?.positions || [];
 
@@ -3600,6 +3741,22 @@ function openReportLoadDetails(load) {
           <strong>Comparison window:</strong> January through {getReportMonthName(report.throughMonth)} for {report.comparedYears?.join(', ') || 'available years'}.
           <span> Rows are built from Bid Listing plus available archives, not the old PDF attachment.</span>
         </div>
+
+        {report.sourceWarnings?.length > 0 && (
+          <div className="customer-trends-meta-card warning">
+            <strong>Archive field mismatch handled:</strong> one or more source lists did not accept the optimized field-select request, so the server retried with full fields.
+            <span>{report.sourceWarnings.map((entry) => entry.SourceList).join(', ')}</span>
+          </div>
+        )}
+
+        {report.failedLists?.length > 0 && (
+          <div className="report-alert error">
+            <h4>Some source lists could not be loaded.</h4>
+            {report.failedLists.map((entry, index) => (
+              <p key={`${entry.SourceList || 'source'}-${index}`}>{entry.SourceList}: {entry.error}</p>
+            ))}
+          </div>
+        )}
 
         <div className="sales-summary-grid sales-summary-button-grid customer-trends-filter-grid">
           {bucketOptions.map((option) => (
@@ -4304,6 +4461,7 @@ function openReportLoadDetails(load) {
     const isWeeklySettlementOpen = activeReportPanel === 'weeklySettlement';
     const isWonNotRegisteredOpen = activeReportPanel === 'wonNotRegistered';
     const isInactiveDriverRosterOpen = activeReportPanel === 'inactiveDriverRoster';
+    const isNoAvailabilityOpen = activeReportPanel === 'noAvailability';
     const isCustomerTrendsOpen = activeReportPanel === 'customerBookingTrends';
     const isSalesActivityOpen = activeReportPanel === 'salesActivity';
     const isSalesLeadsOpen = activeReportPanel === 'salesLeads';
@@ -4711,6 +4869,74 @@ function openReportLoadDetails(load) {
                     <div className="report-alert error">
                       <h4>Report could not be loaded.</h4>
                       <p>{inactiveDriverRosterError.message}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className={`report-accordion ${isNoAvailabilityOpen ? 'open' : ''}`}>
+            <button
+              type="button"
+              className="report-accordion-button"
+              onClick={() => toggleReportPanel('noAvailability')}
+            >
+              <span>No Availability</span>
+              <span className="report-accordion-icon">{isNoAvailabilityOpen ? '▼' : '▶'}</span>
+            </button>
+
+            {isNoAvailabilityOpen && (
+              <div className="report-accordion-body">
+                <div className="report-card compact-report-card accordion-inner-card no-availability-card">
+                  <div className="report-card-header centered-report-header">
+                    <div>
+                      <h3>No Availability</h3>
+                      <p>Review customer orders we could not cover because capacity was not available.</p>
+                    </div>
+                  </div>
+
+                  <div className="report-controls centered-report-controls">
+                    <label>
+                      <span>Report Year</span>
+                      <select
+                        value={noAvailabilityYear}
+                        onChange={(e) => {
+                          setNoAvailabilityYear(e.target.value);
+                          setNoAvailabilityReport(null);
+                          setNoAvailabilityError(null);
+                          setNoAvailabilityModalOpen(false);
+                        }}
+                        disabled={noAvailabilityLoading}
+                      >
+                        <option value="all">All Years</option>
+                        {getReportYears().map((year) => (
+                          <option key={year} value={year}>{year}</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <button onClick={loadNoAvailabilityReport} disabled={noAvailabilityLoading}>
+                      {noAvailabilityLoading ? 'Loading Report...' : 'Preview Report'}
+                    </button>
+                  </div>
+
+                  {noAvailabilityReport && !noAvailabilityModalOpen && (
+                    <div className="report-ready-card">
+                      <div>
+                        <strong>{noAvailabilityReport.reportLabel} is ready.</strong>
+                        <span> The preview opens in a report window.</span>
+                      </div>
+                      <button className="view-button" onClick={() => setNoAvailabilityModalOpen(true)}>
+                        Reopen Preview
+                      </button>
+                    </div>
+                  )}
+
+                  {noAvailabilityError && (
+                    <div className="report-alert error">
+                      <h4>Report could not be loaded.</h4>
+                      <p>{noAvailabilityError.message}</p>
                     </div>
                   )}
                 </div>
@@ -5402,6 +5628,27 @@ function openReportLoadDetails(load) {
 
             <div className="modal-body report-modal-body">
               <InactiveDriverRosterPreview />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {noAvailabilityModalOpen && noAvailabilityReport && (
+        <div className="modal-overlay report-modal-overlay" onClick={closeNoAvailabilityModal}>
+          <div className="detail-modal report-modal wide-report-modal no-availability-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="detail-header report-modal-header">
+              <div>
+                <h2>{noAvailabilityReport.reportLabel || 'No Availability'}</h2>
+                <p>{noAvailabilityReport.anchorDate || 'Solicit Date'} · {formatReportNumber(noAvailabilityReport.count)} record(s)</p>
+              </div>
+
+              <button className="close-button" onClick={closeNoAvailabilityModal}>
+                Close
+              </button>
+            </div>
+
+            <div className="modal-body report-modal-body">
+              <NoAvailabilityPreview />
             </div>
           </div>
         </div>

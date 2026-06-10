@@ -15,6 +15,9 @@ const DEFAULT_UPLOAD_DIGEST_LIST_ID = 'c9e907f9-cdac-4657-9da6-cc6ecfaa19a8';
 const DEFAULT_SALES_LEADS_LIST_ID = '86cc3352-fb75-421d-a5e4-4b16d011fd1e';
 const DEFAULT_SALES_LEADS_NOTES_LIST_NAME = 'Sales Leads Notes Log';
 const DEFAULT_CUSTOMER_BOOKING_TRENDS_LIST_ID = 'f899ef92-6489-43b1-9a9f-19c5f0ee83b9';
+const DEFAULT_NO_AVAILABILITY_MAIN_LIST_ID = '38f3bf2a-30d2-48eb-8b6f-8f5c05e5f1d7';
+const DEFAULT_NO_AVAILABILITY_2025_LIST_ID = '138431f5-a32d-452d-abf4-05adbd0ab50d';
+const DEFAULT_NO_AVAILABILITY_2024_LIST_ID = '8336e21e-38bb-47c0-bc01-6fea891b7cf6';
 const SALES_LEAD_NOTE_MAX_LENGTH = 63000;
 
 function getLoadPicturesFolderId() {
@@ -1651,6 +1654,26 @@ async function getAllListItemsWithFields(token, listId, fieldSelect = '') {
   return allItems;
 }
 
+async function getAllListItemsWithFieldsResilient(token, listId, fieldSelect = '') {
+  try {
+    return {
+      items: await getAllListItemsWithFields(token, listId, fieldSelect),
+      usedFallback: false,
+      warning: ''
+    };
+  } catch (error) {
+    if (!fieldSelect) throw error;
+
+    const fallbackItems = await getAllListItemsWithFields(token, listId);
+
+    return {
+      items: fallbackItems,
+      usedFallback: true,
+      warning: error.message || 'Selected field fetch failed; retried with full fields.'
+    };
+  }
+}
+
 async function getUploadEvidenceSets(token) {
   const uploadDigestListId =
     process.env.UPLOAD_DIGEST_LIST_ID || DEFAULT_UPLOAD_DIGEST_LIST_ID;
@@ -2442,6 +2465,220 @@ function buildCustomerBookingTrendsResponse(items, throughYear, throughMonth) {
     },
     monthKeys,
     rows
+  };
+}
+
+
+function getNoAvailabilitySources() {
+  return [
+    {
+      key: 'main',
+      label: 'No Availability',
+      sourceYear: 'Main',
+      listId:
+        process.env.VITE_KOLE_NO_AVAILABILITY_MAIN_LIST_ID ||
+        process.env.KOLE_NO_AVAILABILITY_MAIN_LIST_ID ||
+        DEFAULT_NO_AVAILABILITY_MAIN_LIST_ID
+    },
+    {
+      key: '2025',
+      label: '2025 No Availability',
+      sourceYear: 2025,
+      listId:
+        process.env.VITE_KOLE_NO_AVAILABILITY_2025_LIST_ID ||
+        process.env.KOLE_NO_AVAILABILITY_2025_LIST_ID ||
+        DEFAULT_NO_AVAILABILITY_2025_LIST_ID
+    },
+    {
+      key: '2024',
+      label: '2024 No Availability',
+      sourceYear: 2024,
+      listId:
+        process.env.VITE_KOLE_NO_AVAILABILITY_2024_LIST_ID ||
+        process.env.KOLE_NO_AVAILABILITY_2024_LIST_ID ||
+        DEFAULT_NO_AVAILABILITY_2024_LIST_ID
+    }
+  ].filter((source) => source.listId);
+}
+
+function getNoAvailabilityFieldSelect() {
+  return [
+    'Company',
+    'Requestor',
+    'Solicit_x0020_Date',
+    'Pickup_x0020_Location',
+    'Delivery_x0020_Location',
+    'Shipment_x0020_Type',
+    'Total_x0020_Miles',
+    'Created',
+    'Modified'
+  ].join(',');
+}
+
+function getNoAvailabilityReportYear(value) {
+  const dateKey = normalizeEasternDateOnly(value);
+  return dateKey ? Number(dateKey.slice(0, 4)) : null;
+}
+
+function cleanNoAvailabilityItem(item, source) {
+  const f = item.fields || {};
+  const solicitDate = f.Solicit_x0020_Date || '';
+  const solicitDateKey = normalizeEasternDateOnly(solicitDate);
+  const company = getChoiceValue(f.Company || f['Company/Value'] || '');
+  const requestor = getChoiceValue(f.Requestor || f['Requestor/Value'] || '');
+  const pickupLocation = getChoiceValue(f.Pickup_x0020_Location || f['Pickup_x0020_Location/Value'] || '');
+  const deliveryLocation = getChoiceValue(f.Delivery_x0020_Location || f['Delivery_x0020_Location/Value'] || '');
+  const shipmentType = getChoiceValue(f.Shipment_x0020_Type || f['Shipment_x0020_Type/Value'] || '');
+  const totalMiles = getNumberValue(f.Total_x0020_Miles);
+
+  return {
+    id: item.id || f.id || '',
+    SourceListId: source.listId,
+    sourceKey: source.key,
+    sourceLabel: source.label,
+    sourceYear: source.sourceYear,
+    reportYear: getNoAvailabilityReportYear(solicitDate),
+    solicitDate,
+    solicitDateKey,
+    company,
+    requestor,
+    pickupLocation,
+    deliveryLocation,
+    shipmentType,
+    totalMiles,
+    created: f.Created || item.createdDateTime || '',
+    modified: f.Modified || item.lastModifiedDateTime || '',
+    webUrl: item.webUrl || ''
+  };
+}
+
+function buildNoAvailabilityDedupKey(row) {
+  return [
+    row.solicitDateKey,
+    normalizeSearchValue(row.company),
+    normalizeSearchValue(row.requestor),
+    normalizeSearchValue(row.pickupLocation),
+    normalizeSearchValue(row.deliveryLocation),
+    normalizeSearchValue(row.shipmentType),
+    Number(row.totalMiles || 0)
+  ].join('|');
+}
+
+function dedupeNoAvailabilityRows(rows) {
+  const seen = new Map();
+  let duplicateCount = 0;
+
+  rows.forEach((row) => {
+    const key = buildNoAvailabilityDedupKey(row);
+    const existing = seen.get(key);
+
+    if (!existing) {
+      seen.set(key, row);
+      return;
+    }
+
+    duplicateCount += 1;
+
+    const existingIsMain = existing.sourceKey === 'main';
+    const rowIsArchive = row.sourceKey !== 'main';
+    const rowModified = new Date(row.modified || row.created || 0).getTime() || 0;
+    const existingModified = new Date(existing.modified || existing.created || 0).getTime() || 0;
+
+    if ((existingIsMain && rowIsArchive) || rowModified > existingModified) {
+      seen.set(key, row);
+    }
+  });
+
+  return {
+    rows: Array.from(seen.values()),
+    duplicateCount
+  };
+}
+
+function getNoAvailabilityTopCustomer(rows) {
+  const counts = new Map();
+
+  rows.forEach((row) => {
+    const key = normalizeSearchValue(row.company);
+    if (!key) return;
+
+    const current = counts.get(key) || { customer: row.company, count: 0, miles: 0 };
+    current.count += 1;
+    current.miles += Number(row.totalMiles || 0);
+    counts.set(key, current);
+  });
+
+  return Array.from(counts.values())
+    .sort((a, b) => b.count - a.count || b.miles - a.miles || String(a.customer).localeCompare(String(b.customer)))[0] ||
+    { customer: '', count: 0, miles: 0 };
+}
+
+function getNoAvailabilityYearBreakdown(rows) {
+  const byYear = new Map();
+
+  rows.forEach((row) => {
+    const year = row.reportYear || 'Unknown';
+    const current = byYear.get(year) || { year, count: 0, miles: 0, uniqueCustomers: new Set() };
+    current.count += 1;
+    current.miles += Number(row.totalMiles || 0);
+    if (normalizeSearchValue(row.company)) current.uniqueCustomers.add(normalizeSearchValue(row.company));
+    byYear.set(year, current);
+  });
+
+  return Array.from(byYear.values())
+    .map((entry) => ({
+      year: entry.year,
+      count: entry.count,
+      miles: entry.miles,
+      uniqueCustomers: entry.uniqueCustomers.size
+    }))
+    .sort((a, b) => Number(b.year || 0) - Number(a.year || 0));
+}
+
+function buildNoAvailabilityResponse(rawRows, options = {}) {
+  const { duplicateCount, rows: dedupedRows } = dedupeNoAvailabilityRows(rawRows);
+  const targetYear = options.year && options.year !== 'all' ? Number(options.year) : null;
+  const filteredRows = targetYear
+    ? dedupedRows.filter((row) => Number(row.reportYear) === targetYear)
+    : dedupedRows;
+
+  const rows = filteredRows.sort((a, b) => {
+    const dateDiff = new Date(b.solicitDate || b.created || 0) - new Date(a.solicitDate || a.created || 0);
+    if (dateDiff !== 0) return dateDiff;
+    return String(a.company || '').localeCompare(String(b.company || ''));
+  });
+
+  const uniqueCustomerKeys = new Set(rows.map((row) => normalizeSearchValue(row.company)).filter(Boolean));
+  const topCustomer = getNoAvailabilityTopCustomer(rows);
+  const totalMiles = rows.reduce((sum, row) => sum + Number(row.totalMiles || 0), 0);
+  const mostRecentSolicitDate = rows[0]?.solicitDate || '';
+  const mostRecentModifiedDate = rows
+    .map((row) => row.modified || row.created || '')
+    .filter(Boolean)
+    .sort((a, b) => new Date(b) - new Date(a))[0] || '';
+  const reportLabel = targetYear ? `No Availability - ${targetYear}` : 'No Availability - All Years';
+
+  return {
+    success: true,
+    reportType: 'noAvailability',
+    reportLabel,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    selectedYear: targetYear || 'all',
+    anchorDate: 'Solicit Date',
+    count: rows.length,
+    rows,
+    summary: {
+      totalNoAvailability: rows.length,
+      uniqueCustomers: uniqueCustomerKeys.size,
+      topCustomer: topCustomer.customer,
+      topCustomerCount: topCustomer.count,
+      topCustomerMiles: topCustomer.miles,
+      totalMissedMiles: totalMiles,
+      mostRecentSolicitDate,
+      mostRecentModifiedDate,
+      duplicateRowsRemoved: duplicateCount
+    },
+    yearBreakdown: getNoAvailabilityYearBreakdown(dedupedRows)
   };
 }
 
@@ -4809,6 +5046,72 @@ app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, asyn
 });
 
 
+
+app.get('/reports/no-availability', requireLookupAccess, async (req, res) => {
+  try {
+    const yearParam = String(req.query.year || 'all').trim().toLowerCase();
+    const selectedYear = yearParam === 'all'
+      ? 'all'
+      : parseReportInteger(yearParam, 'year', ARCHIVE_YEAR_MIN, ARCHIVE_YEAR_MAX);
+    const sources = getNoAvailabilitySources();
+
+    if (sources.length === 0) {
+      return res.status(500).json({
+        success: false,
+        error: 'No Availability list IDs are not configured on the server.'
+      });
+    }
+
+    const token = await getGraphToken();
+    const settled = await Promise.allSettled(
+      sources.map(async (source) => {
+        const items = await getAllListItemsWithFields(
+          token,
+          source.listId,
+          getNoAvailabilityFieldSelect()
+        );
+
+        return items.map((item) => cleanNoAvailabilityItem(item, source));
+      })
+    );
+
+    const rows = settled
+      .filter((result) => result.status === 'fulfilled')
+      .flatMap((result) => result.value);
+
+    const failedLists = settled
+      .map((result, index) => ({ result, source: sources[index] }))
+      .filter((entry) => entry.result.status === 'rejected')
+      .map((entry) => ({
+        sourceLabel: entry.source.label,
+        listId: entry.source.listId,
+        error: entry.result.reason?.message || 'Unknown No Availability list failure'
+      }));
+
+    const report = buildNoAvailabilityResponse(rows, { year: selectedYear });
+
+    res.json({
+      ...report,
+      source: 'No Availability + archives',
+      sourceLists: sources.map((source) => ({
+        key: source.key,
+        label: source.label,
+        sourceYear: source.sourceYear,
+        listId: source.listId
+      })),
+      sourceRecordsScanned: rows.length,
+      failedLists
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to load No Availability report.'
+    });
+  }
+});
+
 app.get('/reports/customer-booking-trends', requireLookupAccess, async (req, res) => {
   try {
     const throughMonth = parseReportInteger(req.query.month, 'month', 1, 12);
@@ -4853,19 +5156,34 @@ app.get('/reports/customer-booking-trends', requireLookupAccess, async (req, res
 
     const settled = await Promise.allSettled(
       sourceLists.map(async (sourceList) => {
-        const listItems = await getAllListItemsWithFields(
+        const bundle = await getAllListItemsWithFieldsResilient(
           token,
           sourceList.listId,
           getCustomerBookingTrendsSourceFieldSelect()
         );
 
-        return listItems.map((item) => ({ item, sourceList }));
+        return {
+          sourceList,
+          items: bundle.items.map((item) => ({ item, sourceList })),
+          usedFallback: bundle.usedFallback,
+          warning: bundle.warning
+        };
       })
     );
 
-    const successfulItems = settled
+    const fulfilledBundles = settled
       .filter((result) => result.status === 'fulfilled')
-      .flatMap((result) => result.value);
+      .map((result) => result.value);
+
+    const successfulItems = fulfilledBundles.flatMap((bundle) => bundle.items);
+
+    const sourceWarnings = fulfilledBundles
+      .filter((bundle) => bundle.usedFallback)
+      .map((bundle) => ({
+        SourceList: bundle.sourceList.label,
+        warning: 'Selected field fetch failed for this source, so the server retried with full fields.',
+        detail: bundle.warning
+      }));
 
     const failedLists = settled
       .map((result, index) => ({ result, list: sourceLists[index] }))
@@ -4886,6 +5204,7 @@ app.get('/reports/customer-booking-trends', requireLookupAccess, async (req, res
       source: 'Bid Listing + archives',
       sourceLists: sourceLists.map((list) => ({ label: list.label, year: list.year, listId: list.listId })),
       sourceRecordsScanned: successfulItems.length,
+      sourceWarnings,
       failedLists
     });
   } catch (error) {
