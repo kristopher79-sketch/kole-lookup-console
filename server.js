@@ -12,6 +12,7 @@ const PORT = process.env.PORT || 5000;
 const ARCHIVE_YEAR_MIN = 2024;
 const ARCHIVE_YEAR_MAX = 2030;
 const DEFAULT_UPLOAD_DIGEST_LIST_ID = 'c9e907f9-cdac-4657-9da6-cc6ecfaa19a8';
+const DEFAULT_KOLE_AUTO_UPDATER_LIST_ID = 'fd5b0d2f-b0e7-4445-a36d-af753825a3ea';
 const DEFAULT_SALES_LEADS_LIST_ID = '86cc3352-fb75-421d-a5e4-4b16d011fd1e';
 const DEFAULT_SALES_LEADS_NOTES_LIST_NAME = 'Sales Leads Notes Log';
 const DEFAULT_CUSTOMER_BOOKING_TRENDS_LIST_ID = 'f899ef92-6489-43b1-9a9f-19c5f0ee83b9';
@@ -107,14 +108,34 @@ async function getGraphToken() {
   return data.access_token;
 }
 
-async function graphGet(token, url) {
+async function graphGet(token, url, extraHeaders = {}) {
   const response = await fetch(url, {
     headers: {
-      Authorization: `Bearer ${token}`
+      Authorization: `Bearer ${token}`,
+      ...extraHeaders
     }
   });
 
   const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(JSON.stringify(data));
+  }
+
+  return data;
+}
+
+async function graphPatch(token, url, body) {
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+
+  const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
     throw new Error(JSON.stringify(data));
@@ -5176,6 +5197,342 @@ app.get('/reports/driver-summary', requireLookupAccess, async (req, res) => {
   }
 });
 
+
+
+function getKoleAutoUpdaterListId() {
+  return process.env.KOLE_AUTO_UPDATER_LIST_ID || DEFAULT_KOLE_AUTO_UPDATER_LIST_ID;
+}
+
+function escapeODataString(value) {
+  return String(value || '').replace(/'/g, "''");
+}
+
+function getChoiceValue(value) {
+  if (value && typeof value === 'object') {
+    return value.Value || value.value || value.Label || value.label || '';
+  }
+
+  return value || '';
+}
+
+async function getCurrentBidListingSource(token) {
+  const lists = await getSearchableBidLists(token);
+  return lists.find((list) => list.label === 'Bid Listing') || null;
+}
+
+function getIntelliTrackFieldSelect() {
+  return [
+    'BOLNumber',
+    'TruckNumber',
+    'Company',
+    'Operator',
+    'Origin',
+    'Destination',
+    'PickupDate',
+    'PickupTime',
+    'DeliveryDate',
+    'DeliveryTime',
+    'Email1',
+    'Email2',
+    'Email3',
+    'Email4',
+    'Email5',
+    'Email6',
+    'UpdateInterval',
+    'OverrideStartDate',
+    'OverrideStartTime',
+    'OverrideEndDate',
+    'OverrideEndTime',
+    'LastUpdateSent',
+    'NextUpdateScheduled',
+    'DisableTracking',
+    'CurrentLocation',
+    'BidListingID'
+  ].join(',');
+}
+
+function getIntelliTrackBidFieldSelect() {
+  return [
+    'BOLNumber_x0028_Won_x0029_',
+    'Company',
+    'Status',
+    'Operator_x002f_Team',
+    'Truck_x0020_Number',
+    'Shipment_x0020_Origin',
+    'Shipment_x0020_Destination',
+    'Pickup_x0020_Offer_x0020_Date',
+    'Pickup1PickupTime',
+    'Pickup1AMorPM',
+    'Expected_x0020_Delivery_x0020_Da',
+    'Delivery1Time',
+    'Delivery1AMorPM',
+    'EnableTracking',
+    'TrackingActive',
+    'FinalSettleSent'
+  ].join(',');
+}
+
+function cleanIntelliTrackRecord(item) {
+  const fields = item.fields || {};
+  const recipients = [
+    fields.Email1,
+    fields.Email2,
+    fields.Email3,
+    fields.Email4,
+    fields.Email5,
+    fields.Email6
+  ]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+
+  return {
+    id: item.id || '',
+    BOLNumber: fields.BOLNumber || '',
+    TruckNumber: fields.TruckNumber || '',
+    Company: fields.Company || '',
+    Operator: fields.Operator || '',
+    Origin: fields.Origin || '',
+    Destination: fields.Destination || '',
+    PickupDate: fields.PickupDate || '',
+    PickupTime: fields.PickupTime || '',
+    DeliveryDate: fields.DeliveryDate || '',
+    DeliveryTime: fields.DeliveryTime || '',
+    Email1: fields.Email1 || '',
+    Email2: fields.Email2 || '',
+    Email3: fields.Email3 || '',
+    Email4: fields.Email4 || '',
+    Email5: fields.Email5 || '',
+    Email6: fields.Email6 || '',
+    Recipients: recipients,
+    UpdateInterval: getChoiceValue(fields.UpdateInterval),
+    OverrideStartDate: fields.OverrideStartDate || '',
+    OverrideStartTime: fields.OverrideStartTime || '',
+    OverrideEndDate: fields.OverrideEndDate || '',
+    OverrideEndTime: fields.OverrideEndTime || '',
+    LastUpdateSent: fields.LastUpdateSent || '',
+    NextUpdateScheduled: fields.NextUpdateScheduled || '',
+    DisableTracking: parseBoolean(fields.DisableTracking),
+    CurrentLocation: fields.CurrentLocation || '',
+    BidListingID: fields.BidListingID || ''
+  };
+}
+
+function sortIntelliTrackRecords(a, b) {
+  const aNext = new Date(a.NextUpdateScheduled || a.PickupDate || 0).getTime();
+  const bNext = new Date(b.NextUpdateScheduled || b.PickupDate || 0).getTime();
+
+  if (!Number.isNaN(aNext) && !Number.isNaN(bNext) && aNext !== bNext) {
+    return aNext - bNext;
+  }
+
+  return String(a.BOLNumber || '').localeCompare(String(b.BOLNumber || ''));
+}
+
+function cleanIntelliTrackBidOrder(item, sourceList) {
+  const fields = item.fields || {};
+  const status = String(getChoiceValue(fields.Status) || '').trim();
+  const bol = fields.BOLNumber_x0028_Won_x0029_ || '';
+  const enableTracking = parseBoolean(fields.EnableTracking);
+  const trackingActive = parseBoolean(fields.TrackingActive);
+  const finalSettleSent = parseBoolean(fields.FinalSettleSent);
+
+  let startBlockedReason = '';
+
+  if (!bol) {
+    startBlockedReason = 'Missing BOL — tracking cannot be started.';
+  } else if (status !== 'Won') {
+    startBlockedReason = 'Not a won order — tracking cannot be started.';
+  } else if (finalSettleSent) {
+    startBlockedReason = 'Settled order — tracking cannot be started.';
+  }
+
+  return {
+    id: item.id || '',
+    SourceListId: sourceList?.listId || '',
+    SourceList: sourceList?.label || '',
+    BOL: bol,
+    Customer: fields.Company || '',
+    Status: status,
+    Driver: getChoiceValue(fields.Operator_x002f_Team) || '',
+    Truck: getChoiceValue(fields.Truck_x0020_Number) || '',
+    Origin: fields.Shipment_x0020_Origin || '',
+    Destination: fields.Shipment_x0020_Destination || '',
+    PickupDate: fields.Pickup_x0020_Offer_x0020_Date || '',
+    PickupTime: fields.Pickup1PickupTime || '',
+    PickupAMPM: fields.Pickup1AMorPM || '',
+    DeliveryDate: fields.Expected_x0020_Delivery_x0020_Da || '',
+    DeliveryTime: fields.Delivery1Time || '',
+    DeliveryAMPM: fields.Delivery1AMorPM || '',
+    EnableTracking: enableTracking,
+    TrackingActive: trackingActive,
+    FinalSettleSent: finalSettleSent,
+    CanStartTracking: !startBlockedReason,
+    StartBlockedReason: startBlockedReason
+  };
+}
+
+async function findCurrentBidOrderByBol(token, currentList, bol) {
+  const fieldSelect = getIntelliTrackBidFieldSelect();
+  const safeBol = escapeODataString(normalizeBolKey(bol));
+  const url = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}/items?$select=id,createdDateTime,lastModifiedDateTime&$expand=fields($select=${fieldSelect})&$filter=fields/BOLNumber_x0028_Won_x0029_ eq '${safeBol}'&$top=5`;
+
+  try {
+    const data = await graphGet(token, url, {
+      Prefer: 'HonorNonIndexedQueriesWarningMayFailRandomly'
+    });
+
+    return (data.value || [])[0] || null;
+  } catch (error) {
+    // Graph can be moody about filtering SharePoint list fields. Fall back to a
+    // full current-list scan so the app still behaves predictably.
+    const items = await getAllListItemsWithFields(token, currentList.listId, fieldSelect);
+    return items.find((item) => normalizeBolKey(item.fields?.BOLNumber_x0028_Won_x0029_) === normalizeBolKey(bol)) || null;
+  }
+}
+
+app.get('/tracking/intellitrack', requireLookupAccess, async (req, res) => {
+  try {
+    const listId = getKoleAutoUpdaterListId();
+
+    if (!listId) {
+      return res.status(500).json({
+        success: false,
+        error: 'KOLE_AUTO_UPDATER_LIST_ID is not configured on the server.'
+      });
+    }
+
+    const token = await getGraphToken();
+    const items = await getAllListItemsWithFields(
+      token,
+      listId,
+      getIntelliTrackFieldSelect()
+    );
+
+    const records = items
+      .map(cleanIntelliTrackRecord)
+      .filter((record) => !record.DisableTracking)
+      .sort(sortIntelliTrackRecords);
+
+    res.json({
+      success: true,
+      generatedAt: `${formatEasternTimestamp()} Eastern`,
+      sourceListId: listId,
+      count: records.length,
+      records
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to load IntelliTrack.'
+    });
+  }
+});
+
+app.get('/tracking/intellitrack/order', requireLookupAccess, async (req, res) => {
+  try {
+    const bol = normalizeBolKey(req.query.bol);
+
+    if (!bol) {
+      return res.status(400).json({
+        success: false,
+        error: 'Enter a BOL number.'
+      });
+    }
+
+    const token = await getGraphToken();
+    const currentList = await getCurrentBidListingSource(token);
+
+    if (!currentList) {
+      return res.status(404).json({
+        success: false,
+        error: 'Bid Listing not found.'
+      });
+    }
+
+    const item = await findCurrentBidOrderByBol(token, currentList, bol);
+
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        error: `No current Bid Listing order was found for ${bol}.`
+      });
+    }
+
+    res.json({
+      success: true,
+      order: cleanIntelliTrackBidOrder(item, currentList)
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to search IntelliTrack order.'
+    });
+  }
+});
+
+app.post('/tracking/intellitrack/order/:id', requireLookupAccess, async (req, res) => {
+  try {
+    const enabled = req.body?.enabled === true;
+    const orderId = String(req.params.id || '').trim();
+
+    if (!orderId) {
+      return res.status(400).json({
+        success: false,
+        error: 'A Bid Listing item ID is required.'
+      });
+    }
+
+    const token = await getGraphToken();
+    const currentList = await getCurrentBidListingSource(token);
+
+    if (!currentList) {
+      return res.status(404).json({
+        success: false,
+        error: 'Bid Listing not found.'
+      });
+    }
+
+    const fieldSelect = getIntelliTrackBidFieldSelect();
+    const readUrl = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}/items/${orderId}?$select=id,createdDateTime,lastModifiedDateTime&$expand=fields($select=${fieldSelect})`;
+    const currentItem = await graphGet(token, readUrl);
+    const currentOrder = cleanIntelliTrackBidOrder(currentItem, currentList);
+
+    if (enabled && !currentOrder.CanStartTracking) {
+      return res.status(400).json({
+        success: false,
+        error: currentOrder.StartBlockedReason || 'This order is not eligible for IntelliTrack.'
+      });
+    }
+
+    const patchUrl = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}/items/${orderId}/fields`;
+    await graphPatch(token, patchUrl, {
+      EnableTracking: enabled
+    });
+
+    const updatedItem = await graphGet(token, readUrl);
+    const updatedOrder = cleanIntelliTrackBidOrder(updatedItem, currentList);
+
+    res.json({
+      success: true,
+      enabled,
+      message: enabled
+        ? 'IntelliTrack request submitted. Power Automate will create the tracking record shortly.'
+        : 'IntelliTrack stop request submitted. Power Automate will remove the tracking record shortly.',
+      order: updatedOrder
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to update IntelliTrack status.'
+    });
+  }
+});
 
 app.get('/tracking/driver-positions', requireLookupAccess, async (req, res) => {
   try {

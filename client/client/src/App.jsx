@@ -208,6 +208,20 @@ export default function App() {
   const [uploadDigestError, setUploadDigestError] = useState('');
   const [uploadDigestActionError, setUploadDigestActionError] = useState('');
   const [uploadDigestOpen, setUploadDigestOpen] = useState(false);
+  const [intelliTrackOpen, setIntelliTrackOpen] = useState(false);
+  const [intelliTrackActionOpen, setIntelliTrackActionOpen] = useState(false);
+  const [intelliTrackData, setIntelliTrackData] = useState(null);
+  const [intelliTrackLoading, setIntelliTrackLoading] = useState(false);
+  const [intelliTrackError, setIntelliTrackError] = useState('');
+  const [intelliTrackActionError, setIntelliTrackActionError] = useState('');
+  const [intelliTrackActionMessage, setIntelliTrackActionMessage] = useState('');
+  const [intelliTrackSearchBol, setIntelliTrackSearchBol] = useState('');
+  const [intelliTrackSearchResult, setIntelliTrackSearchResult] = useState(null);
+  const [intelliTrackSearchLoading, setIntelliTrackSearchLoading] = useState(false);
+  const [intelliTrackSearchError, setIntelliTrackSearchError] = useState('');
+  const [intelliTrackActionLoading, setIntelliTrackActionLoading] = useState('');
+  const [intelliTrackPendingBol, setIntelliTrackPendingBol] = useState('');
+  const [intelliTrackSuppressedBols, setIntelliTrackSuppressedBols] = useState([]);
   
 
   function isBolLookup(value) {
@@ -300,15 +314,42 @@ export default function App() {
     loadOperationsDashboard();
     loadDriverPositions();
     loadUploadDigest(uploadDigestDate);
+    loadIntelliTrack();
 
     const interval = window.setInterval(() => {
       loadOperationsDashboard({ silent: true });
       loadDriverPositions({ silent: true });
       loadUploadDigest(uploadDigestDate, { silent: true });
+      loadIntelliTrack({ silent: true });
     }, 10 * 60 * 1000);
 
     return () => window.clearInterval(interval);
   }, [isAuthenticated, accessToken, uploadDigestDate]);
+
+  useEffect(() => {
+    const pendingBol = String(intelliTrackPendingBol || '').trim().toUpperCase();
+    if (!pendingBol) return;
+
+    const records = intelliTrackData?.records || [];
+    const isNowTracking = records.some((record) =>
+      String(record?.BOLNumber || '').trim().toUpperCase() === pendingBol
+    );
+
+    if (isNowTracking) {
+      setIntelliTrackPendingBol('');
+      setIntelliTrackActionMessage(`${pendingBol} is now showing in Currently Tracking.`);
+    }
+  }, [intelliTrackData, intelliTrackPendingBol]);
+
+  useEffect(() => {
+    if (!intelliTrackActionMessage) return undefined;
+
+    const timeout = window.setTimeout(() => {
+      setIntelliTrackActionMessage('');
+    }, 7000);
+
+    return () => window.clearTimeout(timeout);
+  }, [intelliTrackActionMessage]);
 
   function toggleSort(field) {
     if (sortField === field) {
@@ -340,6 +381,15 @@ export default function App() {
     setSortField('');
     setSortDirection('asc');
     setSalesSearchReturnLead(null);
+    setIntelliTrackSearchBol('');
+    setIntelliTrackSearchResult(null);
+    setIntelliTrackSearchError('');
+    setIntelliTrackActionError('');
+    setIntelliTrackActionMessage('');
+    setIntelliTrackPendingBol('');
+    setIntelliTrackSuppressedBols([]);
+    setIntelliTrackOpen(false);
+    setIntelliTrackActionOpen(false);
   }
 
   async function handleLogin() {
@@ -586,6 +636,233 @@ async function loadUploadDigest(dateValue = uploadDigestDate, options = {}) {
 }
 
 
+async function loadIntelliTrack(options = {}) {
+  const { silent = false } = options;
+
+  if (!silent) {
+    setIntelliTrackLoading(true);
+  }
+
+  setIntelliTrackError('');
+
+  try {
+    const res = await authedFetch(`${API}/tracking/intellitrack`);
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Unable to load IntelliTrack.');
+    }
+
+    setIntelliTrackData(data);
+
+    const activeBols = new Set(
+      (data.records || [])
+        .map((record) => String(record?.BOLNumber || '').trim().toUpperCase())
+        .filter(Boolean)
+    );
+
+    setIntelliTrackSuppressedBols((current) =>
+      current.filter((bol) => activeBols.has(bol))
+    );
+  } catch (err) {
+    setIntelliTrackError(err.message || 'Unable to load IntelliTrack.');
+
+    if (!silent) {
+      setIntelliTrackData(null);
+    }
+  } finally {
+    if (!silent) {
+      setIntelliTrackLoading(false);
+    }
+  }
+}
+
+function isIntelliTrackBolWaiting(bol) {
+  const pendingBol = String(intelliTrackPendingBol || '').trim().toUpperCase();
+  const targetBol = String(bol || '').trim().toUpperCase();
+
+  if (!pendingBol || !targetBol || pendingBol !== targetBol) {
+    return false;
+  }
+
+  const records = intelliTrackData?.records || [];
+  return !records.some((record) =>
+    String(record?.BOLNumber || '').trim().toUpperCase() === targetBol
+  );
+}
+
+function handleIntelliTrackBolChange(value) {
+  setIntelliTrackSearchBol(value.toUpperCase());
+  setIntelliTrackSearchError('');
+  setIntelliTrackActionError('');
+  setIntelliTrackActionMessage('');
+}
+
+async function searchIntelliTrackOrder(e) {
+  if (e) {
+    e.preventDefault();
+  }
+
+  const bol = intelliTrackSearchBol.trim().toUpperCase();
+
+  if (!bol) {
+    setIntelliTrackSearchError('Enter a BOL number.');
+    return;
+  }
+
+  if (isIntelliTrackBolWaiting(bol)) {
+    setIntelliTrackSearchError(`${bol} already has a tracking request submitted. Waiting for it to show in Currently Tracking.`);
+    return;
+  }
+
+  setIntelliTrackSearchLoading(true);
+  setIntelliTrackSearchError('');
+  setIntelliTrackActionError('');
+  setIntelliTrackActionMessage('');
+  setIntelliTrackSearchResult(null);
+
+  try {
+    const res = await authedFetch(
+      `${API}/tracking/intellitrack/order?bol=${encodeURIComponent(bol)}`
+    );
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Unable to find that order.');
+    }
+
+    setIntelliTrackSearchResult(data.order || null);
+  } catch (err) {
+    setIntelliTrackSearchError(err.message || 'Unable to find that order.');
+  } finally {
+    setIntelliTrackSearchLoading(false);
+  }
+}
+
+function getIntelliTrackButtonState(order) {
+  const isTracking = Boolean(order?.EnableTracking || order?.TrackingActive);
+
+  if (isTracking) {
+    return {
+      enabled: false,
+      label: 'Turn Tracking Off',
+      disabled: false,
+      reason: ''
+    };
+  }
+
+  if (!order?.CanStartTracking) {
+    return {
+      enabled: true,
+      label: 'Turn Tracking On',
+      disabled: true,
+      reason: order?.StartBlockedReason || 'This order is not eligible for IntelliTrack.'
+    };
+  }
+
+  return {
+    enabled: true,
+    label: 'Turn Tracking On',
+    disabled: false,
+    reason: ''
+  };
+}
+
+async function toggleIntelliTrackOrder(order, enabled) {
+  if (!order?.id) {
+    setIntelliTrackActionError('This order does not have a Bid Listing item ID.');
+    return;
+  }
+
+  const loadingKey = `${order.id}-${enabled ? 'on' : 'off'}`;
+
+  setIntelliTrackActionLoading(loadingKey);
+  setIntelliTrackActionError('');
+  setIntelliTrackActionMessage('');
+
+  try {
+    const res = await authedFetch(
+      `${API}/tracking/intellitrack/order/${encodeURIComponent(order.id)}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ enabled })
+      }
+    );
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Unable to update IntelliTrack.');
+    }
+
+    if (enabled) {
+      const submittedBol = String(data.order?.BOL || order?.BOL || '').trim().toUpperCase();
+
+      if (submittedBol) {
+        setIntelliTrackPendingBol(submittedBol);
+      }
+
+      setIntelliTrackSearchBol('');
+      setIntelliTrackSearchResult(null);
+      setIntelliTrackSearchError('');
+      setIntelliTrackActionMessage(
+        data.message ||
+        (submittedBol
+          ? `${submittedBol} tracking request submitted. Waiting for it to show in Currently Tracking.`
+          : 'IntelliTrack request submitted. Waiting for it to show in Currently Tracking.')
+      );
+    } else {
+      const stoppedBol = String(
+        data.order?.BOL ||
+        order?.BOL ||
+        order?.BOLNumber ||
+        ''
+      ).trim().toUpperCase();
+
+      if (stoppedBol) {
+        setIntelliTrackSuppressedBols((current) =>
+          current.includes(stoppedBol) ? current : [...current, stoppedBol]
+        );
+      }
+
+      setIntelliTrackSearchBol('');
+      setIntelliTrackSearchResult(null);
+      setIntelliTrackSearchError('');
+      setIntelliTrackPendingBol('');
+      setIntelliTrackActionMessage(
+        data.message ||
+        (stoppedBol
+          ? `${stoppedBol} tracking shutoff submitted.`
+          : 'IntelliTrack shutoff submitted.')
+      );
+    }
+
+    if (enabled) {
+      await loadIntelliTrack({ silent: true });
+    }
+  } catch (err) {
+    setIntelliTrackActionError(err.message || 'Unable to update IntelliTrack.');
+  } finally {
+    setIntelliTrackActionLoading('');
+  }
+}
+
+async function turnOffIntelliTrackRecord(record) {
+  const bidListingId = String(record?.BidListingID || '').trim();
+
+  if (!bidListingId) {
+    setIntelliTrackActionError('This IntelliTrack row does not have a linked Bid Listing ID.');
+    return;
+  }
+
+  await toggleIntelliTrackOrder({ id: bidListingId, BOL: record?.BOLNumber }, false);
+}
+
+
 function changeUploadDigestDate(days) {
   setUploadDigestDate((current) => clampUploadDigestDate(addDaysToDateInput(current, days)));
 }
@@ -648,6 +925,7 @@ function refreshOperationsAndTracking() {
   loadOperationsDashboard();
   loadDriverPositions();
   loadUploadDigest(uploadDigestDate);
+  loadIntelliTrack();
 }
 
 function closeDriverRosterModal() {
@@ -3426,6 +3704,234 @@ function openReportLoadDetails(load) {
     );
   }
 
+  function IntelliTrackPanel() {
+    const suppressedBolSet = new Set(intelliTrackSuppressedBols);
+    const records = (intelliTrackData?.records || []).filter((record) => {
+      const bol = String(record?.BOLNumber || '').trim().toUpperCase();
+      return !bol || !suppressedBolSet.has(bol);
+    });
+    const count = records.length;
+    const order = intelliTrackSearchResult;
+    const buttonState = getIntelliTrackButtonState(order);
+    const orderLoadingKey = order?.id ? `${order.id}-${buttonState.enabled ? 'on' : 'off'}` : '';
+
+    return (
+      <div className="search-card intellitrack-panel">
+        <div className="intellitrack-section-header">
+          <h2>IntelliTrack</h2>
+        </div>
+
+        {intelliTrackError && <div className="msg error">{intelliTrackError}</div>}
+        {intelliTrackActionError && <div className="msg error">{intelliTrackActionError}</div>}
+        {intelliTrackActionMessage && <div className="msg success">{intelliTrackActionMessage}</div>}
+
+        <div className="intellitrack-body">
+          <button
+            type="button"
+            className="intellitrack-summary"
+            onClick={() => setIntelliTrackOpen((current) => !current)}
+            aria-expanded={intelliTrackOpen}
+          >
+            <span className="intellitrack-title-block">
+              <span className="intellitrack-title">Active automatic tracking</span>
+              <span className="intellitrack-subtitle">Show orders currently enrolled in IntelliTrack.</span>
+            </span>
+            <span className="intellitrack-count">
+              {intelliTrackLoading ? 'Loading...' : `${count} tracking`}
+            </span>
+            <span className="intellitrack-chevron">
+              {intelliTrackOpen ? '▲' : '▼'}
+            </span>
+          </button>
+
+          {intelliTrackOpen && !intelliTrackError && (
+            <div className="intellitrack-current-card">
+              <div className="intellitrack-subheader">
+                <div>
+                  <h3>Currently Tracking</h3>
+                </div>
+
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => loadIntelliTrack()}
+                  disabled={intelliTrackLoading}
+                >
+                  {intelliTrackLoading ? 'Refreshing...' : 'Refresh'}
+                </button>
+              </div>
+
+              {records.length === 0 ? (
+                <div className="intellitrack-empty">
+                  <strong>No orders are currently being tracked.</strong>
+                </div>
+              ) : (
+                <div className="operations-table-wrap intellitrack-table-wrap">
+                  <table className="intellitrack-table">
+                    <thead>
+                      <tr>
+                        <th>BOL</th>
+                        <th>Customer</th>
+                        <th>Driver</th>
+                        <th>Truck</th>
+                        <th>Route</th>
+                        <th>Next Update</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {records.map((record, i) => {
+                        const rowLoadingKey = `${record.BidListingID}-off`;
+
+                        return (
+                          <tr key={record.id || `${record.BOLNumber}-${i}`}>
+                            <td>{record.BOLNumber || '-'}</td>
+                            <td>{record.Company || '-'}</td>
+                            <td>{record.Operator || '-'}</td>
+                            <td>{record.TruckNumber || '-'}</td>
+                            <td>{record.Origin || '-'} → {record.Destination || '-'}</td>
+                            <td>{record.NextUpdateScheduled ? formatTrackingTimestamp(record.NextUpdateScheduled) : '-'}</td>
+                            <td>
+                              <button
+                                type="button"
+                                className="danger-button compact-action-button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  turnOffIntelliTrackRecord(record);
+                                }}
+                                disabled={!record.BidListingID || intelliTrackActionLoading === rowLoadingKey}
+                              >
+                                {intelliTrackActionLoading === rowLoadingKey ? 'Stopping...' : 'Turn Off'}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          <button
+            type="button"
+            className="intellitrack-summary intellitrack-action-summary"
+            onClick={() => setIntelliTrackActionOpen((current) => !current)}
+            aria-expanded={intelliTrackActionOpen}
+          >
+            <span className="intellitrack-title-block">
+              <span className="intellitrack-title">Start or Stop Tracking</span>
+              <span className="intellitrack-subtitle">Search a BOL and toggle IntelliTrack from the Bid Listing record.</span>
+            </span>
+            <span className="intellitrack-chevron">
+              {intelliTrackActionOpen ? '▲' : '▼'}
+            </span>
+          </button>
+
+          {intelliTrackActionOpen && !intelliTrackError && (
+            <div className="intellitrack-search-card">
+              <form className="intellitrack-search-row" onSubmit={searchIntelliTrackOrder}>
+                <input
+                  value={intelliTrackSearchBol}
+                  onChange={(e) => handleIntelliTrackBolChange(e.target.value)}
+                  placeholder="Search BOL, e.g. D197382"
+                  aria-label="Search BOL for IntelliTrack"
+                />
+                <button type="submit" disabled={intelliTrackSearchLoading}>
+                  {intelliTrackSearchLoading ? 'Searching...' : 'Find Order'}
+                </button>
+              </form>
+
+              {intelliTrackSearchError && <div className="msg error">{intelliTrackSearchError}</div>}
+              {intelliTrackPendingBol && (
+                <div className="msg">
+                  Waiting for {intelliTrackPendingBol} to show in Currently Tracking. Search is soft-locked for that BOL until it appears.
+                </div>
+              )}
+
+              {order && (
+                <div className="intellitrack-order-card">
+                  <div className="intellitrack-order-main">
+                    <div>
+                      <span className="intellitrack-label">BOL</span>
+                      <strong>{order.BOL || '-'}</strong>
+                    </div>
+                    <div>
+                      <span className="intellitrack-label">Customer</span>
+                      <strong>{order.Customer || '-'}</strong>
+                    </div>
+                    <div>
+                      <span className="intellitrack-label">Status</span>
+                      <strong><span className={getStatusClass(order.Status)}>{order.Status || '-'}</span></strong>
+                    </div>
+                    <div>
+                      <span className="intellitrack-label">Tracking</span>
+                      <strong>{order.EnableTracking || order.TrackingActive ? 'On' : 'Off'}</strong>
+                    </div>
+                  </div>
+
+                  <div className="intellitrack-dispatch-grid">
+                    <div>
+                      <span>Operator / Team</span>
+                      <strong>{order.Driver || '-'}</strong>
+                    </div>
+                    <div>
+                      <span>Truck</span>
+                      <strong>{order.Truck || '-'}</strong>
+                    </div>
+                    <div>
+                      <span>Route</span>
+                      <strong>{order.Origin || '-'} → {order.Destination || '-'}</strong>
+                    </div>
+                    <div>
+                      <span>Pickup</span>
+                      <strong>{formatDateTime(order.PickupDate, order.PickupTime, order.PickupAMPM)}</strong>
+                    </div>
+                    <div>
+                      <span>Delivery</span>
+                      <strong>{formatDateTime(order.DeliveryDate, order.DeliveryTime, order.DeliveryAMPM)}</strong>
+                    </div>
+                    <div>
+                      <span>Final Settle Sent</span>
+                      <strong>{order.FinalSettleSent ? 'Yes' : 'No'}</strong>
+                    </div>
+                  </div>
+
+                  {buttonState.reason && (
+                    <div className="intellitrack-blocked-note">
+                      {buttonState.reason}
+                    </div>
+                  )}
+
+                  <div className="intellitrack-action-row">
+                    <button
+                      type="button"
+                      className={buttonState.enabled ? 'primary-action-button' : 'danger-button'}
+                      onClick={() => toggleIntelliTrackOrder(order, buttonState.enabled)}
+                      disabled={buttonState.disabled || intelliTrackActionLoading === orderLoadingKey}
+                    >
+                      {intelliTrackActionLoading === orderLoadingKey
+                        ? 'Submitting...'
+                        : buttonState.label}
+                    </button>
+                    <span>
+                      {buttonState.enabled
+                        ? 'Turns Enable Tracking on in Bid Listing.'
+                        : 'Turns Enable Tracking off in Bid Listing.'}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+
   function UploadDigestPanel() {
     const records = uploadDigestData?.records || [];
     const count = uploadDigestData?.count ?? records.length;
@@ -4182,8 +4688,7 @@ function openReportLoadDetails(load) {
               <div className="driver-report-section-header">
                 <div>
                   <h4>Trend Notes</h4>
-                  <p>Plain-language flags for the selected comparison window.</p>
-                </div>
+                  </div>
               </div>
               <div className="customer-trend-insights-list">
                 {(row.insights || []).map((insight, index) => (
@@ -5549,6 +6054,8 @@ function openReportLoadDetails(load) {
   </div>
 
   <UploadDigestPanel />
+
+  {IntelliTrackPanel()}
 
   <DriverSummaryReport />
   </>
