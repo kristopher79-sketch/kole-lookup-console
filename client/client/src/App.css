@@ -3993,3 +3993,222 @@ input:focus,
     grid-template-columns: 1fr;
   }
 }
+
+/* PASS 17: No Availability pattern-finder upgrade */
+.no-availability-kpi-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.no-availability-preview .driver-report-section-header,
+.no-availability-preview .driver-report-section-header h4,
+.no-availability-preview .driver-report-section-header p {
+  text-align: left !important;
+}
+
+.no-availability-insight-section,
+.no-availability-year-section,
+.no-availability-log-section {
+  margin-bottom: 18px;
+}
+
+.no-availability-insight-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px;
+  background: #0b1220;
+}
+
+.no-availability-insight-card {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-left: 4px solid rgba(148, 163, 184, 0.42);
+  border-radius: 12px;
+  padding: 13px;
+  background: rgba(15, 23, 42, 0.58);
+  color: #e5e7eb;
+}
+
+.no-availability-insight-card.warning {
+  border-left-color: #facc15;
+  background: rgba(120, 53, 15, 0.16);
+}
+
+.no-availability-insight-card.info {
+  border-left-color: #60a5fa;
+}
+
+.no-availability-insight-card span {
+  display: block;
+  margin-bottom: 6px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.no-availability-insight-card strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #f8fafc;
+  font-size: 16px;
+  line-height: 1.25;
+}
+
+.no-availability-insight-card p {
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.no-availability-pattern-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 18px 0;
+}
+
+.no-availability-pattern-card {
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+  background: #111827;
+}
+
+.no-availability-pattern-card-header {
+  padding: 13px 15px;
+  background: #0f172a;
+  border-bottom: 1px solid #1e293b;
+}
+
+.no-availability-pattern-card-header h4 {
+  margin: 0;
+  color: #facc15;
+  font-size: 16px;
+}
+
+.no-availability-pattern-card-header p {
+  margin: 4px 0 0;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.no-availability-pattern-list {
+  display: grid;
+  gap: 10px;
+  padding: 13px;
+}
+
+.no-availability-pattern-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 11px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.no-availability-pattern-rank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  border-radius: 999px;
+  background: rgba(250, 204, 21, 0.14);
+  color: #fde68a;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.no-availability-pattern-main {
+  min-width: 0;
+}
+
+.no-availability-pattern-topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.no-availability-pattern-topline strong {
+  min-width: 0;
+  color: #f8fafc;
+  font-size: 13px;
+  line-height: 1.28;
+  overflow-wrap: anywhere;
+}
+
+.no-availability-pattern-topline span {
+  flex: 0 0 auto;
+  color: #f8fafc;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.no-availability-pattern-meta {
+  margin-top: 4px;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.no-availability-bar-track {
+  height: 6px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18);
+}
+
+.no-availability-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: #d4a017;
+}
+
+.no-availability-empty-pattern {
+  padding: 16px;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.no-availability-year-section .no-availability-year-strip {
+  margin: 0;
+  padding: 14px;
+  background: #0b1220;
+}
+
+.no-availability-log-section .msg {
+  padding: 16px;
+}
+
+@media (max-width: 1300px) {
+  .no-availability-kpi-grid,
+  .no-availability-insight-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1000px) {
+  .no-availability-pattern-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .no-availability-kpi-grid,
+  .no-availability-insight-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .no-availability-pattern-topline {
+    flex-direction: column;
+    gap: 4px;
+  }
+}

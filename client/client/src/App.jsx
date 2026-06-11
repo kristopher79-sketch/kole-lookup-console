@@ -2988,9 +2988,62 @@ function openReportLoadDetails(load) {
   function NoAvailabilityPreview() {
     const rows = noAvailabilityReport?.rows || [];
     const summary = noAvailabilityReport?.summary || {};
+    const analytics = noAvailabilityReport?.analytics || {};
+    const insights = noAvailabilityReport?.insights || [];
     const yearBreakdown = noAvailabilityReport?.yearBreakdown || [];
+    const topCustomers = analytics.topCustomers || [];
+    const topCityStates = analytics.topCityStates || [];
+    const topMonths = analytics.topMonths || [];
+    const topLanes = analytics.topLanes || [];
+    const topRequestors = analytics.topRequestors || [];
+    const shipmentTypes = analytics.shipmentTypes || [];
 
     if (!noAvailabilityReport) return null;
+
+    function formatNoAvailabilityPercent(value) {
+      return `${formatReportNumber(Number(value || 0) * 100, 1)}%`;
+    }
+
+    function renderNoAvailabilityPatternList(title, subtitle, items, getLabel, getMeta, emptyText = 'No pattern data available.') {
+      const maxCount = Math.max(1, ...items.map((item) => Number(item.count || 0)));
+
+      return (
+        <div className="no-availability-pattern-card">
+          <div className="no-availability-pattern-card-header">
+            <div>
+              <h4>{title}</h4>
+              {subtitle && <p>{subtitle}</p>}
+            </div>
+          </div>
+
+          {items.length === 0 ? (
+            <div className="no-availability-empty-pattern">{emptyText}</div>
+          ) : (
+            <div className="no-availability-pattern-list">
+              {items.map((item, index) => {
+                const width = Math.max(7, Math.round((Number(item.count || 0) / maxCount) * 100));
+
+                return (
+                  <div className="no-availability-pattern-row" key={`${title}-${getLabel(item)}-${index}`}>
+                    <div className="no-availability-pattern-rank">#{index + 1}</div>
+                    <div className="no-availability-pattern-main">
+                      <div className="no-availability-pattern-topline">
+                        <strong>{getLabel(item) || '-'}</strong>
+                        <span>{formatReportNumber(item.count)} hit(s)</span>
+                      </div>
+                      <div className="no-availability-pattern-meta">{getMeta(item)}</div>
+                      <div className="no-availability-bar-track" aria-hidden="true">
+                        <div className="no-availability-bar-fill" style={{ width: `${width}%` }} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    }
 
     return (
       <div className="driver-report-preview modal-report-preview no-availability-preview">
@@ -3002,24 +3055,106 @@ function openReportLoadDetails(load) {
           <div className="report-kpi-card">
             <span>No Availability</span>
             <strong>{formatReportNumber(summary.totalNoAvailability)}</strong>
+            <small>{formatReportNumber(summary.uniqueCustomers)} customer(s) · {formatReportNumber(summary.uniqueCityStates)} city/state(s)</small>
           </div>
           <div className="report-kpi-card">
-            <span>Unique Customers</span>
-            <strong>{formatReportNumber(summary.uniqueCustomers)}</strong>
+            <span>Top City/State</span>
+            <strong>{summary.topCityState || '-'}</strong>
+            {summary.topCityStateCount > 0 && (
+              <small>{formatReportNumber(summary.topCityStateCount)} endpoint hit(s) · {formatReportNumber(summary.topCityStatePickupCount)} pickup / {formatReportNumber(summary.topCityStateDeliveryCount)} delivery</small>
+            )}
           </div>
           <div className="report-kpi-card">
             <span>Top Customer</span>
             <strong>{summary.topCustomer || '-'}</strong>
-            {summary.topCustomerCount > 0 && <small>{formatReportNumber(summary.topCustomerCount)} request(s)</small>}
+            {summary.topCustomerCount > 0 && <small>{formatReportNumber(summary.topCustomerCount)} request(s) · {formatNoAvailabilityPercent(summary.topCustomerShare)}</small>}
+          </div>
+          <div className="report-kpi-card">
+            <span>Highest Month</span>
+            <strong>{summary.highestMonth || '-'}</strong>
+            {summary.highestMonthCount > 0 && <small>{formatReportNumber(summary.highestMonthCount)} request(s) · {formatReportNumber(summary.highestMonthMiles)} mi</small>}
           </div>
           <div className="report-kpi-card">
             <span>Missed Miles</span>
             <strong>{formatReportNumber(summary.totalMissedMiles)}</strong>
+            <small>{formatReportNumber(summary.averageMissedMiles)} avg mi / request</small>
           </div>
           <div className="report-kpi-card">
             <span>Most Recent</span>
             <strong>{formatDateOnly(summary.mostRecentSolicitDate)}</strong>
+            <small>By solicit date</small>
           </div>
+        </div>
+
+        {insights.length > 0 && (
+          <div className="driver-report-section no-availability-insight-section">
+            <div className="driver-report-section-header">
+              <div>
+                <h4>Pattern Watch</h4>
+                </div>
+            </div>
+
+            <div className="no-availability-insight-grid">
+              {insights.map((insight, index) => (
+                <div className={`no-availability-insight-card ${insight.tone || 'neutral'}`} key={`${insight.title || 'insight'}-${index}`}>
+                  <span>{insight.title}</span>
+                  <strong>{insight.value || '-'}</strong>
+                  <p>{insight.detail}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="no-availability-pattern-grid">
+          {renderNoAvailabilityPatternList(
+            'Top 5 City/States',
+            'Pickup and delivery endpoint appearances combined.',
+            topCityStates,
+            (item) => item.cityState,
+            (item) => `${formatNoAvailabilityPercent(item.percentage)} of endpoint hits · ${formatReportNumber(item.pickupCount)} pickup / ${formatReportNumber(item.deliveryCount)} delivery · ${formatReportNumber(item.uniqueCustomers)} customer(s)`
+          )}
+
+          {renderNoAvailabilityPatternList(
+            'Top 5 Customers',
+            'Customers creating the most uncovered opportunities.',
+            topCustomers,
+            (item) => item.customer,
+            (item) => `${formatNoAvailabilityPercent(item.percentage)} of report · ${formatReportNumber(item.miles)} missed mi`
+          )}
+
+          {renderNoAvailabilityPatternList(
+            'Highest Months',
+            'Months ranked by no availability count.',
+            topMonths,
+            (item) => item.monthLabel,
+            (item) => `${formatNoAvailabilityPercent(item.percentage)} of report · ${formatReportNumber(item.uniqueCustomers)} customer(s) · ${formatReportNumber(item.uniqueCityStates)} city/state(s)`
+          )}
+
+          {renderNoAvailabilityPatternList(
+            'Repeating Lanes',
+            'Origin-to-destination pairs that repeat.',
+            topLanes,
+            (item) => item.lane,
+            (item) => `${formatNoAvailabilityPercent(item.percentage)} of report · ${formatReportNumber(item.miles)} missed mi · ${formatReportNumber(item.uniqueCustomers)} customer(s)`,
+            'No repeated pickup/delivery lane was found.'
+          )}
+
+          {renderNoAvailabilityPatternList(
+            'Requestors',
+            'Who is tied to the most no availability records.',
+            topRequestors,
+            (item) => item.requestor,
+            (item) => `${formatNoAvailabilityPercent(item.percentage)} of report · ${formatReportNumber(item.uniqueCustomers)} customer(s)`
+          )}
+
+          {renderNoAvailabilityPatternList(
+            'Shipment Types',
+            'Equipment or shipment categories that show up most often.',
+            shipmentTypes,
+            (item) => item.shipmentType,
+            (item) => `${formatNoAvailabilityPercent(item.percentage)} of report · ${formatReportNumber(item.miles)} missed mi`
+          )}
         </div>
 
         {summary.duplicateRowsRemoved > 0 && (
@@ -3038,53 +3173,72 @@ function openReportLoadDetails(load) {
         )}
 
         {yearBreakdown.length > 0 && (
-          <div className="no-availability-year-strip">
-            {yearBreakdown.map((entry) => (
-              <div key={entry.year}>
-                <span>{entry.year}</span>
-                <strong>{formatReportNumber(entry.count)}</strong>
-                <small>{formatReportNumber(entry.miles)} mi · {formatReportNumber(entry.uniqueCustomers)} customer(s)</small>
+          <div className="driver-report-section no-availability-year-section">
+            <div className="driver-report-section-header">
+              <div>
+                <h4>Year Context</h4>
+                <p>Useful for spotting whether the pattern is new or recurring.</p>
               </div>
-            ))}
+            </div>
+
+            <div className="no-availability-year-strip">
+              {yearBreakdown.map((entry) => (
+                <div key={entry.year}>
+                  <span>{entry.year}</span>
+                  <strong>{formatReportNumber(entry.count)}</strong>
+                  <small>{formatReportNumber(entry.miles)} mi · {formatReportNumber(entry.uniqueCustomers)} customer(s) · {formatReportNumber(entry.uniqueCityStates)} city/state(s)</small>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
-        {rows.length === 0 ? (
-          <div className="msg">No records matched this No Availability report window.</div>
-        ) : (
-          <div className="report-table-wrap">
-            <table className="driver-report-table no-availability-table">
-              <thead>
-                <tr>
-                  <th>Solicit Date</th>
-                  <th>Company</th>
-                  <th>Requestor</th>
-                  <th>Pickup</th>
-                  <th>Delivery</th>
-                  <th>Type</th>
-                  <th>Miles</th>
-                  <th>Year</th>
-                  <th>Source</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, index) => (
-                  <tr key={`${row.SourceListId || row.sourceLabel}-${row.id || index}-${index}`}>
-                    <td>{formatDateOnly(row.solicitDate)}</td>
-                    <td>{row.company || '-'}</td>
-                    <td>{row.requestor || '-'}</td>
-                    <td>{row.pickupLocation || '-'}</td>
-                    <td>{row.deliveryLocation || '-'}</td>
-                    <td>{row.shipmentType || '-'}</td>
-                    <td>{formatReportNumber(row.totalMiles)}</td>
-                    <td>{row.reportYear || '-'}</td>
-                    <td>{row.sourceLabel || '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <div className="driver-report-section no-availability-log-section">
+          <div className="driver-report-section-header">
+            <div>
+              <h4>Raw No Availability Log</h4>
+              <p>Traceability stays here, but the pattern panels above are the decision tool.</p>
+            </div>
+            <div className="driver-report-section-total">{formatReportNumber(rows.length)} row(s)</div>
           </div>
-        )}
+
+          {rows.length === 0 ? (
+            <div className="msg">No records matched this No Availability report window.</div>
+          ) : (
+            <div className="report-table-wrap">
+              <table className="driver-report-table no-availability-table">
+                <thead>
+                  <tr>
+                    <th>Solicit Date</th>
+                    <th>Company</th>
+                    <th>Requestor</th>
+                    <th>Pickup</th>
+                    <th>Delivery</th>
+                    <th>Type</th>
+                    <th>Miles</th>
+                    <th>Year</th>
+                    <th>Source</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, index) => (
+                    <tr key={`${row.SourceListId || row.sourceLabel}-${row.id || index}-${index}`}>
+                      <td>{formatDateOnly(row.solicitDate)}</td>
+                      <td>{row.company || '-'}</td>
+                      <td>{row.requestor || '-'}</td>
+                      <td>{row.pickupCityState || row.pickupLocation || '-'}</td>
+                      <td>{row.deliveryCityState || row.deliveryLocation || '-'}</td>
+                      <td>{row.shipmentType || '-'}</td>
+                      <td>{formatReportNumber(row.totalMiles)}</td>
+                      <td>{row.reportYear || '-'}</td>
+                      <td>{row.sourceLabel || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -4892,7 +5046,7 @@ function openReportLoadDetails(load) {
                   <div className="report-card-header centered-report-header">
                     <div>
                       <h3>No Availability</h3>
-                      <p>Review customer orders we could not cover because capacity was not available.</p>
+                      <p>Spot patterns in uncovered opportunities by city/state, customer, month, lane, requestor, and shipment type.</p>
                     </div>
                   </div>
 

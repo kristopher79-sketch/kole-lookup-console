@@ -2595,7 +2595,104 @@ function dedupeNoAvailabilityRows(rows) {
   };
 }
 
-function getNoAvailabilityTopCustomer(rows) {
+const US_STATE_ABBREVIATIONS = {
+  alabama: 'AL', alaska: 'AK', arizona: 'AZ', arkansas: 'AR', california: 'CA', colorado: 'CO', connecticut: 'CT', delaware: 'DE', florida: 'FL', georgia: 'GA', hawaii: 'HI', idaho: 'ID', illinois: 'IL', indiana: 'IN', iowa: 'IA', kansas: 'KS', kentucky: 'KY', louisiana: 'LA', maine: 'ME', maryland: 'MD', massachusetts: 'MA', michigan: 'MI', minnesota: 'MN', mississippi: 'MS', missouri: 'MO', montana: 'MT', nebraska: 'NE', nevada: 'NV', 'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY', 'north carolina': 'NC', 'north dakota': 'ND', ohio: 'OH', oklahoma: 'OK', oregon: 'OR', pennsylvania: 'PA', 'rhode island': 'RI', 'south carolina': 'SC', 'south dakota': 'SD', tennessee: 'TN', texas: 'TX', utah: 'UT', vermont: 'VT', virginia: 'VA', washington: 'WA', 'west virginia': 'WV', wisconsin: 'WI', wyoming: 'WY', district: 'DC', 'district of columbia': 'DC'
+};
+
+const US_STATE_ABBREVIATION_SET = new Set(Object.values(US_STATE_ABBREVIATIONS));
+
+function formatNoAvailabilityName(value) {
+  const clean = String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+
+  if (!clean) return '';
+
+  return clean.replace(/\b([a-z])/g, (match) => match.toUpperCase());
+}
+
+function getNoAvailabilityStateAbbreviation(value) {
+  const clean = String(value || '')
+    .trim()
+    .replace(/\./g, '')
+    .replace(/\b\d{5}(?:-\d{4})?\b/g, '')
+    .replace(/[^a-zA-Z\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!clean) return '';
+
+  const upper = clean.toUpperCase();
+  if (US_STATE_ABBREVIATION_SET.has(upper)) return upper;
+
+  return US_STATE_ABBREVIATIONS[clean.toLowerCase()] || '';
+}
+
+function normalizeNoAvailabilityCityState(value) {
+  const raw = String(value || '')
+    .trim()
+    .replace(/\b\d{5}(?:-\d{4})?\b/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+,/g, ',')
+    .replace(/,\s*/g, ', ')
+    .replace(/,+$/g, '')
+    .trim();
+
+  if (!raw) return '';
+
+  const commaParts = raw.split(',').map((part) => part.trim()).filter(Boolean);
+
+  if (commaParts.length >= 2) {
+    const state = getNoAvailabilityStateAbbreviation(commaParts[commaParts.length - 1]);
+    const city = commaParts.length > 2 ? commaParts[commaParts.length - 2] : commaParts[0];
+
+    if (state && city) {
+      return `${formatNoAvailabilityName(city)}, ${state}`;
+    }
+  }
+
+  const parts = raw.split(' ').map((part) => part.trim()).filter(Boolean);
+
+  for (let size = Math.min(3, parts.length); size >= 1; size -= 1) {
+    const stateCandidate = parts.slice(parts.length - size).join(' ');
+    const state = getNoAvailabilityStateAbbreviation(stateCandidate);
+    const city = parts.slice(0, parts.length - size).join(' ');
+
+    if (state && city) {
+      return `${formatNoAvailabilityName(city)}, ${state}`;
+    }
+  }
+
+  return formatNoAvailabilityName(raw);
+}
+
+function getNoAvailabilityMonthKey(row) {
+  const dateKey = row.solicitDateKey || normalizeEasternDateOnly(row.solicitDate || row.created || '');
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateKey) ? dateKey.slice(0, 7) : '';
+}
+
+function getNoAvailabilityMonthLabel(monthKey) {
+  if (!/^\d{4}-\d{2}$/.test(String(monthKey || ''))) return 'Unknown';
+
+  const [year, month] = String(monthKey).split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, 1));
+
+  return date.toLocaleDateString('en-US', {
+    timeZone: 'UTC',
+    month: 'long',
+    year: 'numeric'
+  });
+}
+
+function getNoAvailabilityLocationPoints(row) {
+  return [
+    { role: 'pickup', cityState: normalizeNoAvailabilityCityState(row.pickupLocation) },
+    { role: 'delivery', cityState: normalizeNoAvailabilityCityState(row.deliveryLocation) }
+  ].filter((point) => point.cityState);
+}
+
+function getNoAvailabilityTopCustomers(rows, limit = 5) {
   const counts = new Map();
 
   rows.forEach((row) => {
@@ -2609,8 +2706,171 @@ function getNoAvailabilityTopCustomer(rows) {
   });
 
   return Array.from(counts.values())
-    .sort((a, b) => b.count - a.count || b.miles - a.miles || String(a.customer).localeCompare(String(b.customer)))[0] ||
-    { customer: '', count: 0, miles: 0 };
+    .sort((a, b) => b.count - a.count || b.miles - a.miles || String(a.customer).localeCompare(String(b.customer)))
+    .slice(0, limit)
+    .map((entry) => ({
+      ...entry,
+      percentage: rows.length > 0 ? entry.count / rows.length : 0
+    }));
+}
+
+function getNoAvailabilityTopCustomer(rows) {
+  return getNoAvailabilityTopCustomers(rows, 1)[0] || { customer: '', count: 0, miles: 0, percentage: 0 };
+}
+
+function getNoAvailabilityTopCityStates(rows, limit = 5) {
+  const counts = new Map();
+  let totalLocationHits = 0;
+
+  rows.forEach((row) => {
+    const points = getNoAvailabilityLocationPoints(row);
+    totalLocationHits += points.length;
+
+    points.forEach((point) => {
+      const key = normalizeSearchValue(point.cityState);
+      if (!key) return;
+
+      const current = counts.get(key) || {
+        cityState: point.cityState,
+        count: 0,
+        pickupCount: 0,
+        deliveryCount: 0,
+        miles: 0,
+        uniqueCustomers: new Set()
+      };
+
+      current.count += 1;
+      current.miles += Number(row.totalMiles || 0);
+      if (point.role === 'pickup') current.pickupCount += 1;
+      if (point.role === 'delivery') current.deliveryCount += 1;
+      if (normalizeSearchValue(row.company)) current.uniqueCustomers.add(normalizeSearchValue(row.company));
+      counts.set(key, current);
+    });
+  });
+
+  return Array.from(counts.values())
+    .map((entry) => ({
+      cityState: entry.cityState,
+      count: entry.count,
+      pickupCount: entry.pickupCount,
+      deliveryCount: entry.deliveryCount,
+      miles: entry.miles,
+      uniqueCustomers: entry.uniqueCustomers.size,
+      percentage: totalLocationHits > 0 ? entry.count / totalLocationHits : 0
+    }))
+    .sort((a, b) => b.count - a.count || b.miles - a.miles || String(a.cityState).localeCompare(String(b.cityState)))
+    .slice(0, limit);
+}
+
+function getNoAvailabilityTopMonths(rows, limit = 5) {
+  const counts = new Map();
+
+  rows.forEach((row) => {
+    const monthKey = getNoAvailabilityMonthKey(row) || 'Unknown';
+    const current = counts.get(monthKey) || {
+      monthKey,
+      monthLabel: getNoAvailabilityMonthLabel(monthKey),
+      count: 0,
+      miles: 0,
+      uniqueCustomers: new Set(),
+      uniqueCityStates: new Set()
+    };
+
+    current.count += 1;
+    current.miles += Number(row.totalMiles || 0);
+    if (normalizeSearchValue(row.company)) current.uniqueCustomers.add(normalizeSearchValue(row.company));
+
+    getNoAvailabilityLocationPoints(row).forEach((point) => {
+      current.uniqueCityStates.add(normalizeSearchValue(point.cityState));
+    });
+
+    counts.set(monthKey, current);
+  });
+
+  return Array.from(counts.values())
+    .map((entry) => ({
+      monthKey: entry.monthKey,
+      monthLabel: entry.monthLabel,
+      count: entry.count,
+      miles: entry.miles,
+      uniqueCustomers: entry.uniqueCustomers.size,
+      uniqueCityStates: entry.uniqueCityStates.size,
+      percentage: rows.length > 0 ? entry.count / rows.length : 0
+    }))
+    .sort((a, b) => b.count - a.count || b.miles - a.miles || String(b.monthKey).localeCompare(String(a.monthKey)))
+    .slice(0, limit);
+}
+
+function getNoAvailabilityMonthlyTrend(rows) {
+  return getNoAvailabilityTopMonths(rows, 999)
+    .sort((a, b) => String(a.monthKey).localeCompare(String(b.monthKey)));
+}
+
+function getNoAvailabilityTopLanes(rows, limit = 5) {
+  const counts = new Map();
+
+  rows.forEach((row) => {
+    const pickup = normalizeNoAvailabilityCityState(row.pickupLocation);
+    const delivery = normalizeNoAvailabilityCityState(row.deliveryLocation);
+
+    if (!pickup || !delivery) return;
+
+    const lane = `${pickup} → ${delivery}`;
+    const key = normalizeSearchValue(lane);
+    const current = counts.get(key) || {
+      lane,
+      pickup,
+      delivery,
+      count: 0,
+      miles: 0,
+      uniqueCustomers: new Set()
+    };
+
+    current.count += 1;
+    current.miles += Number(row.totalMiles || 0);
+    if (normalizeSearchValue(row.company)) current.uniqueCustomers.add(normalizeSearchValue(row.company));
+    counts.set(key, current);
+  });
+
+  return Array.from(counts.values())
+    .map((entry) => ({
+      lane: entry.lane,
+      pickup: entry.pickup,
+      delivery: entry.delivery,
+      count: entry.count,
+      miles: entry.miles,
+      uniqueCustomers: entry.uniqueCustomers.size,
+      percentage: rows.length > 0 ? entry.count / rows.length : 0
+    }))
+    .sort((a, b) => b.count - a.count || b.miles - a.miles || String(a.lane).localeCompare(String(b.lane)))
+    .slice(0, limit);
+}
+
+function getNoAvailabilityFieldBreakdown(rows, fieldName, outputName, limit = 5) {
+  const counts = new Map();
+
+  rows.forEach((row) => {
+    const value = String(row[fieldName] || '').trim();
+    const key = normalizeSearchValue(value);
+    if (!key) return;
+
+    const current = counts.get(key) || { [outputName]: value, count: 0, miles: 0, uniqueCustomers: new Set() };
+    current.count += 1;
+    current.miles += Number(row.totalMiles || 0);
+    if (normalizeSearchValue(row.company)) current.uniqueCustomers.add(normalizeSearchValue(row.company));
+    counts.set(key, current);
+  });
+
+  return Array.from(counts.values())
+    .map((entry) => ({
+      [outputName]: entry[outputName],
+      count: entry.count,
+      miles: entry.miles,
+      uniqueCustomers: entry.uniqueCustomers.size,
+      percentage: rows.length > 0 ? entry.count / rows.length : 0
+    }))
+    .sort((a, b) => b.count - a.count || b.miles - a.miles || String(a[outputName]).localeCompare(String(b[outputName])))
+    .slice(0, limit);
 }
 
 function getNoAvailabilityYearBreakdown(rows) {
@@ -2618,10 +2878,11 @@ function getNoAvailabilityYearBreakdown(rows) {
 
   rows.forEach((row) => {
     const year = row.reportYear || 'Unknown';
-    const current = byYear.get(year) || { year, count: 0, miles: 0, uniqueCustomers: new Set() };
+    const current = byYear.get(year) || { year, count: 0, miles: 0, uniqueCustomers: new Set(), uniqueCityStates: new Set() };
     current.count += 1;
     current.miles += Number(row.totalMiles || 0);
     if (normalizeSearchValue(row.company)) current.uniqueCustomers.add(normalizeSearchValue(row.company));
+    getNoAvailabilityLocationPoints(row).forEach((point) => current.uniqueCityStates.add(normalizeSearchValue(point.cityState)));
     byYear.set(year, current);
   });
 
@@ -2630,9 +2891,68 @@ function getNoAvailabilityYearBreakdown(rows) {
       year: entry.year,
       count: entry.count,
       miles: entry.miles,
-      uniqueCustomers: entry.uniqueCustomers.size
+      uniqueCustomers: entry.uniqueCustomers.size,
+      uniqueCityStates: entry.uniqueCityStates.size
     }))
     .sort((a, b) => Number(b.year || 0) - Number(a.year || 0));
+}
+
+function buildNoAvailabilityInsights(rows, analytics, summary) {
+  const insights = [];
+
+  if (rows.length === 0) return insights;
+
+  const peakMonth = analytics.topMonths[0];
+  if (peakMonth) {
+    insights.push({
+      title: 'Highest month',
+      value: peakMonth.monthLabel,
+      detail: `${peakMonth.monthLabel} produced ${peakMonth.count} no availability record(s), covering ${peakMonth.uniqueCustomers} customer(s) and ${Math.round(peakMonth.miles).toLocaleString('en-US')} missed mile(s).`,
+      tone: 'warning'
+    });
+  }
+
+  const topCity = analytics.topCityStates[0];
+  if (topCity) {
+    insights.push({
+      title: 'Hot city/state',
+      value: topCity.cityState,
+      detail: `${topCity.cityState} appeared ${topCity.count} time(s) across pickup and delivery points (${topCity.pickupCount} pickup / ${topCity.deliveryCount} delivery).`,
+      tone: 'info'
+    });
+  }
+
+  const topCustomersShare = summary.topFiveCustomersShare || 0;
+  if (analytics.topCustomers[0]) {
+    insights.push({
+      title: 'Customer concentration',
+      value: `${Math.round(topCustomersShare * 1000) / 10}%`,
+      detail: `The top five customers account for ${Math.round(topCustomersShare * 1000) / 10}% of the no availability records in this window.`,
+      tone: topCustomersShare >= 0.35 ? 'warning' : 'neutral'
+    });
+  }
+
+  const topLane = analytics.topLanes[0];
+  if (topLane && topLane.count > 1) {
+    insights.push({
+      title: 'Repeated lane',
+      value: topLane.lane,
+      detail: `${topLane.lane} repeated ${topLane.count} time(s). That may point to a lane worth targeted capacity planning.`,
+      tone: 'info'
+    });
+  }
+
+  const topShipmentType = analytics.shipmentTypes[0];
+  if (topShipmentType) {
+    insights.push({
+      title: 'Common shipment type',
+      value: topShipmentType.shipmentType,
+      detail: `${topShipmentType.shipmentType} is the most common type in this report at ${topShipmentType.count} no availability record(s).`,
+      tone: 'neutral'
+    });
+  }
+
+  return insights;
 }
 
 function buildNoAvailabilityResponse(rawRows, options = {}) {
@@ -2642,14 +2962,28 @@ function buildNoAvailabilityResponse(rawRows, options = {}) {
     ? dedupedRows.filter((row) => Number(row.reportYear) === targetYear)
     : dedupedRows;
 
-  const rows = filteredRows.sort((a, b) => {
-    const dateDiff = new Date(b.solicitDate || b.created || 0) - new Date(a.solicitDate || a.created || 0);
-    if (dateDiff !== 0) return dateDiff;
-    return String(a.company || '').localeCompare(String(b.company || ''));
-  });
+  const rows = filteredRows
+    .map((row) => ({
+      ...row,
+      pickupCityState: normalizeNoAvailabilityCityState(row.pickupLocation),
+      deliveryCityState: normalizeNoAvailabilityCityState(row.deliveryLocation)
+    }))
+    .sort((a, b) => {
+      const dateDiff = new Date(b.solicitDate || b.created || 0) - new Date(a.solicitDate || a.created || 0);
+      if (dateDiff !== 0) return dateDiff;
+      return String(a.company || '').localeCompare(String(b.company || ''));
+    });
 
   const uniqueCustomerKeys = new Set(rows.map((row) => normalizeSearchValue(row.company)).filter(Boolean));
-  const topCustomer = getNoAvailabilityTopCustomer(rows);
+  const uniqueCityStateKeys = new Set(
+    rows.flatMap((row) => getNoAvailabilityLocationPoints(row).map((point) => normalizeSearchValue(point.cityState))).filter(Boolean)
+  );
+  const topCustomers = getNoAvailabilityTopCustomers(rows, 5);
+  const topCustomer = topCustomers[0] || { customer: '', count: 0, miles: 0, percentage: 0 };
+  const topCityStates = getNoAvailabilityTopCityStates(rows, 5);
+  const topCityState = topCityStates[0] || { cityState: '', count: 0, pickupCount: 0, deliveryCount: 0, miles: 0, percentage: 0 };
+  const topMonths = getNoAvailabilityTopMonths(rows, 5);
+  const highestMonth = topMonths[0] || { monthLabel: '', count: 0, miles: 0, percentage: 0 };
   const totalMiles = rows.reduce((sum, row) => sum + Number(row.totalMiles || 0), 0);
   const mostRecentSolicitDate = rows[0]?.solicitDate || '';
   const mostRecentModifiedDate = rows
@@ -2657,6 +2991,41 @@ function buildNoAvailabilityResponse(rawRows, options = {}) {
     .filter(Boolean)
     .sort((a, b) => new Date(b) - new Date(a))[0] || '';
   const reportLabel = targetYear ? `No Availability - ${targetYear}` : 'No Availability - All Years';
+
+  const analytics = {
+    topCustomers,
+    topCityStates,
+    topMonths,
+    monthlyTrend: getNoAvailabilityMonthlyTrend(rows),
+    topLanes: getNoAvailabilityTopLanes(rows, 5),
+    topRequestors: getNoAvailabilityFieldBreakdown(rows, 'requestor', 'requestor', 5),
+    shipmentTypes: getNoAvailabilityFieldBreakdown(rows, 'shipmentType', 'shipmentType', 5)
+  };
+
+  const summary = {
+    totalNoAvailability: rows.length,
+    uniqueCustomers: uniqueCustomerKeys.size,
+    uniqueCityStates: uniqueCityStateKeys.size,
+    topCustomer: topCustomer.customer,
+    topCustomerCount: topCustomer.count,
+    topCustomerMiles: topCustomer.miles,
+    topCustomerShare: topCustomer.percentage,
+    topCityState: topCityState.cityState,
+    topCityStateCount: topCityState.count,
+    topCityStatePickupCount: topCityState.pickupCount,
+    topCityStateDeliveryCount: topCityState.deliveryCount,
+    topCityStateShare: topCityState.percentage,
+    highestMonth: highestMonth.monthLabel,
+    highestMonthCount: highestMonth.count,
+    highestMonthMiles: highestMonth.miles,
+    highestMonthShare: highestMonth.percentage,
+    topFiveCustomersShare: rows.length > 0 ? topCustomers.reduce((sum, entry) => sum + entry.count, 0) / rows.length : 0,
+    totalMissedMiles: totalMiles,
+    averageMissedMiles: rows.length > 0 ? totalMiles / rows.length : 0,
+    mostRecentSolicitDate,
+    mostRecentModifiedDate,
+    duplicateRowsRemoved: duplicateCount
+  };
 
   return {
     success: true,
@@ -2667,17 +3036,9 @@ function buildNoAvailabilityResponse(rawRows, options = {}) {
     anchorDate: 'Solicit Date',
     count: rows.length,
     rows,
-    summary: {
-      totalNoAvailability: rows.length,
-      uniqueCustomers: uniqueCustomerKeys.size,
-      topCustomer: topCustomer.customer,
-      topCustomerCount: topCustomer.count,
-      topCustomerMiles: topCustomer.miles,
-      totalMissedMiles: totalMiles,
-      mostRecentSolicitDate,
-      mostRecentModifiedDate,
-      duplicateRowsRemoved: duplicateCount
-    },
+    summary,
+    analytics,
+    insights: buildNoAvailabilityInsights(rows, analytics, summary),
     yearBreakdown: getNoAvailabilityYearBreakdown(dedupedRows)
   };
 }
