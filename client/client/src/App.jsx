@@ -3455,7 +3455,7 @@ function openReportLoadDetails(load) {
             <div className="driver-report-section-header">
               <div>
                 <h4>Year Context</h4>
-                <p>Useful for spotting whether the pattern is new or recurring.</p>
+               
               </div>
             </div>
 
@@ -3475,7 +3475,7 @@ function openReportLoadDetails(load) {
           <div className="driver-report-section-header">
             <div>
               <h4>Raw No Availability Log</h4>
-              <p>Traceability stays here, but the pattern panels above are the decision tool.</p>
+              
             </div>
             <div className="driver-report-section-total">{formatReportNumber(rows.length)} row(s)</div>
           </div>
