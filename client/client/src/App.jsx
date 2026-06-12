@@ -207,7 +207,9 @@ export default function App() {
   const [uploadDigestLoading, setUploadDigestLoading] = useState(false);
   const [uploadDigestError, setUploadDigestError] = useState('');
   const [uploadDigestActionError, setUploadDigestActionError] = useState('');
+  const [uploadDigestSectionOpen, setUploadDigestSectionOpen] = useState(false);
   const [uploadDigestOpen, setUploadDigestOpen] = useState(false);
+  const [intelliTrackSectionOpen, setIntelliTrackSectionOpen] = useState(false);
   const [intelliTrackOpen, setIntelliTrackOpen] = useState(false);
   const [intelliTrackActionOpen, setIntelliTrackActionOpen] = useState(false);
   const [intelliTrackData, setIntelliTrackData] = useState(null);
@@ -222,6 +224,14 @@ export default function App() {
   const [intelliTrackActionLoading, setIntelliTrackActionLoading] = useState('');
   const [intelliTrackPendingBol, setIntelliTrackPendingBol] = useState('');
   const [intelliTrackSuppressedBols, setIntelliTrackSuppressedBols] = useState([]);
+  const [availableTrucksSectionOpen, setAvailableTrucksSectionOpen] = useState(false);
+  const [availableTrucksOpen, setAvailableTrucksOpen] = useState(false);
+  const [availableTrucksActionOpen, setAvailableTrucksActionOpen] = useState(false);
+  const [availableTrucksData, setAvailableTrucksData] = useState(null);
+  const [availableTrucksLoading, setAvailableTrucksLoading] = useState(false);
+  const [availableTrucksError, setAvailableTrucksError] = useState('');
+  const [availableTruckDrilldown, setAvailableTruckDrilldown] = useState(null);
+  const [reportsSectionOpen, setReportsSectionOpen] = useState(false);
   
 
   function isBolLookup(value) {
@@ -301,6 +311,7 @@ export default function App() {
         setSelectedCustomerTrend(null);
         setSelectedDriverRoster(null);
         setSelectedSalesLead(null);
+        setAvailableTruckDrilldown(null);
       }
     }
 
@@ -315,12 +326,14 @@ export default function App() {
     loadDriverPositions();
     loadUploadDigest(uploadDigestDate);
     loadIntelliTrack();
+    loadAvailableTrucks();
 
     const interval = window.setInterval(() => {
       loadOperationsDashboard({ silent: true });
       loadDriverPositions({ silent: true });
       loadUploadDigest(uploadDigestDate, { silent: true });
       loadIntelliTrack({ silent: true });
+      loadAvailableTrucks({ silent: true });
     }, 10 * 60 * 1000);
 
     return () => window.clearInterval(interval);
@@ -388,8 +401,17 @@ export default function App() {
     setIntelliTrackActionMessage('');
     setIntelliTrackPendingBol('');
     setIntelliTrackSuppressedBols([]);
+    setUploadDigestSectionOpen(false);
+    setIntelliTrackSectionOpen(false);
     setIntelliTrackOpen(false);
     setIntelliTrackActionOpen(false);
+    setAvailableTrucksSectionOpen(false);
+    setAvailableTrucksOpen(false);
+    setAvailableTrucksActionOpen(false);
+    setAvailableTrucksData(null);
+    setAvailableTrucksError('');
+    setAvailableTruckDrilldown(null);
+    setReportsSectionOpen(false);
   }
 
   async function handleLogin() {
@@ -677,6 +699,38 @@ async function loadIntelliTrack(options = {}) {
   }
 }
 
+
+async function loadAvailableTrucks(options = {}) {
+  const { silent = false } = options;
+
+  if (!silent) {
+    setAvailableTrucksLoading(true);
+  }
+
+  setAvailableTrucksError('');
+
+  try {
+    const res = await authedFetch(`${API}/available-trucks`);
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Unable to load Available Trucks.');
+    }
+
+    setAvailableTrucksData(data);
+  } catch (err) {
+    setAvailableTrucksError(err.message || 'Unable to load Available Trucks.');
+
+    if (!silent) {
+      setAvailableTrucksData(null);
+    }
+  } finally {
+    if (!silent) {
+      setAvailableTrucksLoading(false);
+    }
+  }
+}
+
 function isIntelliTrackBolWaiting(bol) {
   const pendingBol = String(intelliTrackPendingBol || '').trim().toUpperCase();
   const targetBol = String(bol || '').trim().toUpperCase();
@@ -926,6 +980,7 @@ function refreshOperationsAndTracking() {
   loadDriverPositions();
   loadUploadDigest(uploadDigestDate);
   loadIntelliTrack();
+  loadAvailableTrucks();
 }
 
 function closeDriverRosterModal() {
@@ -3822,6 +3877,411 @@ function openReportLoadDetails(load) {
     );
   }
 
+  function formatAvailableTruckBatchLabel(summary) {
+    const pieces = [formatDateInputLabel(summary?.latestBatchDate), summary?.latestBatchTimeOfDay]
+      .filter(Boolean);
+
+    return pieces.length ? pieces.join(' · ') : 'Latest batch';
+  }
+
+  function formatBucketList(items, emptyLabel = 'No data yet') {
+    const buckets = items || [];
+
+    if (buckets.length === 0) return emptyLabel;
+
+    return buckets.map((bucket) => `${bucket.label} (${bucket.count})`).join(', ');
+  }
+
+  function formatAvailableTruckPosted(record) {
+    const timestamp = record?.postedAt || record?.createdAt || record?.modifiedAt || '';
+
+    if (timestamp) {
+      const date = new Date(timestamp);
+
+      if (!Number.isNaN(date.getTime())) {
+        return date.toLocaleString('en-US', {
+          timeZone: 'America/New_York',
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit'
+        });
+      }
+    }
+
+    return [formatDateInputLabel(record?.dateSent), record?.timeOfDay]
+      .filter(Boolean)
+      .join(' · ') || '-';
+  }
+
+  function formatAvailableTruckNextPickup(record) {
+    const assignment = record?.nextAssignment;
+
+    if (!assignment) return 'No later pickup found';
+
+    const pickupLabel = formatDateOnly(assignment.pickupDate) || '-';
+    const lane = [assignment.origin, assignment.destination].filter(Boolean).join(' → ');
+    const bol = assignment.bol || 'Order';
+
+    return [bol, pickupLabel, lane].filter(Boolean).join(' · ');
+  }
+
+  function getAvailableTruckGap(record) {
+    if (!record?.nextAssignment) return '-';
+    return record.nextPickupGapLabel || 'Approx. date-only gap';
+  }
+
+  function renderAvailableTruckGap(record) {
+    const gap = getAvailableTruckGap(record);
+
+    if (gap === '-') return gap;
+
+    return (
+      <span className="available-trucks-gap-value">
+        {gap}
+        {record?.hasTonuInPickupSpan && <sup className="available-trucks-tonu-marker">*</sup>}
+      </span>
+    );
+  }
+
+  function openAvailableTruckDrilldown(title, subtitle, rows = []) {
+    setAvailableTruckDrilldown({
+      title,
+      subtitle,
+      rows: rows || []
+    });
+  }
+
+  function AvailableTrucksInsightList({ title, items, emptyLabel }) {
+    const buckets = items || [];
+
+    return (
+      <div className="available-trucks-insight-card">
+        <span>{title}</span>
+        {buckets.length === 0 ? (
+          <strong>{emptyLabel || 'No data yet'}</strong>
+        ) : (
+          <ol>
+            {buckets.map((bucket) => (
+              <li key={bucket.key || bucket.label}>
+                <strong>{bucket.label}</strong>
+                <span>{bucket.count}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    );
+  }
+
+  function AvailableTruckProximityList({ stops }) {
+    const visibleStops = stops || [];
+
+    if (visibleStops.length === 0) return <span className="available-trucks-muted">No proximity stops listed</span>;
+
+    return (
+      <div className="available-trucks-proximity-list">
+        {visibleStops.map((stop) => (
+          <span key={`${stop.rank}-${stop.location}`}>
+            <strong>{stop.location || '-'}</strong>
+            {stop.timeLabel && <small>{stop.timeLabel}</small>}
+          </span>
+        ))}
+      </div>
+    );
+  }
+
+  function AvailableTruckDrilldownModal() {
+    if (!availableTruckDrilldown) return null;
+
+    const rows = availableTruckDrilldown.rows || [];
+    const hasTonuInSpan = rows.some((record) => record?.hasTonuInPickupSpan);
+
+    return (
+      <div className="modal-overlay" onClick={() => setAvailableTruckDrilldown(null)}>
+        <div className="detail-modal available-trucks-drilldown-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="detail-header">
+            <div>
+              <h2>{availableTruckDrilldown.title}</h2>
+              <p>{availableTruckDrilldown.subtitle || `${rows.length} referenced row${rows.length === 1 ? '' : 's'}`}</p>
+            </div>
+            <button type="button" className="close-button" onClick={() => setAvailableTruckDrilldown(null)}>
+              Close
+            </button>
+          </div>
+          <div className="modal-body available-trucks-drilldown-body">
+            {rows.length === 0 ? (
+              <div className="intellitrack-empty">
+                <strong> No records to display.</strong>
+              
+              </div>
+            ) : (
+              <>
+                <div className="operations-table-wrap available-trucks-drilldown-table-wrap">
+                  <table className="available-trucks-table available-trucks-drilldown-table">
+                  <thead>
+                    <tr>
+                      <th>Driver</th>
+                      <th>Unit</th>
+                      <th>Posted Available</th>
+                      <th>Location</th>
+                      <th>First Pickup After Posting</th>
+                      <th>Time to Next Pickup</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((record, index) => (
+                      <tr key={record.id || `${record.driverName}-${record.unitNo}-${index}`}>
+                        <td>
+                          <strong>{record.driverName || '-'}</strong>
+                          <small>{record.equipmentType || '-'}</small>
+                        </td>
+                        <td>{record.unitNo || '-'}</td>
+                        <td>{formatAvailableTruckPosted(record)}</td>
+                        <td>{record.currentLocation || '-'}</td>
+                        <td>
+                          <strong>{formatAvailableTruckNextPickup(record)}</strong>
+                          {record.nextAssignment?.matchType && <small>Matched by {record.nextAssignment.matchType}</small>}
+                        </td>
+                        <td>{renderAvailableTruckGap(record)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  </table>
+                </div>
+                {hasTonuInSpan && (
+                  <p className="available-trucks-tonu-note">
+                    <sup>*</sup> A TONU occurred between the availability posting and the first later Won pickup.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function AvailableTrucksPanel() {
+    const records = availableTrucksData?.records || [];
+    const recordsWithin24Hours = availableTrucksData?.recordsWithin24Hours || [];
+    const assignmentExcludedRecords = availableTrucksData?.assignmentExcludedRecords || [];
+    const recentRecords = availableTrucksData?.recentRecords || [];
+    const summary = availableTrucksData?.summary || {};
+    const insights = availableTrucksData?.insights || {};
+    const batchLabel = formatAvailableTruckBatchLabel(summary);
+    const attentionItems = (insights.attention || []).filter((item) => !['No availability from the last 24 hours', 'No current unassigned trucks'].includes(item.label));
+    const currentCount = summary.currentRecordCount ?? availableTrucksData?.count ?? records.length;
+    const excludedCount = summary.activeFutureAssignmentExclusions || 0;
+
+    return (
+      <div className="search-card feature-accordion-panel available-trucks-panel">
+        <button
+          type="button"
+          className="feature-section-header-button available-trucks-section-header-button"
+          onClick={() => setAvailableTrucksSectionOpen((current) => !current)}
+          aria-expanded={availableTrucksSectionOpen}
+        >
+          <span className="feature-section-title-block">
+            <span className="feature-section-title">Available Trucks</span>
+            <span className="feature-section-subtitle">Current advertised availability and recent location patterns.</span>
+          </span>
+          <span className="feature-section-status-pill">
+            {availableTrucksLoading ? 'Loading...' : `${currentCount} current`}
+          </span>
+          <span className="feature-section-chevron">{availableTrucksSectionOpen ? '▲' : '▼'}</span>
+        </button>
+
+        {availableTrucksError && <div className="msg error">{availableTrucksError}</div>}
+
+        {availableTrucksSectionOpen && (
+          <div className="feature-section-body available-trucks-body">
+            <button
+              type="button"
+              className="available-trucks-summary"
+              onClick={() => setAvailableTrucksOpen((current) => !current)}
+              aria-expanded={availableTrucksOpen}
+            >
+              <span className="available-trucks-title-block">
+                <span className="available-trucks-title">Available Trucks Analysis</span>
+                <span className="available-trucks-subtitle">Availability Analysis and Current Availability.</span>
+              </span>
+              <span className="available-trucks-chevron">
+                {availableTrucksOpen ? '▲' : '▼'}
+              </span>
+            </button>
+
+            {availableTrucksOpen && !availableTrucksError && (
+              <div className="available-trucks-current-card">
+                <div className="available-trucks-subheader">
+                  <div>
+                    <h3>{batchLabel}</h3>
+                    <p>
+                      Current window: last {availableTrucksData?.currentWindowHours || 24} hours · {excludedCount} hidden by active/future assignment · Pattern window: last {availableTrucksData?.lookbackDays || 30} days
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => loadAvailableTrucks()}
+                    disabled={availableTrucksLoading}
+                  >
+                    {availableTrucksLoading ? 'Refreshing...' : 'Refresh'}
+                  </button>
+                </div>
+
+                {availableTrucksLoading && !availableTrucksData && (
+                  <div className="msg">Loading available trucks...</div>
+                )}
+
+                {availableTrucksData && (
+                  <>
+                    <div className="available-trucks-kpi-grid">
+                      <button
+                        type="button"
+                        className="available-trucks-kpi-button"
+                        onClick={() => openAvailableTruckDrilldown('Current available trucks', 'Rows from the last 24 hours with no active/future assignment.', records)}
+                      >
+                        <span>Current</span>
+                        <strong>{summary.currentRecordCount || 0}</strong>
+                        <small>Last 24 hours, unassigned</small>
+                      </button>
+                      <button
+                        type="button"
+                        className="available-trucks-kpi-button"
+                        onClick={() => openAvailableTruckDrilldown('Recent available-truck rows', 'All rows posted in the last 24 hours, before current-availability filtering. First later pickup is shown only as follow-through history.', recordsWithin24Hours)}
+                      >
+                        <span>Recent rows</span>
+                        <strong>{summary.recordsWithin24Hours || 0}</strong>
+                        <small>Created in the last 24 hours</small>
+                      </button>
+                      <button
+                        type="button"
+                        className="available-trucks-kpi-button"
+                        onClick={() => openAvailableTruckDrilldown('Hidden by assignment', 'Recent rows hidden because the truck/driver now has an active or future assignment. First later pickup is shown only as follow-through history.', assignmentExcludedRecords)}
+                      >
+                        <span>Assignment hidden</span>
+                        <strong>{summary.activeFutureAssignmentExclusions || 0}</strong>
+                        <small>Truck/driver now active or future-booked</small>
+                      </button>
+                      <button
+                        type="button"
+                        className="available-trucks-kpi-button"
+                        onClick={() => openAvailableTruckDrilldown('Recent drivers', 'Rows in the recent pattern window, with the first later Won pickup when found. Historical follow-through only; not current status.', recentRecords)}
+                      >
+                        <span>Recent drivers</span>
+                        <strong>{summary.uniqueRecentDrivers || 0}</strong>
+                        <small>{summary.recentRecordCount || 0} rows in pattern window</small>
+                      </button>
+                    </div>
+
+                    {attentionItems.length > 0 && (
+                      <div className="available-trucks-attention-list">
+                        {attentionItems.map((item, index) => (
+                          <div key={`${item.label}-${index}`} className={`available-trucks-attention ${item.level || 'info'}`}>
+                            <strong>{item.label}</strong>
+                            <span>{item.detail}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="available-trucks-insight-grid">
+                      <AvailableTrucksInsightList title="Top current states" items={insights.topCurrentStates} />
+                      <AvailableTrucksInsightList title="Top current locations" items={insights.topCurrentLocations} />
+                      <AvailableTrucksInsightList title="Top advertised proximity" items={insights.topProximityLocations} />
+                      <AvailableTrucksInsightList title="Equipment mix" items={insights.equipmentMix} />
+                    </div>
+
+                    {records.length === 0 ? (
+                      <div className="intellitrack-empty">
+                        <strong>No trucks currently available.</strong>
+                                              </div>
+                    ) : (
+                      <div className="operations-table-wrap available-trucks-table-wrap">
+                        <table className="available-trucks-table">
+                          <thead>
+                            <tr>
+                              <th>Driver</th>
+                              <th>Unit</th>
+                              <th>Equipment</th>
+                              <th>Current Location</th>
+                              <th>Advertised Proximity</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {records.map((record) => (
+                              <tr key={record.id || `${record.driverName}-${record.unitNo}-${record.dateSent}-${record.timeOfDay}`}>
+                                <td>
+                                  <strong>{record.driverName || '-'}</strong>
+                                  <small>{record.teamType || '-'}</small>
+                                </td>
+                                <td>{record.unitNo || '-'}</td>
+                                <td>
+                                  <strong>{record.equipmentType || '-'}</strong>
+                                  <small>{record.equipmentFamily || '-'}</small>
+                                </td>
+                                <td>{record.currentLocation || '-'}</td>
+                                <td><AvailableTruckProximityList stops={record.proximityStops} /></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            <button
+              type="button"
+              className="available-trucks-summary available-trucks-action-summary"
+              onClick={() => setAvailableTrucksActionOpen((current) => !current)}
+              aria-expanded={availableTrucksActionOpen}
+            >
+              <span className="available-trucks-title-block">
+                <span className="available-trucks-title">Add Available Truck</span>
+                <span className="available-trucks-subtitle">Create the source record Power Automate will dissect and send.</span>
+              </span>
+              <span className="available-trucks-chevron">
+                {availableTrucksActionOpen ? '▲' : '▼'}
+              </span>
+            </button>
+
+            {availableTrucksActionOpen && (
+              <div className="available-trucks-action-card">
+                <div className="available-trucks-subheader">
+                  <div>
+                    <h3>Coming in Phase 2</h3>
+                    <p>
+                      This first pass reads the Single Line analysis list. The add form will post to the wide Kole Trucking Available Equipment source list so the existing flow can send and dissect it.
+                    </p>
+                  </div>
+                </div>
+                <div className="available-trucks-kpi-grid available-trucks-source-grid">
+                  <div>
+                    <span>Read list</span>
+                    <strong>Single Line</strong>
+                    <small>{availableTrucksData?.sourceListId || '67edb153-a389-474a-a7dd-d3bc0d746952'}</small>
+                  </div>
+                  <div>
+                    <span>Post list</span>
+                    <strong>Wide source</strong>
+                    <small>{availableTrucksData?.sourceWideListId || '96af7972-58ff-4bb8-b5a6-ca86f4d19ee6'}</small>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        <AvailableTruckDrilldownModal />
+      </div>
+    );
+  }
+
   function IntelliTrackPanel() {
     const suppressedBolSet = new Set(intelliTrackSuppressedBols);
     const records = (intelliTrackData?.records || []).filter((record) => {
@@ -3834,217 +4294,228 @@ function openReportLoadDetails(load) {
     const orderLoadingKey = order?.id ? `${order.id}-${buttonState.enabled ? 'on' : 'off'}` : '';
 
     return (
-      <div className="search-card intellitrack-panel">
-        <div className="intellitrack-section-header">
-          <h2>IntelliTrack</h2>
-        </div>
+      <div className="search-card feature-accordion-panel intellitrack-panel">
+        <button
+          type="button"
+          className="feature-section-header-button intellitrack-section-header-button"
+          onClick={() => setIntelliTrackSectionOpen((current) => !current)}
+          aria-expanded={intelliTrackSectionOpen}
+        >
+          <span className="feature-section-title-block">
+            <span className="feature-section-title">IntelliTrack</span>
+            <span className="feature-section-subtitle">Automatic tracking visibility and start/stop controls.</span>
+          </span>
+          <span className="feature-section-status-pill">
+            {intelliTrackLoading ? 'Loading...' : `${count} tracking`}
+          </span>
+          <span className="feature-section-chevron">{intelliTrackSectionOpen ? '▲' : '▼'}</span>
+        </button>
 
         {intelliTrackError && <div className="msg error">{intelliTrackError}</div>}
         {intelliTrackActionError && <div className="msg error">{intelliTrackActionError}</div>}
         {intelliTrackActionMessage && <div className="msg success">{intelliTrackActionMessage}</div>}
 
-        <div className="intellitrack-body">
-          <button
-            type="button"
-            className="intellitrack-summary"
-            onClick={() => setIntelliTrackOpen((current) => !current)}
-            aria-expanded={intelliTrackOpen}
-          >
-            <span className="intellitrack-title-block">
-              <span className="intellitrack-title">Active automatic tracking</span>
-              <span className="intellitrack-subtitle">Show orders currently enrolled in IntelliTrack.</span>
-            </span>
-            <span className="intellitrack-count">
-              {intelliTrackLoading ? 'Loading...' : `${count} tracking`}
-            </span>
-            <span className="intellitrack-chevron">
-              {intelliTrackOpen ? '▲' : '▼'}
-            </span>
-          </button>
+        {intelliTrackSectionOpen && (
+          <div className="feature-section-body intellitrack-body">
+            <button
+              type="button"
+              className="intellitrack-summary"
+              onClick={() => setIntelliTrackOpen((current) => !current)}
+              aria-expanded={intelliTrackOpen}
+            >
+              <span className="intellitrack-title-block">
+                <span className="intellitrack-title">Active automatic tracking</span>
+                <span className="intellitrack-subtitle">Show orders currently enrolled in IntelliTrack.</span>
+              </span>
+              <span className="intellitrack-chevron">
+                {intelliTrackOpen ? '▲' : '▼'}
+              </span>
+            </button>
 
-          {intelliTrackOpen && !intelliTrackError && (
-            <div className="intellitrack-current-card">
-              <div className="intellitrack-subheader">
-                <div>
-                  <h3>Currently Tracking</h3>
+            {intelliTrackOpen && !intelliTrackError && (
+              <div className="intellitrack-current-card">
+                <div className="intellitrack-subheader">
+                  <div>
+                    <h3>Currently Tracking</h3>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => loadIntelliTrack()}
+                    disabled={intelliTrackLoading}
+                  >
+                    {intelliTrackLoading ? 'Refreshing...' : 'Refresh'}
+                  </button>
                 </div>
 
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => loadIntelliTrack()}
-                  disabled={intelliTrackLoading}
-                >
-                  {intelliTrackLoading ? 'Refreshing...' : 'Refresh'}
-                </button>
+                {records.length === 0 ? (
+                  <div className="intellitrack-empty">
+                    <strong>No orders are currently being tracked.</strong>
+                  </div>
+                ) : (
+                  <div className="operations-table-wrap intellitrack-table-wrap">
+                    <table className="intellitrack-table">
+                      <thead>
+                        <tr>
+                          <th>BOL</th>
+                          <th>Customer</th>
+                          <th>Driver</th>
+                          <th>Truck</th>
+                          <th>Route</th>
+                          <th>Next Update</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+
+                      <tbody>
+                        {records.map((record, i) => {
+                          const rowLoadingKey = `${record.BidListingID}-off`;
+
+                          return (
+                            <tr key={record.id || `${record.BOLNumber}-${i}`}>
+                              <td>{record.BOLNumber || '-'}</td>
+                              <td>{record.Company || '-'}</td>
+                              <td>{record.Operator || '-'}</td>
+                              <td>{record.TruckNumber || '-'}</td>
+                              <td>{record.Origin || '-'} → {record.Destination || '-'}</td>
+                              <td>{record.NextUpdateScheduled ? formatTrackingTimestamp(record.NextUpdateScheduled) : '-'}</td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="danger-button compact-action-button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    turnOffIntelliTrackRecord(record);
+                                  }}
+                                  disabled={!record.BidListingID || intelliTrackActionLoading === rowLoadingKey}
+                                >
+                                  {intelliTrackActionLoading === rowLoadingKey ? 'Stopping...' : 'Turn Off'}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
+            )}
 
-              {records.length === 0 ? (
-                <div className="intellitrack-empty">
-                  <strong>No orders are currently being tracked.</strong>
-                </div>
-              ) : (
-                <div className="operations-table-wrap intellitrack-table-wrap">
-                  <table className="intellitrack-table">
-                    <thead>
-                      <tr>
-                        <th>BOL</th>
-                        <th>Customer</th>
-                        <th>Driver</th>
-                        <th>Truck</th>
-                        <th>Route</th>
-                        <th>Next Update</th>
-                        <th>Action</th>
-                      </tr>
-                    </thead>
+            <button
+              type="button"
+              className="intellitrack-summary intellitrack-action-summary"
+              onClick={() => setIntelliTrackActionOpen((current) => !current)}
+              aria-expanded={intelliTrackActionOpen}
+            >
+              <span className="intellitrack-title-block">
+                <span className="intellitrack-title">Start or Stop Tracking</span>
+                <span className="intellitrack-subtitle">Search a BOL and toggle IntelliTrack from the Bid Listing record.</span>
+              </span>
+              <span className="intellitrack-chevron">
+                {intelliTrackActionOpen ? '▲' : '▼'}
+              </span>
+            </button>
 
-                    <tbody>
-                      {records.map((record, i) => {
-                        const rowLoadingKey = `${record.BidListingID}-off`;
+            {intelliTrackActionOpen && !intelliTrackError && (
+              <div className="intellitrack-search-card">
+                <form className="intellitrack-search-row" onSubmit={searchIntelliTrackOrder}>
+                  <input
+                    value={intelliTrackSearchBol}
+                    onChange={(e) => handleIntelliTrackBolChange(e.target.value)}
+                    placeholder="Search BOL, e.g. D197382"
+                    aria-label="Search BOL for IntelliTrack"
+                  />
+                  <button type="submit" disabled={intelliTrackSearchLoading}>
+                    {intelliTrackSearchLoading ? 'Searching...' : 'Find Order'}
+                  </button>
+                </form>
 
-                        return (
-                          <tr key={record.id || `${record.BOLNumber}-${i}`}>
-                            <td>{record.BOLNumber || '-'}</td>
-                            <td>{record.Company || '-'}</td>
-                            <td>{record.Operator || '-'}</td>
-                            <td>{record.TruckNumber || '-'}</td>
-                            <td>{record.Origin || '-'} → {record.Destination || '-'}</td>
-                            <td>{record.NextUpdateScheduled ? formatTrackingTimestamp(record.NextUpdateScheduled) : '-'}</td>
-                            <td>
-                              <button
-                                type="button"
-                                className="danger-button compact-action-button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  turnOffIntelliTrackRecord(record);
-                                }}
-                                disabled={!record.BidListingID || intelliTrackActionLoading === rowLoadingKey}
-                              >
-                                {intelliTrackActionLoading === rowLoadingKey ? 'Stopping...' : 'Turn Off'}
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
+                {intelliTrackSearchError && <div className="msg error">{intelliTrackSearchError}</div>}
+                {intelliTrackPendingBol && (
+                  <div className="msg">
+                    Waiting for {intelliTrackPendingBol} to show in Currently Tracking. Search is soft-locked for that BOL until it appears.
+                  </div>
+                )}
 
-          <button
-            type="button"
-            className="intellitrack-summary intellitrack-action-summary"
-            onClick={() => setIntelliTrackActionOpen((current) => !current)}
-            aria-expanded={intelliTrackActionOpen}
-          >
-            <span className="intellitrack-title-block">
-              <span className="intellitrack-title">Start or Stop Tracking</span>
-              <span className="intellitrack-subtitle">Search a BOL and toggle IntelliTrack from the Bid Listing record.</span>
-            </span>
-            <span className="intellitrack-chevron">
-              {intelliTrackActionOpen ? '▲' : '▼'}
-            </span>
-          </button>
-
-          {intelliTrackActionOpen && !intelliTrackError && (
-            <div className="intellitrack-search-card">
-              <form className="intellitrack-search-row" onSubmit={searchIntelliTrackOrder}>
-                <input
-                  value={intelliTrackSearchBol}
-                  onChange={(e) => handleIntelliTrackBolChange(e.target.value)}
-                  placeholder="Search BOL, e.g. D197382"
-                  aria-label="Search BOL for IntelliTrack"
-                />
-                <button type="submit" disabled={intelliTrackSearchLoading}>
-                  {intelliTrackSearchLoading ? 'Searching...' : 'Find Order'}
-                </button>
-              </form>
-
-              {intelliTrackSearchError && <div className="msg error">{intelliTrackSearchError}</div>}
-              {intelliTrackPendingBol && (
-                <div className="msg">
-                  Waiting for {intelliTrackPendingBol} to show in Currently Tracking. Search is soft-locked for that BOL until it appears.
-                </div>
-              )}
-
-              {order && (
-                <div className="intellitrack-order-card">
-                  <div className="intellitrack-order-main">
-                    <div>
-                      <span className="intellitrack-label">BOL</span>
-                      <strong>{order.BOL || '-'}</strong>
+                {order && (
+                  <div className="intellitrack-order-card">
+                    <div className="intellitrack-order-main">
+                      <div>
+                        <span className="intellitrack-label">BOL</span>
+                        <strong>{order.BOL || '-'}</strong>
+                      </div>
+                      <div>
+                        <span className="intellitrack-label">Customer</span>
+                        <strong>{order.Customer || '-'}</strong>
+                      </div>
+                      <div>
+                        <span className="intellitrack-label">Status</span>
+                        <strong><span className={getStatusClass(order.Status)}>{order.Status || '-'}</span></strong>
+                      </div>
+                      <div>
+                        <span className="intellitrack-label">Tracking</span>
+                        <strong>{order.EnableTracking || order.TrackingActive ? 'On' : 'Off'}</strong>
+                      </div>
                     </div>
-                    <div>
-                      <span className="intellitrack-label">Customer</span>
-                      <strong>{order.Customer || '-'}</strong>
+
+                    <div className="intellitrack-dispatch-grid">
+                      <div>
+                        <span>Operator / Team</span>
+                        <strong>{order.Driver || '-'}</strong>
+                      </div>
+                      <div>
+                        <span>Truck</span>
+                        <strong>{order.Truck || '-'}</strong>
+                      </div>
+                      <div>
+                        <span>Route</span>
+                        <strong>{order.Origin || '-'} → {order.Destination || '-'}</strong>
+                      </div>
+                      <div>
+                        <span>Pickup</span>
+                        <strong>{formatDateTime(order.PickupDate, order.PickupTime, order.PickupAMPM)}</strong>
+                      </div>
+                      <div>
+                        <span>Delivery</span>
+                        <strong>{formatDateTime(order.DeliveryDate, order.DeliveryTime, order.DeliveryAMPM)}</strong>
+                      </div>
+                      <div>
+                        <span>Final Settle Sent</span>
+                        <strong>{order.FinalSettleSent ? 'Yes' : 'No'}</strong>
+                      </div>
                     </div>
-                    <div>
-                      <span className="intellitrack-label">Status</span>
-                      <strong><span className={getStatusClass(order.Status)}>{order.Status || '-'}</span></strong>
-                    </div>
-                    <div>
-                      <span className="intellitrack-label">Tracking</span>
-                      <strong>{order.EnableTracking || order.TrackingActive ? 'On' : 'Off'}</strong>
+
+                    {buttonState.reason && (
+                      <div className="intellitrack-blocked-note">
+                        {buttonState.reason}
+                      </div>
+                    )}
+
+                    <div className="intellitrack-action-row">
+                      <button
+                        type="button"
+                        className={buttonState.enabled ? 'primary-action-button' : 'danger-button'}
+                        onClick={() => toggleIntelliTrackOrder(order, buttonState.enabled)}
+                        disabled={buttonState.disabled || intelliTrackActionLoading === orderLoadingKey}
+                      >
+                        {intelliTrackActionLoading === orderLoadingKey
+                          ? 'Submitting...'
+                          : buttonState.label}
+                      </button>
+                      <span>
+                        {buttonState.enabled
+                          ? 'Turns Enable Tracking on in Bid Listing.'
+                          : 'Turns Enable Tracking off in Bid Listing.'}
+                      </span>
                     </div>
                   </div>
-
-                  <div className="intellitrack-dispatch-grid">
-                    <div>
-                      <span>Operator / Team</span>
-                      <strong>{order.Driver || '-'}</strong>
-                    </div>
-                    <div>
-                      <span>Truck</span>
-                      <strong>{order.Truck || '-'}</strong>
-                    </div>
-                    <div>
-                      <span>Route</span>
-                      <strong>{order.Origin || '-'} → {order.Destination || '-'}</strong>
-                    </div>
-                    <div>
-                      <span>Pickup</span>
-                      <strong>{formatDateTime(order.PickupDate, order.PickupTime, order.PickupAMPM)}</strong>
-                    </div>
-                    <div>
-                      <span>Delivery</span>
-                      <strong>{formatDateTime(order.DeliveryDate, order.DeliveryTime, order.DeliveryAMPM)}</strong>
-                    </div>
-                    <div>
-                      <span>Final Settle Sent</span>
-                      <strong>{order.FinalSettleSent ? 'Yes' : 'No'}</strong>
-                    </div>
-                  </div>
-
-                  {buttonState.reason && (
-                    <div className="intellitrack-blocked-note">
-                      {buttonState.reason}
-                    </div>
-                  )}
-
-                  <div className="intellitrack-action-row">
-                    <button
-                      type="button"
-                      className={buttonState.enabled ? 'primary-action-button' : 'danger-button'}
-                      onClick={() => toggleIntelliTrackOrder(order, buttonState.enabled)}
-                      disabled={buttonState.disabled || intelliTrackActionLoading === orderLoadingKey}
-                    >
-                      {intelliTrackActionLoading === orderLoadingKey
-                        ? 'Submitting...'
-                        : buttonState.label}
-                    </button>
-                    <span>
-                      {buttonState.enabled
-                        ? 'Turns Enable Tracking on in Bid Listing.'
-                        : 'Turns Enable Tracking off in Bid Listing.'}
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -4058,108 +4529,120 @@ function openReportLoadDetails(load) {
     const isUploadDigestToday = isTodayOrFutureDateInput(activeDigestDate);
 
     return (
-      <div className="search-card upload-digest-panel">
-        <div className="upload-digest-section-header">
-          <h2>Job Photo Uploads</h2>
-        </div>
-
-        <div className="upload-digest-header-row">
-          <button
-            className="upload-digest-arrow"
-            onClick={() => changeUploadDigestDate(-1)}
-            disabled={uploadDigestLoading}
-            aria-label="Previous upload digest day"
-            title="Previous day"
-          >
-            ‹
-          </button>
-
-          <button
-            className="upload-digest-summary"
-            onClick={() => setUploadDigestOpen((current) => !current)}
-            aria-expanded={uploadDigestOpen}
-          >
-            <span className="upload-digest-title">
-              Pickup and Delivery Photos for {dateLabel}
-            </span>
-            <span className="upload-digest-count">
-              {uploadDigestLoading ? 'Loading...' : `${count} logged`}
-            </span>
-            <span className="upload-digest-chevron">
-              {uploadDigestOpen ? '▲' : '▼'}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            className={`upload-digest-today-button ${isUploadDigestToday ? 'hidden' : ''}`}
-            onClick={resetUploadDigestToToday}
-            disabled={uploadDigestLoading || isUploadDigestToday}
-            aria-hidden={isUploadDigestToday}
-            tabIndex={isUploadDigestToday ? -1 : 0}
-            title="Return to today"
-          >
-            Today
-          </button>
-
-          <button
-            className="upload-digest-arrow"
-            onClick={() => changeUploadDigestDate(1)}
-            disabled={uploadDigestLoading || isUploadDigestToday}
-            aria-label="Next upload digest day"
-            title={isUploadDigestToday ? 'Already on today' : 'Next day'}
-          >
-            ›
-          </button>
-        </div>
+      <div className="search-card feature-accordion-panel upload-digest-panel">
+        <button
+          type="button"
+          className="feature-section-header-button upload-digest-section-header-button"
+          onClick={() => setUploadDigestSectionOpen((current) => !current)}
+          aria-expanded={uploadDigestSectionOpen}
+        >
+          <span className="feature-section-title-block">
+            <span className="feature-section-title">Job Photo Uploads</span>
+            <span className="feature-section-subtitle">Pickup and delivery photo log for {dateLabel}.</span>
+          </span>
+          <span className="feature-section-status-pill">
+            {uploadDigestLoading ? 'Loading...' : `${count} logged`}
+          </span>
+          <span className="feature-section-chevron">{uploadDigestSectionOpen ? '▲' : '▼'}</span>
+        </button>
 
         {uploadDigestError && <div className="msg error">{uploadDigestError}</div>}
         {uploadDigestActionError && <div className="msg error">{uploadDigestActionError}</div>}
 
-        {uploadDigestOpen && !uploadDigestError && (
-          <div className="upload-digest-body">
-            {records.length === 0 ? (
-              <div className="msg">No pickup or delivery uploads logged for this date.</div>
-            ) : (
-              <div className="operations-table-wrap upload-digest-table-wrap">
-                <table className="upload-digest-table">
-                  <thead>
-                    <tr>
-                      <th>BOL</th>
-                      <th>Driver</th>
-                      <th>Type</th>
-                      <th>Folder</th>
-                    </tr>
-                  </thead>
+        {uploadDigestSectionOpen && (
+          <div className="feature-section-body upload-digest-section-body">
+            <div className="upload-digest-header-row">
+              <button
+                className="upload-digest-arrow"
+                onClick={() => changeUploadDigestDate(-1)}
+                disabled={uploadDigestLoading}
+                aria-label="Previous upload digest day"
+                title="Previous day"
+              >
+                ‹
+              </button>
 
-                  <tbody>
-                    {records.map((record, i) => (
-                      <tr key={record.id || `${record.CompositeKey || record.BOLNumber}-${i}`}>
-                        <td>{record.BOLNumber || '-'}</td>
-                        <td>{record.DriverName || '-'}</td>
-                        <td>{record.UploadType || '-'}</td>
-                        <td>
-                          <button
-                            type="button"
-                            className="table-link-button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openUploadDigestLoadPhotos(record);
-                            }}
-                            disabled={!record.BOLNumber || documentLoading === `upload-digest-loadphotos-${record.id || record.BOLNumber}`}
-                          >
-                            {documentLoading === `upload-digest-loadphotos-${record.id || record.BOLNumber}`
-                              ? 'Opening...'
-                              : `${record.UploadType || 'Open'} Folder`}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <button
+                className="upload-digest-summary"
+                onClick={() => setUploadDigestOpen((current) => !current)}
+                aria-expanded={uploadDigestOpen}
+              >
+                <span className="upload-digest-title">
+                  Pickup and Delivery Photos for {dateLabel}
+                </span>
+                <span className="upload-digest-chevron">
+                  {uploadDigestOpen ? '▲' : '▼'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                className={`upload-digest-today-button ${isUploadDigestToday ? 'hidden' : ''}`}
+                onClick={resetUploadDigestToToday}
+                disabled={uploadDigestLoading || isUploadDigestToday}
+                aria-hidden={isUploadDigestToday}
+                tabIndex={isUploadDigestToday ? -1 : 0}
+                title="Return to today"
+              >
+                Today
+              </button>
+
+              <button
+                className="upload-digest-arrow"
+                onClick={() => changeUploadDigestDate(1)}
+                disabled={uploadDigestLoading || isUploadDigestToday}
+                aria-label="Next upload digest day"
+                title={isUploadDigestToday ? 'Already on today' : 'Next day'}
+              >
+                ›
+              </button>
+            </div>
+
+            {uploadDigestOpen && !uploadDigestError && (
+              <div className="upload-digest-body">
+                {records.length === 0 ? (
+                  <div className="msg">No pickup or delivery uploads logged for this date.</div>
+                ) : (
+                  <div className="operations-table-wrap upload-digest-table-wrap">
+                    <table className="upload-digest-table">
+                      <thead>
+                        <tr>
+                          <th>BOL</th>
+                          <th>Driver</th>
+                          <th>Type</th>
+                          <th>Folder</th>
+                        </tr>
+                      </thead>
+
+                      <tbody>
+                        {records.map((record, i) => (
+                          <tr key={record.id || `${record.CompositeKey || record.BOLNumber}-${i}`}>
+                            <td>{record.BOLNumber || '-'}</td>
+                            <td>{record.DriverName || '-'}</td>
+                            <td>{record.UploadType || '-'}</td>
+                            <td>
+                              <button
+                                type="button"
+                                className="table-link-button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openUploadDigestLoadPhotos(record);
+                                }}
+                                disabled={!record.BOLNumber || documentLoading === `upload-digest-loadphotos-${record.id || record.BOLNumber}`}
+                              >
+                                {documentLoading === `upload-digest-loadphotos-${record.id || record.BOLNumber}`
+                                  ? 'Opening...'
+                                  : `${record.UploadType || 'Open'} Folder`}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
-
           </div>
         )}
       </div>
@@ -5246,14 +5729,23 @@ function openReportLoadDetails(load) {
     const isSalesReportsOpen = isReportGroupOpen('sales');
 
     return (
-      <div className="search-card reports-panel">
-        <div className="reports-header">
-          <div>
-            <h2>Reports</h2>
-          </div>
-        </div>
+      <div className="search-card feature-accordion-panel reports-panel">
+        <button
+          type="button"
+          className="feature-section-header-button reports-section-header-button"
+          onClick={() => setReportsSectionOpen((current) => !current)}
+          aria-expanded={reportsSectionOpen}
+        >
+          <span className="feature-section-title-block">
+            <span className="feature-section-title">Reports</span>
+            <span className="feature-section-subtitle">Operational and sales reporting.</span>
+          </span>
+          <span className="feature-section-status-pill">2 groups</span>
+          <span className="feature-section-chevron">{reportsSectionOpen ? '▲' : '▼'}</span>
+        </button>
 
-        <div className="reports-accordion-list">
+        {reportsSectionOpen && (
+          <div className="feature-section-body reports-accordion-list">
           <div className={`report-group-accordion ${isOperationalReportsOpen ? 'open' : ''}`}>
             <button
               type="button"
@@ -5792,7 +6284,8 @@ function openReportLoadDetails(load) {
               </div>
             )}
           </div>
-        </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -6174,6 +6667,8 @@ function openReportLoadDetails(load) {
   <UploadDigestPanel />
 
   {IntelliTrackPanel()}
+
+  <AvailableTrucksPanel />
 
   <DriverSummaryReport />
   </>

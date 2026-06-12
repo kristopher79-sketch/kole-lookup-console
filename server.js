@@ -19,6 +19,9 @@ const DEFAULT_CUSTOMER_BOOKING_TRENDS_LIST_ID = 'f899ef92-6489-43b1-9a9f-19c5f0e
 const DEFAULT_NO_AVAILABILITY_MAIN_LIST_ID = '38f3bf2a-30d2-48eb-8b6f-8f5c05e5f1d7';
 const DEFAULT_NO_AVAILABILITY_2025_LIST_ID = '138431f5-a32d-452d-abf4-05adbd0ab50d';
 const DEFAULT_NO_AVAILABILITY_2024_LIST_ID = '8336e21e-38bb-47c0-bc01-6fea891b7cf6';
+const DEFAULT_AVAILABLE_TRUCKS_SINGLE_LINE_LIST_ID = '67edb153-a389-474a-a7dd-d3bc0d746952';
+const DEFAULT_AVAILABLE_EQUIPMENT_SOURCE_LIST_ID = '96af7972-58ff-4bb8-b5a6-ca86f4d19ee6';
+const AVAILABLE_TRUCKS_DEFAULT_LOOKBACK_DAYS = 30;
 const SALES_LEAD_NOTE_MAX_LENGTH = 63000;
 
 function getLoadPicturesFolderId() {
@@ -1962,7 +1965,11 @@ function getDriverSummaryFieldSelect() {
     'BidID',
     'Company',
     'Pickup_x0020_Offer_x0020_Date',
+    'Pickup1PickupTime',
+    'Pickup1AMorPM',
     'Expected_x0020_Delivery_x0020_Da',
+    'Shipment_x0020_Origin',
+    'Shipment_x0020_Destination',
     'Route',
     'Shipment_x0020_Origin',
     'Shipment_x0020_Destination',
@@ -5353,6 +5360,788 @@ app.get('/reports/driver-summary', requireLookupAccess, async (req, res) => {
 
 
 
+
+function getAvailableTrucksSingleLineListId() {
+  return (
+    process.env.AVAILABLE_TRUCKS_SINGLE_LINE_LIST_ID ||
+    process.env.AVAILABLE_EQUIPMENT_SINGLE_LINE_LIST_ID ||
+    DEFAULT_AVAILABLE_TRUCKS_SINGLE_LINE_LIST_ID
+  );
+}
+
+function getAvailableEquipmentSourceListId() {
+  return (
+    process.env.AVAILABLE_EQUIPMENT_SOURCE_LIST_ID ||
+    process.env.AVAILABLE_TRUCKS_SOURCE_LIST_ID ||
+    DEFAULT_AVAILABLE_EQUIPMENT_SOURCE_LIST_ID
+  );
+}
+
+function getAvailableTruckFieldSelect() {
+  return [
+    'DateSent',
+    'TimeofDay',
+    'DriverName',
+    'UnitNo',
+    'EquipmentType',
+    'CurrentLocation',
+    'Proximity1',
+    'Proximity1Time',
+    'Proximity2',
+    'Proximity2Time',
+    'Proximity3',
+    'Proximity3Time',
+    'Proximity4',
+    'Proximity4Time'
+  ].join(',');
+}
+
+function cleanAvailableTruckText(value) {
+  return stripHtml(value)
+    .replace(/\s+/g, ' ')
+    .replace(/\s+,/g, ',')
+    .trim();
+}
+
+function normalizeStateAbbreviation(value) {
+  const state = String(value || '').trim();
+  return /^[A-Za-z]{2}$/.test(state) ? state.toUpperCase() : state;
+}
+
+function parseCityState(value) {
+  const clean = cleanAvailableTruckText(value);
+
+  if (!clean) {
+    return {
+      location: '',
+      city: '',
+      state: '',
+      stateKey: ''
+    };
+  }
+
+  const parts = clean.split(',');
+
+  if (parts.length < 2) {
+    return {
+      location: clean,
+      city: clean,
+      state: '',
+      stateKey: ''
+    };
+  }
+
+  const state = normalizeStateAbbreviation(parts.pop());
+  const city = parts.join(',').trim();
+
+  return {
+    location: [city, state].filter(Boolean).join(', '),
+    city,
+    state,
+    stateKey: state.toUpperCase()
+  };
+}
+
+function getAvailableEquipmentFamily(value) {
+  const raw = cleanAvailableTruckText(value);
+  const normalized = raw.toLowerCase();
+
+  if (!normalized) return 'Not listed';
+  if (normalized.includes('rgn')) return 'RGN';
+  if (normalized.includes('conestoga')) return 'Conestoga';
+  if (normalized.includes('stepdeck')) return 'Stepdeck';
+  if (normalized.includes('flatbed')) return 'Flatbed';
+  if (normalized.includes('dry van') || normalized.includes('van')) return 'Van';
+
+  return raw;
+}
+
+function getAvailableTeamType(value) {
+  const normalized = cleanAvailableTruckText(value).toLowerCase();
+
+  if (normalized.includes('team')) return 'Team';
+  if (normalized.includes('solo')) return 'Solo';
+
+  return 'Unlisted';
+}
+
+function getTimeOfDaySortValue(value) {
+  const normalized = normalizeText(value);
+
+  if (normalized === 'am' || normalized.includes('morning')) return 1;
+  if (normalized === 'pm' || normalized.includes('afternoon')) return 2;
+  if (normalized.includes('evening')) return 3;
+
+  return 0;
+}
+
+function getAvailableTruckDateSortValue(value) {
+  const normalized = normalizeEasternDateOnly(value) || String(value || '').trim();
+  const parsed = new Date(`${normalized}T00:00:00Z`);
+  const time = parsed.getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function cleanAvailableTruckRecord(item) {
+  const fields = item.fields || {};
+  const currentLocation = parseCityState(fields.CurrentLocation);
+  const dateSent = normalizeEasternDateOnly(fields.DateSent) || cleanAvailableTruckText(fields.DateSent);
+  const equipmentType = cleanAvailableTruckText(fields.EquipmentType);
+
+  const proximityStops = [1, 2, 3, 4]
+    .map((rank) => {
+      const parsedLocation = parseCityState(fields[`Proximity${rank}`]);
+      const timeLabel = cleanAvailableTruckText(fields[`Proximity${rank}Time`]);
+
+      return {
+        rank,
+        location: parsedLocation.location,
+        city: parsedLocation.city,
+        state: parsedLocation.state,
+        stateKey: parsedLocation.stateKey,
+        timeLabel
+      };
+    })
+    .filter((stop) => stop.location || stop.timeLabel);
+
+  return {
+    id: item.id || '',
+    webUrl: item.webUrl || '',
+    createdAt: item.createdDateTime || fields.Created || '',
+    modifiedAt: item.lastModifiedDateTime || fields.Modified || '',
+    dateSent,
+    timeOfDay: cleanAvailableTruckText(fields.TimeofDay),
+    driverName: cleanAvailableTruckText(fields.DriverName),
+    unitNo: cleanAvailableTruckText(fields.UnitNo),
+    equipmentType,
+    equipmentFamily: getAvailableEquipmentFamily(equipmentType),
+    teamType: getAvailableTeamType(equipmentType),
+    currentLocation: currentLocation.location,
+    currentCity: currentLocation.city,
+    currentState: currentLocation.state,
+    currentStateKey: currentLocation.stateKey,
+    proximityStops
+  };
+}
+
+function compareAvailableTruckRecords(a, b) {
+  const dateDiff = getAvailableTruckDateSortValue(b.dateSent) - getAvailableTruckDateSortValue(a.dateSent);
+  if (dateDiff !== 0) return dateDiff;
+
+  const timeDiff = getTimeOfDaySortValue(b.timeOfDay) - getTimeOfDaySortValue(a.timeOfDay);
+  if (timeDiff !== 0) return timeDiff;
+
+  return String(a.driverName || '').localeCompare(String(b.driverName || ''));
+}
+
+function incrementBucket(map, key, label = key) {
+  const cleanKey = String(key || '').trim();
+  const cleanLabel = String(label || cleanKey).trim();
+  if (!cleanKey) return;
+
+  const existing = map.get(cleanKey) || { key: cleanKey, label: cleanLabel, count: 0 };
+  existing.count += 1;
+  map.set(cleanKey, existing);
+}
+
+function getTopBuckets(map, limit = 5) {
+  return Array.from(map.values())
+    .sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      return String(a.label || '').localeCompare(String(b.label || ''));
+    })
+    .slice(0, limit);
+}
+
+function getAvailableTruckDateTimeSortValue(dateValue, timeOfDay) {
+  const dateOnly = normalizeEasternDateOnly(dateValue) || String(dateValue || '').trim().slice(0, 10);
+
+  if (!dateOnly) return 0;
+
+  const normalizedTime = normalizeText(timeOfDay);
+  let hour = 12;
+
+  if (normalizedTime === 'am' || normalizedTime.includes('morning')) hour = 8;
+  else if (normalizedTime === 'pm' || normalizedTime.includes('afternoon')) hour = 15;
+  else if (normalizedTime.includes('evening')) hour = 19;
+
+  const parsed = new Date(`${dateOnly}T${String(hour).padStart(2, '0')}:00:00-04:00`);
+  const time = parsed.getTime();
+  return Number.isNaN(time) ? getAvailableTruckDateSortValue(dateOnly) : time;
+}
+
+function getAvailableTruckSentTime(record) {
+  const created = new Date(record.createdAt || '').getTime();
+
+  if (!Number.isNaN(created) && created > 0) {
+    return created;
+  }
+
+  const modified = new Date(record.modifiedAt || '').getTime();
+
+  if (!Number.isNaN(modified) && modified > 0) {
+    return modified;
+  }
+
+  return getAvailableTruckDateTimeSortValue(record.dateSent, record.timeOfDay);
+}
+
+function getAvailableTruckAgeHours(record, now = new Date()) {
+  const sentTime = getAvailableTruckSentTime(record);
+
+  if (!sentTime) return null;
+
+  return Math.max(0, (now.getTime() - sentTime) / (60 * 60 * 1000));
+}
+
+function isAvailableTruckRecordInLast24Hours(record, now = new Date()) {
+  const ageHours = getAvailableTruckAgeHours(record, now);
+  return ageHours !== null && ageHours <= 24;
+}
+
+function getAvailableTruckAssignmentFieldSelect() {
+  return [
+    'BOLNumber_x0028_Won_x0029_',
+    'Company',
+    'Status',
+    'Processed',
+    'FinalSettleSent',
+    'Operator_x002f_Team',
+    'TMSName',
+    'Truck_x0020_Number',
+    'Pickup_x0020_Offer_x0020_Date',
+    'Pickup1PickupTime',
+    'Pickup1AMorPM',
+    'Expected_x0020_Delivery_x0020_Da',
+    'Shipment_x0020_Origin',
+    'Shipment_x0020_Destination'
+  ].join(',');
+}
+
+function normalizeSharePointBusinessDate(value) {
+  if (!value) return '';
+
+  const raw = String(value || '').trim();
+  const dateOnlyMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+
+  // SharePoint date-only fields often arrive as YYYY-MM-DDT00:00:00Z.
+  // Converting that midnight UTC timestamp to Eastern shifts the business date
+  // back one day, which is wrong for pickup/delivery schedule fields.
+  if (dateOnlyMatch) return dateOnlyMatch[1];
+
+  return normalizeEasternDateOnly(raw);
+}
+
+function isCancelledAvailabilityAssignment(assignment) {
+  const status = normalizeText(assignment?.status || '');
+  const bol = normalizeText(assignment?.bol || '');
+
+  return (
+    status === 'can' ||
+    status === 'cancelled' ||
+    status === 'canceled' ||
+    bol.endsWith('-can') ||
+    bol.includes('-can-')
+  );
+}
+
+function cleanAvailableTruckAssignment(item, sourceList) {
+  const fields = item.fields || {};
+  const pickupRaw = fields.Pickup_x0020_Offer_x0020_Date || '';
+  const pickupDate = normalizeSharePointBusinessDate(pickupRaw);
+
+  return {
+    id: item.id || '',
+    sourceListId: sourceList?.listId || '',
+    sourceList: sourceList?.label || '',
+    sourceYear: sourceList?.year || '',
+    bol: fields.BOLNumber_x0028_Won_x0029_ || '',
+    customer: getChoiceValue(fields.Company || fields['Company/Value'] || ''),
+    status: getChoiceValue(fields.Status || fields['Status/Value'] || ''),
+    processed: parseBoolean(fields.Processed),
+    finalSettleSent: parseBoolean(fields.FinalSettleSent),
+    driver: getChoiceValue(fields.Operator_x002f_Team || fields['Operator_x002f_Team/Value'] || ''),
+    tmsName: fields.TMSName || '',
+    truck: getChoiceValue(fields.Truck_x0020_Number || fields['Truck_x0020_Number/Value'] || ''),
+    origin: fields.Shipment_x0020_Origin || '',
+    destination: fields.Shipment_x0020_Destination || '',
+    pickupDate,
+    pickupRaw,
+    pickupTime: fields.Pickup1PickupTime || '',
+    pickupAMPM: fields.Pickup1AMorPM || '',
+    deliveryDate: normalizeSharePointBusinessDate(fields.Expected_x0020_Delivery_x0020_Da)
+  };
+}
+
+function isActiveOrFutureAssignment(assignment, targetDate = formatEasternDate()) {
+  if (normalizeText(assignment.status) !== 'won') return false;
+  if (assignment.processed || assignment.finalSettleSent) return false;
+
+  const pickup = assignment.pickupDate || '';
+  const delivery = assignment.deliveryDate || '';
+
+  if (delivery && delivery >= targetDate) return true;
+  if (pickup && pickup >= targetDate) return true;
+
+  return false;
+}
+
+function getAssignmentLabel(assignment) {
+  const pieces = [
+    assignment.bol,
+    assignment.customer,
+    assignment.pickupDate ? `Pickup ${formatShortDate(assignment.pickupDate)}` : '',
+    assignment.deliveryDate ? `Delivery ${formatShortDate(assignment.deliveryDate)}` : ''
+  ].filter(Boolean);
+
+  return pieces.join(' · ');
+}
+
+function parseAssignmentPickupClock(pickupTime, pickupAMPM) {
+  const text = normalizeText(`${pickupTime || ''} ${pickupAMPM || ''}`);
+  let hour = null;
+  let minute = 0;
+
+  const match = text.match(/(\d{1,2})(?::(\d{2}))?/);
+
+  if (match) {
+    hour = Number(match[1]);
+    minute = Number(match[2] || 0);
+
+    if (text.includes('pm') && hour < 12) hour += 12;
+    if (text.includes('am') && hour === 12) hour = 0;
+  }
+
+  if (hour === null || Number.isNaN(hour)) {
+    if (text.includes('morning') || text === 'am') hour = 8;
+    else if (text.includes('afternoon') || text === 'pm') hour = 15;
+    else if (text.includes('evening')) hour = 19;
+    else hour = 12;
+  }
+
+  hour = Math.max(0, Math.min(23, hour));
+  minute = Math.max(0, Math.min(59, Number.isNaN(minute) ? 0 : minute));
+
+  return { hour, minute };
+}
+
+function getAssignmentPickupSortTime(assignment) {
+  if (!assignment?.pickupDate) return 0;
+
+  const { hour, minute } = parseAssignmentPickupClock(assignment.pickupTime, assignment.pickupAMPM);
+  const parsed = new Date(`${assignment.pickupDate}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00-04:00`);
+  const time = parsed.getTime();
+
+  return Number.isNaN(time) ? getAvailableTruckDateSortValue(assignment.pickupDate) : time;
+}
+
+function pushAssignmentToMapArray(map, key, assignment) {
+  if (!key) return;
+  const existing = map.get(key) || [];
+  existing.push(assignment);
+  map.set(key, existing);
+}
+
+function sortAssignmentsByPickup(assignments = []) {
+  return assignments.sort((a, b) => {
+    const aTime = getAssignmentPickupSortTime(a) || 0;
+    const bTime = getAssignmentPickupSortTime(b) || 0;
+    if (aTime !== bTime) return aTime - bTime;
+    return String(a.bol || '').localeCompare(String(b.bol || ''));
+  });
+}
+
+function buildActiveFutureAssignmentIndex(items = [], sourceList = null) {
+  const targetDate = formatEasternDate();
+  const truckMap = new Map();
+  const driverMap = new Map();
+  const truckAssignmentMap = new Map();
+  const driverAssignmentMap = new Map();
+  const allTruckAssignmentMap = new Map();
+  const allDriverAssignmentMap = new Map();
+  const tonuTruckAssignmentMap = new Map();
+  const tonuDriverAssignmentMap = new Map();
+
+  const allStatusAssignments = items
+    .map((item) => cleanAvailableTruckAssignment(item, sourceList))
+    .filter((assignment) => {
+      const status = normalizeText(assignment.status);
+      return (status === 'won' || status === 'tonu') && !isCancelledAvailabilityAssignment(assignment);
+    })
+    .map((assignment) => ({
+      ...assignment,
+      pickupSortTime: getAssignmentPickupSortTime(assignment)
+    }))
+    .filter((assignment) => assignment.pickupSortTime)
+    .sort((a, b) => (a.pickupSortTime || 0) - (b.pickupSortTime || 0));
+
+  const allAssignments = allStatusAssignments.filter((assignment) => normalizeText(assignment.status) === 'won');
+  const tonuAssignments = allStatusAssignments.filter((assignment) => normalizeText(assignment.status) === 'tonu');
+  const assignments = allAssignments.filter((assignment) => isActiveOrFutureAssignment(assignment, targetDate));
+
+  function indexAssignment(assignment, options = {}) {
+    const { active = false } = options;
+    const truckKey = normalizeTruckKey(assignment.truck);
+    const driverKeys = uniqueNonEmpty([assignment.tmsName, assignment.driver])
+      .map((value) => normalizeSearchValue(value))
+      .filter(Boolean);
+
+    if (truckKey) {
+      pushAssignmentToMapArray(allTruckAssignmentMap, truckKey, assignment);
+
+      if (active) {
+        if (!truckMap.has(truckKey)) truckMap.set(truckKey, assignment);
+        pushAssignmentToMapArray(truckAssignmentMap, truckKey, assignment);
+      }
+    }
+
+    driverKeys.forEach((driverKey) => {
+      if (!driverKey) return;
+      pushAssignmentToMapArray(allDriverAssignmentMap, driverKey, assignment);
+
+      if (active) {
+        if (!driverMap.has(driverKey)) driverMap.set(driverKey, assignment);
+        pushAssignmentToMapArray(driverAssignmentMap, driverKey, assignment);
+      }
+    });
+  }
+
+  allAssignments.forEach((assignment) => indexAssignment(assignment, { active: false }));
+  assignments.forEach((assignment) => indexAssignment(assignment, { active: true }));
+
+  tonuAssignments.forEach((assignment) => {
+    const truckKey = normalizeTruckKey(assignment.truck);
+    const driverKeys = uniqueNonEmpty([assignment.tmsName, assignment.driver])
+      .map((value) => normalizeSearchValue(value))
+      .filter(Boolean);
+
+    if (truckKey) {
+      pushAssignmentToMapArray(tonuTruckAssignmentMap, truckKey, assignment);
+    }
+
+    driverKeys.forEach((driverKey) => {
+      if (driverKey) {
+        pushAssignmentToMapArray(tonuDriverAssignmentMap, driverKey, assignment);
+      }
+    });
+  });
+
+  [truckAssignmentMap, driverAssignmentMap, allTruckAssignmentMap, allDriverAssignmentMap, tonuTruckAssignmentMap, tonuDriverAssignmentMap].forEach((map) => {
+    map.forEach((assignmentsForKey, key) => {
+      map.set(key, sortAssignmentsByPickup(assignmentsForKey));
+    });
+  });
+
+  return {
+    truckMap,
+    driverMap,
+    truckAssignmentMap,
+    driverAssignmentMap,
+    allTruckAssignmentMap,
+    allDriverAssignmentMap,
+    tonuTruckAssignmentMap,
+    tonuDriverAssignmentMap,
+    assignments,
+    allAssignments,
+    tonuAssignments
+  };
+}
+
+function serializeAvailableTruckAssignment(assignment, matchType = '') {
+  if (!assignment) return null;
+
+  return {
+    id: assignment.id,
+    sourceListId: assignment.sourceListId,
+    sourceList: assignment.sourceList,
+    sourceYear: assignment.sourceYear,
+    bol: assignment.bol,
+    customer: assignment.customer,
+    driver: assignment.driver,
+    tmsName: assignment.tmsName,
+    truck: assignment.truck,
+    origin: assignment.origin,
+    destination: assignment.destination,
+    pickupDate: assignment.pickupDate,
+    pickupTime: assignment.pickupTime,
+    pickupAMPM: assignment.pickupAMPM,
+    deliveryDate: assignment.deliveryDate,
+    matchType,
+    label: getAssignmentLabel(assignment)
+  };
+}
+
+function getHoursBetweenAvailabilityAndPickup(record, assignment) {
+  if (!record || !assignment) return null;
+
+  const postedTime = getAvailableTruckSentTime(record);
+  const pickupTime = getAssignmentPickupSortTime(assignment);
+
+  if (!postedTime || !pickupTime) return null;
+
+  return Math.round(((pickupTime - postedTime) / (60 * 60 * 1000)) * 10) / 10;
+}
+
+function formatAvailabilityPickupGapLabel(hours) {
+  if (hours === null || hours === undefined || Number.isNaN(Number(hours))) return '';
+
+  if (hours < 0) return 'Pickup already passed';
+  if (hours < 1) return 'Less than 1 hour';
+
+  const roundedHours = Math.round(Number(hours));
+  const days = Math.floor(roundedHours / 24);
+  const remainderHours = roundedHours % 24;
+
+  if (days <= 0) return `${roundedHours} hr${roundedHours === 1 ? '' : 's'}`;
+  if (remainderHours <= 0) return `${days} day${days === 1 ? '' : 's'}`;
+
+  return `${days} day${days === 1 ? '' : 's'} ${remainderHours} hr${remainderHours === 1 ? '' : 's'}`;
+}
+
+function findNextAvailableTruckAssignment(record, assignmentIndex) {
+  const postedTime = getAvailableTruckSentTime(record);
+  const truckKey = normalizeTruckKey(record.unitNo);
+  const driverKey = normalizeSearchValue(record.driverName);
+
+  // This is intentionally historical follow-through logic, not current-status logic.
+  // Active/future filtering is handled separately by truckMap/driverMap. For this
+  // modal detail, look for the first Won pickup after the availability row was posted,
+  // even if that pickup has already happened by the time the user opens Kole Connect.
+  const candidateGroups = [
+    { matchType: 'truck', assignments: truckKey ? assignmentIndex?.allTruckAssignmentMap?.get(truckKey) : [] },
+    { matchType: 'driver', assignments: driverKey ? assignmentIndex?.allDriverAssignmentMap?.get(driverKey) : [] }
+  ];
+
+  for (const group of candidateGroups) {
+    const assignments = group.assignments || [];
+    const assignment = assignments.find((candidate) => {
+      const pickupTime = getAssignmentPickupSortTime(candidate);
+      return pickupTime && (!postedTime || pickupTime >= postedTime);
+    });
+
+    if (assignment) {
+      return { assignment, matchType: group.matchType };
+    }
+  }
+
+  return { assignment: null, matchType: '' };
+}
+
+function getTonuAssignmentsInAvailabilitySpan(record, assignmentIndex, nextAssignment = null) {
+  const postedTime = getAvailableTruckSentTime(record);
+  const nextPickupTime = getAssignmentPickupSortTime(nextAssignment);
+  const truckKey = normalizeTruckKey(record.unitNo);
+  const driverKey = normalizeSearchValue(record.driverName);
+  const seen = new Set();
+  const matches = [];
+
+  const candidateGroups = [
+    { matchType: 'truck', assignments: truckKey ? assignmentIndex?.tonuTruckAssignmentMap?.get(truckKey) : [] },
+    { matchType: 'driver', assignments: driverKey ? assignmentIndex?.tonuDriverAssignmentMap?.get(driverKey) : [] }
+  ];
+
+  candidateGroups.forEach((group) => {
+    (group.assignments || []).forEach((candidate) => {
+      const pickupTime = getAssignmentPickupSortTime(candidate);
+
+      if (!pickupTime) return;
+      if (postedTime && pickupTime < postedTime) return;
+      if (nextPickupTime && pickupTime >= nextPickupTime) return;
+
+      const key = candidate.id || `${candidate.bol || ''}-${candidate.pickupDate || ''}-${candidate.truck || ''}`;
+      if (seen.has(key)) return;
+
+      seen.add(key);
+      matches.push({
+        ...candidate,
+        matchType: group.matchType
+      });
+    });
+  });
+
+  return sortAssignmentsByPickup(matches);
+}
+
+function addAvailableTruckAssignmentStatus(record, assignmentIndex) {
+  const truckKey = normalizeTruckKey(record.unitNo);
+  const driverKey = normalizeSearchValue(record.driverName);
+  const activeFutureMatch =
+    (truckKey && assignmentIndex?.truckMap?.get(truckKey))
+      ? { assignment: assignmentIndex.truckMap.get(truckKey), matchType: 'truck' }
+      : (driverKey && assignmentIndex?.driverMap?.get(driverKey))
+        ? { assignment: assignmentIndex.driverMap.get(driverKey), matchType: 'driver' }
+        : { assignment: null, matchType: '' };
+
+  const nextMatch = findNextAvailableTruckAssignment(record, assignmentIndex);
+  const hoursUntilNextPickup = getHoursBetweenAvailabilityAndPickup(record, nextMatch.assignment);
+  const tonuAssignmentsInSpan = getTonuAssignmentsInAvailabilitySpan(record, assignmentIndex, nextMatch.assignment);
+
+  return {
+    ...record,
+    postedAt: record.createdAt || record.modifiedAt || '',
+    hasActiveOrFutureAssignment: Boolean(activeFutureMatch.assignment),
+    activeFutureAssignment: serializeAvailableTruckAssignment(activeFutureMatch.assignment, activeFutureMatch.matchType),
+    nextAssignment: serializeAvailableTruckAssignment(nextMatch.assignment, nextMatch.matchType),
+    hoursUntilNextPickup,
+    nextPickupGapLabel: formatAvailabilityPickupGapLabel(hoursUntilNextPickup),
+    hasTonuInPickupSpan: tonuAssignmentsInSpan.length > 0,
+    tonuInPickupSpanCount: tonuAssignmentsInSpan.length,
+    tonuAssignmentsInPickupSpan: tonuAssignmentsInSpan.slice(0, 3).map((assignment) =>
+      serializeAvailableTruckAssignment(assignment, assignment.matchType || '')
+    )
+  };
+}
+
+function isAvailableTruckRecordInWindow(record, cutoffTime) {
+  if (!cutoffTime) return true;
+  const time = getAvailableTruckDateSortValue(record.dateSent);
+  return time >= cutoffTime;
+}
+
+function buildAvailableTrucksResponse(items, options = {}) {
+  const lookbackDays = Math.max(1, Math.min(Number(options.lookbackDays) || AVAILABLE_TRUCKS_DEFAULT_LOOKBACK_DAYS, 365));
+  const now = options.now instanceof Date ? options.now : new Date();
+  const assignmentIndex = options.assignmentIndex || buildActiveFutureAssignmentIndex([], null);
+  const sortedRecords = items
+    .map(cleanAvailableTruckRecord)
+    .filter((record) => record.driverName || record.unitNo || record.currentLocation)
+    .map((record) => {
+      const recordWithAssignment = addAvailableTruckAssignmentStatus(record, assignmentIndex);
+      const ageHours = getAvailableTruckAgeHours(recordWithAssignment, now);
+
+      return {
+        ...recordWithAssignment,
+        ageHours: ageHours === null ? null : Math.round(ageHours * 10) / 10,
+        isWithin24Hours: isAvailableTruckRecordInLast24Hours(recordWithAssignment, now)
+      };
+    })
+    .sort(compareAvailableTruckRecords);
+
+  const latestRecord = sortedRecords[0] || null;
+  const latestDate = latestRecord?.dateSent || '';
+  const latestTimeOfDay = latestRecord?.timeOfDay || '';
+  const latestTimeSort = getTimeOfDaySortValue(latestTimeOfDay);
+
+  const latestBatchRecords = sortedRecords.filter((record) => {
+    if (!latestDate || record.dateSent !== latestDate) return false;
+    if (!latestTimeOfDay) return true;
+    return getTimeOfDaySortValue(record.timeOfDay) === latestTimeSort;
+  });
+
+  const recordsWithin24Hours = sortedRecords.filter((record) => record.isWithin24Hours);
+  const currentRecords = recordsWithin24Hours.filter((record) => !record.hasActiveOrFutureAssignment);
+  const assignmentExcludedRecords = recordsWithin24Hours.filter((record) => record.hasActiveOrFutureAssignment);
+  const staleRecords = sortedRecords.filter((record) => !record.isWithin24Hours);
+
+  const today = new Date(`${formatEasternDate()}T00:00:00Z`);
+  const cutoff = new Date(today);
+  cutoff.setUTCDate(cutoff.getUTCDate() - (lookbackDays - 1));
+  const cutoffTime = cutoff.getTime();
+  const recentRecords = sortedRecords.filter((record) => isAvailableTruckRecordInWindow(record, cutoffTime));
+
+  const currentStateBuckets = new Map();
+  const currentCityBuckets = new Map();
+  const proximityStateBuckets = new Map();
+  const proximityLocationBuckets = new Map();
+  const equipmentBuckets = new Map();
+  const teamBuckets = new Map();
+  const driverBuckets = new Map();
+  const truckBuckets = new Map();
+  let missingProximityTimes = 0;
+  let missingCurrentLocation = 0;
+
+  recentRecords.forEach((record) => {
+    if (record.currentStateKey) incrementBucket(currentStateBuckets, record.currentStateKey, record.currentState);
+    if (record.currentLocation) incrementBucket(currentCityBuckets, record.currentLocation, record.currentLocation);
+    if (record.equipmentFamily) incrementBucket(equipmentBuckets, record.equipmentFamily, record.equipmentFamily);
+    if (record.teamType) incrementBucket(teamBuckets, record.teamType, record.teamType);
+    if (record.driverName) incrementBucket(driverBuckets, normalizeSearchValue(record.driverName), record.driverName);
+    if (record.unitNo) incrementBucket(truckBuckets, normalizeSearchValue(record.unitNo), record.unitNo);
+    if (!record.currentLocation) missingCurrentLocation += 1;
+
+    record.proximityStops.forEach((stop) => {
+      if (stop.stateKey) incrementBucket(proximityStateBuckets, stop.stateKey, stop.state);
+      if (stop.location) incrementBucket(proximityLocationBuckets, stop.location, stop.location);
+      if (stop.location && !stop.timeLabel) missingProximityTimes += 1;
+    });
+  });
+
+  const repeatTrucks = getTopBuckets(truckBuckets, 8).filter((bucket) => bucket.count > 1);
+  const attention = [];
+
+  if (!currentRecords.length) {
+    attention.push({
+      level: recordsWithin24Hours.length ? 'info' : 'warning',
+      label: recordsWithin24Hours.length ? 'No current unassigned trucks' : 'No availability from the last 24 hours',
+      detail: recordsWithin24Hours.length
+        ? 'Recent availability exists, but every recent row is tied to a truck/driver with an active or future assignment.'
+        : 'The latest available-trucks data is older than 24 hours, so it is not shown as current.'
+    });
+  }
+
+  if (assignmentExcludedRecords.length > 0) {
+    attention.push({
+      level: 'info',
+      label: 'Removed from current availability',
+      detail: `${assignmentExcludedRecords.length} recent row${assignmentExcludedRecords.length === 1 ? ' was' : 's were'} hidden because the driver/truck now has an active or future assignment.`
+    });
+  }
+
+  if (missingCurrentLocation > 0) {
+    attention.push({
+      level: 'warning',
+      label: 'Missing current locations',
+      detail: `${missingCurrentLocation} recent record${missingCurrentLocation === 1 ? ' is' : 's are'} missing a current location.`
+    });
+  }
+
+  const latestAgeHours = latestRecord ? getAvailableTruckAgeHours(latestRecord, now) : null;
+
+  return {
+    success: true,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    sourceListId: getAvailableTrucksSingleLineListId(),
+    sourceListName: 'Available Trucks Single Line',
+    sourceWideListId: getAvailableEquipmentSourceListId(),
+    lookbackDays,
+    currentWindowHours: 24,
+    count: currentRecords.length,
+    totalRecords: sortedRecords.length,
+    summary: {
+      latestBatchDate: latestDate,
+      latestBatchTimeOfDay: latestTimeOfDay,
+      latestBatchCount: latestBatchRecords.length,
+      latestBatchAgeHours: latestAgeHours === null ? null : Math.round(latestAgeHours * 10) / 10,
+      recordsWithin24Hours: recordsWithin24Hours.length,
+      currentRecordCount: currentRecords.length,
+      activeFutureAssignmentExclusions: assignmentExcludedRecords.length,
+      staleRecordCount: staleRecords.length,
+      activeFutureAssignmentsScanned: assignmentIndex.assignments?.length || 0,
+      wonAssignmentsScanned: assignmentIndex.allAssignments?.length || 0,
+      recentRecordCount: recentRecords.length,
+      uniqueRecentDrivers: new Set(recentRecords.map((record) => normalizeSearchValue(record.driverName)).filter(Boolean)).size,
+      uniqueRecentTrucks: new Set(recentRecords.map((record) => normalizeSearchValue(record.unitNo)).filter(Boolean)).size,
+      uniqueRecentCurrentLocations: currentCityBuckets.size,
+      missingProximityTimes,
+      missingCurrentLocation
+    },
+    insights: {
+      topCurrentStates: getTopBuckets(currentStateBuckets),
+      topCurrentLocations: getTopBuckets(currentCityBuckets),
+      topProximityStates: getTopBuckets(proximityStateBuckets),
+      topProximityLocations: getTopBuckets(proximityLocationBuckets),
+      equipmentMix: getTopBuckets(equipmentBuckets, 8),
+      teamMix: getTopBuckets(teamBuckets, 4),
+      repeatTrucks,
+      attention
+    },
+    records: currentRecords,
+    latestBatchRecords,
+    recordsWithin24Hours,
+    assignmentExcludedRecords,
+    recentRecords: recentRecords.slice(0, 250)
+  };
+}
 function getKoleAutoUpdaterListId() {
   return process.env.KOLE_AUTO_UPDATER_LIST_ID || DEFAULT_KOLE_AUTO_UPDATER_LIST_ID;
 }
@@ -5543,6 +6332,54 @@ async function findCurrentBidOrderByBol(token, currentList, bol) {
     return items.find((item) => normalizeBolKey(item.fields?.BOLNumber_x0028_Won_x0029_) === normalizeBolKey(bol)) || null;
   }
 }
+
+
+app.get('/available-trucks', requireLookupAccess, async (req, res) => {
+  try {
+    const listId = getAvailableTrucksSingleLineListId();
+
+    if (!listId) {
+      return res.status(500).json({
+        success: false,
+        error: 'AVAILABLE_TRUCKS_SINGLE_LINE_LIST_ID is not configured on the server.'
+      });
+    }
+
+    const lookbackDays = Math.max(
+      1,
+      Math.min(Number(req.query.days) || AVAILABLE_TRUCKS_DEFAULT_LOOKBACK_DAYS, 365)
+    );
+
+    const token = await getGraphToken();
+    const currentList = await getCurrentBidListingSource(token);
+
+    const [items, assignmentItems] = await Promise.all([
+      getAllListItemsWithFields(
+        token,
+        listId,
+        getAvailableTruckFieldSelect()
+      ),
+      currentList
+        ? getAllListItemsWithFields(
+            token,
+            currentList.listId,
+            getAvailableTruckAssignmentFieldSelect()
+          )
+        : Promise.resolve([])
+    ]);
+
+    const assignmentIndex = buildActiveFutureAssignmentIndex(assignmentItems, currentList);
+
+    res.json(buildAvailableTrucksResponse(items, { lookbackDays, assignmentIndex }));
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to load Available Trucks.'
+    });
+  }
+});
 
 app.get('/tracking/intellitrack', requireLookupAccess, async (req, res) => {
   try {
