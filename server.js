@@ -3913,6 +3913,135 @@ function getSettlementTotals(records) {
   return totals;
 }
 
+
+function getSettlementDriverKey(record) {
+  const operatorKey = normalizeSearchValue(record.Operator || record.OperatorTeam || '');
+  const truckKey = normalizeTruckKey(record.Truck);
+
+  return operatorKey || (truckKey ? `truck:${truckKey}` : 'unknown-driver');
+}
+
+function getSettlementRevenueMatchKeys(record) {
+  const keys = new Set();
+  const operatorKey = normalizeSearchValue(record.Operator || '');
+  const operatorTeamKey = normalizeSearchValue(record.OperatorTeam || '');
+  const truckKey = normalizeTruckKey(record.Truck);
+
+  if (operatorKey) keys.add(`name:${operatorKey}`);
+  if (operatorTeamKey) keys.add(`name:${operatorTeamKey}`);
+  if (truckKey) keys.add(`truck:${truckKey}`);
+
+  return keys;
+}
+
+function getRosterRevenueMatchKeys(roster) {
+  const keys = new Set();
+  const tmsNameKey = normalizeSearchValue(roster.tmsName || '');
+  const operatorTeamKey = normalizeSearchValue(roster.operatorTeamName || '');
+  const truckKey = normalizeTruckKey(roster.truck);
+
+  if (tmsNameKey) keys.add(`name:${tmsNameKey}`);
+  if (operatorTeamKey) keys.add(`name:${operatorTeamKey}`);
+  if (truckKey) keys.add(`truck:${truckKey}`);
+
+  return keys;
+}
+
+function buildSettlementDriverPaySummary(records) {
+  const summaryByDriver = new Map();
+
+  records.forEach((record) => {
+    const key = getSettlementDriverKey(record);
+    const existing = summaryByDriver.get(key) || {
+      driver: record.Operator || record.OperatorTeam || 'Unknown Operator',
+      trucks: new Set(),
+      orderCount: 0,
+      bidTotal: 0,
+      driverPayTotal: 0,
+      margin: 0,
+      bols: new Set()
+    };
+
+    existing.orderCount += 1;
+    existing.bidTotal += getNumberValue(record.BidAmount);
+    existing.driverPayTotal += getNumberValue(record.DriverPay);
+    existing.margin = existing.bidTotal - existing.driverPayTotal;
+
+    if (record.Truck) existing.trucks.add(record.Truck);
+    if (record.BOL) existing.bols.add(record.BOL);
+
+    summaryByDriver.set(key, existing);
+  });
+
+  return Array.from(summaryByDriver.values())
+    .map((row) => ({
+      ...row,
+      trucks: Array.from(row.trucks).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true })).join(', '),
+      bolCount: row.bols.size,
+      bols: Array.from(row.bols).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }))
+    }))
+    .sort((a, b) => {
+      const nameDiff = String(a.driver || '').localeCompare(String(b.driver || ''), undefined, { numeric: true });
+      if (nameDiff !== 0) return nameDiff;
+
+      return String(a.trucks || '').localeCompare(String(b.trucks || ''), undefined, { numeric: true });
+    });
+}
+
+function buildSettlementRevenueKeySet(records) {
+  const keys = new Set();
+
+  records
+    .filter((record) => getNumberValue(record.BidAmount) > 0)
+    .forEach((record) => {
+      getSettlementRevenueMatchKeys(record).forEach((key) => keys.add(key));
+    });
+
+  return keys;
+}
+
+function hasAnyRevenueKeyMatch(keys, revenueKeys) {
+  for (const key of keys) {
+    if (revenueKeys.has(key)) return true;
+  }
+
+  return false;
+}
+
+function isExcludedActiveNoRevenueSettlementRosterRow(roster) {
+  const truckKey = normalizeTruckKey(roster?.truck);
+  const tmsNameKey = normalizeSearchValue(roster?.tmsName || '');
+  const operatorTeamKey = normalizeSearchValue(roster?.operatorTeamName || '');
+
+  // One-off business exception: New Vision / truck 5550 is a placeholder used
+  // when work is brokered to a sister company, so it should not trigger the
+  // active-driver-with-no-revenue sanity check.
+  return (
+    truckKey === '5550' &&
+    (tmsNameKey.includes('new vision') || operatorTeamKey.includes('new vision'))
+  );
+}
+
+function buildActiveDriversWithNoSettlementRevenue(rosterItems = [], mainRecords = [], suggestRecords = []) {
+  const mainRevenueKeys = buildSettlementRevenueKeySet(mainRecords);
+  const suggestRevenueKeys = buildSettlementRevenueKeySet(suggestRecords);
+
+  return rosterItems
+    .filter((roster) => normalizeText(roster.status) === 'active')
+    .filter((roster) => !isExcludedActiveNoRevenueSettlementRosterRow(roster))
+    .map((roster) => {
+      const matchKeys = getRosterRevenueMatchKeys(roster);
+
+      return {
+        ...roster,
+        hasMainSettlementRevenue: hasAnyRevenueKeyMatch(matchKeys, mainRevenueKeys),
+        hasLikelyNextWeekRevenue: hasAnyRevenueKeyMatch(matchKeys, suggestRevenueKeys)
+      };
+    })
+    .filter((roster) => !roster.hasMainSettlementRevenue)
+    .sort(sortDriverRosterRecords);
+}
+
 function sortSettlementRows(a, b) {
   const operatorDiff = String(a.Operator || '').localeCompare(String(b.Operator || ''), undefined, { numeric: true });
   if (operatorDiff !== 0) return operatorDiff;
@@ -3923,7 +4052,7 @@ function sortSettlementRows(a, b) {
   return String(a.BOL || '').localeCompare(String(b.BOL || ''), undefined, { numeric: true });
 }
 
-function buildWeeklySettlementResponse(items, sourceLists, cutoffDateValue) {
+function buildWeeklySettlementResponse(items, sourceLists, cutoffDateValue, activeRosterItems = [], activeRosterWarning = '') {
   const cutoff = parseCutoffDateValue(cutoffDateValue);
   const previousCutoff = addDaysToDateParts(cutoff, -7);
 const payrollDate = getPayrollDatePartsFromCutoff(cutoff);
@@ -3976,6 +4105,8 @@ const payrollDate = getPayrollDatePartsFromCutoff(cutoff);
     .filter((record) => parseBoolean(record.Processed))
     .filter((record) => record.SubmittedComparable === null).length;
 
+  const activeDriversWithoutMainRevenue = buildActiveDriversWithNoSettlementRevenue(activeRosterItems, main, suggest);
+
   return {
     success: true,
     reportType: 'weeklySettlement',
@@ -3995,6 +4126,16 @@ payrollDateLabel: formatDisplayDateParts(payrollDate),
       main: getSettlementTotals(main),
       suggest: getSettlementTotals(suggest),
       combined: getSettlementTotals([...main, ...suggest])
+    },
+    driverPaySummary: {
+      main: buildSettlementDriverPaySummary(main),
+      suggest: buildSettlementDriverPaySummary(suggest)
+    },
+    activeDriversWithNoRevenue: {
+      sourceAvailable: activeRosterItems.length > 0,
+      warning: activeRosterWarning,
+      count: activeDriversWithoutMainRevenue.length,
+      main: activeDriversWithoutMainRevenue
     },
     counts: {
       scannedRecords: items.length,
@@ -5134,7 +5275,20 @@ app.get('/reports/weekly-settlement', requireLookupAccess, async (req, res) => {
         error: entry.result.reason?.message || 'Unknown settlement report list failure'
       }));
 
-    const report = buildWeeklySettlementResponse(successfulItems, sourceLists, cutoffDate);
+    let activeRosterItems = [];
+    let activeRosterWarning = '';
+
+    if (process.env.DRIVER_ROSTER_LIST_ID) {
+      try {
+        activeRosterItems = await getDriverRosterItems(token);
+      } catch (rosterError) {
+        activeRosterWarning = rosterError.message || 'Driver Roster could not be loaded for the active-driver revenue check.';
+      }
+    } else {
+      activeRosterWarning = 'DRIVER_ROSTER_LIST_ID is not configured, so active drivers with no settlement revenue could not be checked.';
+    }
+
+    const report = buildWeeklySettlementResponse(successfulItems, sourceLists, cutoffDate, activeRosterItems, activeRosterWarning);
 
     res.json({
       ...report,

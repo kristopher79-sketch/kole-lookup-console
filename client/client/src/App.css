@@ -4826,3 +4826,121 @@ input:focus,
     grid-template-columns: minmax(0, 1fr) !important;
   }
 }
+
+/* Weekly Settlement: driver pay summary + active roster revenue sanity check */
+.settlement-subsection {
+  margin-top: 18px;
+  border: 1px solid rgba(203, 213, 225, 0.16);
+  border-radius: 14px;
+  background: rgba(2, 6, 23, 0.38);
+  overflow: hidden;
+}
+
+.settlement-subsection-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(203, 213, 225, 0.14);
+  background: rgba(15, 23, 42, 0.78);
+}
+
+.settlement-subsection-header h5 {
+  margin: 0 0 4px;
+  color: #facc15;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+}
+
+.settlement-subsection-header p {
+  margin: 0;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+.settlement-subsection-header > span {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border: 1px solid rgba(250, 204, 21, 0.28);
+  border-radius: 999px;
+  background: rgba(250, 204, 21, 0.1);
+  color: #fde68a;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.settlement-summary-table-wrap {
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.settlement-driver-summary-table,
+.settlement-no-revenue-table {
+  min-width: 980px;
+  table-layout: fixed;
+}
+
+.settlement-driver-summary-table th:nth-child(1),
+.settlement-driver-summary-table td:nth-child(1) { width: 18%; }
+.settlement-driver-summary-table th:nth-child(2),
+.settlement-driver-summary-table td:nth-child(2) { width: 12%; }
+.settlement-driver-summary-table th:nth-child(3),
+.settlement-driver-summary-table td:nth-child(3) { width: 8%; text-align: right; }
+.settlement-driver-summary-table th:nth-child(4),
+.settlement-driver-summary-table td:nth-child(4) { width: 22%; }
+.settlement-driver-summary-table th:nth-child(5),
+.settlement-driver-summary-table td:nth-child(5),
+.settlement-driver-summary-table th:nth-child(6),
+.settlement-driver-summary-table td:nth-child(6),
+.settlement-driver-summary-table th:nth-child(7),
+.settlement-driver-summary-table td:nth-child(7) { width: 13%; text-align: right; }
+
+.settlement-no-revenue-table th:nth-child(1),
+.settlement-no-revenue-table td:nth-child(1) { width: 18%; }
+.settlement-no-revenue-table th:nth-child(2),
+.settlement-no-revenue-table td:nth-child(2) { width: 18%; }
+.settlement-no-revenue-table th:nth-child(3),
+.settlement-no-revenue-table td:nth-child(3) { width: 10%; }
+.settlement-no-revenue-table th:nth-child(4),
+.settlement-no-revenue-table td:nth-child(4) { width: 12%; }
+.settlement-no-revenue-table th:nth-child(5),
+.settlement-no-revenue-table td:nth-child(5) { width: 12%; }
+.settlement-no-revenue-table th:nth-child(6),
+.settlement-no-revenue-table td:nth-child(6) { width: 11%; }
+.settlement-no-revenue-table th:nth-child(7),
+.settlement-no-revenue-table td:nth-child(7) { width: 19%; }
+
+.settlement-driver-summary-table td,
+.settlement-no-revenue-table td {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.settlement-check-warning {
+  margin: 12px 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(120, 53, 15, 0.48);
+  border-radius: 10px;
+  background: rgba(120, 53, 15, 0.18);
+  color: #fde68a;
+  font-size: 13px;
+}
+
+.settlement-roster-warning {
+  max-width: 1280px;
+  margin: 18px auto 0;
+}
+
+.msg.good-news {
+  margin: 14px;
+  color: #bbf7d0;
+}
+
+@media (max-width: 800px) {
+  .settlement-subsection-header {
+    flex-direction: column;
+  }
+}

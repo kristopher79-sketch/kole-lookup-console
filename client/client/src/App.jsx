@@ -2997,6 +2997,122 @@ function openReportLoadDetails(load) {
   }
 
 
+  function SettlementDriverPaySummary({ rows }) {
+    const summaryRows = rows || [];
+
+    return (
+      <div className="settlement-subsection settlement-driver-pay-summary">
+        <div className="settlement-subsection-header">
+          <div>
+            <h5>Gross / Driver Pay by Driver</h5>
+                  </div>
+          <span>{formatReportNumber(summaryRows.length)} driver(s)</span>
+        </div>
+
+        {summaryRows.length === 0 ? (
+          <div className="msg">No driver pay summary is available for this settlement window.</div>
+        ) : (
+          <div className="report-table-wrap settlement-summary-table-wrap">
+            <table className="settlement-driver-summary-table">
+              <thead>
+                <tr>
+                  <th>Driver</th>
+                  <th>Truck(s)</th>
+                  <th>Orders</th>
+                  <th>BOLs</th>
+                  <th>Gross Revenue</th>
+                  <th>Driver Pay</th>
+                  <th>Margin</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summaryRows.map((row, index) => (
+                  <tr key={`${row.driver || 'driver'}-${row.trucks || 'truck'}-${index}`}>
+                    <td>{row.driver || 'Unknown Operator'}</td>
+                    <td>{row.trucks || '-'}</td>
+                    <td>{formatReportNumber(row.orderCount)}</td>
+                    <td>{(row.bols || []).join(', ') || '-'}</td>
+                    <td>{formatReportMoney(row.bidTotal)}</td>
+                    <td>{formatReportMoney(row.driverPayTotal)}</td>
+                    <td>{formatReportMoney(row.margin)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function ActiveDriversNoRevenueCheck({ data }) {
+    const rows = data?.main || [];
+
+    if (!data) return null;
+
+    if (!data.sourceAvailable && data.warning) {
+      return (
+        <div className="report-alert locked settlement-roster-warning">
+          <h4>Active driver revenue check skipped.</h4>
+          <p>{data.warning}</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="settlement-subsection settlement-no-revenue-check">
+        <div className="settlement-subsection-header">
+          <div>
+            <h5>Active Drivers With No Main-Window Revenue</h5>
+                     </div>
+          <span>{formatReportNumber(rows.length)} flagged</span>
+        </div>
+
+        {data.warning && (
+          <div className="settlement-check-warning">{data.warning}</div>
+        )}
+
+        {rows.length === 0 ? (
+          <div className="msg good-news">Every active roster driver matched main-window settlement revenue.</div>
+        ) : (
+          <div className="report-table-wrap settlement-summary-table-wrap">
+            <table className="settlement-no-revenue-table">
+              <thead>
+                <tr>
+                  <th>Operator / Team</th>
+                  <th>TMS Name</th>
+                  <th>Truck</th>
+                  <th>Driver Type</th>
+                  <th>Trailer</th>
+                  <th>Start Date</th>
+                  <th>Check</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((roster, index) => (
+                  <tr key={`${roster.id || roster.truck || roster.tmsName || index}-${index}`}>
+                    <td>{roster.operatorTeamName || '-'}</td>
+                    <td>{roster.tmsName || '-'}</td>
+                    <td>{roster.truck || '-'}</td>
+                    <td>{roster.driverType || '-'}</td>
+                    <td>{roster.trailerType || '-'}</td>
+                    <td>{formatRosterDate(roster.startDate) || '-'}</td>
+                    <td>
+                      {roster.hasLikelyNextWeekRevenue
+                        ? 'No main-window revenue; appears in likely next week.'
+                        : 'No main-window revenue found.'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+
   function OrdersDueSettlementPreview() {
     const rows = ordersDueSettlementReport?.rows || [];
 
@@ -3102,6 +3218,8 @@ function openReportLoadDetails(load) {
 
           <SettlementTotalsGrid totals={weeklySettlementReport.totals?.main} />
           <SettlementRows rows={weeklySettlementReport.main} />
+          <SettlementDriverPaySummary rows={weeklySettlementReport.driverPaySummary?.main} />
+          <ActiveDriversNoRevenueCheck data={weeklySettlementReport.activeDriversWithNoRevenue} />
 
           <div className="settlement-footnote">
             * Submitted after the prior cutoff but before the end of that prior cutoff date.
