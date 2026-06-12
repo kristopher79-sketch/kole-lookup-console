@@ -5514,3 +5514,195 @@ input:focus,
 .available-trucks-summary[aria-expanded="true"] .available-trucks-chevron {
   color: var(--kole-text) !important;
 }
+
+/* AVAILABLE TRUCKS ADD FORM */
+.available-trucks-source-note {
+  min-width: 220px;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.04);
+}
+
+.available-trucks-source-note span,
+.available-truck-send-grid label span,
+.available-truck-main-grid label span,
+.available-truck-proximity-pair label span {
+  display: block;
+  margin-bottom: 6px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.available-trucks-source-note strong,
+.available-trucks-source-note small {
+  display: block;
+}
+
+.available-trucks-source-note strong {
+  color: #f8fafc;
+}
+
+.available-trucks-source-note small {
+  margin-top: 4px;
+  color: #94a3b8;
+  overflow-wrap: anywhere;
+}
+
+.available-truck-form {
+  display: grid;
+  gap: 14px;
+}
+
+.available-truck-send-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 240px));
+  gap: 12px;
+}
+
+.available-truck-send-grid input,
+.available-truck-send-grid select,
+.available-truck-main-grid input,
+.available-truck-main-grid select,
+.available-truck-proximity-pair input {
+  width: 100%;
+  min-width: 0;
+  padding: 11px 12px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #020617;
+  color: #e5e7eb;
+  font-size: 14px;
+  outline: none;
+}
+
+.available-truck-send-grid input:focus,
+.available-truck-send-grid select:focus,
+.available-truck-main-grid input:focus,
+.available-truck-main-grid select:focus,
+.available-truck-proximity-pair input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.22);
+}
+
+.available-truck-main-grid input[readonly] {
+  border-color: rgba(250, 204, 21, 0.26);
+  background: rgba(15, 23, 42, 0.92);
+  color: #cbd5e1;
+  cursor: default;
+}
+
+.available-truck-field-hint {
+  display: block;
+  margin-top: 5px;
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.available-truck-roster-warning {
+  border: 1px solid rgba(250, 204, 21, 0.32);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(250, 204, 21, 0.08);
+  color: #fde68a;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.available-truck-form-rows {
+  display: grid;
+  gap: 12px;
+}
+
+.available-truck-form-row-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 14px;
+  padding: 14px;
+  background: rgba(15, 23, 42, 0.68);
+}
+
+.available-truck-form-row-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+.available-truck-form-row-header strong,
+.available-truck-form-row-header span {
+  display: block;
+}
+
+.available-truck-form-row-header strong {
+  color: #f8fafc;
+}
+
+.available-truck-form-row-header span {
+  margin-top: 3px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.available-truck-main-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.available-truck-proximity-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.available-truck-proximity-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+  gap: 8px;
+}
+
+.available-truck-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.available-truck-form-actions span {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+@media (max-width: 1000px) {
+  .available-truck-main-grid,
+  .available-truck-proximity-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .available-truck-send-grid,
+  .available-truck-main-grid,
+  .available-truck-proximity-grid,
+  .available-truck-proximity-pair {
+    grid-template-columns: 1fr;
+  }
+
+  .available-truck-form-row-header,
+  .available-truck-form-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .available-trucks-source-note {
+    min-width: 0;
+  }
+}

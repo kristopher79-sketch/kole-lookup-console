@@ -5377,6 +5377,395 @@ function getAvailableEquipmentSourceListId() {
   );
 }
 
+
+async function getListColumnLookup(token, listId) {
+  const data = await graphGet(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/columns?$select=name,displayName,hidden,readOnly&$top=999`
+  );
+
+  const lookup = new Map();
+
+  (data.value || [])
+    .filter((column) => column?.hidden !== true && column?.readOnly !== true)
+    .forEach((column) => {
+      const internalName = column.name || '';
+      const displayName = column.displayName || '';
+
+      if (!internalName) return;
+
+      [internalName, displayName]
+        .filter(Boolean)
+        .forEach((name) => {
+          const normalized = normalizeGraphName(name);
+
+          if (!lookup.has(normalized)) {
+            lookup.set(normalized, internalName);
+          }
+        });
+    });
+
+  return lookup;
+}
+
+function resolveListColumnName(columnLookup, aliases = []) {
+  for (const alias of aliases) {
+    const normalized = normalizeGraphName(alias);
+    if (columnLookup.has(normalized)) {
+      return columnLookup.get(normalized);
+    }
+  }
+
+  return '';
+}
+
+function addResolvedListField(fields, columnLookup, aliases, value, options = {}) {
+  const clean = String(value ?? '').trim();
+
+  if (!clean && options.includeEmpty !== true) {
+    return '';
+  }
+
+  const columnName = resolveListColumnName(columnLookup, aliases);
+
+  if (!columnName) {
+    if (options.required) {
+      throw new Error(`${options.label || aliases[0] || 'Required field'} was not found on the Available Equipment source list.`);
+    }
+
+    return '';
+  }
+
+  if (['LinkTitle', 'LinkTitleNoMenu'].includes(columnName)) {
+    if (options.required) {
+      throw new Error(`${options.label || aliases[0] || 'Required field'} resolved to SharePoint's read-only ${columnName} field.`);
+    }
+
+    return '';
+  }
+
+  fields[columnName] = clean;
+  return columnName;
+}
+
+function normalizeAvailableTruckTimeOfDay(value) {
+  const raw = String(value || '').trim();
+  const normalized = normalizeText(raw);
+
+  if (normalized === 'am' || normalized === 'morning') return 'AM';
+  if (normalized === 'pm' || normalized === 'afternoon') return 'PM';
+  if (normalized === 'evening') return 'Evening';
+
+  return raw;
+}
+
+function cleanAvailableTruckFormValue(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function getAvailableTruckDriverColumnAliases(slot, fieldName, cityRank = null) {
+  const slotText = String(slot);
+
+  if (fieldName === 'driverName') {
+    return [
+      `Driver${slotText}`,
+      `Driver${slotText}Name`,
+      `DriverName${slotText}`,
+      `Driver ${slotText}`,
+      `Driver ${slotText} Name`,
+      `Driver Name ${slotText}`,
+      `Driver ${slotText} Driver Name`
+    ];
+  }
+
+  if (fieldName === 'unitNo') {
+    return [
+      `Driver${slotText}Unit`,
+      `Driver${slotText}UnitNo`,
+      `Driver${slotText}UnitNumber`,
+      `Driver${slotText}UnitNumbers`,
+      `DriverUnit${slotText}`,
+      `DriverUnitNo${slotText}`,
+      `DriverUnitNumber${slotText}`,
+      `DriverUnitNumbers${slotText}`,
+      `Unit${slotText}`,
+      `UnitNo${slotText}`,
+      `UnitNumber${slotText}`,
+      `UnitNumbers${slotText}`,
+      `Driver ${slotText} Unit`,
+      `Driver ${slotText} Unit No`,
+      `Driver Unit No ${slotText}`,
+      `Driver ${slotText} Unit Number`,
+      `Driver Unit Number ${slotText}`,
+      `Driver ${slotText} Unit Numbers`,
+      `Driver Unit Numbers ${slotText}`
+    ];
+  }
+
+  if (fieldName === 'equipmentType') {
+    return [
+      `Driver${slotText}EquipmentType`,
+      `DriverEquipmentType${slotText}`,
+      `EquipmentType${slotText}`,
+      `Driver ${slotText} Equipment Type`,
+      `Driver Equipment Type ${slotText}`
+    ];
+  }
+
+  if (fieldName === 'currentLocation') {
+    return [
+      `Driver${slotText}CurrentLocation`,
+      `DriverCurrentLocation${slotText}`,
+      `CurrentLocation${slotText}`,
+      `Driver ${slotText} Current Location`,
+      `Driver Current Location ${slotText}`
+    ];
+  }
+
+  if (fieldName === 'proximityLocation') {
+    return [
+      `Driver${slotText}City${cityRank}`,
+      `Driver${slotText}Proximity${cityRank}`,
+      `Driver${slotText}ProximityCity${cityRank}`,
+      `DriverCity${cityRank}_${slotText}`,
+      `DriverCity${cityRank}${slotText}`,
+      `DriverProximity${cityRank}${slotText}`,
+      `Proximity${cityRank}Driver${slotText}`,
+      `Proximity${cityRank}_${slotText}`,
+      `Driver ${slotText} City ${cityRank}`,
+      `Driver ${slotText} Proximity ${cityRank}`,
+      `Driver City ${cityRank} ${slotText}`,
+      `Driver ${slotText} Proximity City ${cityRank}`
+    ];
+  }
+
+  if (fieldName === 'proximityTime') {
+    return [
+      `Driver${slotText}City${cityRank}Time`,
+      `Driver${slotText}CityTime${cityRank}`,
+      `Driver${slotText}Proximity${cityRank}Time`,
+      `Driver${slotText}ProximityTime${cityRank}`,
+      `DriverCity${cityRank}Time${slotText}`,
+      `DriverProximity${cityRank}Time${slotText}`,
+      `Proximity${cityRank}TimeDriver${slotText}`,
+      `Proximity${cityRank}Time_${slotText}`,
+      `Driver ${slotText} City ${cityRank} Time`,
+      `Driver ${slotText} Proximity ${cityRank} Time`,
+      `Driver City ${cityRank} Time ${slotText}`,
+      `Driver ${slotText} Proximity Time ${cityRank}`
+    ];
+  }
+
+  return [];
+}
+
+function cleanAvailableTruckSubmissionDriver(row) {
+  const proximityStops = Array.isArray(row?.proximityStops) ? row.proximityStops : [];
+
+  return {
+    rosterDriverKey: cleanAvailableTruckFormValue(row?.rosterDriverKey),
+    driverName: cleanAvailableTruckFormValue(row?.driverName),
+    unitNo: cleanAvailableTruckFormValue(row?.unitNo),
+    equipmentType: cleanAvailableTruckFormValue(row?.equipmentType),
+    currentLocation: cleanAvailableTruckFormValue(row?.currentLocation),
+    proximityStops: [0, 1, 2, 3].map((index) => ({
+      location: cleanAvailableTruckFormValue(proximityStops[index]?.location),
+      timeLabel: cleanAvailableTruckFormValue(proximityStops[index]?.timeLabel)
+    }))
+  };
+}
+
+function hasAvailableTruckSubmissionDriver(row) {
+  return Boolean(
+    row.rosterDriverKey ||
+    row.driverName ||
+    row.unitNo ||
+    row.equipmentType ||
+    row.currentLocation ||
+    row.proximityStops.some((stop) => stop.location || stop.timeLabel)
+  );
+}
+
+function validateAvailableTruckSubmissionDriver(row, slot) {
+  const missing = [];
+
+  if (!row.driverName) missing.push('driver name');
+  if (!row.unitNo) missing.push('unit number');
+  if (!row.equipmentType) missing.push('equipment type');
+  if (!row.currentLocation) missing.push('current location');
+
+  if (missing.length > 0) {
+    throw new Error(`Truck ${slot} is missing ${missing.join(', ')}.`);
+  }
+}
+
+function validateAvailableTruckSubmissionDuplicates(drivers = []) {
+  const seenRosterDrivers = new Map();
+  const seenUnits = new Map();
+  const seenDriverNames = new Map();
+
+  drivers.forEach((driver, index) => {
+    const rowLabel = `Truck ${index + 1}`;
+    const rosterKey = cleanAvailableTruckFormValue(driver.rosterDriverKey);
+    const unitKey = normalizeTruckKey(driver.unitNo);
+    const driverKey = normalizeSearchValue(driver.driverName);
+
+    if (rosterKey) {
+      if (seenRosterDrivers.has(rosterKey)) {
+        throw new Error(`${rowLabel} duplicates ${seenRosterDrivers.get(rosterKey)}. Each active roster driver can only be posted once.`);
+      }
+      seenRosterDrivers.set(rosterKey, rowLabel);
+    }
+
+    if (unitKey) {
+      if (seenUnits.has(unitKey)) {
+        throw new Error(`${rowLabel} duplicates unit ${driver.unitNo} from ${seenUnits.get(unitKey)}.`);
+      }
+      seenUnits.set(unitKey, rowLabel);
+    }
+
+    if (driverKey) {
+      if (seenDriverNames.has(driverKey)) {
+        throw new Error(`${rowLabel} duplicates driver ${driver.driverName} from ${seenDriverNames.get(driverKey)}.`);
+      }
+      seenDriverNames.set(driverKey, rowLabel);
+    }
+  });
+}
+
+function getAvailableTruckRosterOptionKey(roster) {
+  if (roster?.id) return `roster-${roster.id}`;
+
+  return [roster?.operatorTeamName || roster?.tmsName, roster?.truck]
+    .map((value) => normalizeSearchValue(value))
+    .filter(Boolean)
+    .join('-');
+}
+
+function getAvailableTruckRosterEquipmentType(roster) {
+  return uniqueNonEmpty([roster?.soloOrTeam, roster?.trailerType]).join(' ');
+}
+
+function buildAvailableTruckRosterOptions(rosterItems = []) {
+  const seen = new Set();
+
+  return rosterItems
+    .filter((roster) => normalizeText(roster.status) === 'active')
+    .map((roster) => {
+      const driverName = cleanAvailableTruckFormValue(roster.operatorTeamName || roster.tmsName);
+      const unitNo = cleanAvailableTruckFormValue(roster.truck);
+      const equipmentType = cleanAvailableTruckFormValue(getAvailableTruckRosterEquipmentType(roster));
+      const key = getAvailableTruckRosterOptionKey(roster);
+
+      return {
+        key,
+        id: roster.id || '',
+        driverName,
+        unitNo,
+        equipmentType,
+        status: roster.status || '',
+        trailerType: roster.trailerType || '',
+        soloOrTeam: roster.soloOrTeam || '',
+        tmsName: roster.tmsName || ''
+      };
+    })
+    .filter((option) => option.key && (option.driverName || option.unitNo))
+    .filter((option) => {
+      const duplicateKey = `${normalizeSearchValue(option.driverName)}|${normalizeTruckKey(option.unitNo)}`;
+      if (seen.has(duplicateKey)) return false;
+      seen.add(duplicateKey);
+      return true;
+    })
+    .sort((a, b) => {
+      const nameCompare = String(a.driverName || '').localeCompare(String(b.driverName || ''));
+      if (nameCompare !== 0) return nameCompare;
+      return String(a.unitNo || '').localeCompare(String(b.unitNo || ''));
+    });
+}
+
+async function getAvailableTruckRosterOptions(token) {
+  if (!process.env.DRIVER_ROSTER_LIST_ID) {
+    return [];
+  }
+
+  const rosterItems = await getDriverRosterItems(token);
+  return buildAvailableTruckRosterOptions(rosterItems);
+}
+
+async function resolveAvailableTruckDriversFromRoster(token, drivers = []) {
+  if (!drivers.some((driver) => driver.rosterDriverKey)) {
+    return drivers;
+  }
+
+  const rosterOptions = await getAvailableTruckRosterOptions(token);
+  const rosterOptionMap = new Map(rosterOptions.map((option) => [option.key, option]));
+
+  return drivers.map((driver, index) => {
+    if (!driver.rosterDriverKey) return driver;
+
+    const rosterOption = rosterOptionMap.get(driver.rosterDriverKey);
+
+    if (!rosterOption) {
+      throw new Error(`Truck ${index + 1} selected a driver that is not currently active in Driver Roster. Refresh Available Trucks and choose the driver again.`);
+    }
+
+    return {
+      ...driver,
+      driverName: rosterOption.driverName,
+      unitNo: rosterOption.unitNo,
+      equipmentType: rosterOption.equipmentType
+    };
+  });
+}
+
+function buildAvailableTruckSourceFields(columnLookup, submission) {
+  const fields = {};
+  const dateSent = normalizeEasternDateOnly(submission.dateSent) || formatEasternDate();
+  const timeOfDay = normalizeAvailableTruckTimeOfDay(submission.timeOfDay) || 'AM';
+
+  fields.Title = `Available Trucks ${dateSent} ${timeOfDay}`;
+
+  addResolvedListField(
+    fields,
+    columnLookup,
+    ['DateSent', 'Date Sent'],
+    dateSent,
+    { required: true, label: 'Date Sent' }
+  );
+
+  addResolvedListField(
+    fields,
+    columnLookup,
+    ['TimeofDay', 'Time Of Day', 'Time of Day'],
+    timeOfDay,
+    { required: true, label: 'Time of Day' }
+  );
+
+  addResolvedListField(
+    fields,
+    columnLookup,
+    ['EmailSent', 'Email Sent'],
+    'No'
+  );
+
+  submission.drivers.forEach((driver, index) => {
+    const slot = index + 1;
+
+    addResolvedListField(fields, columnLookup, getAvailableTruckDriverColumnAliases(slot, 'driverName'), driver.driverName);
+    addResolvedListField(fields, columnLookup, getAvailableTruckDriverColumnAliases(slot, 'unitNo'), driver.unitNo);
+    addResolvedListField(fields, columnLookup, getAvailableTruckDriverColumnAliases(slot, 'equipmentType'), driver.equipmentType);
+    addResolvedListField(fields, columnLookup, getAvailableTruckDriverColumnAliases(slot, 'currentLocation'), driver.currentLocation);
+
+    driver.proximityStops.forEach((stop, stopIndex) => {
+      const rank = stopIndex + 1;
+      addResolvedListField(fields, columnLookup, getAvailableTruckDriverColumnAliases(slot, 'proximityLocation', rank), stop.location);
+      addResolvedListField(fields, columnLookup, getAvailableTruckDriverColumnAliases(slot, 'proximityTime', rank), stop.timeLabel);
+    });
+  });
+
+  return fields;
+}
+
 function getAvailableTruckFieldSelect() {
   return [
     'DateSent',
@@ -6103,6 +6492,8 @@ function buildAvailableTrucksResponse(items, options = {}) {
     sourceListId: getAvailableTrucksSingleLineListId(),
     sourceListName: 'Available Trucks Single Line',
     sourceWideListId: getAvailableEquipmentSourceListId(),
+    activeDriverOptions: options.activeDriverOptions || [],
+    activeDriverOptionsWarning: options.activeDriverOptionsWarning || '',
     lookbackDays,
     currentWindowHours: 24,
     count: currentRecords.length,
@@ -6334,6 +6725,68 @@ async function findCurrentBidOrderByBol(token, currentList, bol) {
 }
 
 
+
+app.post('/available-trucks', requireLookupAccess, async (req, res) => {
+  try {
+    const listId = getAvailableEquipmentSourceListId();
+
+    if (!listId) {
+      return res.status(500).json({
+        success: false,
+        error: 'AVAILABLE_EQUIPMENT_SOURCE_LIST_ID is not configured on the server.'
+      });
+    }
+
+    const drivers = (Array.isArray(req.body?.drivers) ? req.body.drivers : [])
+      .slice(0, 8)
+      .map(cleanAvailableTruckSubmissionDriver)
+      .filter(hasAvailableTruckSubmissionDriver);
+
+    if (drivers.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Add at least one available truck before submitting.'
+      });
+    }
+
+    const token = await getGraphToken();
+    const resolvedDrivers = await resolveAvailableTruckDriversFromRoster(token, drivers);
+
+    resolvedDrivers.forEach((driver, index) => validateAvailableTruckSubmissionDriver(driver, index + 1));
+    validateAvailableTruckSubmissionDuplicates(resolvedDrivers);
+
+    const submission = {
+      dateSent: req.body?.dateSent,
+      timeOfDay: req.body?.timeOfDay,
+      drivers: resolvedDrivers
+    };
+
+    const columnLookup = await getListColumnLookup(token, listId);
+    const fields = buildAvailableTruckSourceFields(columnLookup, submission);
+
+    const createdItem = await graphPost(
+      token,
+      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/items`,
+      { fields }
+    );
+
+    res.status(201).json({
+      success: true,
+      sourceListId: listId,
+      itemId: createdItem.id || '',
+      driverCount: resolvedDrivers.length,
+      message: `${resolvedDrivers.length} available truck${resolvedDrivers.length === 1 ? '' : 's'} submitted. Power Automate will send and dissect the source row shortly.`
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to submit available trucks.'
+    });
+  }
+});
+
 app.get('/available-trucks', requireLookupAccess, async (req, res) => {
   try {
     const listId = getAvailableTrucksSingleLineListId();
@@ -6352,8 +6805,18 @@ app.get('/available-trucks', requireLookupAccess, async (req, res) => {
 
     const token = await getGraphToken();
     const currentList = await getCurrentBidListingSource(token);
+    let activeDriverOptionsWarning = process.env.DRIVER_ROSTER_LIST_ID
+      ? ''
+      : 'DRIVER_ROSTER_LIST_ID is not configured, so active roster driver options could not be loaded.';
 
-    const [items, assignmentItems] = await Promise.all([
+    const activeDriverOptionsPromise = process.env.DRIVER_ROSTER_LIST_ID
+      ? getAvailableTruckRosterOptions(token).catch((error) => {
+          activeDriverOptionsWarning = error.message || 'Driver Roster could not be loaded for available-truck posting.';
+          return [];
+        })
+      : Promise.resolve([]);
+
+    const [items, assignmentItems, activeDriverOptions] = await Promise.all([
       getAllListItemsWithFields(
         token,
         listId,
@@ -6365,12 +6828,18 @@ app.get('/available-trucks', requireLookupAccess, async (req, res) => {
             currentList.listId,
             getAvailableTruckAssignmentFieldSelect()
           )
-        : Promise.resolve([])
+        : Promise.resolve([]),
+      activeDriverOptionsPromise
     ]);
 
     const assignmentIndex = buildActiveFutureAssignmentIndex(assignmentItems, currentList);
 
-    res.json(buildAvailableTrucksResponse(items, { lookbackDays, assignmentIndex }));
+    res.json(buildAvailableTrucksResponse(items, {
+      lookbackDays,
+      assignmentIndex,
+      activeDriverOptions,
+      activeDriverOptionsWarning
+    }));
   } catch (error) {
     console.error(error);
 

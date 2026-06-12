@@ -15,6 +15,187 @@ const API =
     : 'https://kole-lookup-console.onrender.com');
 
 const SALES_NOTE_MAX_LENGTH = 63000;
+const AVAILABLE_TRUCK_MAX_ROWS = 8;
+
+function createAvailableTruckDraftRow(seed = Date.now()) {
+  return {
+    key: `${seed}-${Math.random().toString(36).slice(2, 9)}`,
+    rosterDriverKey: '',
+    driverName: '',
+    unitNo: '',
+    equipmentType: '',
+    currentLocation: '',
+    proximity1: '',
+    proximity1Time: '',
+    proximity2: '',
+    proximity2Time: '',
+    proximity3: '',
+    proximity3Time: '',
+    proximity4: '',
+    proximity4Time: ''
+  };
+}
+
+function getDefaultAvailableTruckTimeOfDay() {
+  const hour = Number(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric',
+    hour12: false
+  }).format(new Date()));
+
+  if (hour < 12) return 'AM';
+  if (hour < 17) return 'PM';
+  return 'Evening';
+}
+
+function hasAvailableTruckDraftData(row) {
+  return Boolean(
+    row.driverName ||
+    row.unitNo ||
+    row.equipmentType ||
+    row.currentLocation ||
+    row.proximity1 ||
+    row.proximity1Time ||
+    row.proximity2 ||
+    row.proximity2Time ||
+    row.proximity3 ||
+    row.proximity3Time ||
+    row.proximity4 ||
+    row.proximity4Time
+  );
+}
+
+
+function AvailableTruckFormRow({
+  row,
+  index,
+  canRemove,
+  submitting,
+  driverOptions = [],
+  selectedRosterDriverKeys = new Set(),
+  onSelectDriver,
+  onUpdate,
+  onRemove
+}) {
+  const rowNumber = index + 1;
+  const hasRosterOptions = driverOptions.length > 0;
+  const isRosterLocked = Boolean(row.rosterDriverKey);
+
+  return (
+    <div className="available-truck-form-row-card">
+      <div className="available-truck-form-row-header">
+        <div>
+          <strong>Truck {rowNumber}</strong>
+          <span>Choose an active roster driver; unit and equipment fill from Driver Roster.</span>
+        </div>
+        {canRemove && (
+          <button
+            type="button"
+            className="danger-button compact-action-button"
+            onClick={() => onRemove(row.key)}
+            disabled={submitting}
+          >
+            Remove
+          </button>
+        )}
+      </div>
+
+      <div className="available-truck-main-grid">
+        <label>
+          <span>Driver Name</span>
+          {hasRosterOptions ? (
+            <select
+              value={row.rosterDriverKey || ''}
+              onChange={(e) => onSelectDriver(row.key, e.target.value)}
+              disabled={submitting}
+            >
+              <option value="">Select active driver</option>
+              {driverOptions.map((option) => {
+                const disabledElsewhere =
+                  option.key !== row.rosterDriverKey && selectedRosterDriverKeys.has(option.key);
+
+                return (
+                  <option key={option.key} value={option.key} disabled={disabledElsewhere}>
+                    {[option.driverName, option.unitNo, option.equipmentType]
+                      .filter(Boolean)
+                      .join(' · ')}{disabledElsewhere ? ' · already selected' : ''}
+                  </option>
+                );
+              })}
+            </select>
+          ) : (
+            <input
+              value={row.driverName}
+              onChange={(e) => onUpdate(row.key, 'driverName', e.target.value)}
+              placeholder="Driver / team"
+              disabled={submitting}
+            />
+          )}
+          <small className="available-truck-field-hint">
+            {hasRosterOptions
+              ? (row.driverName ? `Posting as ${row.driverName}` : 'Active Driver Roster is the source of truth.')
+              : 'Roster options unavailable; manual entry is still allowed.'}
+          </small>
+        </label>
+        <label>
+          <span>Unit No</span>
+          <input
+            value={row.unitNo}
+            onChange={(e) => onUpdate(row.key, 'unitNo', e.target.value)}
+            placeholder="Truck #"
+            readOnly={isRosterLocked}
+            disabled={submitting}
+          />
+        </label>
+        <label>
+          <span>Equipment Type</span>
+          <input
+            value={row.equipmentType}
+            onChange={(e) => onUpdate(row.key, 'equipmentType', e.target.value)}
+            placeholder="Solo stepdeck, RGN, etc."
+            readOnly={isRosterLocked}
+            disabled={submitting}
+          />
+        </label>
+        <label>
+          <span>Current Location</span>
+          <input
+            value={row.currentLocation}
+            onChange={(e) => onUpdate(row.key, 'currentLocation', e.target.value)}
+            placeholder="City, ST"
+            disabled={submitting}
+          />
+        </label>
+      </div>
+
+      <div className="available-truck-proximity-grid">
+        {[1, 2, 3, 4].map((rank) => (
+          <div key={`${row.key}-proximity-${rank}`} className="available-truck-proximity-pair">
+            <label>
+              <span>City {rank}</span>
+              <input
+                value={row[`proximity${rank}`]}
+                onChange={(e) => onUpdate(row.key, `proximity${rank}`, e.target.value)}
+                placeholder="City, ST"
+                disabled={submitting}
+              />
+            </label>
+            <label>
+              <span>Time {rank}</span>
+              <input
+                value={row[`proximity${rank}Time`]}
+                onChange={(e) => onUpdate(row.key, `proximity${rank}Time`, e.target.value)}
+                placeholder="2 hrs, AM, etc."
+                disabled={submitting}
+              />
+            </label>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 
 async function openExternalLink(url) {
   if (!url) return;
@@ -230,6 +411,12 @@ export default function App() {
   const [availableTrucksData, setAvailableTrucksData] = useState(null);
   const [availableTrucksLoading, setAvailableTrucksLoading] = useState(false);
   const [availableTrucksError, setAvailableTrucksError] = useState('');
+  const [availableTruckFormDate, setAvailableTruckFormDate] = useState(getEasternDateInputValue);
+  const [availableTruckTimeOfDay, setAvailableTruckTimeOfDay] = useState(getDefaultAvailableTruckTimeOfDay);
+  const [availableTruckRows, setAvailableTruckRows] = useState(() => [createAvailableTruckDraftRow('initial')]);
+  const [availableTruckSubmitting, setAvailableTruckSubmitting] = useState(false);
+  const [availableTruckActionMessage, setAvailableTruckActionMessage] = useState('');
+  const [availableTruckActionError, setAvailableTruckActionError] = useState('');
   const [availableTruckDrilldown, setAvailableTruckDrilldown] = useState(null);
   const [reportsSectionOpen, setReportsSectionOpen] = useState(false);
   
@@ -285,6 +472,45 @@ export default function App() {
 
     return sorted;
   }, [filteredResults, sortField, sortDirection]);
+
+
+  const availableTruckDriverOptions = useMemo(() => {
+    const options = availableTrucksData?.activeDriverOptions || [];
+
+    return options
+      .map((option, index) => {
+        const driverName = String(option?.driverName || '').trim();
+        const unitNo = String(option?.unitNo || '').trim();
+        const equipmentType = String(option?.equipmentType || '').trim();
+        const key = String(option?.key || option?.id || `${driverName}-${unitNo}-${index}`).trim();
+
+        return {
+          key,
+          id: option?.id || '',
+          driverName,
+          unitNo,
+          equipmentType,
+          status: option?.status || '',
+          trailerType: option?.trailerType || '',
+          soloOrTeam: option?.soloOrTeam || '',
+          tmsName: option?.tmsName || ''
+        };
+      })
+      .filter((option) => option.key && (option.driverName || option.unitNo))
+      .sort((a, b) => {
+        const nameCompare = a.driverName.localeCompare(b.driverName);
+        if (nameCompare !== 0) return nameCompare;
+        return a.unitNo.localeCompare(b.unitNo);
+      });
+  }, [availableTrucksData]);
+
+  const selectedAvailableTruckRosterKeys = useMemo(() => {
+    return new Set(
+      availableTruckRows
+        .map((row) => String(row.rosterDriverKey || '').trim())
+        .filter(Boolean)
+    );
+  }, [availableTruckRows]);
 
 
   useEffect(() => {
@@ -364,6 +590,16 @@ export default function App() {
     return () => window.clearTimeout(timeout);
   }, [intelliTrackActionMessage]);
 
+  useEffect(() => {
+    if (!availableTruckActionMessage) return undefined;
+
+    const timeout = window.setTimeout(() => {
+      setAvailableTruckActionMessage('');
+    }, 9000);
+
+    return () => window.clearTimeout(timeout);
+  }, [availableTruckActionMessage]);
+
   function toggleSort(field) {
     if (sortField === field) {
       setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
@@ -410,6 +646,12 @@ export default function App() {
     setAvailableTrucksActionOpen(false);
     setAvailableTrucksData(null);
     setAvailableTrucksError('');
+    setAvailableTruckFormDate(getEasternDateInputValue());
+    setAvailableTruckTimeOfDay(getDefaultAvailableTruckTimeOfDay());
+    setAvailableTruckRows([createAvailableTruckDraftRow('reset')]);
+    setAvailableTruckSubmitting(false);
+    setAvailableTruckActionMessage('');
+    setAvailableTruckActionError('');
     setAvailableTruckDrilldown(null);
     setReportsSectionOpen(false);
   }
@@ -700,6 +942,7 @@ async function loadIntelliTrack(options = {}) {
 }
 
 
+
 async function loadAvailableTrucks(options = {}) {
   const { silent = false } = options;
 
@@ -728,6 +971,189 @@ async function loadAvailableTrucks(options = {}) {
     if (!silent) {
       setAvailableTrucksLoading(false);
     }
+  }
+}
+
+function updateAvailableTruckRow(rowKey, field, value) {
+  setAvailableTruckRows((current) =>
+    current.map((row) => {
+      if (row.key !== rowKey) return row;
+
+      const clearsRosterSelection =
+        row.rosterDriverKey && ['driverName', 'unitNo', 'equipmentType'].includes(field);
+
+      return {
+        ...row,
+        ...(clearsRosterSelection ? { rosterDriverKey: '' } : {}),
+        [field]: value
+      };
+    })
+  );
+
+  setAvailableTruckActionError('');
+  setAvailableTruckActionMessage('');
+}
+
+function selectAvailableTruckRosterDriver(rowKey, rosterDriverKey) {
+  const selectedOption = availableTruckDriverOptions.find((option) => option.key === rosterDriverKey) || null;
+
+  setAvailableTruckRows((current) =>
+    current.map((row) => {
+      if (row.key !== rowKey) return row;
+
+      if (!selectedOption) {
+        return {
+          ...row,
+          rosterDriverKey: '',
+          driverName: '',
+          unitNo: '',
+          equipmentType: ''
+        };
+      }
+
+      return {
+        ...row,
+        rosterDriverKey: selectedOption.key,
+        driverName: selectedOption.driverName,
+        unitNo: selectedOption.unitNo,
+        equipmentType: selectedOption.equipmentType
+      };
+    })
+  );
+
+  setAvailableTruckActionError('');
+  setAvailableTruckActionMessage('');
+}
+
+function addAvailableTruckRow() {
+  setAvailableTruckRows((current) => {
+    if (current.length >= AVAILABLE_TRUCK_MAX_ROWS) return current;
+    return [...current, createAvailableTruckDraftRow(current.length + 1)];
+  });
+
+  setAvailableTruckActionError('');
+}
+
+function removeAvailableTruckRow(rowKey) {
+  setAvailableTruckRows((current) => {
+    const nextRows = current.filter((row) => row.key !== rowKey);
+    return nextRows.length ? nextRows : [createAvailableTruckDraftRow('replacement')];
+  });
+
+  setAvailableTruckActionError('');
+  setAvailableTruckActionMessage('');
+}
+
+function clearAvailableTruckForm() {
+  setAvailableTruckFormDate(getEasternDateInputValue());
+  setAvailableTruckTimeOfDay(getDefaultAvailableTruckTimeOfDay());
+  setAvailableTruckRows([createAvailableTruckDraftRow('clear')]);
+  setAvailableTruckActionError('');
+  setAvailableTruckActionMessage('');
+}
+
+function buildAvailableTruckSubmissionDrivers() {
+  return availableTruckRows
+    .filter(hasAvailableTruckDraftData)
+    .map((row) => ({
+      rosterDriverKey: String(row.rosterDriverKey || '').trim(),
+      driverName: row.driverName.trim(),
+      unitNo: row.unitNo.trim(),
+      equipmentType: row.equipmentType.trim(),
+      currentLocation: row.currentLocation.trim(),
+      proximityStops: [1, 2, 3, 4].map((rank) => ({
+        location: String(row[`proximity${rank}`] || '').trim(),
+        timeLabel: String(row[`proximity${rank}Time`] || '').trim()
+      }))
+    }));
+}
+
+function validateAvailableTruckFormRows(drivers) {
+  if (drivers.length === 0) {
+    throw new Error('Add at least one truck before submitting. Blank rows are ignored, but all rows are blank right now.');
+  }
+
+  const seenRosterDrivers = new Map();
+  const seenUnits = new Map();
+  const seenDriverNames = new Map();
+
+  drivers.forEach((driver, index) => {
+    const missing = [];
+    if (!driver.driverName) missing.push('driver name');
+    if (!driver.unitNo) missing.push('unit number');
+    if (!driver.equipmentType) missing.push('equipment type');
+    if (!driver.currentLocation) missing.push('current location');
+
+    if (missing.length > 0) {
+      throw new Error(`Truck ${index + 1} needs ${missing.join(', ')}.`);
+    }
+
+    const rowLabel = `Truck ${index + 1}`;
+    const rosterKey = String(driver.rosterDriverKey || '').trim();
+    const unitKey = String(driver.unitNo || '').trim().toUpperCase();
+    const driverKey = String(driver.driverName || '').trim().toLowerCase();
+
+    if (rosterKey) {
+      if (seenRosterDrivers.has(rosterKey)) {
+        throw new Error(`${rowLabel} duplicates ${seenRosterDrivers.get(rosterKey)}. Each active roster driver can only be posted once.`);
+      }
+      seenRosterDrivers.set(rosterKey, rowLabel);
+    }
+
+    if (unitKey) {
+      if (seenUnits.has(unitKey)) {
+        throw new Error(`${rowLabel} duplicates unit ${driver.unitNo} from ${seenUnits.get(unitKey)}.`);
+      }
+      seenUnits.set(unitKey, rowLabel);
+    }
+
+    if (driverKey) {
+      if (seenDriverNames.has(driverKey)) {
+        throw new Error(`${rowLabel} duplicates driver ${driver.driverName} from ${seenDriverNames.get(driverKey)}.`);
+      }
+      seenDriverNames.set(driverKey, rowLabel);
+    }
+  });
+}
+
+async function submitAvailableTruckForm(e) {
+  if (e) {
+    e.preventDefault();
+  }
+
+  setAvailableTruckSubmitting(true);
+  setAvailableTruckActionError('');
+  setAvailableTruckActionMessage('');
+
+  try {
+    const drivers = buildAvailableTruckSubmissionDrivers();
+    validateAvailableTruckFormRows(drivers);
+
+    const res = await authedFetch(`${API}/available-trucks`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        dateSent: availableTruckFormDate,
+        timeOfDay: availableTruckTimeOfDay,
+        drivers
+      })
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Unable to submit available trucks.');
+    }
+
+    setAvailableTruckActionMessage(data.message || `${drivers.length} available truck${drivers.length === 1 ? '' : 's'} submitted.`);
+    setAvailableTruckRows([createAvailableTruckDraftRow('submitted')]);
+    await loadAvailableTrucks({ silent: true });
+  } catch (err) {
+    setAvailableTruckActionError(err.message || 'Unable to submit available trucks.');
+  } finally {
+    setAvailableTruckSubmitting(false);
   }
 }
 
@@ -4094,6 +4520,8 @@ function openReportLoadDetails(load) {
         </button>
 
         {availableTrucksError && <div className="msg error">{availableTrucksError}</div>}
+        {availableTruckActionError && <div className="msg error">{availableTruckActionError}</div>}
+        {availableTruckActionMessage && <div className="msg success">{availableTruckActionMessage}</div>}
 
         {availableTrucksSectionOpen && (
           <div className="feature-section-body available-trucks-body">
@@ -4255,24 +4683,90 @@ function openReportLoadDetails(load) {
               <div className="available-trucks-action-card">
                 <div className="available-trucks-subheader">
                   <div>
-                    <h3>Coming in Phase 2</h3>
+                    <h3>Add Available Truck</h3>
                     <p>
-                      This first pass reads the Single Line analysis list. The add form will post to the wide Kole Trucking Available Equipment source list so the existing flow can send and dissect it.
+                      Select active drivers from Driver Roster. Driver name, unit number, and equipment type are prefilled so the wide source row stays consistent.
                     </p>
                   </div>
                 </div>
-                <div className="available-trucks-kpi-grid available-trucks-source-grid">
-                  <div>
-                    <span>Read list</span>
-                    <strong>Single Line</strong>
-                    <small>{availableTrucksData?.sourceListId || '67edb153-a389-474a-a7dd-d3bc0d746952'}</small>
+
+                {availableTrucksData?.activeDriverOptionsWarning && (
+                  <div className="available-truck-roster-warning">
+                    {availableTrucksData.activeDriverOptionsWarning}
                   </div>
-                  <div>
-                    <span>Post list</span>
-                    <strong>Wide source</strong>
-                    <small>{availableTrucksData?.sourceWideListId || '96af7972-58ff-4bb8-b5a6-ca86f4d19ee6'}</small>
+                )}
+
+                <form className="available-truck-form" onSubmit={submitAvailableTruckForm}>
+                  <div className="available-truck-send-grid">
+                    <label>
+                      <span>Date Sent</span>
+                      <input
+                        type="date"
+                        value={availableTruckFormDate}
+                        onChange={(e) => setAvailableTruckFormDate(e.target.value)}
+                        disabled={availableTruckSubmitting}
+                      />
+                    </label>
+                    <label>
+                      <span>Time of Day</span>
+                      <select
+                        value={availableTruckTimeOfDay}
+                        onChange={(e) => setAvailableTruckTimeOfDay(e.target.value)}
+                        disabled={availableTruckSubmitting}
+                      >
+                        <option value="AM">AM</option>
+                        <option value="PM">PM</option>
+                        <option value="Evening">Evening</option>
+                      </select>
+                    </label>
                   </div>
-                </div>
+
+                  <div className="available-truck-form-rows">
+                    {availableTruckRows.map((row, index) => (
+                      <AvailableTruckFormRow
+                        key={row.key}
+                        row={row}
+                        index={index}
+                        canRemove={availableTruckRows.length > 1}
+                        submitting={availableTruckSubmitting}
+                        driverOptions={availableTruckDriverOptions}
+                        selectedRosterDriverKeys={selectedAvailableTruckRosterKeys}
+                        onSelectDriver={selectAvailableTruckRosterDriver}
+                        onUpdate={updateAvailableTruckRow}
+                        onRemove={removeAvailableTruckRow}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="available-truck-form-actions">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={addAvailableTruckRow}
+                      disabled={availableTruckSubmitting || availableTruckRows.length >= AVAILABLE_TRUCK_MAX_ROWS}
+                    >
+                      Add Another Truck
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={clearAvailableTruckForm}
+                      disabled={availableTruckSubmitting}
+                    >
+                      Clear
+                    </button>
+                    <button
+                      type="submit"
+                      className="primary-action-button"
+                      disabled={availableTruckSubmitting}
+                    >
+                      {availableTruckSubmitting ? 'Submitting...' : 'Submit Available Trucks'}
+                    </button>
+                    <span>
+                      {availableTruckDriverOptions.length} active roster option{availableTruckDriverOptions.length === 1 ? '' : 's'} loaded · {availableTruckRows.length}/{AVAILABLE_TRUCK_MAX_ROWS} source slots shown · blank rows are ignored.
+                    </span>
+                  </div>
+                </form>
               </div>
             )}
           </div>
@@ -6668,7 +7162,7 @@ function openReportLoadDetails(load) {
 
   {IntelliTrackPanel()}
 
-  <AvailableTrucksPanel />
+  {AvailableTrucksPanel()}
 
   <DriverSummaryReport />
   </>
