@@ -65,6 +65,23 @@ function hasAvailableTruckDraftData(row) {
   );
 }
 
+function normalizeAvailableTruckSuggestionKey(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getAvailableTruckRowSuggestionGroup(row, suggestionIndex = {}) {
+  const key = normalizeAvailableTruckSuggestionKey(row?.currentLocation);
+  if (!key) return null;
+
+  return suggestionIndex?.[key] || null;
+}
+
 
 function AvailableTruckFormRow({
   row,
@@ -73,13 +90,34 @@ function AvailableTruckFormRow({
   submitting,
   driverOptions = [],
   selectedRosterDriverKeys = new Set(),
+  suggestionGroup = null,
   onSelectDriver,
   onUpdate,
+  onApplySuggestion,
   onRemove
 }) {
   const rowNumber = index + 1;
   const hasRosterOptions = driverOptions.length > 0;
   const isRosterLocked = Boolean(row.rosterDriverKey);
+  const currentLocationLabel = String(row.currentLocation || '').trim();
+  const hasCurrentLocation = Boolean(currentLocationLabel);
+  const currentLocationSuggestionKey = normalizeAvailableTruckSuggestionKey(currentLocationLabel);
+  const historicalSuggestionMatches = suggestionGroup?.suggestions || [];
+  const immediateSuggestion = hasCurrentLocation
+    ? {
+        key: `immediate-${currentLocationSuggestionKey}`,
+        location: currentLocationLabel,
+        timeLabel: 'Immediate',
+        count: suggestionGroup?.sourceRecordCount || 0,
+        isImmediate: true
+      }
+    : null;
+  const suggestionMatches = [
+    immediateSuggestion,
+    ...historicalSuggestionMatches.filter((suggestion) =>
+      normalizeAvailableTruckSuggestionKey(suggestion?.location) !== currentLocationSuggestionKey
+    )
+  ].filter(Boolean);
 
   return (
     <div className="available-truck-form-row-card">
@@ -116,9 +154,7 @@ function AvailableTruckFormRow({
 
                 return (
                   <option key={option.key} value={option.key} disabled={disabledElsewhere}>
-                    {[option.driverName, option.unitNo, option.equipmentType]
-                      .filter(Boolean)
-                      .join(' · ')}{disabledElsewhere ? ' · already selected' : ''}
+                    {option.driverName || option.unitNo || 'Unnamed driver'}{disabledElsewhere ? ' · already selected' : ''}
                   </option>
                 );
               })}
@@ -167,6 +203,41 @@ function AvailableTruckFormRow({
           />
         </label>
       </div>
+
+      {hasCurrentLocation && (
+        <div className="available-truck-suggestion-box">
+          <div className="available-truck-suggestion-header">
+            <strong>Suggested proximity from past postings</strong>
+            <span>
+              {suggestionMatches.length > 0
+                ? `${suggestionMatches.length} suggestion${suggestionMatches.length === 1 ? '' : 's'} for ${suggestionGroup?.currentLocation || row.currentLocation}`
+                : `No saved suggestion matches for ${row.currentLocation}`}
+            </span>
+          </div>
+
+          {suggestionMatches.length > 0 && (
+            <div className="available-truck-suggestion-list">
+              {suggestionMatches.slice(0, 8).map((suggestion) => (
+                <button
+                  key={suggestion.key || suggestion.location}
+                  type="button"
+                  className="available-truck-suggestion-chip"
+                  onClick={() => onApplySuggestion(row.key, suggestion)}
+                  disabled={submitting}
+                  title="Fill the next open proximity city/time slot"
+                >
+                  <strong>{suggestion.location}</strong>
+                  <span>
+                    {suggestion.isImmediate
+                      ? 'Immediate · current location'
+                      : `${suggestion.timeLabel || 'time varies'} · ${suggestion.count} prior use${suggestion.count === 1 ? '' : 's'}`}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="available-truck-proximity-grid">
         {[1, 2, 3, 4].map((rank) => (
@@ -511,6 +582,10 @@ export default function App() {
         .filter(Boolean)
     );
   }, [availableTruckRows]);
+
+  const availableTruckSuggestionIndex = useMemo(() => {
+    return availableTrucksData?.proximitySuggestionIndex || {};
+  }, [availableTrucksData]);
 
 
   useEffect(() => {
@@ -987,6 +1062,78 @@ function updateAvailableTruckRow(rowKey, field, value) {
         ...(clearsRosterSelection ? { rosterDriverKey: '' } : {}),
         [field]: value
       };
+    })
+  );
+
+  setAvailableTruckActionError('');
+  setAvailableTruckActionMessage('');
+}
+
+function applyAvailableTruckSuggestion(rowKey, suggestion) {
+  const suggestedLocation = String(suggestion?.location || '').trim();
+  const suggestedTime = String(suggestion?.timeLabel || '').trim();
+
+  if (!suggestedLocation) return;
+
+  setAvailableTruckRows((current) =>
+    current.map((row) => {
+      if (row.key !== rowKey) return row;
+
+      const currentLocation = String(row.currentLocation || '').trim();
+      const currentLocationKey = normalizeAvailableTruckSuggestionKey(currentLocation);
+      const suggestedKey = normalizeAvailableTruckSuggestionKey(suggestedLocation);
+
+      const existingSlots = [1, 2, 3, 4]
+        .map((rank) => ({
+          location: String(row[`proximity${rank}`] || '').trim(),
+          timeLabel: String(row[`proximity${rank}Time`] || '').trim()
+        }))
+        .filter((slot) => slot.location);
+
+      const nextSlots = [];
+      const seenKeys = new Set();
+
+      function pushSlot(location, timeLabel) {
+        const cleanLocation = String(location || '').trim();
+        if (!cleanLocation || nextSlots.length >= 4) return;
+
+        const key = normalizeAvailableTruckSuggestionKey(cleanLocation);
+        if (!key || seenKeys.has(key)) return;
+
+        seenKeys.add(key);
+        nextSlots.push({
+          location: cleanLocation,
+          timeLabel: String(timeLabel || '').trim()
+        });
+      }
+
+      // The entered current city is always the first proximity slot. In the
+      // existing VBA-style posting pattern, the truck's actual city is the
+      // immediate option, and historical nearby matches fill in after it.
+      if (currentLocation) {
+        pushSlot(currentLocation, 'Immediate');
+      }
+
+      existingSlots.forEach((slot) => {
+        const slotKey = normalizeAvailableTruckSuggestionKey(slot.location);
+        if (slotKey && slotKey !== currentLocationKey) {
+          pushSlot(slot.location, slot.timeLabel);
+        }
+      });
+
+      if (!suggestion?.isImmediate && suggestedKey && !seenKeys.has(suggestedKey)) {
+        pushSlot(suggestedLocation, suggestedTime);
+      }
+
+      const nextRow = { ...row };
+
+      for (let rank = 1; rank <= 4; rank += 1) {
+        const slot = nextSlots[rank - 1];
+        nextRow[`proximity${rank}`] = slot?.location || '';
+        nextRow[`proximity${rank}Time`] = slot?.timeLabel || '';
+      }
+
+      return nextRow;
     })
   );
 
@@ -4731,8 +4878,10 @@ function openReportLoadDetails(load) {
                         submitting={availableTruckSubmitting}
                         driverOptions={availableTruckDriverOptions}
                         selectedRosterDriverKeys={selectedAvailableTruckRosterKeys}
+                        suggestionGroup={getAvailableTruckRowSuggestionGroup(row, availableTruckSuggestionIndex)}
                         onSelectDriver={selectAvailableTruckRosterDriver}
                         onUpdate={updateAvailableTruckRow}
+                        onApplySuggestion={applyAvailableTruckSuggestion}
                         onRemove={removeAvailableTruckRow}
                       />
                     ))}
@@ -4763,7 +4912,7 @@ function openReportLoadDetails(load) {
                       {availableTruckSubmitting ? 'Submitting...' : 'Submit Available Trucks'}
                     </button>
                     <span>
-                      {availableTruckDriverOptions.length} active roster option{availableTruckDriverOptions.length === 1 ? '' : 's'} loaded · {availableTruckRows.length}/{AVAILABLE_TRUCK_MAX_ROWS} source slots shown · blank rows are ignored.
+                      {availableTruckDriverOptions.length} active roster option{availableTruckDriverOptions.length === 1 ? '' : 's'} loaded · {Object.keys(availableTruckSuggestionIndex).length} historical city match{Object.keys(availableTruckSuggestionIndex).length === 1 ? '' : 'es'} loaded · {availableTruckRows.length}/{AVAILABLE_TRUCK_MAX_ROWS} source slots shown · blank rows are ignored.
                     </span>
                   </div>
                 </form>

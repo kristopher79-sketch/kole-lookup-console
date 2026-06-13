@@ -5959,6 +5959,124 @@ function getAvailableTruckDateTimeSortValue(dateValue, timeOfDay) {
   return Number.isNaN(time) ? getAvailableTruckDateSortValue(dateOnly) : time;
 }
 
+function normalizeAvailableTruckSuggestionKey(value) {
+  return normalizeSearchValue(parseCityState(value).location || value);
+}
+
+function buildAvailableTruckProximitySuggestionIndex(records = [], options = {}) {
+  const limitPerLocation = Math.max(1, Math.min(Number(options.limitPerLocation) || 8, 12));
+  const locationGroups = new Map();
+
+  records.forEach((record) => {
+    const currentLocationKey = normalizeAvailableTruckSuggestionKey(record.currentLocation);
+    if (!currentLocationKey) return;
+
+    if (!locationGroups.has(currentLocationKey)) {
+      locationGroups.set(currentLocationKey, {
+        key: currentLocationKey,
+        currentLocation: record.currentLocation,
+        sourceRecordCount: 0,
+        suggestionMap: new Map()
+      });
+    }
+
+    const group = locationGroups.get(currentLocationKey);
+    group.sourceRecordCount += 1;
+
+    const sentTime = getAvailableTruckSentTime(record);
+
+    (record.proximityStops || []).forEach((stop) => {
+      const location = cleanAvailableTruckText(stop.location);
+      const suggestionKey = normalizeAvailableTruckSuggestionKey(location);
+
+      if (!suggestionKey || suggestionKey === currentLocationKey) return;
+
+      if (!group.suggestionMap.has(suggestionKey)) {
+        group.suggestionMap.set(suggestionKey, {
+          key: suggestionKey,
+          location,
+          count: 0,
+          lastUsedTime: 0,
+          lastUsedDate: '',
+          timeMap: new Map()
+        });
+      }
+
+      const suggestion = group.suggestionMap.get(suggestionKey);
+      suggestion.count += 1;
+
+      if (sentTime > suggestion.lastUsedTime) {
+        suggestion.lastUsedTime = sentTime;
+        suggestion.lastUsedDate = record.dateSent || '';
+        suggestion.location = location || suggestion.location;
+      }
+
+      const timeLabel = cleanAvailableTruckText(stop.timeLabel);
+      const timeKey = normalizeSearchValue(timeLabel || 'time varies');
+
+      if (!suggestion.timeMap.has(timeKey)) {
+        suggestion.timeMap.set(timeKey, {
+          key: timeKey,
+          label: timeLabel,
+          count: 0,
+          lastUsedTime: 0
+        });
+      }
+
+      const timeBucket = suggestion.timeMap.get(timeKey);
+      timeBucket.count += 1;
+      timeBucket.lastUsedTime = Math.max(timeBucket.lastUsedTime, sentTime);
+    });
+  });
+
+  const output = {};
+
+  Array.from(locationGroups.values()).forEach((group) => {
+    const suggestions = Array.from(group.suggestionMap.values())
+      .map((suggestion) => {
+        const topTime = Array.from(suggestion.timeMap.values())
+          .sort((a, b) => {
+            const countDiff = b.count - a.count;
+            if (countDiff !== 0) return countDiff;
+            return b.lastUsedTime - a.lastUsedTime;
+          })[0] || null;
+
+        return {
+          key: suggestion.key,
+          location: suggestion.location,
+          timeLabel: topTime?.label || '',
+          count: suggestion.count,
+          lastUsedDate: suggestion.lastUsedDate,
+          timeOptions: Array.from(suggestion.timeMap.values())
+            .filter((time) => time.label)
+            .sort((a, b) => b.count - a.count || b.lastUsedTime - a.lastUsedTime)
+            .slice(0, 3)
+            .map((time) => ({
+              label: time.label,
+              count: time.count
+            }))
+        };
+      })
+      .sort((a, b) => {
+        const countDiff = b.count - a.count;
+        if (countDiff !== 0) return countDiff;
+        return getAvailableTruckDateSortValue(b.lastUsedDate) - getAvailableTruckDateSortValue(a.lastUsedDate);
+      })
+      .slice(0, limitPerLocation);
+
+    if (suggestions.length > 0) {
+      output[group.key] = {
+        key: group.key,
+        currentLocation: group.currentLocation,
+        sourceRecordCount: group.sourceRecordCount,
+        suggestions
+      };
+    }
+  });
+
+  return output;
+}
+
 function getAvailableTruckSentTime(record) {
   const created = new Date(record.createdAt || '').getTime();
 
@@ -6485,6 +6603,7 @@ function buildAvailableTrucksResponse(items, options = {}) {
   }
 
   const latestAgeHours = latestRecord ? getAvailableTruckAgeHours(latestRecord, now) : null;
+  const proximitySuggestionIndex = buildAvailableTruckProximitySuggestionIndex(sortedRecords);
 
   return {
     success: true,
@@ -6510,6 +6629,8 @@ function buildAvailableTrucksResponse(items, options = {}) {
       activeFutureAssignmentsScanned: assignmentIndex.assignments?.length || 0,
       wonAssignmentsScanned: assignmentIndex.allAssignments?.length || 0,
       recentRecordCount: recentRecords.length,
+      proximitySuggestionLocationCount: Object.keys(proximitySuggestionIndex).length,
+      proximitySuggestionSourceRecordCount: sortedRecords.length,
       uniqueRecentDrivers: new Set(recentRecords.map((record) => normalizeSearchValue(record.driverName)).filter(Boolean)).size,
       uniqueRecentTrucks: new Set(recentRecords.map((record) => normalizeSearchValue(record.unitNo)).filter(Boolean)).size,
       uniqueRecentCurrentLocations: currentCityBuckets.size,
@@ -6526,6 +6647,7 @@ function buildAvailableTrucksResponse(items, options = {}) {
       repeatTrucks,
       attention
     },
+    proximitySuggestionIndex,
     records: currentRecords,
     latestBatchRecords,
     recordsWithin24Hours,

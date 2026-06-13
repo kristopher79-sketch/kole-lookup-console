@@ -15,6 +15,258 @@ const API =
     : 'https://kole-lookup-console.onrender.com');
 
 const SALES_NOTE_MAX_LENGTH = 63000;
+const AVAILABLE_TRUCK_MAX_ROWS = 8;
+
+function createAvailableTruckDraftRow(seed = Date.now()) {
+  return {
+    key: `${seed}-${Math.random().toString(36).slice(2, 9)}`,
+    rosterDriverKey: '',
+    driverName: '',
+    unitNo: '',
+    equipmentType: '',
+    currentLocation: '',
+    proximity1: '',
+    proximity1Time: '',
+    proximity2: '',
+    proximity2Time: '',
+    proximity3: '',
+    proximity3Time: '',
+    proximity4: '',
+    proximity4Time: ''
+  };
+}
+
+function getDefaultAvailableTruckTimeOfDay() {
+  const hour = Number(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric',
+    hour12: false
+  }).format(new Date()));
+
+  if (hour < 12) return 'AM';
+  if (hour < 17) return 'PM';
+  return 'Evening';
+}
+
+function hasAvailableTruckDraftData(row) {
+  return Boolean(
+    row.driverName ||
+    row.unitNo ||
+    row.equipmentType ||
+    row.currentLocation ||
+    row.proximity1 ||
+    row.proximity1Time ||
+    row.proximity2 ||
+    row.proximity2Time ||
+    row.proximity3 ||
+    row.proximity3Time ||
+    row.proximity4 ||
+    row.proximity4Time
+  );
+}
+
+function normalizeAvailableTruckSuggestionKey(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getAvailableTruckRowSuggestionGroup(row, suggestionIndex = {}) {
+  const key = normalizeAvailableTruckSuggestionKey(row?.currentLocation);
+  if (!key) return null;
+
+  return suggestionIndex?.[key] || null;
+}
+
+
+function AvailableTruckFormRow({
+  row,
+  index,
+  canRemove,
+  submitting,
+  driverOptions = [],
+  selectedRosterDriverKeys = new Set(),
+  suggestionGroup = null,
+  onSelectDriver,
+  onUpdate,
+  onApplySuggestion,
+  onRemove
+}) {
+  const rowNumber = index + 1;
+  const hasRosterOptions = driverOptions.length > 0;
+  const isRosterLocked = Boolean(row.rosterDriverKey);
+  const currentLocationLabel = String(row.currentLocation || '').trim();
+  const hasCurrentLocation = Boolean(currentLocationLabel);
+  const currentLocationSuggestionKey = normalizeAvailableTruckSuggestionKey(currentLocationLabel);
+  const historicalSuggestionMatches = suggestionGroup?.suggestions || [];
+  const immediateSuggestion = hasCurrentLocation
+    ? {
+        key: `immediate-${currentLocationSuggestionKey}`,
+        location: currentLocationLabel,
+        timeLabel: 'Immediate',
+        count: suggestionGroup?.sourceRecordCount || 0,
+        isImmediate: true
+      }
+    : null;
+  const suggestionMatches = [
+    immediateSuggestion,
+    ...historicalSuggestionMatches.filter((suggestion) =>
+      normalizeAvailableTruckSuggestionKey(suggestion?.location) !== currentLocationSuggestionKey
+    )
+  ].filter(Boolean);
+
+  return (
+    <div className="available-truck-form-row-card">
+      <div className="available-truck-form-row-header">
+        <div>
+          <strong>Truck {rowNumber}</strong>
+          <span>Choose an active roster driver; unit and equipment fill from Driver Roster.</span>
+        </div>
+        {canRemove && (
+          <button
+            type="button"
+            className="danger-button compact-action-button"
+            onClick={() => onRemove(row.key)}
+            disabled={submitting}
+          >
+            Remove
+          </button>
+        )}
+      </div>
+
+      <div className="available-truck-main-grid">
+        <label>
+          <span>Driver Name</span>
+          {hasRosterOptions ? (
+            <select
+              value={row.rosterDriverKey || ''}
+              onChange={(e) => onSelectDriver(row.key, e.target.value)}
+              disabled={submitting}
+            >
+              <option value="">Select active driver</option>
+              {driverOptions.map((option) => {
+                const disabledElsewhere =
+                  option.key !== row.rosterDriverKey && selectedRosterDriverKeys.has(option.key);
+
+                return (
+                  <option key={option.key} value={option.key} disabled={disabledElsewhere}>
+                    {option.driverName || option.unitNo || 'Unnamed driver'}{disabledElsewhere ? ' · already selected' : ''}
+                  </option>
+                );
+              })}
+            </select>
+          ) : (
+            <input
+              value={row.driverName}
+              onChange={(e) => onUpdate(row.key, 'driverName', e.target.value)}
+              placeholder="Driver / team"
+              disabled={submitting}
+            />
+          )}
+          <small className="available-truck-field-hint">
+            {hasRosterOptions
+              ? (row.driverName ? `Posting as ${row.driverName}` : 'Active Driver Roster is the source of truth.')
+              : 'Roster options unavailable; manual entry is still allowed.'}
+          </small>
+        </label>
+        <label>
+          <span>Unit No</span>
+          <input
+            value={row.unitNo}
+            onChange={(e) => onUpdate(row.key, 'unitNo', e.target.value)}
+            placeholder="Truck #"
+            readOnly={isRosterLocked}
+            disabled={submitting}
+          />
+        </label>
+        <label>
+          <span>Equipment Type</span>
+          <input
+            value={row.equipmentType}
+            onChange={(e) => onUpdate(row.key, 'equipmentType', e.target.value)}
+            placeholder="Solo stepdeck, RGN, etc."
+            readOnly={isRosterLocked}
+            disabled={submitting}
+          />
+        </label>
+        <label>
+          <span>Current Location</span>
+          <input
+            value={row.currentLocation}
+            onChange={(e) => onUpdate(row.key, 'currentLocation', e.target.value)}
+            placeholder="City, ST"
+            disabled={submitting}
+          />
+        </label>
+      </div>
+
+      {hasCurrentLocation && (
+        <div className="available-truck-suggestion-box">
+          <div className="available-truck-suggestion-header">
+            <strong>Suggested proximity from past postings</strong>
+            <span>
+              {suggestionMatches.length > 0
+                ? `${suggestionMatches.length} suggestion${suggestionMatches.length === 1 ? '' : 's'} for ${suggestionGroup?.currentLocation || row.currentLocation}`
+                : `No saved suggestion matches for ${row.currentLocation}`}
+            </span>
+          </div>
+
+          {suggestionMatches.length > 0 && (
+            <div className="available-truck-suggestion-list">
+              {suggestionMatches.slice(0, 8).map((suggestion) => (
+                <button
+                  key={suggestion.key || suggestion.location}
+                  type="button"
+                  className="available-truck-suggestion-chip"
+                  onClick={() => onApplySuggestion(row.key, suggestion)}
+                  disabled={submitting}
+                  title="Fill the next open proximity city/time slot"
+                >
+                  <strong>{suggestion.location}</strong>
+                  <span>
+                    {suggestion.isImmediate
+                      ? 'Immediate · current location'
+                      : `${suggestion.timeLabel || 'time varies'} · ${suggestion.count} prior use${suggestion.count === 1 ? '' : 's'}`}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="available-truck-proximity-grid">
+        {[1, 2, 3, 4].map((rank) => (
+          <div key={`${row.key}-proximity-${rank}`} className="available-truck-proximity-pair">
+            <label>
+              <span>City {rank}</span>
+              <input
+                value={row[`proximity${rank}`]}
+                onChange={(e) => onUpdate(row.key, `proximity${rank}`, e.target.value)}
+                placeholder="City, ST"
+                disabled={submitting}
+              />
+            </label>
+            <label>
+              <span>Time {rank}</span>
+              <input
+                value={row[`proximity${rank}Time`]}
+                onChange={(e) => onUpdate(row.key, `proximity${rank}Time`, e.target.value)}
+                placeholder="2 hrs, AM, etc."
+                disabled={submitting}
+              />
+            </label>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 
 async function openExternalLink(url) {
   if (!url) return;
@@ -207,7 +459,37 @@ export default function App() {
   const [uploadDigestLoading, setUploadDigestLoading] = useState(false);
   const [uploadDigestError, setUploadDigestError] = useState('');
   const [uploadDigestActionError, setUploadDigestActionError] = useState('');
+  const [uploadDigestSectionOpen, setUploadDigestSectionOpen] = useState(false);
   const [uploadDigestOpen, setUploadDigestOpen] = useState(false);
+  const [intelliTrackSectionOpen, setIntelliTrackSectionOpen] = useState(false);
+  const [intelliTrackOpen, setIntelliTrackOpen] = useState(false);
+  const [intelliTrackActionOpen, setIntelliTrackActionOpen] = useState(false);
+  const [intelliTrackData, setIntelliTrackData] = useState(null);
+  const [intelliTrackLoading, setIntelliTrackLoading] = useState(false);
+  const [intelliTrackError, setIntelliTrackError] = useState('');
+  const [intelliTrackActionError, setIntelliTrackActionError] = useState('');
+  const [intelliTrackActionMessage, setIntelliTrackActionMessage] = useState('');
+  const [intelliTrackSearchBol, setIntelliTrackSearchBol] = useState('');
+  const [intelliTrackSearchResult, setIntelliTrackSearchResult] = useState(null);
+  const [intelliTrackSearchLoading, setIntelliTrackSearchLoading] = useState(false);
+  const [intelliTrackSearchError, setIntelliTrackSearchError] = useState('');
+  const [intelliTrackActionLoading, setIntelliTrackActionLoading] = useState('');
+  const [intelliTrackPendingBol, setIntelliTrackPendingBol] = useState('');
+  const [intelliTrackSuppressedBols, setIntelliTrackSuppressedBols] = useState([]);
+  const [availableTrucksSectionOpen, setAvailableTrucksSectionOpen] = useState(false);
+  const [availableTrucksOpen, setAvailableTrucksOpen] = useState(false);
+  const [availableTrucksActionOpen, setAvailableTrucksActionOpen] = useState(false);
+  const [availableTrucksData, setAvailableTrucksData] = useState(null);
+  const [availableTrucksLoading, setAvailableTrucksLoading] = useState(false);
+  const [availableTrucksError, setAvailableTrucksError] = useState('');
+  const [availableTruckFormDate, setAvailableTruckFormDate] = useState(getEasternDateInputValue);
+  const [availableTruckTimeOfDay, setAvailableTruckTimeOfDay] = useState(getDefaultAvailableTruckTimeOfDay);
+  const [availableTruckRows, setAvailableTruckRows] = useState(() => [createAvailableTruckDraftRow('initial')]);
+  const [availableTruckSubmitting, setAvailableTruckSubmitting] = useState(false);
+  const [availableTruckActionMessage, setAvailableTruckActionMessage] = useState('');
+  const [availableTruckActionError, setAvailableTruckActionError] = useState('');
+  const [availableTruckDrilldown, setAvailableTruckDrilldown] = useState(null);
+  const [reportsSectionOpen, setReportsSectionOpen] = useState(false);
   
 
   function isBolLookup(value) {
@@ -263,6 +545,49 @@ export default function App() {
   }, [filteredResults, sortField, sortDirection]);
 
 
+  const availableTruckDriverOptions = useMemo(() => {
+    const options = availableTrucksData?.activeDriverOptions || [];
+
+    return options
+      .map((option, index) => {
+        const driverName = String(option?.driverName || '').trim();
+        const unitNo = String(option?.unitNo || '').trim();
+        const equipmentType = String(option?.equipmentType || '').trim();
+        const key = String(option?.key || option?.id || `${driverName}-${unitNo}-${index}`).trim();
+
+        return {
+          key,
+          id: option?.id || '',
+          driverName,
+          unitNo,
+          equipmentType,
+          status: option?.status || '',
+          trailerType: option?.trailerType || '',
+          soloOrTeam: option?.soloOrTeam || '',
+          tmsName: option?.tmsName || ''
+        };
+      })
+      .filter((option) => option.key && (option.driverName || option.unitNo))
+      .sort((a, b) => {
+        const nameCompare = a.driverName.localeCompare(b.driverName);
+        if (nameCompare !== 0) return nameCompare;
+        return a.unitNo.localeCompare(b.unitNo);
+      });
+  }, [availableTrucksData]);
+
+  const selectedAvailableTruckRosterKeys = useMemo(() => {
+    return new Set(
+      availableTruckRows
+        .map((row) => String(row.rosterDriverKey || '').trim())
+        .filter(Boolean)
+    );
+  }, [availableTruckRows]);
+
+  const availableTruckSuggestionIndex = useMemo(() => {
+    return availableTrucksData?.proximitySuggestionIndex || {};
+  }, [availableTrucksData]);
+
+
   useEffect(() => {
     const runtimeClass = isTauriRuntime ? 'tauri-runtime' : 'web-runtime';
     document.body.classList.add(runtimeClass);
@@ -287,6 +612,7 @@ export default function App() {
         setSelectedCustomerTrend(null);
         setSelectedDriverRoster(null);
         setSelectedSalesLead(null);
+        setAvailableTruckDrilldown(null);
       }
     }
 
@@ -300,15 +626,54 @@ export default function App() {
     loadOperationsDashboard();
     loadDriverPositions();
     loadUploadDigest(uploadDigestDate);
+    loadIntelliTrack();
+    loadAvailableTrucks();
 
     const interval = window.setInterval(() => {
       loadOperationsDashboard({ silent: true });
       loadDriverPositions({ silent: true });
       loadUploadDigest(uploadDigestDate, { silent: true });
+      loadIntelliTrack({ silent: true });
+      loadAvailableTrucks({ silent: true });
     }, 10 * 60 * 1000);
 
     return () => window.clearInterval(interval);
   }, [isAuthenticated, accessToken, uploadDigestDate]);
+
+  useEffect(() => {
+    const pendingBol = String(intelliTrackPendingBol || '').trim().toUpperCase();
+    if (!pendingBol) return;
+
+    const records = intelliTrackData?.records || [];
+    const isNowTracking = records.some((record) =>
+      String(record?.BOLNumber || '').trim().toUpperCase() === pendingBol
+    );
+
+    if (isNowTracking) {
+      setIntelliTrackPendingBol('');
+      setIntelliTrackActionMessage(`${pendingBol} is now showing in Currently Tracking.`);
+    }
+  }, [intelliTrackData, intelliTrackPendingBol]);
+
+  useEffect(() => {
+    if (!intelliTrackActionMessage) return undefined;
+
+    const timeout = window.setTimeout(() => {
+      setIntelliTrackActionMessage('');
+    }, 7000);
+
+    return () => window.clearTimeout(timeout);
+  }, [intelliTrackActionMessage]);
+
+  useEffect(() => {
+    if (!availableTruckActionMessage) return undefined;
+
+    const timeout = window.setTimeout(() => {
+      setAvailableTruckActionMessage('');
+    }, 9000);
+
+    return () => window.clearTimeout(timeout);
+  }, [availableTruckActionMessage]);
 
   function toggleSort(field) {
     if (sortField === field) {
@@ -340,6 +705,30 @@ export default function App() {
     setSortField('');
     setSortDirection('asc');
     setSalesSearchReturnLead(null);
+    setIntelliTrackSearchBol('');
+    setIntelliTrackSearchResult(null);
+    setIntelliTrackSearchError('');
+    setIntelliTrackActionError('');
+    setIntelliTrackActionMessage('');
+    setIntelliTrackPendingBol('');
+    setIntelliTrackSuppressedBols([]);
+    setUploadDigestSectionOpen(false);
+    setIntelliTrackSectionOpen(false);
+    setIntelliTrackOpen(false);
+    setIntelliTrackActionOpen(false);
+    setAvailableTrucksSectionOpen(false);
+    setAvailableTrucksOpen(false);
+    setAvailableTrucksActionOpen(false);
+    setAvailableTrucksData(null);
+    setAvailableTrucksError('');
+    setAvailableTruckFormDate(getEasternDateInputValue());
+    setAvailableTruckTimeOfDay(getDefaultAvailableTruckTimeOfDay());
+    setAvailableTruckRows([createAvailableTruckDraftRow('reset')]);
+    setAvailableTruckSubmitting(false);
+    setAvailableTruckActionMessage('');
+    setAvailableTruckActionError('');
+    setAvailableTruckDrilldown(null);
+    setReportsSectionOpen(false);
   }
 
   async function handleLogin() {
@@ -586,6 +975,506 @@ async function loadUploadDigest(dateValue = uploadDigestDate, options = {}) {
 }
 
 
+async function loadIntelliTrack(options = {}) {
+  const { silent = false } = options;
+
+  if (!silent) {
+    setIntelliTrackLoading(true);
+  }
+
+  setIntelliTrackError('');
+
+  try {
+    const res = await authedFetch(`${API}/tracking/intellitrack`);
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Unable to load IntelliTrack.');
+    }
+
+    setIntelliTrackData(data);
+
+    const activeBols = new Set(
+      (data.records || [])
+        .map((record) => String(record?.BOLNumber || '').trim().toUpperCase())
+        .filter(Boolean)
+    );
+
+    setIntelliTrackSuppressedBols((current) =>
+      current.filter((bol) => activeBols.has(bol))
+    );
+  } catch (err) {
+    setIntelliTrackError(err.message || 'Unable to load IntelliTrack.');
+
+    if (!silent) {
+      setIntelliTrackData(null);
+    }
+  } finally {
+    if (!silent) {
+      setIntelliTrackLoading(false);
+    }
+  }
+}
+
+
+
+async function loadAvailableTrucks(options = {}) {
+  const { silent = false } = options;
+
+  if (!silent) {
+    setAvailableTrucksLoading(true);
+  }
+
+  setAvailableTrucksError('');
+
+  try {
+    const res = await authedFetch(`${API}/available-trucks`);
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Unable to load Available Trucks.');
+    }
+
+    setAvailableTrucksData(data);
+  } catch (err) {
+    setAvailableTrucksError(err.message || 'Unable to load Available Trucks.');
+
+    if (!silent) {
+      setAvailableTrucksData(null);
+    }
+  } finally {
+    if (!silent) {
+      setAvailableTrucksLoading(false);
+    }
+  }
+}
+
+function updateAvailableTruckRow(rowKey, field, value) {
+  setAvailableTruckRows((current) =>
+    current.map((row) => {
+      if (row.key !== rowKey) return row;
+
+      const clearsRosterSelection =
+        row.rosterDriverKey && ['driverName', 'unitNo', 'equipmentType'].includes(field);
+
+      return {
+        ...row,
+        ...(clearsRosterSelection ? { rosterDriverKey: '' } : {}),
+        [field]: value
+      };
+    })
+  );
+
+  setAvailableTruckActionError('');
+  setAvailableTruckActionMessage('');
+}
+
+function applyAvailableTruckSuggestion(rowKey, suggestion) {
+  const suggestedLocation = String(suggestion?.location || '').trim();
+  const suggestedTime = String(suggestion?.timeLabel || '').trim();
+
+  if (!suggestedLocation) return;
+
+  let applied = false;
+  let noOpenSlot = false;
+
+  setAvailableTruckRows((current) =>
+    current.map((row) => {
+      if (row.key !== rowKey) return row;
+
+      const suggestionKey = normalizeAvailableTruckSuggestionKey(suggestedLocation);
+      let targetRank = 0;
+
+      for (let rank = 1; rank <= 4; rank += 1) {
+        const existingKey = normalizeAvailableTruckSuggestionKey(row[`proximity${rank}`]);
+        if (existingKey && existingKey === suggestionKey) {
+          targetRank = rank;
+          break;
+        }
+      }
+
+      if (!targetRank) {
+        for (let rank = 1; rank <= 4; rank += 1) {
+          if (!String(row[`proximity${rank}`] || '').trim()) {
+            targetRank = rank;
+            break;
+          }
+        }
+      }
+
+      if (!targetRank) {
+        noOpenSlot = true;
+        return row;
+      }
+
+      applied = true;
+
+      return {
+        ...row,
+        [`proximity${targetRank}`]: suggestedLocation,
+        [`proximity${targetRank}Time`]: suggestedTime || row[`proximity${targetRank}Time`]
+      };
+    })
+  );
+
+  if (noOpenSlot && !applied) {
+    setAvailableTruckActionError('All four proximity slots are already filled for that truck. Clear one before applying another suggestion.');
+    return;
+  }
+
+  setAvailableTruckActionError('');
+  setAvailableTruckActionMessage('');
+}
+
+function selectAvailableTruckRosterDriver(rowKey, rosterDriverKey) {
+  const selectedOption = availableTruckDriverOptions.find((option) => option.key === rosterDriverKey) || null;
+
+  setAvailableTruckRows((current) =>
+    current.map((row) => {
+      if (row.key !== rowKey) return row;
+
+      if (!selectedOption) {
+        return {
+          ...row,
+          rosterDriverKey: '',
+          driverName: '',
+          unitNo: '',
+          equipmentType: ''
+        };
+      }
+
+      return {
+        ...row,
+        rosterDriverKey: selectedOption.key,
+        driverName: selectedOption.driverName,
+        unitNo: selectedOption.unitNo,
+        equipmentType: selectedOption.equipmentType
+      };
+    })
+  );
+
+  setAvailableTruckActionError('');
+  setAvailableTruckActionMessage('');
+}
+
+function addAvailableTruckRow() {
+  setAvailableTruckRows((current) => {
+    if (current.length >= AVAILABLE_TRUCK_MAX_ROWS) return current;
+    return [...current, createAvailableTruckDraftRow(current.length + 1)];
+  });
+
+  setAvailableTruckActionError('');
+}
+
+function removeAvailableTruckRow(rowKey) {
+  setAvailableTruckRows((current) => {
+    const nextRows = current.filter((row) => row.key !== rowKey);
+    return nextRows.length ? nextRows : [createAvailableTruckDraftRow('replacement')];
+  });
+
+  setAvailableTruckActionError('');
+  setAvailableTruckActionMessage('');
+}
+
+function clearAvailableTruckForm() {
+  setAvailableTruckFormDate(getEasternDateInputValue());
+  setAvailableTruckTimeOfDay(getDefaultAvailableTruckTimeOfDay());
+  setAvailableTruckRows([createAvailableTruckDraftRow('clear')]);
+  setAvailableTruckActionError('');
+  setAvailableTruckActionMessage('');
+}
+
+function buildAvailableTruckSubmissionDrivers() {
+  return availableTruckRows
+    .filter(hasAvailableTruckDraftData)
+    .map((row) => ({
+      rosterDriverKey: String(row.rosterDriverKey || '').trim(),
+      driverName: row.driverName.trim(),
+      unitNo: row.unitNo.trim(),
+      equipmentType: row.equipmentType.trim(),
+      currentLocation: row.currentLocation.trim(),
+      proximityStops: [1, 2, 3, 4].map((rank) => ({
+        location: String(row[`proximity${rank}`] || '').trim(),
+        timeLabel: String(row[`proximity${rank}Time`] || '').trim()
+      }))
+    }));
+}
+
+function validateAvailableTruckFormRows(drivers) {
+  if (drivers.length === 0) {
+    throw new Error('Add at least one truck before submitting. Blank rows are ignored, but all rows are blank right now.');
+  }
+
+  const seenRosterDrivers = new Map();
+  const seenUnits = new Map();
+  const seenDriverNames = new Map();
+
+  drivers.forEach((driver, index) => {
+    const missing = [];
+    if (!driver.driverName) missing.push('driver name');
+    if (!driver.unitNo) missing.push('unit number');
+    if (!driver.equipmentType) missing.push('equipment type');
+    if (!driver.currentLocation) missing.push('current location');
+
+    if (missing.length > 0) {
+      throw new Error(`Truck ${index + 1} needs ${missing.join(', ')}.`);
+    }
+
+    const rowLabel = `Truck ${index + 1}`;
+    const rosterKey = String(driver.rosterDriverKey || '').trim();
+    const unitKey = String(driver.unitNo || '').trim().toUpperCase();
+    const driverKey = String(driver.driverName || '').trim().toLowerCase();
+
+    if (rosterKey) {
+      if (seenRosterDrivers.has(rosterKey)) {
+        throw new Error(`${rowLabel} duplicates ${seenRosterDrivers.get(rosterKey)}. Each active roster driver can only be posted once.`);
+      }
+      seenRosterDrivers.set(rosterKey, rowLabel);
+    }
+
+    if (unitKey) {
+      if (seenUnits.has(unitKey)) {
+        throw new Error(`${rowLabel} duplicates unit ${driver.unitNo} from ${seenUnits.get(unitKey)}.`);
+      }
+      seenUnits.set(unitKey, rowLabel);
+    }
+
+    if (driverKey) {
+      if (seenDriverNames.has(driverKey)) {
+        throw new Error(`${rowLabel} duplicates driver ${driver.driverName} from ${seenDriverNames.get(driverKey)}.`);
+      }
+      seenDriverNames.set(driverKey, rowLabel);
+    }
+  });
+}
+
+async function submitAvailableTruckForm(e) {
+  if (e) {
+    e.preventDefault();
+  }
+
+  setAvailableTruckSubmitting(true);
+  setAvailableTruckActionError('');
+  setAvailableTruckActionMessage('');
+
+  try {
+    const drivers = buildAvailableTruckSubmissionDrivers();
+    validateAvailableTruckFormRows(drivers);
+
+    const res = await authedFetch(`${API}/available-trucks`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        dateSent: availableTruckFormDate,
+        timeOfDay: availableTruckTimeOfDay,
+        drivers
+      })
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Unable to submit available trucks.');
+    }
+
+    setAvailableTruckActionMessage(data.message || `${drivers.length} available truck${drivers.length === 1 ? '' : 's'} submitted.`);
+    setAvailableTruckRows([createAvailableTruckDraftRow('submitted')]);
+    await loadAvailableTrucks({ silent: true });
+  } catch (err) {
+    setAvailableTruckActionError(err.message || 'Unable to submit available trucks.');
+  } finally {
+    setAvailableTruckSubmitting(false);
+  }
+}
+
+function isIntelliTrackBolWaiting(bol) {
+  const pendingBol = String(intelliTrackPendingBol || '').trim().toUpperCase();
+  const targetBol = String(bol || '').trim().toUpperCase();
+
+  if (!pendingBol || !targetBol || pendingBol !== targetBol) {
+    return false;
+  }
+
+  const records = intelliTrackData?.records || [];
+  return !records.some((record) =>
+    String(record?.BOLNumber || '').trim().toUpperCase() === targetBol
+  );
+}
+
+function handleIntelliTrackBolChange(value) {
+  setIntelliTrackSearchBol(value.toUpperCase());
+  setIntelliTrackSearchError('');
+  setIntelliTrackActionError('');
+  setIntelliTrackActionMessage('');
+}
+
+async function searchIntelliTrackOrder(e) {
+  if (e) {
+    e.preventDefault();
+  }
+
+  const bol = intelliTrackSearchBol.trim().toUpperCase();
+
+  if (!bol) {
+    setIntelliTrackSearchError('Enter a BOL number.');
+    return;
+  }
+
+  if (isIntelliTrackBolWaiting(bol)) {
+    setIntelliTrackSearchError(`${bol} already has a tracking request submitted. Waiting for it to show in Currently Tracking.`);
+    return;
+  }
+
+  setIntelliTrackSearchLoading(true);
+  setIntelliTrackSearchError('');
+  setIntelliTrackActionError('');
+  setIntelliTrackActionMessage('');
+  setIntelliTrackSearchResult(null);
+
+  try {
+    const res = await authedFetch(
+      `${API}/tracking/intellitrack/order?bol=${encodeURIComponent(bol)}`
+    );
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Unable to find that order.');
+    }
+
+    setIntelliTrackSearchResult(data.order || null);
+  } catch (err) {
+    setIntelliTrackSearchError(err.message || 'Unable to find that order.');
+  } finally {
+    setIntelliTrackSearchLoading(false);
+  }
+}
+
+function getIntelliTrackButtonState(order) {
+  const isTracking = Boolean(order?.EnableTracking || order?.TrackingActive);
+
+  if (isTracking) {
+    return {
+      enabled: false,
+      label: 'Turn Tracking Off',
+      disabled: false,
+      reason: ''
+    };
+  }
+
+  if (!order?.CanStartTracking) {
+    return {
+      enabled: true,
+      label: 'Turn Tracking On',
+      disabled: true,
+      reason: order?.StartBlockedReason || 'This order is not eligible for IntelliTrack.'
+    };
+  }
+
+  return {
+    enabled: true,
+    label: 'Turn Tracking On',
+    disabled: false,
+    reason: ''
+  };
+}
+
+async function toggleIntelliTrackOrder(order, enabled) {
+  if (!order?.id) {
+    setIntelliTrackActionError('This order does not have a Bid Listing item ID.');
+    return;
+  }
+
+  const loadingKey = `${order.id}-${enabled ? 'on' : 'off'}`;
+
+  setIntelliTrackActionLoading(loadingKey);
+  setIntelliTrackActionError('');
+  setIntelliTrackActionMessage('');
+
+  try {
+    const res = await authedFetch(
+      `${API}/tracking/intellitrack/order/${encodeURIComponent(order.id)}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ enabled })
+      }
+    );
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Unable to update IntelliTrack.');
+    }
+
+    if (enabled) {
+      const submittedBol = String(data.order?.BOL || order?.BOL || '').trim().toUpperCase();
+
+      if (submittedBol) {
+        setIntelliTrackPendingBol(submittedBol);
+      }
+
+      setIntelliTrackSearchBol('');
+      setIntelliTrackSearchResult(null);
+      setIntelliTrackSearchError('');
+      setIntelliTrackActionMessage(
+        data.message ||
+        (submittedBol
+          ? `${submittedBol} tracking request submitted. Waiting for it to show in Currently Tracking.`
+          : 'IntelliTrack request submitted. Waiting for it to show in Currently Tracking.')
+      );
+    } else {
+      const stoppedBol = String(
+        data.order?.BOL ||
+        order?.BOL ||
+        order?.BOLNumber ||
+        ''
+      ).trim().toUpperCase();
+
+      if (stoppedBol) {
+        setIntelliTrackSuppressedBols((current) =>
+          current.includes(stoppedBol) ? current : [...current, stoppedBol]
+        );
+      }
+
+      setIntelliTrackSearchBol('');
+      setIntelliTrackSearchResult(null);
+      setIntelliTrackSearchError('');
+      setIntelliTrackPendingBol('');
+      setIntelliTrackActionMessage(
+        data.message ||
+        (stoppedBol
+          ? `${stoppedBol} tracking shutoff submitted.`
+          : 'IntelliTrack shutoff submitted.')
+      );
+    }
+
+    if (enabled) {
+      await loadIntelliTrack({ silent: true });
+    }
+  } catch (err) {
+    setIntelliTrackActionError(err.message || 'Unable to update IntelliTrack.');
+  } finally {
+    setIntelliTrackActionLoading('');
+  }
+}
+
+async function turnOffIntelliTrackRecord(record) {
+  const bidListingId = String(record?.BidListingID || '').trim();
+
+  if (!bidListingId) {
+    setIntelliTrackActionError('This IntelliTrack row does not have a linked Bid Listing ID.');
+    return;
+  }
+
+  await toggleIntelliTrackOrder({ id: bidListingId, BOL: record?.BOLNumber }, false);
+}
+
+
 function changeUploadDigestDate(days) {
   setUploadDigestDate((current) => clampUploadDigestDate(addDaysToDateInput(current, days)));
 }
@@ -648,6 +1537,8 @@ function refreshOperationsAndTracking() {
   loadOperationsDashboard();
   loadDriverPositions();
   loadUploadDigest(uploadDigestDate);
+  loadIntelliTrack();
+  loadAvailableTrucks();
 }
 
 function closeDriverRosterModal() {
@@ -2719,6 +3610,122 @@ function openReportLoadDetails(load) {
   }
 
 
+  function SettlementDriverPaySummary({ rows }) {
+    const summaryRows = rows || [];
+
+    return (
+      <div className="settlement-subsection settlement-driver-pay-summary">
+        <div className="settlement-subsection-header">
+          <div>
+            <h5>Gross / Driver Pay by Driver</h5>
+                  </div>
+          <span>{formatReportNumber(summaryRows.length)} driver(s)</span>
+        </div>
+
+        {summaryRows.length === 0 ? (
+          <div className="msg">No driver pay summary is available for this settlement window.</div>
+        ) : (
+          <div className="report-table-wrap settlement-summary-table-wrap">
+            <table className="settlement-driver-summary-table">
+              <thead>
+                <tr>
+                  <th>Driver</th>
+                  <th>Truck(s)</th>
+                  <th>Orders</th>
+                  <th>BOLs</th>
+                  <th>Gross Revenue</th>
+                  <th>Driver Pay</th>
+                  <th>Margin</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summaryRows.map((row, index) => (
+                  <tr key={`${row.driver || 'driver'}-${row.trucks || 'truck'}-${index}`}>
+                    <td>{row.driver || 'Unknown Operator'}</td>
+                    <td>{row.trucks || '-'}</td>
+                    <td>{formatReportNumber(row.orderCount)}</td>
+                    <td>{(row.bols || []).join(', ') || '-'}</td>
+                    <td>{formatReportMoney(row.bidTotal)}</td>
+                    <td>{formatReportMoney(row.driverPayTotal)}</td>
+                    <td>{formatReportMoney(row.margin)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function ActiveDriversNoRevenueCheck({ data }) {
+    const rows = data?.main || [];
+
+    if (!data) return null;
+
+    if (!data.sourceAvailable && data.warning) {
+      return (
+        <div className="report-alert locked settlement-roster-warning">
+          <h4>Active driver revenue check skipped.</h4>
+          <p>{data.warning}</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="settlement-subsection settlement-no-revenue-check">
+        <div className="settlement-subsection-header">
+          <div>
+            <h5>Active Drivers With No Main-Window Revenue</h5>
+                     </div>
+          <span>{formatReportNumber(rows.length)} flagged</span>
+        </div>
+
+        {data.warning && (
+          <div className="settlement-check-warning">{data.warning}</div>
+        )}
+
+        {rows.length === 0 ? (
+          <div className="msg good-news">Every active roster driver matched main-window settlement revenue.</div>
+        ) : (
+          <div className="report-table-wrap settlement-summary-table-wrap">
+            <table className="settlement-no-revenue-table">
+              <thead>
+                <tr>
+                  <th>Operator / Team</th>
+                  <th>TMS Name</th>
+                  <th>Truck</th>
+                  <th>Driver Type</th>
+                  <th>Trailer</th>
+                  <th>Start Date</th>
+                  <th>Check</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((roster, index) => (
+                  <tr key={`${roster.id || roster.truck || roster.tmsName || index}-${index}`}>
+                    <td>{roster.operatorTeamName || '-'}</td>
+                    <td>{roster.tmsName || '-'}</td>
+                    <td>{roster.truck || '-'}</td>
+                    <td>{roster.driverType || '-'}</td>
+                    <td>{roster.trailerType || '-'}</td>
+                    <td>{formatRosterDate(roster.startDate) || '-'}</td>
+                    <td>
+                      {roster.hasLikelyNextWeekRevenue
+                        ? 'No main-window revenue; appears in likely next week.'
+                        : 'No main-window revenue found.'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+
   function OrdersDueSettlementPreview() {
     const rows = ordersDueSettlementReport?.rows || [];
 
@@ -2824,6 +3831,8 @@ function openReportLoadDetails(load) {
 
           <SettlementTotalsGrid totals={weeklySettlementReport.totals?.main} />
           <SettlementRows rows={weeklySettlementReport.main} />
+          <SettlementDriverPaySummary rows={weeklySettlementReport.driverPaySummary?.main} />
+          <ActiveDriversNoRevenueCheck data={weeklySettlementReport.activeDriversWithNoRevenue} />
 
           <div className="settlement-footnote">
             * Submitted after the prior cutoff but before the end of that prior cutoff date.
@@ -3091,8 +4100,7 @@ function openReportLoadDetails(load) {
             <div className="driver-report-section-header">
               <div>
                 <h4>Pattern Watch</h4>
-                <p>What deserves attention before anyone starts reading line-by-line.</p>
-              </div>
+                </div>
             </div>
 
             <div className="no-availability-insight-grid">
@@ -3178,7 +4186,7 @@ function openReportLoadDetails(load) {
             <div className="driver-report-section-header">
               <div>
                 <h4>Year Context</h4>
-                <p>Useful for spotting whether the pattern is new or recurring.</p>
+               
               </div>
             </div>
 
@@ -3198,7 +4206,7 @@ function openReportLoadDetails(load) {
           <div className="driver-report-section-header">
             <div>
               <h4>Raw No Availability Log</h4>
-              <p>Traceability stays here, but the pattern panels above are the decision tool.</p>
+              
             </div>
             <div className="driver-report-section-total">{formatReportNumber(rows.length)} row(s)</div>
           </div>
@@ -3427,6 +4435,720 @@ function openReportLoadDetails(load) {
     );
   }
 
+  function formatAvailableTruckBatchLabel(summary) {
+    const pieces = [formatDateInputLabel(summary?.latestBatchDate), summary?.latestBatchTimeOfDay]
+      .filter(Boolean);
+
+    return pieces.length ? pieces.join(' · ') : 'Latest batch';
+  }
+
+  function formatBucketList(items, emptyLabel = 'No data yet') {
+    const buckets = items || [];
+
+    if (buckets.length === 0) return emptyLabel;
+
+    return buckets.map((bucket) => `${bucket.label} (${bucket.count})`).join(', ');
+  }
+
+  function formatAvailableTruckPosted(record) {
+    const timestamp = record?.postedAt || record?.createdAt || record?.modifiedAt || '';
+
+    if (timestamp) {
+      const date = new Date(timestamp);
+
+      if (!Number.isNaN(date.getTime())) {
+        return date.toLocaleString('en-US', {
+          timeZone: 'America/New_York',
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit'
+        });
+      }
+    }
+
+    return [formatDateInputLabel(record?.dateSent), record?.timeOfDay]
+      .filter(Boolean)
+      .join(' · ') || '-';
+  }
+
+  function formatAvailableTruckNextPickup(record) {
+    const assignment = record?.nextAssignment;
+
+    if (!assignment) return 'No later pickup found';
+
+    const pickupLabel = formatDateOnly(assignment.pickupDate) || '-';
+    const lane = [assignment.origin, assignment.destination].filter(Boolean).join(' → ');
+    const bol = assignment.bol || 'Order';
+
+    return [bol, pickupLabel, lane].filter(Boolean).join(' · ');
+  }
+
+  function getAvailableTruckGap(record) {
+    if (!record?.nextAssignment) return '-';
+    return record.nextPickupGapLabel || 'Approx. date-only gap';
+  }
+
+  function renderAvailableTruckGap(record) {
+    const gap = getAvailableTruckGap(record);
+
+    if (gap === '-') return gap;
+
+    return (
+      <span className="available-trucks-gap-value">
+        {gap}
+        {record?.hasTonuInPickupSpan && <sup className="available-trucks-tonu-marker">*</sup>}
+      </span>
+    );
+  }
+
+  function openAvailableTruckDrilldown(title, subtitle, rows = []) {
+    setAvailableTruckDrilldown({
+      title,
+      subtitle,
+      rows: rows || []
+    });
+  }
+
+  function AvailableTrucksInsightList({ title, items, emptyLabel }) {
+    const buckets = items || [];
+
+    return (
+      <div className="available-trucks-insight-card">
+        <span>{title}</span>
+        {buckets.length === 0 ? (
+          <strong>{emptyLabel || 'No data yet'}</strong>
+        ) : (
+          <ol>
+            {buckets.map((bucket) => (
+              <li key={bucket.key || bucket.label}>
+                <strong>{bucket.label}</strong>
+                <span>{bucket.count}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    );
+  }
+
+  function AvailableTruckProximityList({ stops }) {
+    const visibleStops = stops || [];
+
+    if (visibleStops.length === 0) return <span className="available-trucks-muted">No proximity stops listed</span>;
+
+    return (
+      <div className="available-trucks-proximity-list">
+        {visibleStops.map((stop) => (
+          <span key={`${stop.rank}-${stop.location}`}>
+            <strong>{stop.location || '-'}</strong>
+            {stop.timeLabel && <small>{stop.timeLabel}</small>}
+          </span>
+        ))}
+      </div>
+    );
+  }
+
+  function AvailableTruckDrilldownModal() {
+    if (!availableTruckDrilldown) return null;
+
+    const rows = availableTruckDrilldown.rows || [];
+    const hasTonuInSpan = rows.some((record) => record?.hasTonuInPickupSpan);
+
+    return (
+      <div className="modal-overlay" onClick={() => setAvailableTruckDrilldown(null)}>
+        <div className="detail-modal available-trucks-drilldown-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="detail-header">
+            <div>
+              <h2>{availableTruckDrilldown.title}</h2>
+              <p>{availableTruckDrilldown.subtitle || `${rows.length} referenced row${rows.length === 1 ? '' : 's'}`}</p>
+            </div>
+            <button type="button" className="close-button" onClick={() => setAvailableTruckDrilldown(null)}>
+              Close
+            </button>
+          </div>
+          <div className="modal-body available-trucks-drilldown-body">
+            {rows.length === 0 ? (
+              <div className="intellitrack-empty">
+                <strong> No records to display.</strong>
+              
+              </div>
+            ) : (
+              <>
+                <div className="operations-table-wrap available-trucks-drilldown-table-wrap">
+                  <table className="available-trucks-table available-trucks-drilldown-table">
+                  <thead>
+                    <tr>
+                      <th>Driver</th>
+                      <th>Unit</th>
+                      <th>Posted Available</th>
+                      <th>Location</th>
+                      <th>First Pickup After Posting</th>
+                      <th>Time to Next Pickup</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((record, index) => (
+                      <tr key={record.id || `${record.driverName}-${record.unitNo}-${index}`}>
+                        <td>
+                          <strong>{record.driverName || '-'}</strong>
+                          <small>{record.equipmentType || '-'}</small>
+                        </td>
+                        <td>{record.unitNo || '-'}</td>
+                        <td>{formatAvailableTruckPosted(record)}</td>
+                        <td>{record.currentLocation || '-'}</td>
+                        <td>
+                          <strong>{formatAvailableTruckNextPickup(record)}</strong>
+                          {record.nextAssignment?.matchType && <small>Matched by {record.nextAssignment.matchType}</small>}
+                        </td>
+                        <td>{renderAvailableTruckGap(record)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  </table>
+                </div>
+                {hasTonuInSpan && (
+                  <p className="available-trucks-tonu-note">
+                    <sup>*</sup> A TONU occurred between the availability posting and the first later Won pickup.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function AvailableTrucksPanel() {
+    const records = availableTrucksData?.records || [];
+    const recordsWithin24Hours = availableTrucksData?.recordsWithin24Hours || [];
+    const assignmentExcludedRecords = availableTrucksData?.assignmentExcludedRecords || [];
+    const recentRecords = availableTrucksData?.recentRecords || [];
+    const summary = availableTrucksData?.summary || {};
+    const insights = availableTrucksData?.insights || {};
+    const batchLabel = formatAvailableTruckBatchLabel(summary);
+    const attentionItems = (insights.attention || []).filter((item) => !['No availability from the last 24 hours', 'No current unassigned trucks'].includes(item.label));
+    const currentCount = summary.currentRecordCount ?? availableTrucksData?.count ?? records.length;
+    const excludedCount = summary.activeFutureAssignmentExclusions || 0;
+
+    return (
+      <div className="search-card feature-accordion-panel available-trucks-panel">
+        <button
+          type="button"
+          className="feature-section-header-button available-trucks-section-header-button"
+          onClick={() => setAvailableTrucksSectionOpen((current) => !current)}
+          aria-expanded={availableTrucksSectionOpen}
+        >
+          <span className="feature-section-title-block">
+            <span className="feature-section-title">Available Trucks</span>
+            <span className="feature-section-subtitle">Current advertised availability and recent location patterns.</span>
+          </span>
+          <span className="feature-section-status-pill">
+            {availableTrucksLoading ? 'Loading...' : `${currentCount} current`}
+          </span>
+          <span className="feature-section-chevron">{availableTrucksSectionOpen ? '▲' : '▼'}</span>
+        </button>
+
+        {availableTrucksError && <div className="msg error">{availableTrucksError}</div>}
+        {availableTruckActionError && <div className="msg error">{availableTruckActionError}</div>}
+        {availableTruckActionMessage && <div className="msg success">{availableTruckActionMessage}</div>}
+
+        {availableTrucksSectionOpen && (
+          <div className="feature-section-body available-trucks-body">
+            <button
+              type="button"
+              className="available-trucks-summary"
+              onClick={() => setAvailableTrucksOpen((current) => !current)}
+              aria-expanded={availableTrucksOpen}
+            >
+              <span className="available-trucks-title-block">
+                <span className="available-trucks-title">Available Trucks Analysis</span>
+                <span className="available-trucks-subtitle">Availability Analysis and Current Availability.</span>
+              </span>
+              <span className="available-trucks-chevron">
+                {availableTrucksOpen ? '▲' : '▼'}
+              </span>
+            </button>
+
+            {availableTrucksOpen && !availableTrucksError && (
+              <div className="available-trucks-current-card">
+                <div className="available-trucks-subheader">
+                  <div>
+                    <h3>{batchLabel}</h3>
+                    <p>
+                      Current window: last {availableTrucksData?.currentWindowHours || 24} hours · {excludedCount} hidden by active/future assignment · Pattern window: last {availableTrucksData?.lookbackDays || 30} days
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => loadAvailableTrucks()}
+                    disabled={availableTrucksLoading}
+                  >
+                    {availableTrucksLoading ? 'Refreshing...' : 'Refresh'}
+                  </button>
+                </div>
+
+                {availableTrucksLoading && !availableTrucksData && (
+                  <div className="msg">Loading available trucks...</div>
+                )}
+
+                {availableTrucksData && (
+                  <>
+                    <div className="available-trucks-kpi-grid">
+                      <button
+                        type="button"
+                        className="available-trucks-kpi-button"
+                        onClick={() => openAvailableTruckDrilldown('Current available trucks', 'Rows from the last 24 hours with no active/future assignment.', records)}
+                      >
+                        <span>Current</span>
+                        <strong>{summary.currentRecordCount || 0}</strong>
+                        <small>Last 24 hours, unassigned</small>
+                      </button>
+                      <button
+                        type="button"
+                        className="available-trucks-kpi-button"
+                        onClick={() => openAvailableTruckDrilldown('Recent available-truck rows', 'All rows posted in the last 24 hours, before current-availability filtering. First later pickup is shown only as follow-through history.', recordsWithin24Hours)}
+                      >
+                        <span>Recent rows</span>
+                        <strong>{summary.recordsWithin24Hours || 0}</strong>
+                        <small>Created in the last 24 hours</small>
+                      </button>
+                      <button
+                        type="button"
+                        className="available-trucks-kpi-button"
+                        onClick={() => openAvailableTruckDrilldown('Hidden by assignment', 'Recent rows hidden because the truck/driver now has an active or future assignment. First later pickup is shown only as follow-through history.', assignmentExcludedRecords)}
+                      >
+                        <span>Assignment hidden</span>
+                        <strong>{summary.activeFutureAssignmentExclusions || 0}</strong>
+                        <small>Truck/driver now active or future-booked</small>
+                      </button>
+                      <button
+                        type="button"
+                        className="available-trucks-kpi-button"
+                        onClick={() => openAvailableTruckDrilldown('Recent drivers', 'Rows in the recent pattern window, with the first later Won pickup when found. Historical follow-through only; not current status.', recentRecords)}
+                      >
+                        <span>Recent drivers</span>
+                        <strong>{summary.uniqueRecentDrivers || 0}</strong>
+                        <small>{summary.recentRecordCount || 0} rows in pattern window</small>
+                      </button>
+                    </div>
+
+                    {attentionItems.length > 0 && (
+                      <div className="available-trucks-attention-list">
+                        {attentionItems.map((item, index) => (
+                          <div key={`${item.label}-${index}`} className={`available-trucks-attention ${item.level || 'info'}`}>
+                            <strong>{item.label}</strong>
+                            <span>{item.detail}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="available-trucks-insight-grid">
+                      <AvailableTrucksInsightList title="Top current states" items={insights.topCurrentStates} />
+                      <AvailableTrucksInsightList title="Top current locations" items={insights.topCurrentLocations} />
+                      <AvailableTrucksInsightList title="Top advertised proximity" items={insights.topProximityLocations} />
+                      <AvailableTrucksInsightList title="Equipment mix" items={insights.equipmentMix} />
+                    </div>
+
+                    {records.length === 0 ? (
+                      <div className="intellitrack-empty">
+                        <strong>No trucks currently available.</strong>
+                                              </div>
+                    ) : (
+                      <div className="operations-table-wrap available-trucks-table-wrap">
+                        <table className="available-trucks-table">
+                          <thead>
+                            <tr>
+                              <th>Driver</th>
+                              <th>Unit</th>
+                              <th>Equipment</th>
+                              <th>Current Location</th>
+                              <th>Advertised Proximity</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {records.map((record) => (
+                              <tr key={record.id || `${record.driverName}-${record.unitNo}-${record.dateSent}-${record.timeOfDay}`}>
+                                <td>
+                                  <strong>{record.driverName || '-'}</strong>
+                                  <small>{record.teamType || '-'}</small>
+                                </td>
+                                <td>{record.unitNo || '-'}</td>
+                                <td>
+                                  <strong>{record.equipmentType || '-'}</strong>
+                                  <small>{record.equipmentFamily || '-'}</small>
+                                </td>
+                                <td>{record.currentLocation || '-'}</td>
+                                <td><AvailableTruckProximityList stops={record.proximityStops} /></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            <button
+              type="button"
+              className="available-trucks-summary available-trucks-action-summary"
+              onClick={() => setAvailableTrucksActionOpen((current) => !current)}
+              aria-expanded={availableTrucksActionOpen}
+            >
+              <span className="available-trucks-title-block">
+                <span className="available-trucks-title">Add Available Truck</span>
+                <span className="available-trucks-subtitle">Create the source record Power Automate will dissect and send.</span>
+              </span>
+              <span className="available-trucks-chevron">
+                {availableTrucksActionOpen ? '▲' : '▼'}
+              </span>
+            </button>
+
+            {availableTrucksActionOpen && (
+              <div className="available-trucks-action-card">
+                <div className="available-trucks-subheader">
+                  <div>
+                    <h3>Add Available Truck</h3>
+                    <p>
+                      Select active drivers from Driver Roster. Driver name, unit number, and equipment type are prefilled so the wide source row stays consistent.
+                    </p>
+                  </div>
+                </div>
+
+                {availableTrucksData?.activeDriverOptionsWarning && (
+                  <div className="available-truck-roster-warning">
+                    {availableTrucksData.activeDriverOptionsWarning}
+                  </div>
+                )}
+
+                <form className="available-truck-form" onSubmit={submitAvailableTruckForm}>
+                  <div className="available-truck-send-grid">
+                    <label>
+                      <span>Date Sent</span>
+                      <input
+                        type="date"
+                        value={availableTruckFormDate}
+                        onChange={(e) => setAvailableTruckFormDate(e.target.value)}
+                        disabled={availableTruckSubmitting}
+                      />
+                    </label>
+                    <label>
+                      <span>Time of Day</span>
+                      <select
+                        value={availableTruckTimeOfDay}
+                        onChange={(e) => setAvailableTruckTimeOfDay(e.target.value)}
+                        disabled={availableTruckSubmitting}
+                      >
+                        <option value="AM">AM</option>
+                        <option value="PM">PM</option>
+                        <option value="Evening">Evening</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="available-truck-form-rows">
+                    {availableTruckRows.map((row, index) => (
+                      <AvailableTruckFormRow
+                        key={row.key}
+                        row={row}
+                        index={index}
+                        canRemove={availableTruckRows.length > 1}
+                        submitting={availableTruckSubmitting}
+                        driverOptions={availableTruckDriverOptions}
+                        selectedRosterDriverKeys={selectedAvailableTruckRosterKeys}
+                        suggestionGroup={getAvailableTruckRowSuggestionGroup(row, availableTruckSuggestionIndex)}
+                        onSelectDriver={selectAvailableTruckRosterDriver}
+                        onUpdate={updateAvailableTruckRow}
+                        onApplySuggestion={applyAvailableTruckSuggestion}
+                        onRemove={removeAvailableTruckRow}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="available-truck-form-actions">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={addAvailableTruckRow}
+                      disabled={availableTruckSubmitting || availableTruckRows.length >= AVAILABLE_TRUCK_MAX_ROWS}
+                    >
+                      Add Another Truck
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={clearAvailableTruckForm}
+                      disabled={availableTruckSubmitting}
+                    >
+                      Clear
+                    </button>
+                    <button
+                      type="submit"
+                      className="primary-action-button"
+                      disabled={availableTruckSubmitting}
+                    >
+                      {availableTruckSubmitting ? 'Submitting...' : 'Submit Available Trucks'}
+                    </button>
+                    <span>
+                      {availableTruckDriverOptions.length} active roster option{availableTruckDriverOptions.length === 1 ? '' : 's'} loaded · {Object.keys(availableTruckSuggestionIndex).length} historical city match{Object.keys(availableTruckSuggestionIndex).length === 1 ? '' : 'es'} loaded · {availableTruckRows.length}/{AVAILABLE_TRUCK_MAX_ROWS} source slots shown · blank rows are ignored.
+                    </span>
+                  </div>
+                </form>
+              </div>
+            )}
+          </div>
+        )}
+        <AvailableTruckDrilldownModal />
+      </div>
+    );
+  }
+
+  function IntelliTrackPanel() {
+    const suppressedBolSet = new Set(intelliTrackSuppressedBols);
+    const records = (intelliTrackData?.records || []).filter((record) => {
+      const bol = String(record?.BOLNumber || '').trim().toUpperCase();
+      return !bol || !suppressedBolSet.has(bol);
+    });
+    const count = records.length;
+    const order = intelliTrackSearchResult;
+    const buttonState = getIntelliTrackButtonState(order);
+    const orderLoadingKey = order?.id ? `${order.id}-${buttonState.enabled ? 'on' : 'off'}` : '';
+
+    return (
+      <div className="search-card feature-accordion-panel intellitrack-panel">
+        <button
+          type="button"
+          className="feature-section-header-button intellitrack-section-header-button"
+          onClick={() => setIntelliTrackSectionOpen((current) => !current)}
+          aria-expanded={intelliTrackSectionOpen}
+        >
+          <span className="feature-section-title-block">
+            <span className="feature-section-title">IntelliTrack</span>
+            <span className="feature-section-subtitle">Automatic tracking visibility and start/stop controls.</span>
+          </span>
+          <span className="feature-section-status-pill">
+            {intelliTrackLoading ? 'Loading...' : `${count} tracking`}
+          </span>
+          <span className="feature-section-chevron">{intelliTrackSectionOpen ? '▲' : '▼'}</span>
+        </button>
+
+        {intelliTrackError && <div className="msg error">{intelliTrackError}</div>}
+        {intelliTrackActionError && <div className="msg error">{intelliTrackActionError}</div>}
+        {intelliTrackActionMessage && <div className="msg success">{intelliTrackActionMessage}</div>}
+
+        {intelliTrackSectionOpen && (
+          <div className="feature-section-body intellitrack-body">
+            <button
+              type="button"
+              className="intellitrack-summary"
+              onClick={() => setIntelliTrackOpen((current) => !current)}
+              aria-expanded={intelliTrackOpen}
+            >
+              <span className="intellitrack-title-block">
+                <span className="intellitrack-title">Active automatic tracking</span>
+                <span className="intellitrack-subtitle">Show orders currently enrolled in IntelliTrack.</span>
+              </span>
+              <span className="intellitrack-chevron">
+                {intelliTrackOpen ? '▲' : '▼'}
+              </span>
+            </button>
+
+            {intelliTrackOpen && !intelliTrackError && (
+              <div className="intellitrack-current-card">
+                <div className="intellitrack-subheader">
+                  <div>
+                    <h3>Currently Tracking</h3>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => loadIntelliTrack()}
+                    disabled={intelliTrackLoading}
+                  >
+                    {intelliTrackLoading ? 'Refreshing...' : 'Refresh'}
+                  </button>
+                </div>
+
+                {records.length === 0 ? (
+                  <div className="intellitrack-empty">
+                    <strong>No orders are currently being tracked.</strong>
+                  </div>
+                ) : (
+                  <div className="operations-table-wrap intellitrack-table-wrap">
+                    <table className="intellitrack-table">
+                      <thead>
+                        <tr>
+                          <th>BOL</th>
+                          <th>Customer</th>
+                          <th>Driver</th>
+                          <th>Truck</th>
+                          <th>Route</th>
+                          <th>Next Update</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+
+                      <tbody>
+                        {records.map((record, i) => {
+                          const rowLoadingKey = `${record.BidListingID}-off`;
+
+                          return (
+                            <tr key={record.id || `${record.BOLNumber}-${i}`}>
+                              <td>{record.BOLNumber || '-'}</td>
+                              <td>{record.Company || '-'}</td>
+                              <td>{record.Operator || '-'}</td>
+                              <td>{record.TruckNumber || '-'}</td>
+                              <td>{record.Origin || '-'} → {record.Destination || '-'}</td>
+                              <td>{record.NextUpdateScheduled ? formatTrackingTimestamp(record.NextUpdateScheduled) : '-'}</td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="danger-button compact-action-button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    turnOffIntelliTrackRecord(record);
+                                  }}
+                                  disabled={!record.BidListingID || intelliTrackActionLoading === rowLoadingKey}
+                                >
+                                  {intelliTrackActionLoading === rowLoadingKey ? 'Stopping...' : 'Turn Off'}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <button
+              type="button"
+              className="intellitrack-summary intellitrack-action-summary"
+              onClick={() => setIntelliTrackActionOpen((current) => !current)}
+              aria-expanded={intelliTrackActionOpen}
+            >
+              <span className="intellitrack-title-block">
+                <span className="intellitrack-title">Start or Stop Tracking</span>
+                <span className="intellitrack-subtitle">Search a BOL and toggle IntelliTrack from the Bid Listing record.</span>
+              </span>
+              <span className="intellitrack-chevron">
+                {intelliTrackActionOpen ? '▲' : '▼'}
+              </span>
+            </button>
+
+            {intelliTrackActionOpen && !intelliTrackError && (
+              <div className="intellitrack-search-card">
+                <form className="intellitrack-search-row" onSubmit={searchIntelliTrackOrder}>
+                  <input
+                    value={intelliTrackSearchBol}
+                    onChange={(e) => handleIntelliTrackBolChange(e.target.value)}
+                    placeholder="Search BOL, e.g. D197382"
+                    aria-label="Search BOL for IntelliTrack"
+                  />
+                  <button type="submit" disabled={intelliTrackSearchLoading}>
+                    {intelliTrackSearchLoading ? 'Searching...' : 'Find Order'}
+                  </button>
+                </form>
+
+                {intelliTrackSearchError && <div className="msg error">{intelliTrackSearchError}</div>}
+                {intelliTrackPendingBol && (
+                  <div className="msg">
+                    Waiting for {intelliTrackPendingBol} to show in Currently Tracking. Search is soft-locked for that BOL until it appears.
+                  </div>
+                )}
+
+                {order && (
+                  <div className="intellitrack-order-card">
+                    <div className="intellitrack-order-main">
+                      <div>
+                        <span className="intellitrack-label">BOL</span>
+                        <strong>{order.BOL || '-'}</strong>
+                      </div>
+                      <div>
+                        <span className="intellitrack-label">Customer</span>
+                        <strong>{order.Customer || '-'}</strong>
+                      </div>
+                      <div>
+                        <span className="intellitrack-label">Status</span>
+                        <strong><span className={getStatusClass(order.Status)}>{order.Status || '-'}</span></strong>
+                      </div>
+                      <div>
+                        <span className="intellitrack-label">Tracking</span>
+                        <strong>{order.EnableTracking || order.TrackingActive ? 'On' : 'Off'}</strong>
+                      </div>
+                    </div>
+
+                    <div className="intellitrack-dispatch-grid">
+                      <div>
+                        <span>Operator / Team</span>
+                        <strong>{order.Driver || '-'}</strong>
+                      </div>
+                      <div>
+                        <span>Truck</span>
+                        <strong>{order.Truck || '-'}</strong>
+                      </div>
+                      <div>
+                        <span>Route</span>
+                        <strong>{order.Origin || '-'} → {order.Destination || '-'}</strong>
+                      </div>
+                      <div>
+                        <span>Pickup</span>
+                        <strong>{formatDateTime(order.PickupDate, order.PickupTime, order.PickupAMPM)}</strong>
+                      </div>
+                      <div>
+                        <span>Delivery</span>
+                        <strong>{formatDateTime(order.DeliveryDate, order.DeliveryTime, order.DeliveryAMPM)}</strong>
+                      </div>
+                      <div>
+                        <span>Final Settle Sent</span>
+                        <strong>{order.FinalSettleSent ? 'Yes' : 'No'}</strong>
+                      </div>
+                    </div>
+
+                    {buttonState.reason && (
+                      <div className="intellitrack-blocked-note">
+                        {buttonState.reason}
+                      </div>
+                    )}
+
+                    <div className="intellitrack-action-row">
+                      <button
+                        type="button"
+                        className={buttonState.enabled ? 'primary-action-button' : 'danger-button'}
+                        onClick={() => toggleIntelliTrackOrder(order, buttonState.enabled)}
+                        disabled={buttonState.disabled || intelliTrackActionLoading === orderLoadingKey}
+                      >
+                        {intelliTrackActionLoading === orderLoadingKey
+                          ? 'Submitting...'
+                          : buttonState.label}
+                      </button>
+                      <span>
+                        {buttonState.enabled
+                          ? 'Turns Enable Tracking on in Bid Listing.'
+                          : 'Turns Enable Tracking off in Bid Listing.'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+
   function UploadDigestPanel() {
     const records = uploadDigestData?.records || [];
     const count = uploadDigestData?.count ?? records.length;
@@ -3435,108 +5157,120 @@ function openReportLoadDetails(load) {
     const isUploadDigestToday = isTodayOrFutureDateInput(activeDigestDate);
 
     return (
-      <div className="search-card upload-digest-panel">
-        <div className="upload-digest-section-header">
-          <h2>Job Photo Uploads</h2>
-        </div>
-
-        <div className="upload-digest-header-row">
-          <button
-            className="upload-digest-arrow"
-            onClick={() => changeUploadDigestDate(-1)}
-            disabled={uploadDigestLoading}
-            aria-label="Previous upload digest day"
-            title="Previous day"
-          >
-            ‹
-          </button>
-
-          <button
-            className="upload-digest-summary"
-            onClick={() => setUploadDigestOpen((current) => !current)}
-            aria-expanded={uploadDigestOpen}
-          >
-            <span className="upload-digest-title">
-              Pickup and Delivery Photos for {dateLabel}
-            </span>
-            <span className="upload-digest-count">
-              {uploadDigestLoading ? 'Loading...' : `${count} logged`}
-            </span>
-            <span className="upload-digest-chevron">
-              {uploadDigestOpen ? '▲' : '▼'}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            className={`upload-digest-today-button ${isUploadDigestToday ? 'hidden' : ''}`}
-            onClick={resetUploadDigestToToday}
-            disabled={uploadDigestLoading || isUploadDigestToday}
-            aria-hidden={isUploadDigestToday}
-            tabIndex={isUploadDigestToday ? -1 : 0}
-            title="Return to today"
-          >
-            Today
-          </button>
-
-          <button
-            className="upload-digest-arrow"
-            onClick={() => changeUploadDigestDate(1)}
-            disabled={uploadDigestLoading || isUploadDigestToday}
-            aria-label="Next upload digest day"
-            title={isUploadDigestToday ? 'Already on today' : 'Next day'}
-          >
-            ›
-          </button>
-        </div>
+      <div className="search-card feature-accordion-panel upload-digest-panel">
+        <button
+          type="button"
+          className="feature-section-header-button upload-digest-section-header-button"
+          onClick={() => setUploadDigestSectionOpen((current) => !current)}
+          aria-expanded={uploadDigestSectionOpen}
+        >
+          <span className="feature-section-title-block">
+            <span className="feature-section-title">Job Photo Uploads</span>
+            <span className="feature-section-subtitle">Pickup and delivery photo log for {dateLabel}.</span>
+          </span>
+          <span className="feature-section-status-pill">
+            {uploadDigestLoading ? 'Loading...' : `${count} logged`}
+          </span>
+          <span className="feature-section-chevron">{uploadDigestSectionOpen ? '▲' : '▼'}</span>
+        </button>
 
         {uploadDigestError && <div className="msg error">{uploadDigestError}</div>}
         {uploadDigestActionError && <div className="msg error">{uploadDigestActionError}</div>}
 
-        {uploadDigestOpen && !uploadDigestError && (
-          <div className="upload-digest-body">
-            {records.length === 0 ? (
-              <div className="msg">No pickup or delivery uploads logged for this date.</div>
-            ) : (
-              <div className="operations-table-wrap upload-digest-table-wrap">
-                <table className="upload-digest-table">
-                  <thead>
-                    <tr>
-                      <th>BOL</th>
-                      <th>Driver</th>
-                      <th>Type</th>
-                      <th>Folder</th>
-                    </tr>
-                  </thead>
+        {uploadDigestSectionOpen && (
+          <div className="feature-section-body upload-digest-section-body">
+            <div className="upload-digest-header-row">
+              <button
+                className="upload-digest-arrow"
+                onClick={() => changeUploadDigestDate(-1)}
+                disabled={uploadDigestLoading}
+                aria-label="Previous upload digest day"
+                title="Previous day"
+              >
+                ‹
+              </button>
 
-                  <tbody>
-                    {records.map((record, i) => (
-                      <tr key={record.id || `${record.CompositeKey || record.BOLNumber}-${i}`}>
-                        <td>{record.BOLNumber || '-'}</td>
-                        <td>{record.DriverName || '-'}</td>
-                        <td>{record.UploadType || '-'}</td>
-                        <td>
-                          <button
-                            type="button"
-                            className="table-link-button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openUploadDigestLoadPhotos(record);
-                            }}
-                            disabled={!record.BOLNumber || documentLoading === `upload-digest-loadphotos-${record.id || record.BOLNumber}`}
-                          >
-                            {documentLoading === `upload-digest-loadphotos-${record.id || record.BOLNumber}`
-                              ? 'Opening...'
-                              : `${record.UploadType || 'Open'} Folder`}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <button
+                className="upload-digest-summary"
+                onClick={() => setUploadDigestOpen((current) => !current)}
+                aria-expanded={uploadDigestOpen}
+              >
+                <span className="upload-digest-title">
+                  Pickup and Delivery Photos for {dateLabel}
+                </span>
+                <span className="upload-digest-chevron">
+                  {uploadDigestOpen ? '▲' : '▼'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                className={`upload-digest-today-button ${isUploadDigestToday ? 'hidden' : ''}`}
+                onClick={resetUploadDigestToToday}
+                disabled={uploadDigestLoading || isUploadDigestToday}
+                aria-hidden={isUploadDigestToday}
+                tabIndex={isUploadDigestToday ? -1 : 0}
+                title="Return to today"
+              >
+                Today
+              </button>
+
+              <button
+                className="upload-digest-arrow"
+                onClick={() => changeUploadDigestDate(1)}
+                disabled={uploadDigestLoading || isUploadDigestToday}
+                aria-label="Next upload digest day"
+                title={isUploadDigestToday ? 'Already on today' : 'Next day'}
+              >
+                ›
+              </button>
+            </div>
+
+            {uploadDigestOpen && !uploadDigestError && (
+              <div className="upload-digest-body">
+                {records.length === 0 ? (
+                  <div className="msg">No pickup or delivery uploads logged for this date.</div>
+                ) : (
+                  <div className="operations-table-wrap upload-digest-table-wrap">
+                    <table className="upload-digest-table">
+                      <thead>
+                        <tr>
+                          <th>BOL</th>
+                          <th>Driver</th>
+                          <th>Type</th>
+                          <th>Folder</th>
+                        </tr>
+                      </thead>
+
+                      <tbody>
+                        {records.map((record, i) => (
+                          <tr key={record.id || `${record.CompositeKey || record.BOLNumber}-${i}`}>
+                            <td>{record.BOLNumber || '-'}</td>
+                            <td>{record.DriverName || '-'}</td>
+                            <td>{record.UploadType || '-'}</td>
+                            <td>
+                              <button
+                                type="button"
+                                className="table-link-button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openUploadDigestLoadPhotos(record);
+                                }}
+                                disabled={!record.BOLNumber || documentLoading === `upload-digest-loadphotos-${record.id || record.BOLNumber}`}
+                              >
+                                {documentLoading === `upload-digest-loadphotos-${record.id || record.BOLNumber}`
+                                  ? 'Opening...'
+                                  : `${record.UploadType || 'Open'} Folder`}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
-
           </div>
         )}
       </div>
@@ -4183,8 +5917,7 @@ function openReportLoadDetails(load) {
               <div className="driver-report-section-header">
                 <div>
                   <h4>Trend Notes</h4>
-                  <p>Plain-language flags for the selected comparison window.</p>
-                </div>
+                  </div>
               </div>
               <div className="customer-trend-insights-list">
                 {(row.insights || []).map((insight, index) => (
@@ -4624,14 +6357,23 @@ function openReportLoadDetails(load) {
     const isSalesReportsOpen = isReportGroupOpen('sales');
 
     return (
-      <div className="search-card reports-panel">
-        <div className="reports-header">
-          <div>
-            <h2>Reports</h2>
-          </div>
-        </div>
+      <div className="search-card feature-accordion-panel reports-panel">
+        <button
+          type="button"
+          className="feature-section-header-button reports-section-header-button"
+          onClick={() => setReportsSectionOpen((current) => !current)}
+          aria-expanded={reportsSectionOpen}
+        >
+          <span className="feature-section-title-block">
+            <span className="feature-section-title">Reports</span>
+            <span className="feature-section-subtitle">Operational and sales reporting.</span>
+          </span>
+          <span className="feature-section-status-pill">2 groups</span>
+          <span className="feature-section-chevron">{reportsSectionOpen ? '▲' : '▼'}</span>
+        </button>
 
-        <div className="reports-accordion-list">
+        {reportsSectionOpen && (
+          <div className="feature-section-body reports-accordion-list">
           <div className={`report-group-accordion ${isOperationalReportsOpen ? 'open' : ''}`}>
             <button
               type="button"
@@ -5170,7 +6912,8 @@ function openReportLoadDetails(load) {
               </div>
             )}
           </div>
-        </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -5550,6 +7293,10 @@ function openReportLoadDetails(load) {
   </div>
 
   <UploadDigestPanel />
+
+  {IntelliTrackPanel()}
+
+  {AvailableTrucksPanel()}
 
   <DriverSummaryReport />
   </>

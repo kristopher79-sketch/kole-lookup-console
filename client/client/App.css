@@ -4212,3 +4212,1578 @@ input:focus,
     gap: 4px;
   }
 }
+
+/* INTELLITRACK */
+.intellitrack-panel {
+  width: min(1100px, 100%);
+  margin: 20px auto 0;
+}
+
+.web-runtime .intellitrack-panel {
+  width: min(1100px, 100%);
+}
+
+.intellitrack-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.intellitrack-section-header h2 {
+  margin: 0;
+  color: #d4a017;
+}
+
+.intellitrack-summary {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid #334155;
+  border-radius: 14px;
+  background: #0b1220;
+  color: #f8fafc;
+  text-align: left;
+}
+
+.intellitrack-summary:hover {
+  background: #111827;
+}
+
+.intellitrack-title {
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+.intellitrack-title::before {
+  content: "●";
+  margin-right: 8px;
+  color: #d4a017;
+}
+
+.intellitrack-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 92px;
+  padding: 6px 10px;
+  border: 1px solid rgba(250, 204, 21, 0.34);
+  border-radius: 999px;
+  background: rgba(250, 204, 21, 0.13);
+  color: #fde68a;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.intellitrack-chevron {
+  color: #facc15;
+  font-size: 12px;
+}
+
+.intellitrack-body {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.intellitrack-current-card,
+.intellitrack-search-card,
+.intellitrack-order-card {
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  background: #0b1220;
+  padding: 16px;
+}
+
+.intellitrack-subheader {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.intellitrack-subheader h3 {
+  margin: 0 0 5px;
+  color: #facc15;
+}
+
+.intellitrack-subheader p {
+  margin: 0;
+  color: #94a3b8;
+  line-height: 1.45;
+}
+
+.intellitrack-empty {
+  display: grid;
+  gap: 5px;
+  padding: 16px;
+  border: 1px dashed #334155;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.65);
+  color: #cbd5e1;
+}
+
+.intellitrack-empty strong {
+  color: #f8fafc;
+}
+
+.intellitrack-empty span {
+  color: #94a3b8;
+}
+
+.intellitrack-table {
+  min-width: 1000px;
+}
+
+.intellitrack-table th:nth-child(1),
+.intellitrack-table td:nth-child(1) { width: 120px; }
+.intellitrack-table th:nth-child(2),
+.intellitrack-table td:nth-child(2) { width: 190px; }
+.intellitrack-table th:nth-child(3),
+.intellitrack-table td:nth-child(3) { width: 130px; }
+.intellitrack-table th:nth-child(4),
+.intellitrack-table td:nth-child(4) { width: 90px; }
+.intellitrack-table th:nth-child(6),
+.intellitrack-table td:nth-child(6) { width: 155px; }
+.intellitrack-table th:nth-child(7),
+.intellitrack-table td:nth-child(7) { width: 115px; }
+
+.intellitrack-search-row {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.intellitrack-search-row input {
+  min-width: 0;
+}
+
+.intellitrack-order-card {
+  margin-top: 16px;
+}
+
+.intellitrack-order-main {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #1e293b;
+}
+
+.intellitrack-order-main > div,
+.intellitrack-dispatch-grid > div {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.65);
+  padding: 12px;
+}
+
+.intellitrack-label,
+.intellitrack-dispatch-grid span {
+  display: block;
+  margin-bottom: 6px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.intellitrack-order-main strong,
+.intellitrack-dispatch-grid strong {
+  display: block;
+  color: #f8fafc;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.intellitrack-dispatch-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.intellitrack-blocked-note {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(120, 53, 15, 0.8);
+  border-radius: 12px;
+  background: rgba(120, 53, 15, 0.2);
+  color: #fde68a;
+  font-weight: 700;
+}
+
+.intellitrack-action-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.intellitrack-action-row span {
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.primary-action-button {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.primary-action-button:hover {
+  background: #1d4ed8;
+}
+
+.secondary-button {
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #cbd5e1;
+}
+
+.secondary-button:hover {
+  background: #334155;
+}
+
+.danger-button {
+  background: #7f1d1d;
+  color: #ffffff;
+}
+
+.danger-button:hover {
+  background: #991b1b;
+}
+
+.compact-action-button {
+  padding: 7px 10px;
+  font-size: 12px;
+  border-radius: 7px;
+}
+
+.msg.success {
+  color: #86efac;
+}
+
+@media (max-width: 900px) {
+  .intellitrack-order-main,
+  .intellitrack-dispatch-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .intellitrack-summary,
+  .intellitrack-search-row,
+  .intellitrack-subheader,
+  .intellitrack-action-row {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .intellitrack-count {
+    justify-content: flex-start;
+    width: fit-content;
+  }
+
+  .intellitrack-order-main,
+  .intellitrack-dispatch-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* INTELLITRACK V1.4: align Job Photo Uploads, IntelliTrack, and Reports visual hierarchy */
+.intellitrack-panel {
+  border-color: var(--kole-border-strong) !important;
+  background: var(--kole-shell) !important;
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035) !important;
+}
+
+.intellitrack-section-header {
+  padding: 14px 16px !important;
+  margin-bottom: 18px !important;
+  border: 1px solid var(--kole-border) !important;
+  border-left: 4px solid var(--kole-gold) !important;
+  border-radius: 12px !important;
+  background: linear-gradient(180deg, var(--kole-surface), #121b2e) !important;
+}
+
+.intellitrack-section-header h2 {
+  color: var(--kole-gold-bright) !important;
+}
+
+/* Make the Upload Digest and IntelliTrack drawer controls match the Reports accordion rows. */
+.upload-digest-header-row {
+  gap: 8px !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.upload-digest-summary,
+.intellitrack-summary {
+  min-height: 54px !important;
+  padding: 14px 16px !important;
+  border: 1px solid var(--kole-border) !important;
+  border-left: 4px solid transparent !important;
+  border-radius: 10px !important;
+  background: var(--kole-surface) !important;
+  color: var(--kole-text) !important;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.18) !important;
+}
+
+.upload-digest-summary:hover,
+.intellitrack-summary:hover {
+  background: var(--kole-surface-2) !important;
+  border-left-color: var(--kole-secondary-rail-soft) !important;
+}
+
+.upload-digest-summary[aria-expanded="true"],
+.intellitrack-summary[aria-expanded="true"] {
+  background: var(--kole-surface-2) !important;
+  border-left-color: var(--kole-secondary-rail) !important;
+}
+
+.upload-digest-title,
+.intellitrack-title {
+  color: var(--kole-text) !important;
+  font-weight: 900 !important;
+}
+
+.intellitrack-title::before {
+  content: none !important;
+}
+
+.upload-digest-count,
+.intellitrack-count {
+  border-color: rgba(250, 204, 21, 0.34) !important;
+  background: rgba(250, 204, 21, 0.13) !important;
+  color: #fde68a !important;
+}
+
+.upload-digest-chevron,
+.intellitrack-chevron {
+  color: var(--kole-text) !important;
+}
+
+.upload-digest-arrow,
+.upload-digest-today-button {
+  border: 1px solid var(--kole-border) !important;
+  border-radius: 10px !important;
+  background: var(--kole-surface) !important;
+  color: var(--kole-text) !important;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.16) !important;
+}
+
+.upload-digest-arrow:hover,
+.upload-digest-today-button:hover {
+  background: var(--kole-surface-2) !important;
+  border-color: var(--kole-border-strong) !important;
+}
+
+.intellitrack-current-card,
+.intellitrack-search-card,
+.intellitrack-order-card {
+  border-color: var(--kole-border) !important;
+  background: var(--kole-table-body) !important;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.20) !important;
+}
+
+.intellitrack-subheader h3 {
+  color: var(--kole-text) !important;
+}
+
+.intellitrack-table-wrap,
+.intellitrack-table {
+  border-color: var(--kole-border-strong) !important;
+  background: var(--kole-table-body) !important;
+}
+
+@media (max-width: 900px) {
+  .intellitrack-section-header {
+    padding: 12px 14px !important;
+  }
+}
+
+/* INTELLITRACK V1.5: final drawer typography + full-width upload digest control */
+.upload-digest-header-row {
+  display: block !important;
+  min-height: 0 !important;
+  width: 100% !important;
+  margin: 0 !important;
+}
+
+.upload-digest-arrow,
+.upload-digest-today-button {
+  display: none !important;
+}
+
+.upload-digest-summary,
+.intellitrack-summary {
+  width: 100% !important;
+  min-height: 64px !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto auto !important;
+  align-items: center !important;
+  gap: 16px !important;
+  padding: 16px 18px !important;
+  border-radius: 10px !important;
+  text-align: left !important;
+}
+
+.upload-digest-title,
+.intellitrack-title,
+.report-group-button strong {
+  font-size: 18px !important;
+  font-weight: 900 !important;
+  line-height: 1.22 !important;
+  letter-spacing: 0 !important;
+}
+
+.upload-digest-title,
+.intellitrack-title {
+  color: var(--kole-text) !important;
+  margin: 0 !important;
+}
+
+.upload-digest-count,
+.intellitrack-count {
+  font-size: 13px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+  padding: 7px 11px !important;
+}
+
+.upload-digest-chevron,
+.intellitrack-chevron {
+  font-size: 14px !important;
+  font-weight: 900 !important;
+}
+
+@media (max-width: 700px) {
+  .upload-digest-summary,
+  .intellitrack-summary {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+/* INTELLITRACK V1.6: keep Upload Digest navigation while preserving full-width report-row styling */
+.upload-digest-header-row {
+  display: grid !important;
+  grid-template-columns: 44px minmax(0, 1fr) auto 44px !important;
+  align-items: stretch !important;
+  gap: 0 !important;
+  width: 100% !important;
+  min-height: 64px !important;
+  margin: 0 !important;
+  border: 1px solid var(--kole-border) !important;
+  border-left: 4px solid transparent !important;
+  border-radius: 10px !important;
+  background: var(--kole-surface) !important;
+  overflow: hidden !important;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.18) !important;
+}
+
+.upload-digest-header-row:has(.upload-digest-summary[aria-expanded="true"]) {
+  background: var(--kole-surface-2) !important;
+  border-left-color: var(--kole-secondary-rail) !important;
+}
+
+.upload-digest-header-row:hover {
+  background: var(--kole-surface-2) !important;
+  border-left-color: var(--kole-secondary-rail-soft) !important;
+}
+
+.upload-digest-summary {
+  width: auto !important;
+  min-height: 64px !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto auto !important;
+  align-items: center !important;
+  gap: 16px !important;
+  padding: 16px 18px !important;
+  border: 0 !important;
+  border-left: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  text-align: left !important;
+}
+
+.upload-digest-summary:hover,
+.upload-digest-summary[aria-expanded="true"] {
+  background: transparent !important;
+  border-left-color: transparent !important;
+}
+
+.upload-digest-arrow,
+.upload-digest-today-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 44px !important;
+  min-height: 64px !important;
+  height: auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--kole-text) !important;
+  box-shadow: none !important;
+}
+
+.upload-digest-arrow {
+  font-size: 26px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+}
+
+.upload-digest-today-button {
+  min-width: 58px !important;
+  padding: 0 12px !important;
+  color: #fde68a !important;
+  font-size: 12px !important;
+  font-weight: 900 !important;
+  letter-spacing: 0.01em !important;
+}
+
+.upload-digest-arrow:hover,
+.upload-digest-today-button:hover {
+  background: rgba(255,255,255,0.055) !important;
+  border-color: transparent !important;
+}
+
+.upload-digest-arrow:disabled,
+.upload-digest-today-button:disabled {
+  opacity: 0.35 !important;
+}
+
+.upload-digest-today-button.hidden {
+  display: none !important;
+}
+
+@media (max-width: 700px) {
+  .upload-digest-header-row {
+    grid-template-columns: 40px minmax(0, 1fr) 40px !important;
+  }
+
+  .upload-digest-today-button {
+    display: none !important;
+  }
+
+  .upload-digest-summary {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+/* INTELLITRACK V1.7: split show-me and do-something into separate report-style sections */
+.intellitrack-body {
+  display: grid !important;
+  gap: 14px !important;
+  margin-top: 0 !important;
+}
+
+.intellitrack-title-block {
+  display: grid !important;
+  gap: 4px !important;
+  min-width: 0 !important;
+}
+
+.intellitrack-subtitle {
+  display: block !important;
+  color: #cbd5e1 !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  line-height: 1.3 !important;
+  letter-spacing: 0 !important;
+}
+
+.intellitrack-action-summary {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+}
+
+.intellitrack-current-card,
+.intellitrack-search-card {
+  margin-top: -4px !important;
+}
+
+.intellitrack-empty {
+  padding: 18px !important;
+}
+
+@media (max-width: 700px) {
+  .intellitrack-action-summary {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+/* Weekly Settlement: driver pay summary + active roster revenue sanity check */
+.settlement-subsection {
+  margin-top: 18px;
+  border: 1px solid rgba(203, 213, 225, 0.16);
+  border-radius: 14px;
+  background: rgba(2, 6, 23, 0.38);
+  overflow: hidden;
+}
+
+.settlement-subsection-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(203, 213, 225, 0.14);
+  background: rgba(15, 23, 42, 0.78);
+}
+
+.settlement-subsection-header h5 {
+  margin: 0 0 4px;
+  color: #facc15;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+}
+
+.settlement-subsection-header p {
+  margin: 0;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+.settlement-subsection-header > span {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border: 1px solid rgba(250, 204, 21, 0.28);
+  border-radius: 999px;
+  background: rgba(250, 204, 21, 0.1);
+  color: #fde68a;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.settlement-summary-table-wrap {
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.settlement-driver-summary-table,
+.settlement-no-revenue-table {
+  min-width: 980px;
+  table-layout: fixed;
+}
+
+.settlement-driver-summary-table th:nth-child(1),
+.settlement-driver-summary-table td:nth-child(1) { width: 18%; }
+.settlement-driver-summary-table th:nth-child(2),
+.settlement-driver-summary-table td:nth-child(2) { width: 12%; }
+.settlement-driver-summary-table th:nth-child(3),
+.settlement-driver-summary-table td:nth-child(3) { width: 8%; text-align: right; }
+.settlement-driver-summary-table th:nth-child(4),
+.settlement-driver-summary-table td:nth-child(4) { width: 22%; }
+.settlement-driver-summary-table th:nth-child(5),
+.settlement-driver-summary-table td:nth-child(5),
+.settlement-driver-summary-table th:nth-child(6),
+.settlement-driver-summary-table td:nth-child(6),
+.settlement-driver-summary-table th:nth-child(7),
+.settlement-driver-summary-table td:nth-child(7) { width: 13%; text-align: right; }
+
+.settlement-no-revenue-table th:nth-child(1),
+.settlement-no-revenue-table td:nth-child(1) { width: 18%; }
+.settlement-no-revenue-table th:nth-child(2),
+.settlement-no-revenue-table td:nth-child(2) { width: 18%; }
+.settlement-no-revenue-table th:nth-child(3),
+.settlement-no-revenue-table td:nth-child(3) { width: 10%; }
+.settlement-no-revenue-table th:nth-child(4),
+.settlement-no-revenue-table td:nth-child(4) { width: 12%; }
+.settlement-no-revenue-table th:nth-child(5),
+.settlement-no-revenue-table td:nth-child(5) { width: 12%; }
+.settlement-no-revenue-table th:nth-child(6),
+.settlement-no-revenue-table td:nth-child(6) { width: 11%; }
+.settlement-no-revenue-table th:nth-child(7),
+.settlement-no-revenue-table td:nth-child(7) { width: 19%; }
+
+.settlement-driver-summary-table td,
+.settlement-no-revenue-table td {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.settlement-check-warning {
+  margin: 12px 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(120, 53, 15, 0.48);
+  border-radius: 10px;
+  background: rgba(120, 53, 15, 0.18);
+  color: #fde68a;
+  font-size: 13px;
+}
+
+.settlement-roster-warning {
+  max-width: 1280px;
+  margin: 18px auto 0;
+}
+
+.msg.good-news {
+  margin: 14px;
+  color: #bbf7d0;
+}
+
+@media (max-width: 800px) {
+  .settlement-subsection-header {
+    flex-direction: column;
+  }
+}
+
+/* AVAILABLE TRUCKS */
+.available-trucks-panel {
+  width: min(1100px, 100%);
+  margin: 20px auto 0;
+}
+
+.web-runtime .available-trucks-panel {
+  width: min(1100px, 100%);
+}
+
+.available-trucks-section-header {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 14px;
+  text-align: center;
+}
+
+.available-trucks-section-header h2 {
+  margin: 0;
+  color: #d4a017;
+  font-size: 24px;
+}
+
+.available-trucks-body {
+  display: grid;
+  gap: 12px;
+}
+
+.available-trucks-summary {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(250, 204, 21, 0.26);
+  border-radius: 14px;
+  background: #0f172a;
+  color: #e5e7eb;
+  text-align: left;
+}
+
+.available-trucks-summary:hover,
+.available-trucks-summary[aria-expanded="true"] {
+  background: #111827;
+  border-color: rgba(250, 204, 21, 0.5);
+}
+
+.available-trucks-title-block {
+  display: grid;
+  gap: 4px;
+}
+
+.available-trucks-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #f8fafc;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.available-trucks-subtitle {
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.available-trucks-count {
+  border: 1px solid rgba(250, 204, 21, 0.25);
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: #facc15;
+  background: rgba(250, 204, 21, 0.08);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.available-trucks-chevron {
+  color: #facc15;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.available-trucks-current-card,
+.available-trucks-action-card {
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  padding: 16px;
+  background: #0b1220;
+}
+
+.available-trucks-subheader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.available-trucks-subheader h3 {
+  margin: 0 0 4px;
+  color: #facc15;
+}
+
+.available-trucks-subheader p {
+  margin: 0;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+.available-trucks-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.available-trucks-kpi-grid > div {
+  border: 1px solid rgba(255,255,255,0.11);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255,255,255,0.04);
+}
+
+.available-trucks-kpi-grid span,
+.available-trucks-insight-card > span {
+  display: block;
+  margin-bottom: 6px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.available-trucks-kpi-grid strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 20px;
+}
+
+.available-trucks-kpi-grid small {
+  display: block;
+  margin-top: 6px;
+  color: #94a3b8;
+  word-break: break-all;
+}
+
+.available-trucks-insight-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.available-trucks-insight-card {
+  border: 1px solid rgba(255,255,255,0.11);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(15, 23, 42, 0.9);
+}
+
+.available-trucks-insight-card ol {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.available-trucks-insight-card li {
+  margin: 7px 0;
+  color: #cbd5e1;
+}
+
+.available-trucks-insight-card li strong {
+  color: #f8fafc;
+}
+
+.available-trucks-insight-card li span {
+  margin-left: 6px;
+  color: #facc15;
+  font-weight: 800;
+}
+
+.available-trucks-attention-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.available-trucks-attention {
+  border-radius: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(250, 204, 21, 0.24);
+  background: rgba(250, 204, 21, 0.08);
+}
+
+.available-trucks-attention.warning {
+  border-color: rgba(248, 113, 113, 0.35);
+  background: rgba(127, 29, 29, 0.18);
+}
+
+.available-trucks-attention strong,
+.available-trucks-attention span {
+  display: block;
+}
+
+.available-trucks-attention strong {
+  color: #f8fafc;
+}
+
+.available-trucks-attention span {
+  margin-top: 3px;
+  color: #cbd5e1;
+}
+
+.available-trucks-table {
+  min-width: 1000px;
+}
+
+.available-trucks-table th:nth-child(1),
+.available-trucks-table td:nth-child(1) { width: 190px; }
+.available-trucks-table th:nth-child(2),
+.available-trucks-table td:nth-child(2) { width: 90px; }
+.available-trucks-table th:nth-child(3),
+.available-trucks-table td:nth-child(3) { width: 230px; }
+.available-trucks-table th:nth-child(4),
+.available-trucks-table td:nth-child(4) { width: 180px; }
+
+.available-trucks-table td strong,
+.available-trucks-table td small {
+  display: block;
+}
+
+.available-trucks-table td small,
+.available-trucks-muted {
+  margin-top: 4px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.available-trucks-proximity-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.available-trucks-proximity-list > span {
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 9px;
+  padding: 7px 8px;
+  background: rgba(255,255,255,0.035);
+}
+
+.available-trucks-proximity-list strong,
+.available-trucks-proximity-list small {
+  display: block;
+}
+
+.available-trucks-proximity-list small {
+  color: #94a3b8;
+}
+
+.available-trucks-footnote {
+  margin-top: 12px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.available-trucks-source-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 0;
+}
+
+@media (max-width: 1100px) {
+  .available-trucks-kpi-grid,
+  .available-trucks-insight-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .available-trucks-summary,
+  .available-trucks-subheader {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .available-trucks-kpi-grid,
+  .available-trucks-insight-grid,
+  .available-trucks-source-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .available-trucks-proximity-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* AVAILABLE TRUCKS V1.1 / SECTION REAL ESTATE PASS
+   Main operating sections now collapse at the section header level, with status pills
+   in the true section header instead of nested drawer rows. */
+.feature-accordion-panel {
+  width: min(1100px, 100%) !important;
+  margin: 20px auto 0 !important;
+  padding: 12px !important;
+  border-color: var(--kole-border-strong) !important;
+  background: var(--kole-shell) !important;
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035) !important;
+}
+
+.feature-section-header-button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px !important;
+  border: 1px solid var(--kole-border) !important;
+  border-left: 4px solid var(--kole-gold) !important;
+  border-radius: 12px !important;
+  background: linear-gradient(180deg, var(--kole-surface), #121b2e) !important;
+  color: var(--kole-text) !important;
+  text-align: left;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.18) !important;
+}
+
+.feature-section-header-button:hover,
+.feature-section-header-button[aria-expanded="true"] {
+  background: linear-gradient(180deg, var(--kole-surface-2), #151f34) !important;
+  border-color: rgba(250, 204, 21, 0.42) !important;
+}
+
+.feature-section-title-block {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.feature-section-title {
+  color: var(--kole-gold-bright) !important;
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.feature-section-subtitle {
+  color: var(--kole-muted) !important;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.feature-section-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  border: 1px solid rgba(250, 204, 21, 0.42);
+  border-radius: 999px;
+  padding: 6px 11px;
+  background: rgba(250, 204, 21, 0.10);
+  color: var(--kole-gold-bright) !important;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.feature-section-chevron {
+  color: var(--kole-gold-bright);
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.feature-section-body {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+/* Nested drawers are secondary controls now; keep them slate and compact. */
+.upload-digest-summary,
+.intellitrack-summary,
+.available-trucks-summary {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  min-height: 50px !important;
+  border-left-color: transparent !important;
+}
+
+.upload-digest-summary[aria-expanded="true"],
+.intellitrack-summary[aria-expanded="true"],
+.available-trucks-summary[aria-expanded="true"] {
+  border-left-color: var(--kole-secondary-rail) !important;
+}
+
+.available-trucks-section-header,
+.intellitrack-section-header,
+.upload-digest-section-header,
+.reports-header {
+  display: none !important;
+}
+
+.available-trucks-body,
+.intellitrack-body,
+.upload-digest-section-body,
+.reports-accordion-list {
+  margin-top: 12px;
+}
+
+.reports-panel .reports-accordion-list {
+  display: grid;
+  gap: 12px;
+}
+
+.available-trucks-kpi-grid small {
+  line-height: 1.3;
+  word-break: normal;
+}
+
+@media (max-width: 700px) {
+  .feature-section-header-button {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .feature-section-status-pill,
+  .feature-section-chevron {
+    justify-self: start;
+  }
+}
+
+/* V1.2: Available Trucks nested rows no longer use the yellow mini-rail. */
+.available-trucks-summary .available-trucks-title::before {
+  display: none !important;
+}
+
+/* Available Trucks drilldown refinements */
+.available-trucks-kpi-button {
+  width: 100%;
+  text-align: center;
+  border: 1px solid rgba(255,255,255,0.11);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255,255,255,0.04);
+  color: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.available-trucks-kpi-button:hover {
+  background: rgba(255,255,255,0.075);
+  border-color: rgba(250,204,21,0.32);
+  transform: translateY(-1px);
+}
+
+.available-trucks-kpi-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.22);
+}
+
+.available-trucks-drilldown-modal {
+  width: min(1250px, 94vw);
+}
+
+.available-trucks-drilldown-body {
+  padding: 18px;
+}
+
+.available-trucks-drilldown-table-wrap table {
+  min-width: 1080px;
+}
+
+.available-trucks-drilldown-table th:nth-child(1),
+.available-trucks-drilldown-table td:nth-child(1) { width: 190px; }
+.available-trucks-drilldown-table th:nth-child(2),
+.available-trucks-drilldown-table td:nth-child(2) { width: 80px; }
+.available-trucks-drilldown-table th:nth-child(3),
+.available-trucks-drilldown-table td:nth-child(3) { width: 170px; }
+.available-trucks-drilldown-table th:nth-child(4),
+.available-trucks-drilldown-table td:nth-child(4) { width: 160px; }
+.available-trucks-drilldown-table th:nth-child(5),
+.available-trucks-drilldown-table td:nth-child(5) { width: 340px; }
+.available-trucks-drilldown-table th:nth-child(6),
+.available-trucks-drilldown-table td:nth-child(6) { width: 130px; }
+
+.available-trucks-drilldown-table td strong,
+.available-trucks-drilldown-table td small {
+  display: block;
+  line-height: 1.35;
+}
+
+.available-trucks-drilldown-table td small {
+  margin-top: 4px;
+  color: #94a3b8;
+}
+
+.available-trucks-gap-value {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.available-trucks-tonu-marker {
+  color: #facc15;
+  font-weight: 900;
+  line-height: 1;
+  margin-left: 2px;
+}
+
+.available-trucks-tonu-note {
+  margin: 10px 2px 0;
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.available-trucks-tonu-note sup {
+  color: #facc15;
+  font-weight: 900;
+}
+
+/* AVAILABLE TRUCKS V1.7: keep gold on main headers; nested drawers use slate with an off-white hover/open rail. */
+.available-trucks-summary {
+  min-height: 54px !important;
+  padding: 14px 16px !important;
+  border: 1px solid var(--kole-border) !important;
+  border-left: 4px solid transparent !important;
+  border-radius: 10px !important;
+  background: var(--kole-surface) !important;
+  color: var(--kole-text) !important;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.18) !important;
+}
+
+.available-trucks-summary:hover,
+.available-trucks-summary[aria-expanded="true"] {
+  background: var(--kole-surface-2) !important;
+  border-color: var(--kole-border) !important;
+  border-left-color: #e5e7eb !important;
+}
+
+.available-trucks-summary .available-trucks-title,
+.available-trucks-summary[aria-expanded="true"] .available-trucks-title,
+.available-trucks-summary:hover .available-trucks-title {
+  color: var(--kole-text) !important;
+}
+
+/* AVAILABLE TRUCKS V1.8: match nested drawer hover/open treatment and keep subheader arrows white. */
+.available-trucks-summary:hover {
+  background: var(--kole-surface-2) !important;
+  border-color: var(--kole-border) !important;
+  border-left-color: var(--kole-secondary-rail-soft) !important;
+}
+
+.available-trucks-summary[aria-expanded="true"] {
+  background: var(--kole-surface-2) !important;
+  border-color: var(--kole-border) !important;
+  border-left-color: var(--kole-secondary-rail) !important;
+}
+
+.available-trucks-summary .available-trucks-chevron,
+.available-trucks-summary:hover .available-trucks-chevron,
+.available-trucks-summary[aria-expanded="true"] .available-trucks-chevron {
+  color: var(--kole-text) !important;
+}
+
+/* AVAILABLE TRUCKS ADD FORM */
+.available-trucks-source-note {
+  min-width: 220px;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.04);
+}
+
+.available-trucks-source-note span,
+.available-truck-send-grid label span,
+.available-truck-main-grid label span,
+.available-truck-proximity-pair label span {
+  display: block;
+  margin-bottom: 6px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.available-trucks-source-note strong,
+.available-trucks-source-note small {
+  display: block;
+}
+
+.available-trucks-source-note strong {
+  color: #f8fafc;
+}
+
+.available-trucks-source-note small {
+  margin-top: 4px;
+  color: #94a3b8;
+  overflow-wrap: anywhere;
+}
+
+.available-truck-form {
+  display: grid;
+  gap: 14px;
+}
+
+.available-truck-send-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 240px));
+  gap: 12px;
+}
+
+.available-truck-send-grid input,
+.available-truck-send-grid select,
+.available-truck-main-grid input,
+.available-truck-main-grid select,
+.available-truck-proximity-pair input {
+  width: 100%;
+  min-width: 0;
+  padding: 11px 12px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #020617;
+  color: #e5e7eb;
+  font-size: 14px;
+  outline: none;
+}
+
+.available-truck-send-grid input:focus,
+.available-truck-send-grid select:focus,
+.available-truck-main-grid input:focus,
+.available-truck-main-grid select:focus,
+.available-truck-proximity-pair input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.22);
+}
+
+.available-truck-main-grid input[readonly] {
+  border-color: rgba(250, 204, 21, 0.26);
+  background: rgba(15, 23, 42, 0.92);
+  color: #cbd5e1;
+  cursor: default;
+}
+
+.available-truck-field-hint {
+  display: block;
+  margin-top: 5px;
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.available-truck-suggestion-box {
+  border: 1px solid rgba(250, 204, 21, 0.18);
+  border-radius: 12px;
+  padding: 11px 12px;
+  background: rgba(250, 204, 21, 0.055);
+}
+
+.available-truck-suggestion-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  margin-bottom: 9px;
+}
+
+.available-truck-suggestion-header strong {
+  color: #f8fafc;
+  font-size: 13px;
+}
+
+.available-truck-suggestion-header span {
+  color: #94a3b8;
+  font-size: 12px;
+  text-align: right;
+}
+
+.available-truck-suggestion-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.available-truck-suggestion-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  max-width: 220px;
+  border: 1px solid rgba(250, 204, 21, 0.26);
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #e5e7eb;
+  text-align: left;
+}
+
+.available-truck-suggestion-chip:hover:not(:disabled) {
+  border-color: rgba(250, 204, 21, 0.56);
+  background: rgba(30, 41, 59, 0.96);
+}
+
+.available-truck-suggestion-chip strong,
+.available-truck-suggestion-chip span {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.available-truck-suggestion-chip strong {
+  color: #f8fafc;
+  font-size: 12px;
+}
+
+.available-truck-suggestion-chip span {
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.available-truck-roster-warning {
+  border: 1px solid rgba(250, 204, 21, 0.32);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(250, 204, 21, 0.08);
+  color: #fde68a;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.available-truck-form-rows {
+  display: grid;
+  gap: 12px;
+}
+
+.available-truck-form-row-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 14px;
+  padding: 14px;
+  background: rgba(15, 23, 42, 0.68);
+}
+
+.available-truck-form-row-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+.available-truck-form-row-header strong,
+.available-truck-form-row-header span {
+  display: block;
+}
+
+.available-truck-form-row-header strong {
+  color: #f8fafc;
+}
+
+.available-truck-form-row-header span {
+  margin-top: 3px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.available-truck-main-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.available-truck-proximity-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.available-truck-proximity-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+  gap: 8px;
+}
+
+.available-truck-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.available-truck-form-actions span {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+@media (max-width: 1000px) {
+  .available-truck-main-grid,
+  .available-truck-proximity-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .available-truck-send-grid,
+  .available-truck-main-grid,
+  .available-truck-proximity-grid,
+  .available-truck-proximity-pair {
+    grid-template-columns: 1fr;
+  }
+
+  .available-truck-form-row-header,
+  .available-truck-form-actions,
+  .available-truck-suggestion-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .available-truck-suggestion-header span {
+    text-align: left;
+  }
+
+  .available-truck-suggestion-chip {
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .available-trucks-source-note {
+    min-width: 0;
+  }
+}
