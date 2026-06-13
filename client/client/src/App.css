@@ -5787,3 +5787,37 @@ input:focus,
     min-width: 0;
   }
 }
+
+
+/* PASS 16: Available Trucks current/analysis split + posting rules */
+.available-trucks-current-summary .available-trucks-title {
+  color: var(--kole-text) !important;
+}
+
+.available-trucks-analysis-card {
+  margin-top: 0;
+}
+
+.available-truck-posting-rules {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(250, 204, 21, 0.22);
+  border-left: 4px solid rgba(250, 204, 21, 0.72);
+  border-radius: 12px;
+  background: rgba(250, 204, 21, 0.07);
+  color: var(--kole-text);
+}
+
+.available-truck-posting-rules strong {
+  color: var(--kole-text);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.available-truck-posting-rules span {
+  color: var(--kole-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}

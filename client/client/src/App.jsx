@@ -477,6 +477,7 @@ export default function App() {
   const [intelliTrackPendingBol, setIntelliTrackPendingBol] = useState('');
   const [intelliTrackSuppressedBols, setIntelliTrackSuppressedBols] = useState([]);
   const [availableTrucksSectionOpen, setAvailableTrucksSectionOpen] = useState(false);
+  const [availableTrucksCurrentOpen, setAvailableTrucksCurrentOpen] = useState(false);
   const [availableTrucksOpen, setAvailableTrucksOpen] = useState(false);
   const [availableTrucksActionOpen, setAvailableTrucksActionOpen] = useState(false);
   const [availableTrucksData, setAvailableTrucksData] = useState(null);
@@ -717,6 +718,7 @@ export default function App() {
     setIntelliTrackOpen(false);
     setIntelliTrackActionOpen(false);
     setAvailableTrucksSectionOpen(false);
+    setAvailableTrucksCurrentOpen(false);
     setAvailableTrucksOpen(false);
     setAvailableTrucksActionOpen(false);
     setAvailableTrucksData(null);
@@ -4674,26 +4676,26 @@ function openReportLoadDetails(load) {
           <div className="feature-section-body available-trucks-body">
             <button
               type="button"
-              className="available-trucks-summary"
-              onClick={() => setAvailableTrucksOpen((current) => !current)}
-              aria-expanded={availableTrucksOpen}
+              className="available-trucks-summary available-trucks-current-summary"
+              onClick={() => setAvailableTrucksCurrentOpen((current) => !current)}
+              aria-expanded={availableTrucksCurrentOpen}
             >
               <span className="available-trucks-title-block">
-                <span className="available-trucks-title">Available Trucks Analysis</span>
-                <span className="available-trucks-subtitle">Availability Analysis and Current Availability.</span>
+                <span className="available-trucks-title">Current Available Units</span>
+                <span className="available-trucks-subtitle">Current advertised trucks that are not hidden by active or future assignment.</span>
               </span>
               <span className="available-trucks-chevron">
-                {availableTrucksOpen ? '▲' : '▼'}
+                {availableTrucksCurrentOpen ? '▲' : '▼'}
               </span>
             </button>
 
-            {availableTrucksOpen && !availableTrucksError && (
+            {availableTrucksCurrentOpen && !availableTrucksError && (
               <div className="available-trucks-current-card">
                 <div className="available-trucks-subheader">
                   <div>
                     <h3>{batchLabel}</h3>
                     <p>
-                      Current window: last {availableTrucksData?.currentWindowHours || 24} hours · {excludedCount} hidden by active/future assignment · Pattern window: last {availableTrucksData?.lookbackDays || 30} days
+                      Current window: last {availableTrucksData?.currentWindowHours || 24} hours · {excludedCount} hidden by active/future assignment
                     </p>
                   </div>
 
@@ -4709,6 +4711,88 @@ function openReportLoadDetails(load) {
 
                 {availableTrucksLoading && !availableTrucksData && (
                   <div className="msg">Loading available trucks...</div>
+                )}
+
+                {availableTrucksData && (
+                  <>
+                    {records.length === 0 ? (
+                      <div className="intellitrack-empty">
+                        <strong>No trucks currently available.</strong>
+                      </div>
+                    ) : (
+                      <div className="operations-table-wrap available-trucks-table-wrap">
+                        <table className="available-trucks-table">
+                          <thead>
+                            <tr>
+                              <th>Driver</th>
+                              <th>Unit</th>
+                              <th>Equipment</th>
+                              <th>Current Location</th>
+                              <th>Advertised Proximity</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {records.map((record) => (
+                              <tr key={record.id || `${record.driverName}-${record.unitNo}-${record.dateSent}-${record.timeOfDay}`}>
+                                <td>
+                                  <strong>{record.driverName || '-'}</strong>
+                                  <small>{record.teamType || '-'}</small>
+                                </td>
+                                <td>{record.unitNo || '-'}</td>
+                                <td>
+                                  <strong>{record.equipmentType || '-'}</strong>
+                                  <small>{record.equipmentFamily || '-'}</small>
+                                </td>
+                                <td>{record.currentLocation || '-'}</td>
+                                <td><AvailableTruckProximityList stops={record.proximityStops} /></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            <button
+              type="button"
+              className="available-trucks-summary"
+              onClick={() => setAvailableTrucksOpen((current) => !current)}
+              aria-expanded={availableTrucksOpen}
+            >
+              <span className="available-trucks-title-block">
+                <span className="available-trucks-title">Available Trucks Analysis</span>
+                <span className="available-trucks-subtitle">Recent posting patterns, assignment filters, locations, proximity, and equipment mix.</span>
+              </span>
+              <span className="available-trucks-chevron">
+                {availableTrucksOpen ? '▲' : '▼'}
+              </span>
+            </button>
+
+            {availableTrucksOpen && !availableTrucksError && (
+              <div className="available-trucks-current-card available-trucks-analysis-card">
+                <div className="available-trucks-subheader">
+                  <div>
+                    <h3>Available Trucks Analysis</h3>
+                    <p>
+                      Pattern window: last {availableTrucksData?.lookbackDays || 30} days · {summary.recentRecordCount || 0} row{summary.recentRecordCount === 1 ? '' : 's'} in the analysis window
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => loadAvailableTrucks()}
+                    disabled={availableTrucksLoading}
+                  >
+                    {availableTrucksLoading ? 'Refreshing...' : 'Refresh'}
+                  </button>
+                </div>
+
+                {availableTrucksLoading && !availableTrucksData && (
+                  <div className="msg">Loading available-truck analysis...</div>
                 )}
 
                 {availableTrucksData && (
@@ -4769,43 +4853,6 @@ function openReportLoadDetails(load) {
                       <AvailableTrucksInsightList title="Top advertised proximity" items={insights.topProximityLocations} />
                       <AvailableTrucksInsightList title="Equipment mix" items={insights.equipmentMix} />
                     </div>
-
-                    {records.length === 0 ? (
-                      <div className="intellitrack-empty">
-                        <strong>No trucks currently available.</strong>
-                                              </div>
-                    ) : (
-                      <div className="operations-table-wrap available-trucks-table-wrap">
-                        <table className="available-trucks-table">
-                          <thead>
-                            <tr>
-                              <th>Driver</th>
-                              <th>Unit</th>
-                              <th>Equipment</th>
-                              <th>Current Location</th>
-                              <th>Advertised Proximity</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {records.map((record) => (
-                              <tr key={record.id || `${record.driverName}-${record.unitNo}-${record.dateSent}-${record.timeOfDay}`}>
-                                <td>
-                                  <strong>{record.driverName || '-'}</strong>
-                                  <small>{record.teamType || '-'}</small>
-                                </td>
-                                <td>{record.unitNo || '-'}</td>
-                                <td>
-                                  <strong>{record.equipmentType || '-'}</strong>
-                                  <small>{record.equipmentFamily || '-'}</small>
-                                </td>
-                                <td>{record.currentLocation || '-'}</td>
-                                <td><AvailableTruckProximityList stops={record.proximityStops} /></td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
                   </>
                 )}
               </div>
@@ -4866,6 +4913,11 @@ function openReportLoadDetails(load) {
                         <option value="Evening">Evening</option>
                       </select>
                     </label>
+                  </div>
+
+                  <div className="available-truck-posting-rules">
+                    <strong>{availableTruckTimeOfDay} posting rule</strong>
+                    <span>AM covers 12:00 AM-11:59 AM. PM covers 12:00 PM-5:00 PM. AM and PM batches send every 30 minutes at the next :30 mark; Evening batches only send at the 7:00 PM scheduled run.</span>
                   </div>
 
                   <div className="available-truck-form-rows">

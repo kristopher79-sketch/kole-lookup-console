@@ -3261,7 +3261,13 @@ function getOrdersDueForSettlementFieldSelect() {
     'TMSName',
     'Status',
     'FinalSettleSent',
+    'Quoted_x0020_Total',
     'FinalBillableTotal',
+    'EstimatedDriverPay',
+    'LinehaulDriverPay',
+    'FuelSurchargeDriverPay',
+    'TarpingDriverPay',
+    'AdditionalDriverPay',
     'NetPayabletoDriver'
   ].join(',');
 }
@@ -3271,6 +3277,16 @@ function getOrdersDueForSettlementItem(item, sourceList) {
   const truck = getChoiceValue(f.Truck_x0020_Number || f['Truck_x0020_Number/Value'] || '');
   const operatorTeam = getChoiceValue(f.Operator_x002f_Team || f['Operator_x002f_Team/Value'] || '');
   const customer = getChoiceValue(f.Company || f['Company/Value'] || '');
+  const finalBillableTotal = getNumberValue(f.FinalBillableTotal);
+  const quotedTotal = getNumberValue(f.Quoted_x0020_Total);
+  const netDriverPay = getNumberValue(f.NetPayabletoDriver);
+  const estimatedDriverPay = getNumberValue(f.EstimatedDriverPay);
+  const componentDriverPay = [
+    f.LinehaulDriverPay,
+    f.FuelSurchargeDriverPay,
+    f.TarpingDriverPay,
+    f.AdditionalDriverPay
+  ].reduce((sum, value) => sum + getNumberValue(value), 0);
 
   return {
     id: item.id || '',
@@ -3294,8 +3310,8 @@ function getOrdersDueForSettlementItem(item, sourceList) {
     OriginST: f.Pickup2State || '',
     DestST: f.Delivery1State || '',
     Route: [f.Shipment_x0020_Origin, f.Shipment_x0020_Destination].filter(Boolean).join(' to '),
-    BidAmount: getNumberValue(f.FinalBillableTotal),
-    DriverPay: getNumberValue(f.NetPayabletoDriver)
+    BidAmount: finalBillableTotal > 0 ? finalBillableTotal : quotedTotal,
+    DriverPay: netDriverPay > 0 ? netDriverPay : (estimatedDriverPay > 0 ? estimatedDriverPay : componentDriverPay)
   };
 }
 
