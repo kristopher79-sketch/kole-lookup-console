@@ -6521,6 +6521,70 @@ function isAvailableTruckRecordInWindow(record, cutoffTime) {
   return time >= cutoffTime;
 }
 
+function getAvailableTruckCurrentIdentityKey(record) {
+  const truckKey = normalizeTruckKey(record?.unitNo);
+  if (truckKey) return `truck:${truckKey}`;
+
+  const driverKey = normalizeSearchValue(record?.driverName);
+  if (driverKey) return `driver:${driverKey}`;
+
+  return `record:${record?.id || Math.random().toString(36).slice(2)}`;
+}
+
+function getAvailableTruckCurrentIdentityLabel(record) {
+  const unitNo = cleanAvailableTruckText(record?.unitNo);
+  if (unitNo) return `unit ${unitNo}`;
+
+  const driverName = cleanAvailableTruckText(record?.driverName);
+  if (driverName) return driverName;
+
+  return 'this truck';
+}
+
+function compareAvailableTruckCurrentRecency(a, b) {
+  const sentDiff = getAvailableTruckSentTime(b) - getAvailableTruckSentTime(a);
+  if (sentDiff !== 0) return sentDiff;
+
+  return compareAvailableTruckRecords(a, b);
+}
+
+function splitCurrentAvailableTruckRecords(records = []) {
+  const seen = new Map();
+  const currentRecords = [];
+  const supersededRecords = [];
+
+  [...records]
+    .sort(compareAvailableTruckCurrentRecency)
+    .forEach((record) => {
+      const key = getAvailableTruckCurrentIdentityKey(record);
+      const newerRecord = seen.get(key);
+
+      if (!newerRecord) {
+        seen.set(key, record);
+        currentRecords.push(record);
+        return;
+      }
+
+      supersededRecords.push({
+        ...record,
+        supersededByCurrentPosting: true,
+        supersededBy: {
+          id: newerRecord.id || '',
+          matchKey: key,
+          label: getAvailableTruckCurrentIdentityLabel(newerRecord),
+          dateSent: newerRecord.dateSent || '',
+          timeOfDay: newerRecord.timeOfDay || '',
+          postedAt: newerRecord.postedAt || newerRecord.createdAt || newerRecord.modifiedAt || ''
+        }
+      });
+    });
+
+  return {
+    currentRecords: currentRecords.sort(compareAvailableTruckRecords),
+    supersededRecords: supersededRecords.sort(compareAvailableTruckRecords)
+  };
+}
+
 function buildAvailableTrucksResponse(items, options = {}) {
   const lookbackDays = Math.max(1, Math.min(Number(options.lookbackDays) || AVAILABLE_TRUCKS_DEFAULT_LOOKBACK_DAYS, 365));
   const now = options.now instanceof Date ? options.now : new Date();
@@ -6552,7 +6616,11 @@ function buildAvailableTrucksResponse(items, options = {}) {
   });
 
   const recordsWithin24Hours = sortedRecords.filter((record) => record.isWithin24Hours);
-  const currentRecords = recordsWithin24Hours.filter((record) => !record.hasActiveOrFutureAssignment);
+  const currentCandidateRecords = recordsWithin24Hours.filter((record) => !record.hasActiveOrFutureAssignment);
+  const {
+    currentRecords,
+    supersededRecords: currentDuplicateExcludedRecords
+  } = splitCurrentAvailableTruckRecords(currentCandidateRecords);
   const assignmentExcludedRecords = recordsWithin24Hours.filter((record) => record.hasActiveOrFutureAssignment);
   const staleRecords = sortedRecords.filter((record) => !record.isWithin24Hours);
 

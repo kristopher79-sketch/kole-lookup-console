@@ -4646,7 +4646,7 @@ function openReportLoadDetails(load) {
     const summary = availableTrucksData?.summary || {};
     const insights = availableTrucksData?.insights || {};
     const batchLabel = formatAvailableTruckBatchLabel(summary);
-    const attentionItems = (insights.attention || []).filter((item) => !['No availability from the last 24 hours', 'No current unassigned trucks'].includes(item.label));
+    const attentionItems = (insights.attention || []).filter((item) => !['No availability from the last 24 hours', 'No current unassigned trucks', 'Repost collapsed'].includes(item.label));
     const currentCount = summary.currentRecordCount ?? availableTrucksData?.count ?? records.length;
     const excludedCount = summary.activeFutureAssignmentExclusions || 0;
 
@@ -4798,15 +4798,6 @@ function openReportLoadDetails(load) {
                 {availableTrucksData && (
                   <>
                     <div className="available-trucks-kpi-grid">
-                      <button
-                        type="button"
-                        className="available-trucks-kpi-button"
-                        onClick={() => openAvailableTruckDrilldown('Current available trucks', 'Rows from the last 24 hours with no active/future assignment.', records)}
-                      >
-                        <span>Current</span>
-                        <strong>{summary.currentRecordCount || 0}</strong>
-                        <small>Last 24 hours, unassigned</small>
-                      </button>
                       <button
                         type="button"
                         className="available-trucks-kpi-button"
