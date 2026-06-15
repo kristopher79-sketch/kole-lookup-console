@@ -355,6 +355,26 @@ function clampUploadDigestDate(dateValue) {
   return value > today ? today : value;
 }
 
+function sortAvailableTruckDistributionRowsForDisplay(rows, sortField = 'company', sortDirection = 'asc') {
+  const field = sortField === 'email' ? 'email' : 'company';
+  const direction = sortDirection === 'desc' ? -1 : 1;
+
+  return [...(rows || [])].sort((a, b) => {
+    const primaryCompare = String(a?.[field] || '').localeCompare(String(b?.[field] || ''), undefined, {
+      sensitivity: 'base',
+      numeric: true
+    });
+
+    if (primaryCompare !== 0) return primaryCompare * direction;
+
+    const secondaryField = field === 'company' ? 'email' : 'company';
+    return String(a?.[secondaryField] || '').localeCompare(String(b?.[secondaryField] || ''), undefined, {
+      sensitivity: 'base',
+      numeric: true
+    });
+  });
+}
+
 
 export default function App() {
   const [accessToken, setAccessToken] = useState(() => sessionStorage.getItem('koleLookupToken') || '');
@@ -480,6 +500,17 @@ export default function App() {
   const [availableTrucksCurrentOpen, setAvailableTrucksCurrentOpen] = useState(false);
   const [availableTrucksOpen, setAvailableTrucksOpen] = useState(false);
   const [availableTrucksActionOpen, setAvailableTrucksActionOpen] = useState(false);
+  const [availableTruckDistributionOpen, setAvailableTruckDistributionOpen] = useState(false);
+  const [availableTruckDistributionData, setAvailableTruckDistributionData] = useState(null);
+  const [availableTruckDistributionLoading, setAvailableTruckDistributionLoading] = useState(false);
+  const [availableTruckDistributionError, setAvailableTruckDistributionError] = useState('');
+  const [availableTruckDistributionCompany, setAvailableTruckDistributionCompany] = useState('');
+  const [availableTruckDistributionEmail, setAvailableTruckDistributionEmail] = useState('');
+  const [availableTruckDistributionSubmitting, setAvailableTruckDistributionSubmitting] = useState(false);
+  const [availableTruckDistributionMessage, setAvailableTruckDistributionMessage] = useState('');
+  const [availableTruckDistributionSortField, setAvailableTruckDistributionSortField] = useState('company');
+  const [availableTruckDistributionSortDirection, setAvailableTruckDistributionSortDirection] = useState('asc');
+  const [availableTruckDistributionInactiveModalOpen, setAvailableTruckDistributionInactiveModalOpen] = useState(false);
   const [availableTrucksData, setAvailableTrucksData] = useState(null);
   const [availableTrucksLoading, setAvailableTrucksLoading] = useState(false);
   const [availableTrucksError, setAvailableTrucksError] = useState('');
@@ -629,6 +660,7 @@ export default function App() {
     loadUploadDigest(uploadDigestDate);
     loadIntelliTrack();
     loadAvailableTrucks();
+    loadAvailableTruckDistributionList({ silent: true });
 
     const interval = window.setInterval(() => {
       loadOperationsDashboard({ silent: true });
@@ -636,6 +668,7 @@ export default function App() {
       loadUploadDigest(uploadDigestDate, { silent: true });
       loadIntelliTrack({ silent: true });
       loadAvailableTrucks({ silent: true });
+      loadAvailableTruckDistributionList({ silent: true });
     }, 10 * 60 * 1000);
 
     return () => window.clearInterval(interval);
@@ -721,6 +754,17 @@ export default function App() {
     setAvailableTrucksCurrentOpen(false);
     setAvailableTrucksOpen(false);
     setAvailableTrucksActionOpen(false);
+    setAvailableTruckDistributionOpen(false);
+    setAvailableTruckDistributionData(null);
+    setAvailableTruckDistributionLoading(false);
+    setAvailableTruckDistributionError('');
+    setAvailableTruckDistributionCompany('');
+    setAvailableTruckDistributionEmail('');
+    setAvailableTruckDistributionSubmitting(false);
+    setAvailableTruckDistributionMessage('');
+    setAvailableTruckDistributionSortField('company');
+    setAvailableTruckDistributionSortDirection('asc');
+    setAvailableTruckDistributionInactiveModalOpen(false);
     setAvailableTrucksData(null);
     setAvailableTrucksError('');
     setAvailableTruckFormDate(getEasternDateInputValue());
@@ -1020,6 +1064,126 @@ async function loadIntelliTrack(options = {}) {
 
 
 
+async function loadAvailableTruckDistributionList(options = {}) {
+  const { silent = false } = options;
+
+  if (!silent) {
+    setAvailableTruckDistributionLoading(true);
+  }
+
+  setAvailableTruckDistributionError('');
+
+  try {
+    const res = await authedFetch(`${API}/available-trucks/distribution-list`);
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Unable to load Available Equipment distribution list.');
+    }
+
+    setAvailableTruckDistributionData(data);
+  } catch (err) {
+    setAvailableTruckDistributionError(err.message || 'Unable to load Available Equipment distribution list.');
+
+    if (!silent) {
+      setAvailableTruckDistributionData(null);
+    }
+  } finally {
+    if (!silent) {
+      setAvailableTruckDistributionLoading(false);
+    }
+  }
+}
+
+function validateAvailableTruckDistributionForm() {
+  const company = availableTruckDistributionCompany.trim();
+  const email = availableTruckDistributionEmail.trim().toLowerCase();
+
+  if (!company) {
+    throw new Error('Company is required before adding a contact.');
+  }
+
+  if (!email) {
+    throw new Error('Email address is required before adding a contact.');
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error('Enter a valid email address.');
+  }
+
+  const duplicate = [
+    ...(availableTruckDistributionData?.rows || []),
+    ...(availableTruckDistributionData?.inactiveRows || [])
+  ].find((row) => String(row?.email || '').trim().toLowerCase() === email);
+
+  if (duplicate) {
+    const statusLabel = duplicate.active === false ? 'inactive/hidden' : 'active';
+    throw new Error(`${duplicate.email} is already ${statusLabel} on the distribution list${duplicate.company ? ` under ${duplicate.company}` : ''}.`);
+  }
+
+  return { company, email };
+}
+
+async function submitAvailableTruckDistributionContact(e) {
+  if (e) {
+    e.preventDefault();
+  }
+
+  setAvailableTruckDistributionSubmitting(true);
+  setAvailableTruckDistributionError('');
+  setAvailableTruckDistributionMessage('');
+
+  try {
+    const payload = validateAvailableTruckDistributionForm();
+    const res = await authedFetch(`${API}/available-trucks/distribution-list`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Unable to add distribution-list contact.');
+    }
+
+    setAvailableTruckDistributionMessage(data.message || `${payload.company} added to the distribution list.`);
+    setAvailableTruckDistributionCompany('');
+    setAvailableTruckDistributionEmail('');
+    await loadAvailableTruckDistributionList({ silent: true });
+  } catch (err) {
+    setAvailableTruckDistributionError(err.message || 'Unable to add distribution-list contact.');
+  } finally {
+    setAvailableTruckDistributionSubmitting(false);
+  }
+}
+
+function clearAvailableTruckDistributionForm() {
+  setAvailableTruckDistributionCompany('');
+  setAvailableTruckDistributionEmail('');
+  setAvailableTruckDistributionError('');
+  setAvailableTruckDistributionMessage('');
+}
+
+function toggleAvailableTruckDistributionSort(field) {
+  setAvailableTruckDistributionSortField((currentField) => {
+    if (currentField === field) {
+      setAvailableTruckDistributionSortDirection((currentDirection) => currentDirection === 'asc' ? 'desc' : 'asc');
+      return currentField;
+    }
+
+    setAvailableTruckDistributionSortDirection('asc');
+    return field;
+  });
+}
+
+function getAvailableTruckDistributionSortIndicator(field) {
+  if (availableTruckDistributionSortField !== field) return '↕';
+  return availableTruckDistributionSortDirection === 'asc' ? '▲' : '▼';
+}
+
 async function loadAvailableTrucks(options = {}) {
   const { silent = false } = options;
 
@@ -1034,12 +1198,12 @@ async function loadAvailableTrucks(options = {}) {
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok || !data.success) {
-      throw new Error(data.error || 'Unable to load Available Trucks.');
+      throw new Error(data.error || 'Unable to load Available Equipment.');
     }
 
     setAvailableTrucksData(data);
   } catch (err) {
-    setAvailableTrucksError(err.message || 'Unable to load Available Trucks.');
+    setAvailableTrucksError(err.message || 'Unable to load Available Equipment.');
 
     if (!silent) {
       setAvailableTrucksData(null);
@@ -1293,14 +1457,14 @@ async function submitAvailableTruckForm(e) {
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok || !data.success) {
-      throw new Error(data.error || 'Unable to submit available trucks.');
+      throw new Error(data.error || 'Unable to submit available equipment.');
     }
 
     setAvailableTruckActionMessage(data.message || `${drivers.length} available truck${drivers.length === 1 ? '' : 's'} submitted.`);
     setAvailableTruckRows([createAvailableTruckDraftRow('submitted')]);
     await loadAvailableTrucks({ silent: true });
   } catch (err) {
-    setAvailableTruckActionError(err.message || 'Unable to submit available trucks.');
+    setAvailableTruckActionError(err.message || 'Unable to submit available equipment.');
   } finally {
     setAvailableTruckSubmitting(false);
   }
@@ -1556,6 +1720,7 @@ function refreshOperationsAndTracking() {
   loadUploadDigest(uploadDigestDate);
   loadIntelliTrack();
   loadAvailableTrucks();
+  loadAvailableTruckDistributionList({ silent: true });
 }
 
 function closeDriverRosterModal() {
@@ -4649,6 +4814,19 @@ function openReportLoadDetails(load) {
     const attentionItems = (insights.attention || []).filter((item) => !['No availability from the last 24 hours', 'No current unassigned trucks', 'Repost collapsed'].includes(item.label));
     const currentCount = summary.currentRecordCount ?? availableTrucksData?.count ?? records.length;
     const excludedCount = summary.activeFutureAssignmentExclusions || 0;
+    const distributionRows = availableTruckDistributionData?.rows || [];
+    const inactiveDistributionRows = availableTruckDistributionData?.inactiveRows || [];
+    const sortedDistributionRows = sortAvailableTruckDistributionRowsForDisplay(
+      distributionRows,
+      availableTruckDistributionSortField,
+      availableTruckDistributionSortDirection
+    );
+    const distributionEmailDraftKey = availableTruckDistributionEmail.trim().toLowerCase();
+    const duplicateDistributionDraft = distributionEmailDraftKey
+      ? [...distributionRows, ...inactiveDistributionRows].find((row) =>
+          String(row?.email || '').trim().toLowerCase() === distributionEmailDraftKey
+        )
+      : null;
 
     return (
       <div className="search-card feature-accordion-panel available-trucks-panel">
@@ -4659,8 +4837,8 @@ function openReportLoadDetails(load) {
           aria-expanded={availableTrucksSectionOpen}
         >
           <span className="feature-section-title-block">
-            <span className="feature-section-title">Available Trucks</span>
-            <span className="feature-section-subtitle">Current advertised availability and recent location patterns.</span>
+            <span className="feature-section-title">Available Equipment</span>
+            <span className="feature-section-subtitle">Current advertised availability, recent location patterns, advertise new availability advertisement, view email blast list.</span>
           </span>
           <span className="feature-section-status-pill">
             {availableTrucksLoading ? 'Loading...' : `${currentCount} current`}
@@ -4681,7 +4859,7 @@ function openReportLoadDetails(load) {
               aria-expanded={availableTrucksCurrentOpen}
             >
               <span className="available-trucks-title-block">
-                <span className="available-trucks-title">Current Available Units</span>
+                <span className="available-trucks-title">Currently Available Equipment</span>
                 <span className="available-trucks-subtitle">Current advertised trucks that are not hidden by active or future assignment.</span>
               </span>
               <span className="available-trucks-chevron">
@@ -4710,14 +4888,14 @@ function openReportLoadDetails(load) {
                 </div>
 
                 {availableTrucksLoading && !availableTrucksData && (
-                  <div className="msg">Loading available trucks...</div>
+                  <div className="msg">Loading available equipment...</div>
                 )}
 
                 {availableTrucksData && (
                   <>
                     {records.length === 0 ? (
                       <div className="intellitrack-empty">
-                        <strong>No trucks currently available.</strong>
+                        <strong>No equipment currently available.</strong>
                       </div>
                     ) : (
                       <div className="operations-table-wrap available-trucks-table-wrap">
@@ -4763,7 +4941,7 @@ function openReportLoadDetails(load) {
               aria-expanded={availableTrucksOpen}
             >
               <span className="available-trucks-title-block">
-                <span className="available-trucks-title">Available Trucks Analysis</span>
+                <span className="available-trucks-title">Available Equipment Analysis</span>
                 <span className="available-trucks-subtitle">Recent posting patterns, assignment filters, locations, proximity, and equipment mix.</span>
               </span>
               <span className="available-trucks-chevron">
@@ -4775,7 +4953,7 @@ function openReportLoadDetails(load) {
               <div className="available-trucks-current-card available-trucks-analysis-card">
                 <div className="available-trucks-subheader">
                   <div>
-                    <h3>Available Trucks Analysis</h3>
+                    <h3>Available Equipment Analysis</h3>
                     <p>
                       Pattern window: last {availableTrucksData?.lookbackDays || 30} days · {summary.recentRecordCount || 0} row{summary.recentRecordCount === 1 ? '' : 's'} in the analysis window
                     </p>
@@ -4856,8 +5034,8 @@ function openReportLoadDetails(load) {
               aria-expanded={availableTrucksActionOpen}
             >
               <span className="available-trucks-title-block">
-                <span className="available-trucks-title">Add Available Truck</span>
-                <span className="available-trucks-subtitle">Create the source record Power Automate will dissect and send.</span>
+                <span className="available-trucks-title">Add Available Equipment</span>
+                <span className="available-trucks-subtitle">Advertise Available Equipment to the customer mass distribution list.</span>
               </span>
               <span className="available-trucks-chevron">
                 {availableTrucksActionOpen ? '▲' : '▼'}
@@ -4868,7 +5046,7 @@ function openReportLoadDetails(load) {
               <div className="available-trucks-action-card">
                 <div className="available-trucks-subheader">
                   <div>
-                    <h3>Add Available Truck</h3>
+                    <h3>Add Available Equipment</h3>
                     <p>
                       Select active drivers from Driver Roster. Driver name, unit number, and equipment type are prefilled so the wide source row stays consistent.
                     </p>
@@ -4952,7 +5130,7 @@ function openReportLoadDetails(load) {
                       className="primary-action-button"
                       disabled={availableTruckSubmitting}
                     >
-                      {availableTruckSubmitting ? 'Submitting...' : 'Submit Available Trucks'}
+                      {availableTruckSubmitting ? 'Submitting...' : 'Submit Available Equipment'}
                     </button>
                     <span>
                       {availableTruckDriverOptions.length} active roster option{availableTruckDriverOptions.length === 1 ? '' : 's'} loaded · {Object.keys(availableTruckSuggestionIndex).length} historical city match{Object.keys(availableTruckSuggestionIndex).length === 1 ? '' : 'es'} loaded · {availableTruckRows.length}/{AVAILABLE_TRUCK_MAX_ROWS} source slots shown · blank rows are ignored.
@@ -4961,9 +5139,229 @@ function openReportLoadDetails(load) {
                 </form>
               </div>
             )}
+
+            <button
+              type="button"
+              className="available-trucks-summary available-trucks-distribution-summary-button"
+              onClick={() => {
+                const nextOpen = !availableTruckDistributionOpen;
+                setAvailableTruckDistributionOpen(nextOpen);
+                setAvailableTruckDistributionError('');
+                setAvailableTruckDistributionMessage('');
+                if (nextOpen && !availableTruckDistributionData && !availableTruckDistributionLoading) {
+                  loadAvailableTruckDistributionList();
+                }
+              }}
+              aria-expanded={availableTruckDistributionOpen}
+            >
+              <span className="available-trucks-title-block">
+                <span className="available-trucks-title">Available Equipment Distribution List</span>
+                <span className="available-trucks-subtitle">View and add active recipients for Available Equipment mass emails.</span>
+              </span>
+              <span className="available-trucks-chevron available-trucks-chevron-slot" aria-hidden="true">
+                {availableTruckDistributionOpen ? '▲' : '▼'}
+              </span>
+            </button>
+
+            {availableTruckDistributionOpen && (
+              <div className="available-trucks-action-card available-truck-distribution-panel">
+                <div className="available-trucks-subheader compact">
+                  <div>
+                    <h3>Available Equipment Distribution List</h3>
+                    <p>Active company/email entries receiving Available Equipment mass emails. Add a row here, and the list refreshes immediately after save.</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => loadAvailableTruckDistributionList()}
+                    disabled={availableTruckDistributionLoading}
+                  >
+                    {availableTruckDistributionLoading ? 'Refreshing...' : 'Refresh List'}
+                  </button>
+                </div>
+
+                <div className="available-truck-distribution-summary">
+                  <div className="available-truck-distribution-summary-card">
+                    <span>Active recipients</span>
+                    <strong>{availableTruckDistributionData?.count ?? 0}</strong>
+                  </div>
+                  <button
+                    type="button"
+                    className="available-truck-distribution-summary-card available-truck-distribution-summary-button"
+                    onClick={() => setAvailableTruckDistributionInactiveModalOpen(true)}
+                    disabled={inactiveDistributionRows.length === 0}
+                    title={inactiveDistributionRows.length ? 'View inactive/hidden distribution-list entries' : 'No inactive/hidden entries found'}
+                  >
+                    <span>Inactive hidden</span>
+                    <strong>{availableTruckDistributionData?.inactiveCount ?? 0}</strong>
+                    <small>{inactiveDistributionRows.length ? 'Click to review' : 'None to show'}</small>
+                  </button>
+                  <div className="available-truck-distribution-summary-card">
+                    <span>Last refreshed</span>
+                    <strong>{availableTruckDistributionData?.generatedAt || '-'}</strong>
+                  </div>
+                </div>
+
+                {availableTruckDistributionData?.sourceWarning && (
+                  <div className="available-truck-roster-warning">
+                    {availableTruckDistributionData.sourceWarning}
+                  </div>
+                )}
+
+                <form className="available-truck-distribution-form" onSubmit={submitAvailableTruckDistributionContact}>
+                  <label>
+                    <span>Company</span>
+                    <input
+                      value={availableTruckDistributionCompany}
+                      onChange={(e) => {
+                        setAvailableTruckDistributionCompany(e.target.value);
+                        setAvailableTruckDistributionError('');
+                        setAvailableTruckDistributionMessage('');
+                      }}
+                      placeholder="Company name"
+                      disabled={availableTruckDistributionSubmitting}
+                    />
+                  </label>
+                  <label>
+                    <span>Email</span>
+                    <input
+                      type="email"
+                      value={availableTruckDistributionEmail}
+                      onChange={(e) => {
+                        setAvailableTruckDistributionEmail(e.target.value);
+                        setAvailableTruckDistributionError('');
+                        setAvailableTruckDistributionMessage('');
+                      }}
+                      placeholder="person@example.com"
+                      disabled={availableTruckDistributionSubmitting}
+                    />
+                    {duplicateDistributionDraft && (
+                      <small className="available-truck-distribution-duplicate-hint">
+                        Already {duplicateDistributionDraft.active === false ? 'inactive/hidden' : 'active'}
+                        {duplicateDistributionDraft.company ? ` under ${duplicateDistributionDraft.company}` : ''}.
+                      </small>
+                    )}
+                  </label>
+                  <div className="available-truck-distribution-actions">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={clearAvailableTruckDistributionForm}
+                      disabled={availableTruckDistributionSubmitting}
+                    >
+                      Clear
+                    </button>
+                    <button
+                      type="submit"
+                      className="primary-action-button"
+                      disabled={availableTruckDistributionSubmitting || Boolean(duplicateDistributionDraft)}
+                    >
+                      {availableTruckDistributionSubmitting ? 'Adding...' : 'Add Contact'}
+                    </button>
+                  </div>
+                </form>
+
+                {availableTruckDistributionMessage && <div className="msg success">{availableTruckDistributionMessage}</div>}
+                {availableTruckDistributionError && <div className="msg error">{availableTruckDistributionError}</div>}
+
+                {availableTruckDistributionLoading && !availableTruckDistributionData ? (
+                  <div className="msg">Loading distribution list...</div>
+                ) : (
+                  <div className="report-table-wrap available-truck-distribution-table-wrap">
+                    <table className="available-truck-distribution-table">
+                      <thead>
+                        <tr>
+                          <th>
+                            <button
+                              type="button"
+                              className="distribution-sort-header"
+                              onClick={() => toggleAvailableTruckDistributionSort('company')}
+                            >
+                              <span>Company</span>
+                              <span className="distribution-sort-indicator">{getAvailableTruckDistributionSortIndicator('company')}</span>
+                            </button>
+                          </th>
+                          <th>
+                            <button
+                              type="button"
+                              className="distribution-sort-header"
+                              onClick={() => toggleAvailableTruckDistributionSort('email')}
+                            >
+                              <span>Email</span>
+                              <span className="distribution-sort-indicator">{getAvailableTruckDistributionSortIndicator('email')}</span>
+                            </button>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sortedDistributionRows.length === 0 ? (
+                          <tr>
+                            <td colSpan="2">No active distribution-list entries found.</td>
+                          </tr>
+                        ) : (
+                          sortedDistributionRows.map((row) => (
+                            <tr key={row.id || `${row.company}-${row.email}`}>
+                              <td><strong>{row.company || '-'}</strong></td>
+                              <td>{row.email || '-'}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
           </div>
         )}
         <AvailableTruckDrilldownModal />
+
+        {availableTruckDistributionInactiveModalOpen && (
+          <div className="modal-overlay">
+            <div className="detail-modal available-truck-distribution-modal">
+              <div className="detail-header">
+                <div>
+                  <h2>Inactive / Hidden Distribution Entries</h2>
+                  <p>These contacts are not included in the active Available Equipment email send, but they still exist on the source list.</p>
+                </div>
+                <button
+                  type="button"
+                  className="close-button"
+                  onClick={() => setAvailableTruckDistributionInactiveModalOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+              <div className="modal-body available-truck-distribution-modal-body">
+                {inactiveDistributionRows.length === 0 ? (
+                  <div className="intellitrack-empty">
+                    <strong>No inactive or hidden distribution-list entries found.</strong>
+                  </div>
+                ) : (
+                  <div className="report-table-wrap available-truck-distribution-table-wrap">
+                    <table className="available-truck-distribution-table">
+                      <thead>
+                        <tr>
+                          <th>Company</th>
+                          <th>Email</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sortAvailableTruckDistributionRowsForDisplay(inactiveDistributionRows, 'company', 'asc').map((row) => (
+                          <tr key={row.id || `${row.company}-${row.email}`}>
+                            <td><strong>{row.company || '-'}</strong></td>
+                            <td>{row.email || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -5047,7 +5445,7 @@ function openReportLoadDetails(load) {
                           <th>BOL</th>
                           <th>Customer</th>
                           <th>Driver</th>
-                          <th>Truck</th>
+                          <th>Unit</th>
                           <th>Route</th>
                           <th>Next Update</th>
                           <th>Action</th>

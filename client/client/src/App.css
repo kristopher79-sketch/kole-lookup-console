@@ -5821,3 +5821,309 @@ input:focus,
   font-size: 12px;
   line-height: 1.45;
 }
+
+
+/* AVAILABLE TRUCKS - ACTION TABS / DISTRIBUTION LIST */
+.available-truck-action-tabs {
+  display: inline-flex;
+  gap: 8px;
+  padding: 6px;
+  margin-bottom: 16px;
+  border: 1px solid var(--kole-border, #2b364a);
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.44);
+}
+
+.available-truck-action-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 13px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.available-truck-action-tabs button:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #f8fafc;
+}
+
+.available-truck-action-tabs button.active-tab {
+  border-color: rgba(250, 204, 21, 0.36);
+  background: #202a3b;
+  color: #facc15;
+}
+
+.available-truck-action-tabs button span {
+  min-width: 28px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(250, 204, 21, 0.1);
+  color: #facc15;
+  text-align: center;
+  font-size: 12px;
+}
+
+.available-trucks-subheader.compact {
+  margin-bottom: 12px;
+}
+
+.available-truck-distribution-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.available-truck-distribution-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.available-truck-distribution-summary > div {
+  border: 1px solid rgba(255,255,255,0.11);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255,255,255,0.04);
+}
+
+.available-truck-distribution-summary span {
+  display: block;
+  margin-bottom: 6px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.available-truck-distribution-summary strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 15px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.available-truck-distribution-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(260px, 1.25fr) auto;
+  align-items: end;
+  gap: 12px;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 14px;
+  padding: 14px;
+  background: rgba(255,255,255,0.035);
+}
+
+.available-truck-distribution-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.available-truck-distribution-form label span {
+  color: #cbd5e1;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 800;
+}
+
+.available-truck-distribution-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.available-truck-distribution-table-wrap {
+  border-radius: 12px;
+  border: 1px solid #1e293b;
+  overflow-x: auto;
+}
+
+.available-truck-distribution-table {
+  min-width: 720px;
+}
+
+.available-truck-distribution-table th:nth-child(1),
+.available-truck-distribution-table td:nth-child(1) { width: 45%; }
+.available-truck-distribution-table th:nth-child(2),
+.available-truck-distribution-table td:nth-child(2) { width: 55%; }
+
+.available-truck-distribution-table td strong {
+  display: block;
+  color: #f8fafc;
+  line-height: 1.35;
+}
+
+@media (max-width: 900px) {
+  .available-truck-action-tabs,
+  .available-truck-distribution-form,
+  .available-truck-distribution-actions {
+    align-items: stretch;
+  }
+
+  .available-truck-action-tabs,
+  .available-truck-distribution-form {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .available-truck-distribution-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .available-truck-distribution-actions {
+    justify-content: flex-start;
+  }
+}
+
+/* AVAILABLE TRUCKS DISTRIBUTION LIST POLISH */
+.available-trucks-chevron-slot {
+  justify-self: end;
+  min-width: 34px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.045);
+  color: var(--kole-text) !important;
+}
+
+.available-truck-distribution-summary-card {
+  border: 1px solid rgba(255,255,255,0.11);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255,255,255,0.04);
+  color: inherit;
+  text-align: left;
+}
+
+button.available-truck-distribution-summary-card {
+  width: 100%;
+  cursor: pointer;
+}
+
+button.available-truck-distribution-summary-card:hover:not(:disabled) {
+  background: rgba(255,255,255,0.075);
+  border-color: rgba(229,231,235,0.38);
+  transform: translateY(-1px);
+}
+
+button.available-truck-distribution-summary-card:disabled {
+  opacity: 0.75;
+  cursor: default;
+}
+
+.available-truck-distribution-summary-card small {
+  display: block;
+  margin-top: 6px;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.available-truck-distribution-duplicate-hint {
+  color: #fde68a;
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+.distribution-sort-header {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+}
+
+.distribution-sort-header:hover {
+  background: transparent;
+  color: #f8fafc;
+}
+
+.distribution-sort-indicator {
+  color: #f8fafc;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+.available-truck-distribution-modal {
+  width: min(980px, 94vw);
+}
+
+.available-truck-distribution-modal-body {
+  padding: 18px;
+}
+
+/* AVAILABLE TRUCKS DISTRIBUTION LIST V1.1: match nested chevrons and keep two-column list compact. */
+.available-trucks-summary .available-trucks-chevron-slot {
+  justify-self: end;
+  min-width: auto;
+  width: auto;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #f8fafc !important;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.available-truck-distribution-table-wrap {
+  overflow-x: hidden;
+}
+
+.available-truck-distribution-table {
+  width: 100%;
+  min-width: 0 !important;
+  table-layout: fixed;
+}
+
+.available-truck-distribution-table th:nth-child(1),
+.available-truck-distribution-table td:nth-child(1),
+.available-truck-distribution-table th:nth-child(2),
+.available-truck-distribution-table td:nth-child(2) {
+  width: 50%;
+}
+
+.available-truck-distribution-table th {
+  text-align: center;
+}
+
+.available-truck-distribution-table td {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.available-truck-distribution-table .distribution-sort-header {
+  width: fit-content;
+  margin: 0 auto;
+  justify-content: center;
+  gap: 6px;
+}
+
+.available-truck-distribution-table .distribution-sort-indicator {
+  flex: 0 0 auto;
+  min-width: 12px;
+  text-align: center;
+}

@@ -21,6 +21,7 @@ const DEFAULT_NO_AVAILABILITY_2025_LIST_ID = '138431f5-a32d-452d-abf4-05adbd0ab5
 const DEFAULT_NO_AVAILABILITY_2024_LIST_ID = '8336e21e-38bb-47c0-bc01-6fea891b7cf6';
 const DEFAULT_AVAILABLE_TRUCKS_SINGLE_LINE_LIST_ID = '67edb153-a389-474a-a7dd-d3bc0d746952';
 const DEFAULT_AVAILABLE_EQUIPMENT_SOURCE_LIST_ID = '96af7972-58ff-4bb8-b5a6-ca86f4d19ee6';
+const DEFAULT_AVAILABLE_TRUCKS_EMAIL_LIST_ID = '2458883d-ea8b-4761-8047-a04e35e9f93f';
 const AVAILABLE_TRUCKS_DEFAULT_LOOKBACK_DAYS = 30;
 const SALES_LEAD_NOTE_MAX_LENGTH = 63000;
 
@@ -5393,6 +5394,124 @@ function getAvailableEquipmentSourceListId() {
   );
 }
 
+function getAvailableTrucksEmailListId() {
+  return (
+    process.env.AVAILABLE_TRUCKS_EMAIL_LIST_ID ||
+    process.env.AVAILABLE_EQUIPMENT_DISTRIBUTION_LIST_ID ||
+    process.env.AVAILABLE_TRUCKS_DISTRIBUTION_LIST_ID ||
+    DEFAULT_AVAILABLE_TRUCKS_EMAIL_LIST_ID
+  );
+}
+
+function cleanAvailableTrucksDistributionText(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeDistributionEmail(value) {
+  return cleanAvailableTrucksDistributionText(value).toLowerCase();
+}
+
+function isLikelyEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
+
+function getAvailableTrucksDistributionFieldSelect() {
+  return [
+    'Title',
+    'Email',
+    'Active'
+  ].join(',');
+}
+
+function cleanAvailableTrucksDistributionItem(item) {
+  const fields = item.fields || {};
+  const company = cleanAvailableTrucksDistributionText(fields.Title);
+  const email = cleanAvailableTrucksDistributionText(fields.Email);
+  const active = parseBoolean(fields.Active);
+
+  return {
+    id: item.id || '',
+    webUrl: item.webUrl || '',
+    company,
+    email,
+    emailKey: normalizeDistributionEmail(email),
+    active,
+    createdAt: item.createdDateTime || fields.Created || '',
+    modifiedAt: item.lastModifiedDateTime || fields.Modified || ''
+  };
+}
+
+function sortAvailableTrucksDistributionRows(a, b) {
+  const companyCompare = String(a.company || '').localeCompare(String(b.company || ''));
+  if (companyCompare !== 0) return companyCompare;
+
+  return String(a.email || '').localeCompare(String(b.email || ''));
+}
+
+async function getAvailableTrucksDistributionRows(token, listId) {
+  const bundle = await getAllListItemsWithFieldsResilient(
+    token,
+    listId,
+    getAvailableTrucksDistributionFieldSelect()
+  );
+
+  const rows = (bundle.items || [])
+    .map(cleanAvailableTrucksDistributionItem)
+    .filter((row) => row.company || row.email)
+    .sort(sortAvailableTrucksDistributionRows);
+
+  return {
+    rows,
+    warning: bundle.usedFallback ? bundle.warning : ''
+  };
+}
+
+function buildAvailableTrucksDistributionFields(columnLookup, input) {
+  const company = cleanAvailableTrucksDistributionText(input.company || input.Company || input.title || '');
+  const email = normalizeDistributionEmail(input.email || input.Email || '');
+
+  if (!company) {
+    const error = new Error('Company is required before adding a distribution-list contact.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!email) {
+    const error = new Error('Email address is required before adding a distribution-list contact.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!isLikelyEmail(email)) {
+    const error = new Error('Enter a valid email address.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const fields = {
+    Title: company
+  };
+
+  const emailColumn = resolveListColumnName(columnLookup, ['Email', 'Email Address', 'EmailAddress']);
+  if (!emailColumn) {
+    const error = new Error('Email field was not found on the Available Trucks distribution list.');
+    error.statusCode = 500;
+    throw error;
+  }
+
+  fields[emailColumn] = email;
+
+  const activeColumn = resolveListColumnName(columnLookup, ['Active']);
+  if (!activeColumn) {
+    const error = new Error('Active field was not found on the Available Trucks distribution list.');
+    error.statusCode = 500;
+    throw error;
+  }
+
+  fields[activeColumn] = true;
+
+  return fields;
+}
 
 async function getListColumnLookup(token, listId) {
   const data = await graphGet(
@@ -6930,6 +7049,94 @@ async function findCurrentBidOrderByBol(token, currentList, bol) {
   }
 }
 
+
+
+app.get('/available-trucks/distribution-list', requireLookupAccess, async (req, res) => {
+  try {
+    const listId = getAvailableTrucksEmailListId();
+
+    if (!listId) {
+      return res.status(500).json({
+        success: false,
+        error: 'AVAILABLE_TRUCKS_EMAIL_LIST_ID is not configured on the server.'
+      });
+    }
+
+    const token = await getGraphToken();
+    const { rows, warning } = await getAvailableTrucksDistributionRows(token, listId);
+    const activeRows = rows.filter((row) => row.active);
+    const inactiveRows = rows.filter((row) => !row.active);
+
+    res.json({
+      success: true,
+      generatedAt: `${formatEasternTimestamp()} Eastern`,
+      sourceListId: listId,
+      count: activeRows.length,
+      inactiveCount: inactiveRows.length,
+      rows: activeRows,
+      inactiveRows,
+      sourceWarning: warning
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to load Available Trucks distribution list.'
+    });
+  }
+});
+
+app.post('/available-trucks/distribution-list', requireLookupAccess, async (req, res) => {
+  try {
+    const listId = getAvailableTrucksEmailListId();
+
+    if (!listId) {
+      return res.status(500).json({
+        success: false,
+        error: 'AVAILABLE_TRUCKS_EMAIL_LIST_ID is not configured on the server.'
+      });
+    }
+
+    const token = await getGraphToken();
+    const columnLookup = await getListColumnLookup(token, listId);
+    const fields = buildAvailableTrucksDistributionFields(columnLookup, req.body || {});
+    const emailKey = normalizeDistributionEmail(fields.Email || req.body?.email || req.body?.Email);
+
+    const { rows } = await getAvailableTrucksDistributionRows(token, listId);
+    const duplicate = rows.find((row) => row.emailKey === emailKey);
+
+    if (duplicate) {
+      const statusLabel = duplicate.active ? 'active' : 'inactive/hidden';
+
+      return res.status(409).json({
+        success: false,
+        error: `${duplicate.email} is already ${statusLabel} on the Available Trucks distribution list${duplicate.company ? ` under ${duplicate.company}` : ''}.`
+      });
+    }
+
+    const createdItem = await graphPost(
+      token,
+      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/items`,
+      { fields }
+    );
+
+    const created = cleanAvailableTrucksDistributionItem(createdItem);
+
+    res.status(201).json({
+      success: true,
+      message: `${created.company || fields.Title} added to the Available Trucks distribution list.`,
+      item: created
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to add distribution-list contact.'
+    });
+  }
+});
 
 
 app.post('/available-trucks', requireLookupAccess, async (req, res) => {
