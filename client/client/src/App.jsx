@@ -421,6 +421,9 @@ export default function App() {
   const [driverSummaryLoading, setDriverSummaryLoading] = useState(false);
   const [driverSummaryError, setDriverSummaryError] = useState(null);
   const [driverSummaryModalOpen, setDriverSummaryModalOpen] = useState(false);
+  const [driverSummaryPdfLoading, setDriverSummaryPdfLoading] = useState(false);
+  const [driverSummaryPdfError, setDriverSummaryPdfError] = useState('');
+  const [pdfExportNotice, setPdfExportNotice] = useState(null);
   const [settlementCutoffDate, setSettlementCutoffDate] = useState(getDefaultSettlementCutoffDate);
   const [ordersDueSettlementReport, setOrdersDueSettlementReport] = useState(null);
   const [ordersDueSettlementLoading, setOrdersDueSettlementLoading] = useState(false);
@@ -430,10 +433,15 @@ export default function App() {
   const [weeklySettlementLoading, setWeeklySettlementLoading] = useState(false);
   const [weeklySettlementError, setWeeklySettlementError] = useState(null);
   const [weeklySettlementModalOpen, setWeeklySettlementModalOpen] = useState(false);
+  const [weeklySettlementPdfLoading, setWeeklySettlementPdfLoading] = useState(false);
+  const [weeklySettlementPdfError, setWeeklySettlementPdfError] = useState('');
   const [wonNotRegisteredReport, setWonNotRegisteredReport] = useState(null);
   const [wonNotRegisteredLoading, setWonNotRegisteredLoading] = useState(false);
   const [wonNotRegisteredError, setWonNotRegisteredError] = useState(null);
   const [wonNotRegisteredModalOpen, setWonNotRegisteredModalOpen] = useState(false);
+  const [reportActionAlerts, setReportActionAlerts] = useState(null);
+  const [reportActionAlertsLoading, setReportActionAlertsLoading] = useState(false);
+  const [reportActionAlertsError, setReportActionAlertsError] = useState('');
   const [inactiveDriverRosterReport, setInactiveDriverRosterReport] = useState(null);
   const [inactiveDriverRosterLoading, setInactiveDriverRosterLoading] = useState(false);
   const [inactiveDriverRosterError, setInactiveDriverRosterError] = useState(null);
@@ -455,6 +463,8 @@ export default function App() {
   const [salesActivityModalOpen, setSalesActivityModalOpen] = useState(false);
   const [salesActivityLoading, setSalesActivityLoading] = useState(false);
   const [salesActivityError, setSalesActivityError] = useState(null);
+  const [salesActivityPdfLoading, setSalesActivityPdfLoading] = useState(false);
+  const [salesActivityPdfError, setSalesActivityPdfError] = useState('');
   const [customerTrendMonth, setCustomerTrendMonth] = useState(() => initialReportDate.getMonth() + 1);
   const [customerTrendYear, setCustomerTrendYear] = useState(() => initialReportDate.getFullYear());
   const [customerTrendReport, setCustomerTrendReport] = useState(null);
@@ -619,6 +629,22 @@ export default function App() {
     return availableTrucksData?.proximitySuggestionIndex || {};
   }, [availableTrucksData]);
 
+  const reportActionAlertCounts = useMemo(() => {
+    const alertData = reportActionAlerts?.alerts || {};
+    const ordersDueSettlementCount = Number(
+      ordersDueSettlementReport?.count ?? alertData.ordersDueSettlement?.count ?? 0
+    ) || 0;
+    const wonNotRegisteredCount = Number(
+      wonNotRegisteredReport?.count ?? alertData.wonNotRegistered?.count ?? 0
+    ) || 0;
+
+    return {
+      ordersDueSettlement: ordersDueSettlementCount,
+      wonNotRegistered: wonNotRegisteredCount,
+      total: ordersDueSettlementCount + wonNotRegisteredCount
+    };
+  }, [reportActionAlerts, ordersDueSettlementReport, wonNotRegisteredReport]);
+
 
   useEffect(() => {
     const runtimeClass = isTauriRuntime ? 'tauri-runtime' : 'web-runtime';
@@ -661,6 +687,7 @@ export default function App() {
     loadIntelliTrack();
     loadAvailableTrucks();
     loadAvailableTruckDistributionList({ silent: true });
+    loadReportActionAlerts({ silent: true });
 
     const interval = window.setInterval(() => {
       loadOperationsDashboard({ silent: true });
@@ -669,6 +696,7 @@ export default function App() {
       loadIntelliTrack({ silent: true });
       loadAvailableTrucks({ silent: true });
       loadAvailableTruckDistributionList({ silent: true });
+      loadReportActionAlerts({ silent: true });
     }, 10 * 60 * 1000);
 
     return () => window.clearInterval(interval);
@@ -774,6 +802,9 @@ export default function App() {
     setAvailableTruckActionMessage('');
     setAvailableTruckActionError('');
     setAvailableTruckDrilldown(null);
+    setReportActionAlerts(null);
+    setReportActionAlertsLoading(false);
+    setReportActionAlertsError('');
     setReportsSectionOpen(false);
   }
 
@@ -2239,6 +2270,73 @@ function getPositionStatusLabel(position) {
   }
 
 
+  function updateReportActionAlertCount(alertKey, count) {
+    const cleanCount = Math.max(0, Number(count) || 0);
+
+    setReportActionAlerts((current) => {
+      const currentAlerts = current?.alerts || {};
+      const ordersDueSettlement = {
+        reportKey: 'ordersDueSettlement',
+        reportLabel: 'Orders Due for Settlement',
+        ...(currentAlerts.ordersDueSettlement || {})
+      };
+      const wonNotRegistered = {
+        reportKey: 'wonNotRegistered',
+        reportLabel: 'Orders Won and Not Registered',
+        ...(currentAlerts.wonNotRegistered || {})
+      };
+
+      const alerts = { ordersDueSettlement, wonNotRegistered };
+
+      if (alerts[alertKey]) {
+        alerts[alertKey] = {
+          ...alerts[alertKey],
+          count: cleanCount,
+          hasAlert: cleanCount > 0
+        };
+      }
+
+      const totalAlerts =
+        (Number(alerts.ordersDueSettlement.count) || 0) +
+        (Number(alerts.wonNotRegistered.count) || 0);
+
+      return {
+        ...(current || {}),
+        success: true,
+        reportType: 'reportActionAlerts',
+        alerts,
+        totalAlerts
+      };
+    });
+  }
+
+  async function loadReportActionAlerts(options = {}) {
+    const silent = options.silent === true;
+
+    if (!silent) {
+      setReportActionAlertsLoading(true);
+    } else if (!reportActionAlerts) {
+      setReportActionAlertsLoading(true);
+    }
+
+    setReportActionAlertsError('');
+
+    try {
+      const res = await authedFetch(`${API}/reports/action-alerts`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to load report action alerts.');
+      }
+
+      setReportActionAlerts(data);
+    } catch (err) {
+      setReportActionAlertsError(err.message || 'Unable to load report action alerts.');
+    } finally {
+      setReportActionAlertsLoading(false);
+    }
+  }
+
   async function loadOrdersDueSettlementReport() {
     setOrdersDueSettlementLoading(true);
     setOrdersDueSettlementError(null);
@@ -2257,6 +2355,7 @@ function getPositionStatusLabel(position) {
       }
 
       setOrdersDueSettlementReport(data);
+      updateReportActionAlertCount('ordersDueSettlement', data.count);
       setOrdersDueSettlementModalOpen(true);
     } catch (err) {
       setOrdersDueSettlementError({
@@ -2313,6 +2412,129 @@ function getPositionStatusLabel(position) {
     setWeeklySettlementModalOpen(false);
   }
 
+  function getDownloadFileNameFromResponse(res, fallbackName) {
+    const disposition = res.headers.get('content-disposition') || '';
+    const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+
+    if (utf8Match?.[1]) {
+      try {
+        return decodeURIComponent(utf8Match[1].replace(/\"/g, ''));
+      } catch {
+        return utf8Match[1].replace(/\"/g, '');
+      }
+    }
+
+    const filenameMatch = disposition.match(/filename=\"?([^\";]+)\"?/i);
+    return filenameMatch?.[1] || fallbackName;
+  }
+
+  function downloadBlob(blob, fileName) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function getPdfExportNotice(reportKey) {
+    return pdfExportNotice?.reportKey === reportKey ? pdfExportNotice.message : '';
+  }
+
+  function clearPdfExportNotice(reportKey = '') {
+    setPdfExportNotice((current) => {
+      if (!current) return current;
+      if (!reportKey || current.reportKey === reportKey) return null;
+      return current;
+    });
+  }
+
+  async function downloadReportPdf({ reportKey, reportName, endpoint, fallbackName, setLoading, setError }) {
+    setLoading(true);
+    setError('');
+    clearPdfExportNotice(reportKey);
+
+    try {
+      const res = await authedFetch(endpoint);
+
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => '');
+        let message = `Unable to export ${reportName} PDF.`;
+
+        if (errorText) {
+          try {
+            const parsed = JSON.parse(errorText);
+            message = parsed.error || parsed.message || message;
+          } catch {
+            message = errorText;
+          }
+        }
+
+        throw new Error(message);
+      }
+
+      const blob = await res.blob();
+      const fileName = getDownloadFileNameFromResponse(res, fallbackName);
+
+      downloadBlob(blob, fileName);
+      setPdfExportNotice({
+        reportKey,
+        message: `${reportName} PDF exported. Check your Downloads folder for ${fileName}.`
+      });
+    } catch (err) {
+      setError(err.message || `Unable to export ${reportName} PDF.`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function downloadDriverSummaryPdf() {
+    if (!reportMonth || !reportYear) {
+      setDriverSummaryPdfError('Choose a month and year before exporting the Monthly Driver Summary PDF.');
+      return;
+    }
+
+    await downloadReportPdf({
+      reportKey: 'driverSummary',
+      reportName: 'Monthly Driver Summary Report',
+      endpoint: `${API}/reports/driver-summary/pdf?month=${encodeURIComponent(reportMonth)}&year=${encodeURIComponent(reportYear)}`,
+      fallbackName: `Kole_Driver_Summary_${reportYear}_${String(reportMonth).padStart(2, '0')}.pdf`,
+      setLoading: setDriverSummaryPdfLoading,
+      setError: setDriverSummaryPdfError
+    });
+  }
+
+  async function downloadWeeklySettlementPdf() {
+    if (!settlementCutoffDate) {
+      setWeeklySettlementPdfError('Choose a cutoff date before exporting the Weekly Settlement Report PDF.');
+      return;
+    }
+
+    await downloadReportPdf({
+      reportKey: 'weeklySettlement',
+      reportName: 'Weekly Settlement Report',
+      endpoint: `${API}/reports/weekly-settlement/pdf?cutoffDate=${encodeURIComponent(settlementCutoffDate)}`,
+      fallbackName: `Kole_Weekly_Settlement_${settlementCutoffDate}.pdf`,
+      setLoading: setWeeklySettlementPdfLoading,
+      setError: setWeeklySettlementPdfError
+    });
+  }
+
+  async function downloadSalesActivityPdf() {
+    await downloadReportPdf({
+      reportKey: 'salesActivity',
+      reportName: 'Sales Activity Snapshot',
+      endpoint: `${API}/reports/sales-activity/pdf?days=${encodeURIComponent(salesActivityLookbackDays)}`,
+      fallbackName: `Kole_Sales_Activity_${salesActivityLookbackDays}_days.pdf`,
+      setLoading: setSalesActivityPdfLoading,
+      setError: setSalesActivityPdfError
+    });
+  }
+
   async function loadWonNotRegisteredReport() {
     setWonNotRegisteredLoading(true);
     setWonNotRegisteredError(null);
@@ -2331,6 +2553,7 @@ function getPositionStatusLabel(position) {
       }
 
       setWonNotRegisteredReport(data);
+      updateReportActionAlertCount('wonNotRegistered', data.count);
       setWonNotRegisteredModalOpen(true);
     } catch (err) {
       setWonNotRegisteredError({
@@ -4838,9 +5061,9 @@ function openReportLoadDetails(load) {
         >
           <span className="feature-section-title-block">
             <span className="feature-section-title">Available Equipment</span>
-            <span className="feature-section-subtitle">Current advertised availability, recent location patterns, advertise new availability advertisement, view email blast list.</span>
+            <span className="feature-section-subtitle">Current advertised availability, recent location patterns, advertise new availability, view email blast list.</span>
           </span>
-          <span className="feature-section-status-pill">
+          <span className={`feature-section-status-pill ${currentCount > 0 ? 'has-items' : 'is-zero'} ${availableTrucksLoading ? 'is-loading' : ''}`}>
             {availableTrucksLoading ? 'Loading...' : `${currentCount} current`}
           </span>
           <span className="feature-section-chevron">{availableTrucksSectionOpen ? '▲' : '▼'}</span>
@@ -4979,7 +5202,7 @@ function openReportLoadDetails(load) {
                       <button
                         type="button"
                         className="available-trucks-kpi-button"
-                        onClick={() => openAvailableTruckDrilldown('Recent available-truck rows', 'All rows posted in the last 24 hours, before current-availability filtering. First later pickup is shown only as follow-through history.', recordsWithin24Hours)}
+                        onClick={() => openAvailableTruckDrilldown('Recent Available Equipment', 'All rows posted in the last 24 hours, before current-availability filtering. First later pickup is shown only as follow-through history.', recordsWithin24Hours)}
                       >
                         <span>Recent rows</span>
                         <strong>{summary.recordsWithin24Hours || 0}</strong>
@@ -4997,7 +5220,7 @@ function openReportLoadDetails(load) {
                       <button
                         type="button"
                         className="available-trucks-kpi-button"
-                        onClick={() => openAvailableTruckDrilldown('Recent drivers', 'Rows in the recent pattern window, with the first later Won pickup when found. Historical follow-through only; not current status.', recentRecords)}
+                        onClick={() => openAvailableTruckDrilldown('Recent posts', 'Rows in the recent pattern window, with the first later Won pickup when found. Historical follow-through only; not current status.', recentRecords)}
                       >
                         <span>Recent drivers</span>
                         <strong>{summary.uniqueRecentDrivers || 0}</strong>
@@ -5389,7 +5612,7 @@ function openReportLoadDetails(load) {
             <span className="feature-section-title">IntelliTrack</span>
             <span className="feature-section-subtitle">Automatic tracking visibility and start/stop controls.</span>
           </span>
-          <span className="feature-section-status-pill">
+          <span className={`feature-section-status-pill ${count > 0 ? 'has-items' : 'is-zero'} ${intelliTrackLoading ? 'is-loading' : ''}`}>
             {intelliTrackLoading ? 'Loading...' : `${count} tracking`}
           </span>
           <span className="feature-section-chevron">{intelliTrackSectionOpen ? '▲' : '▼'}</span>
@@ -5624,7 +5847,7 @@ function openReportLoadDetails(load) {
             <span className="feature-section-title">Job Photo Uploads</span>
             <span className="feature-section-subtitle">Pickup and delivery photo log for {dateLabel}.</span>
           </span>
-          <span className="feature-section-status-pill">
+          <span className={`feature-section-status-pill ${count > 0 ? 'has-items' : 'is-zero'} ${uploadDigestLoading ? 'is-loading' : ''}`}>
             {uploadDigestLoading ? 'Loading...' : `${count} logged`}
           </span>
           <span className="feature-section-chevron">{uploadDigestSectionOpen ? '▲' : '▼'}</span>
@@ -5994,6 +6217,8 @@ function openReportLoadDetails(load) {
                 setSalesActivityReport(null);
                 setSalesActivityError(null);
                 setSalesActivityModalOpen(false);
+                setSalesActivityPdfError('');
+                clearPdfExportNotice('salesActivity');
               }}
               disabled={salesActivityLoading}
             >
@@ -6008,7 +6233,26 @@ function openReportLoadDetails(load) {
           <button onClick={loadSalesActivityReport} disabled={salesActivityLoading}>
             {salesActivityLoading ? 'Loading Snapshot...' : 'Preview Snapshot'}
           </button>
+
+          <button
+            type="button"
+            className="pdf-export-button"
+            onClick={downloadSalesActivityPdf}
+            disabled={salesActivityPdfLoading || salesActivityLoading}
+          >
+            {salesActivityPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+          </button>
         </div>
+
+        <div className="pdf-export-guidance">PDF exports download to your default Downloads folder. If your browser asks, use the folder you choose.</div>
+
+        {getPdfExportNotice('salesActivity') && (
+          <div className="pdf-export-success">{getPdfExportNotice('salesActivity')}</div>
+        )}
+
+        {salesActivityPdfError && (
+          <div className="msg error pdf-export-error">{salesActivityPdfError}</div>
+        )}
 
         {salesActivityLoading && (
           <div className="sales-report-loading">
@@ -6029,9 +6273,19 @@ function openReportLoadDetails(load) {
               <strong>Sales Activity Snapshot is ready.</strong>
               <span> The preview opens in a report window.</span>
             </div>
-            <button className="view-button" onClick={() => setSalesActivityModalOpen(true)}>
-              Reopen Preview
-            </button>
+            <div className="report-ready-actions">
+              <button className="view-button" onClick={() => setSalesActivityModalOpen(true)}>
+                Reopen Preview
+              </button>
+              <button
+                type="button"
+                className="pdf-export-button compact"
+                onClick={downloadSalesActivityPdf}
+                disabled={salesActivityPdfLoading}
+              >
+                {salesActivityPdfLoading ? 'Exporting...' : 'Export PDF'}
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -6824,7 +7078,16 @@ function openReportLoadDetails(load) {
             <span className="feature-section-title">Reports</span>
             <span className="feature-section-subtitle">Operational and sales reporting.</span>
           </span>
-          <span className="feature-section-status-pill">2 groups</span>
+          <span
+            className={`feature-section-status-pill report-alert-status-pill ${
+              reportActionAlertCounts.total > 0 ? 'has-alerts' : 'is-zero'
+            } ${reportActionAlertsLoading ? 'is-loading' : ''} ${reportActionAlertsError ? 'is-error' : ''}`}
+            title={reportActionAlertsError || 'Action alerts from Orders Due for Settlement and Orders Won and Not Registered'}
+          >
+            {reportActionAlertsLoading && !reportActionAlerts
+              ? 'Checking...'
+              : `${formatReportNumber(reportActionAlertCounts.total)} ${reportActionAlertCounts.total === 1 ? 'Alert' : 'Alerts'}`}
+          </span>
           <span className="feature-section-chevron">{reportsSectionOpen ? '▲' : '▼'}</span>
         </button>
 
@@ -6941,6 +7204,8 @@ function openReportLoadDetails(load) {
                           setDriverSummaryReport(null);
                           setDriverSummaryError(null);
                           setDriverSummaryModalOpen(false);
+                          setDriverSummaryPdfError('');
+                          clearPdfExportNotice('driverSummary');
                         }}
                       >
                         {monthOptions.map((month) => (
@@ -6960,6 +7225,8 @@ function openReportLoadDetails(load) {
                           setDriverSummaryReport(null);
                           setDriverSummaryError(null);
                           setDriverSummaryModalOpen(false);
+                          setDriverSummaryPdfError('');
+                          clearPdfExportNotice('driverSummary');
                         }}
                       >
                         {getReportYears().map((year) => (
@@ -6973,7 +7240,26 @@ function openReportLoadDetails(load) {
                     <button onClick={loadDriverSummaryReport} disabled={driverSummaryLoading}>
                       {driverSummaryLoading ? 'Loading Report...' : 'Preview Report'}
                     </button>
+
+                    <button
+                      type="button"
+                      className="pdf-export-button"
+                      onClick={downloadDriverSummaryPdf}
+                      disabled={driverSummaryPdfLoading || driverSummaryLoading}
+                    >
+                      {driverSummaryPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                    </button>
                   </div>
+
+                  <div className="pdf-export-guidance">PDF exports download to your default Downloads folder. If your browser asks, use the folder you choose.</div>
+
+                  {getPdfExportNotice('driverSummary') && (
+                    <div className="pdf-export-success">{getPdfExportNotice('driverSummary')}</div>
+                  )}
+
+                  {driverSummaryPdfError && (
+                    <div className="msg error pdf-export-error">{driverSummaryPdfError}</div>
+                  )}
 
                   {driverSummaryReport && !driverSummaryModalOpen && (
                     <div className="report-ready-card">
@@ -6981,9 +7267,19 @@ function openReportLoadDetails(load) {
                         <strong>{driverSummaryReport.reportLabel} is ready.</strong>
                         <span> The preview opens in a report window.</span>
                       </div>
-                      <button className="view-button" onClick={() => setDriverSummaryModalOpen(true)}>
-                        Reopen Preview
-                      </button>
+                      <div className="report-ready-actions">
+                        <button className="view-button" onClick={() => setDriverSummaryModalOpen(true)}>
+                          Reopen Preview
+                        </button>
+                        <button
+                          type="button"
+                          className="pdf-export-button compact"
+                          onClick={downloadDriverSummaryPdf}
+                          disabled={driverSummaryPdfLoading}
+                        >
+                          {driverSummaryPdfLoading ? 'Exporting...' : 'Export PDF'}
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -7025,7 +7321,18 @@ function openReportLoadDetails(load) {
               className="report-accordion-button"
               onClick={() => toggleReportPanel('ordersDueSettlement')}
             >
-              <span>Orders Due for Settlement</span>
+              <span>
+                Orders Due for Settlement
+                {reportActionAlertCounts.ordersDueSettlement > 0 && (
+                  <span
+                    className="report-action-alert-marker"
+                    title={`${formatReportNumber(reportActionAlertCounts.ordersDueSettlement)} order${reportActionAlertCounts.ordersDueSettlement === 1 ? '' : 's'} due for settlement`}
+                    aria-label={`${formatReportNumber(reportActionAlertCounts.ordersDueSettlement)} order${reportActionAlertCounts.ordersDueSettlement === 1 ? '' : 's'} due for settlement`}
+                  >
+                    *
+                  </span>
+                )}
+              </span>
               <span className="report-accordion-icon">{isOrdersDueSettlementOpen ? '▼' : '▶'}</span>
             </button>
 
@@ -7098,6 +7405,8 @@ function openReportLoadDetails(load) {
                           setWeeklySettlementReport(null);
                           setWeeklySettlementError(null);
                           setWeeklySettlementModalOpen(false);
+                          setWeeklySettlementPdfError('');
+                          clearPdfExportNotice('weeklySettlement');
                         }}
                       />
                       <small>Pick the Thursday cutoff date, then preview the report.</small>
@@ -7106,7 +7415,26 @@ function openReportLoadDetails(load) {
                     <button onClick={loadWeeklySettlementReport} disabled={weeklySettlementLoading}>
                       {weeklySettlementLoading ? 'Loading Report...' : 'Preview Report'}
                     </button>
+
+                    <button
+                      type="button"
+                      className="pdf-export-button"
+                      onClick={downloadWeeklySettlementPdf}
+                      disabled={weeklySettlementPdfLoading || weeklySettlementLoading}
+                    >
+                      {weeklySettlementPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                    </button>
                   </div>
+
+                  <div className="pdf-export-guidance">PDF exports download to your default Downloads folder. If your browser asks, use the folder you choose.</div>
+
+                  {getPdfExportNotice('weeklySettlement') && (
+                    <div className="pdf-export-success">{getPdfExportNotice('weeklySettlement')}</div>
+                  )}
+
+                  {weeklySettlementPdfError && (
+                    <div className="msg error pdf-export-error">{weeklySettlementPdfError}</div>
+                  )}
 
                   {weeklySettlementReport && !weeklySettlementModalOpen && (
                     <div className="report-ready-card">
@@ -7114,9 +7442,19 @@ function openReportLoadDetails(load) {
                         <strong>{weeklySettlementReport.reportLabel} is ready.</strong>
                         <span> The preview opens in a report window.</span>
                       </div>
-                      <button className="view-button" onClick={() => setWeeklySettlementModalOpen(true)}>
-                        Reopen Preview
-                      </button>
+                      <div className="report-ready-actions">
+                        <button className="view-button" onClick={() => setWeeklySettlementModalOpen(true)}>
+                          Reopen Preview
+                        </button>
+                        <button
+                          type="button"
+                          className="pdf-export-button compact"
+                          onClick={downloadWeeklySettlementPdf}
+                          disabled={weeklySettlementPdfLoading}
+                        >
+                          {weeklySettlementPdfLoading ? 'Exporting...' : 'Export PDF'}
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -7138,7 +7476,18 @@ function openReportLoadDetails(load) {
               className="report-accordion-button"
               onClick={() => toggleReportPanel('wonNotRegistered')}
             >
-              <span>Orders Won and Not Registered</span>
+              <span>
+                Orders Won and Not Registered
+                {reportActionAlertCounts.wonNotRegistered > 0 && (
+                  <span
+                    className="report-action-alert-marker"
+                    title={`${formatReportNumber(reportActionAlertCounts.wonNotRegistered)} won order${reportActionAlertCounts.wonNotRegistered === 1 ? '' : 's'} not registered`}
+                    aria-label={`${formatReportNumber(reportActionAlertCounts.wonNotRegistered)} won order${reportActionAlertCounts.wonNotRegistered === 1 ? '' : 's'} not registered`}
+                  >
+                    *
+                  </span>
+                )}
+              </span>
               <span className="report-accordion-icon">{isWonNotRegisteredOpen ? '▼' : '▶'}</span>
             </button>
 
@@ -7895,12 +8244,28 @@ function openReportLoadDetails(load) {
            
               </div>
 
-              <button className="close-button" onClick={closeDriverSummaryModal}>
-                Close
-              </button>
+              <div className="report-modal-actions">
+                <button
+                  type="button"
+                  className="pdf-export-button"
+                  onClick={downloadDriverSummaryPdf}
+                  disabled={driverSummaryPdfLoading}
+                >
+                  {driverSummaryPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                </button>
+                <button className="close-button" onClick={closeDriverSummaryModal}>
+                  Close
+                </button>
+              </div>
             </div>
 
             <div className="modal-body report-modal-body">
+              {getPdfExportNotice('driverSummary') && (
+                <div className="pdf-export-success">{getPdfExportNotice('driverSummary')}</div>
+              )}
+              {driverSummaryPdfError && (
+                <div className="msg error pdf-export-error">{driverSummaryPdfError}</div>
+              )}
               <DriverSummaryPreview />
             </div>
           </div>
@@ -7937,12 +8302,28 @@ function openReportLoadDetails(load) {
   <p>Cutoff {weeklySettlementReport.cutoffLabel}</p>
 </div>
 
-              <button className="close-button" onClick={closeWeeklySettlementModal}>
-                Close
-              </button>
+              <div className="report-modal-actions">
+                <button
+                  type="button"
+                  className="pdf-export-button"
+                  onClick={downloadWeeklySettlementPdf}
+                  disabled={weeklySettlementPdfLoading}
+                >
+                  {weeklySettlementPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                </button>
+                <button className="close-button" onClick={closeWeeklySettlementModal}>
+                  Close
+                </button>
+              </div>
             </div>
 
             <div className="modal-body report-modal-body">
+              {getPdfExportNotice('weeklySettlement') && (
+                <div className="pdf-export-success">{getPdfExportNotice('weeklySettlement')}</div>
+              )}
+              {weeklySettlementPdfError && (
+                <div className="msg error pdf-export-error">{weeklySettlementPdfError}</div>
+              )}
               <WeeklySettlementPreview />
             </div>
           </div>
@@ -8044,12 +8425,28 @@ function openReportLoadDetails(load) {
                 <p>{salesActivityReport.activityPeriodLabel || '-'} · Due window {salesActivityReport.duePeriodLabel || '-'}</p>
               </div>
 
-              <button className="close-button" onClick={closeSalesActivityModal}>
-                Close
-              </button>
+              <div className="report-modal-actions">
+                <button
+                  type="button"
+                  className="pdf-export-button"
+                  onClick={downloadSalesActivityPdf}
+                  disabled={salesActivityPdfLoading}
+                >
+                  {salesActivityPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                </button>
+                <button className="close-button" onClick={closeSalesActivityModal}>
+                  Close
+                </button>
+              </div>
             </div>
 
             <div className="modal-body report-modal-body">
+              {getPdfExportNotice('salesActivity') && (
+                <div className="pdf-export-success">{getPdfExportNotice('salesActivity')}</div>
+              )}
+              {salesActivityPdfError && (
+                <div className="msg error pdf-export-error">{salesActivityPdfError}</div>
+              )}
               <SalesActivitySnapshotPreview />
             </div>
           </div>

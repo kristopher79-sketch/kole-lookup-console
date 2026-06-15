@@ -5307,14 +5307,36 @@ input:focus,
   align-items: center;
   justify-content: center;
   min-height: 28px;
-  border: 1px solid rgba(250, 204, 21, 0.42);
+  border: 1px solid rgba(203, 213, 225, 0.22);
   border-radius: 999px;
   padding: 6px 11px;
-  background: rgba(250, 204, 21, 0.10);
-  color: var(--kole-gold-bright) !important;
+  background: rgba(255,255,255,0.065);
+  color: rgba(226, 232, 240, 0.78) !important;
   font-size: 12px;
   font-weight: 900;
   white-space: nowrap;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.035);
+}
+
+.feature-section-status-pill.has-items,
+.report-alert-status-pill.has-alerts {
+  border-color: rgba(45, 212, 191, 0.82) !important;
+  background: linear-gradient(180deg, rgba(20, 184, 166, 0.96), rgba(13, 148, 136, 0.92)) !important;
+  color: #ecfeff !important;
+  box-shadow:
+    0 0 0 1px rgba(45, 212, 191, 0.18),
+    0 8px 18px rgba(0,0,0,0.22),
+    inset 0 1px 0 rgba(255,255,255,0.26) !important;
+}
+
+.feature-section-status-pill.is-zero {
+  border-color: rgba(203, 213, 225, 0.22) !important;
+  background: rgba(255,255,255,0.065) !important;
+  color: rgba(226, 232, 240, 0.78) !important;
+}
+
+.feature-section-status-pill.is-loading {
+  opacity: 0.86;
 }
 
 .feature-section-chevron {
@@ -6126,4 +6148,111 @@ button.available-truck-distribution-summary-card:disabled {
   flex: 0 0 auto;
   min-width: 12px;
   text-align: center;
+}
+
+
+/* REPORT ACTION ALERT COUNTER */
+.report-alert-status-pill {
+  min-width: 94px;
+  border-color: rgba(148, 163, 184, 0.34) !important;
+  background: rgba(15, 23, 42, 0.62) !important;
+  color: #e5e7eb !important;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.035);
+}
+
+.report-alert-status-pill.is-zero {
+  border-color: rgba(203, 213, 225, 0.22) !important;
+  background: rgba(255,255,255,0.065) !important;
+  color: rgba(226, 232, 240, 0.78) !important;
+}
+
+.report-alert-status-pill.is-loading {
+  opacity: 0.88;
+}
+
+.report-alert-status-pill.is-error {
+  border-color: rgba(248, 113, 113, 0.58) !important;
+}
+
+.report-action-alert-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 8px;
+  border-radius: 999px;
+  background: rgba(20, 184, 166, 0.20);
+  color: #5eead4 !important;
+  font-size: 18px;
+  font-weight: 1000;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.report-accordion-button:hover .report-action-alert-marker,
+.report-accordion.open > .report-accordion-button .report-action-alert-marker {
+  background: rgba(20, 184, 166, 0.30);
+  color: #99f6e4 !important;
+}
+
+
+/* PDF EXPORT */
+.pdf-export-button {
+  background: #0ea5e9;
+  color: #f8fafc;
+  border: 1px solid rgba(125, 211, 252, 0.48);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+}
+
+.pdf-export-button:hover:not(:disabled) {
+  background: #0284c7;
+}
+
+.pdf-export-button.compact {
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+.report-ready-actions,
+.report-modal-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pdf-export-error {
+  width: min(860px, 100%);
+  margin: 12px auto 0;
+}
+
+.pdf-export-guidance {
+  width: min(860px, 100%);
+  margin: 9px auto 0;
+  color: rgba(203, 213, 225, 0.82);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
+}
+
+.pdf-export-success {
+  width: min(860px, 100%);
+  margin: 12px auto 0;
+  border: 1px solid rgba(45, 212, 191, 0.36);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: rgba(20, 184, 166, 0.11);
+  color: #ccfbf1;
+  font-size: 13px;
+  font-weight: 750;
+  text-align: center;
+}
+
+@media (max-width: 700px) {
+  .report-modal-actions,
+  .report-ready-actions {
+    justify-content: flex-start;
+  }
 }

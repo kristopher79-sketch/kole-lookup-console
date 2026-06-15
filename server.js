@@ -3377,6 +3377,42 @@ function buildOrdersDueForSettlementResponse(items, sourceList) {
   };
 }
 
+function getReportActionAlertFieldSelect() {
+  return Array.from(new Set([
+    ...getOrdersDueForSettlementFieldSelect().split(','),
+    ...getWonNotRegisteredFieldSelect().split(',')
+  ])).join(',');
+}
+
+function buildReportActionAlertsResponse(items, sourceList) {
+  const ordersDueSettlement = buildOrdersDueForSettlementResponse(items, sourceList);
+  const wonNotRegistered = buildWonNotRegisteredResponse(items, sourceList);
+
+  const alerts = {
+    ordersDueSettlement: {
+      reportKey: 'ordersDueSettlement',
+      reportLabel: ordersDueSettlement.reportLabel,
+      count: ordersDueSettlement.count,
+      hasAlert: ordersDueSettlement.count > 0
+    },
+    wonNotRegistered: {
+      reportKey: 'wonNotRegistered',
+      reportLabel: wonNotRegistered.reportLabel,
+      count: wonNotRegistered.count,
+      hasAlert: wonNotRegistered.count > 0
+    }
+  };
+
+  return {
+    success: true,
+    reportType: 'reportActionAlerts',
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    dataSource: sourceList.label,
+    totalAlerts: alerts.ordersDueSettlement.count + alerts.wonNotRegistered.count,
+    alerts
+  };
+}
+
 
 
 
@@ -4911,35 +4947,39 @@ app.get('/sharepoint-docs-debug', requireLookupAccess, async (req, res) => {
 
 
 
+async function getSalesActivityReportPayload(query = {}) {
+  const salesLeadsListId = getSalesLeadsListId();
+
+  if (!salesLeadsListId) {
+    const configError = new Error('SALES_LEADS_LIST_ID is not configured on the server.');
+    configError.statusCode = 500;
+    throw configError;
+  }
+
+  const token = await getGraphToken();
+  const range = getSalesActivityDateRange(query || {});
+  const [items, notesBundle] = await Promise.all([
+    getAllListItemsWithFields(token, salesLeadsListId, getSalesLeadFieldSelect()),
+    getSalesLeadNotesBundle(token)
+  ]);
+
+  const records = items.map(cleanSalesLeadItem);
+  const report = buildSalesActivitySnapshot(records, notesBundle, range);
+
+  return {
+    ...report,
+    sourceListId: salesLeadsListId
+  };
+}
+
 app.get('/reports/sales-activity', requireLookupAccess, async (req, res) => {
   try {
-    const salesLeadsListId = getSalesLeadsListId();
-
-    if (!salesLeadsListId) {
-      return res.status(500).json({
-        success: false,
-        error: 'SALES_LEADS_LIST_ID is not configured on the server.'
-      });
-    }
-
-    const token = await getGraphToken();
-    const range = getSalesActivityDateRange(req.query || {});
-    const [items, notesBundle] = await Promise.all([
-      getAllListItemsWithFields(token, salesLeadsListId, getSalesLeadFieldSelect()),
-      getSalesLeadNotesBundle(token)
-    ]);
-
-    const records = items.map(cleanSalesLeadItem);
-    const report = buildSalesActivitySnapshot(records, notesBundle, range);
-
-    res.json({
-      ...report,
-      sourceListId: salesLeadsListId
-    });
+    const report = await getSalesActivityReportPayload(req.query || {});
+    res.json(report);
   } catch (error) {
     console.error(error);
 
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       error: error.message || 'Unable to load Sales Activity Snapshot.'
     });
@@ -5140,6 +5180,37 @@ app.get('/sales-leads/by-customer', requireLookupAccess, async (req, res) => {
   }
 });
 
+app.get('/reports/action-alerts', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const lists = await getSearchableBidLists(token);
+    const currentList = lists.find((list) => list.label === 'Bid Listing');
+
+    if (!currentList) {
+      return res.status(404).json({
+        success: false,
+        error: 'Bid Listing was not found.'
+      });
+    }
+
+    const items = await getAllListItemsWithFields(
+      token,
+      currentList.listId,
+      getReportActionAlertFieldSelect()
+    );
+
+    res.json(buildReportActionAlertsResponse(items, currentList));
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to load report action alerts.'
+    });
+  }
+});
+
+
 app.get('/reports/won-not-registered', requireLookupAccess, async (req, res) => {
   try {
     const token = await getGraphToken();
@@ -5235,140 +5306,775 @@ app.get('/reports/orders-due-for-settlement', requireLookupAccess, async (req, r
 });
 
 
-app.get('/reports/weekly-settlement', requireLookupAccess, async (req, res) => {
-  try {
-    const cutoffDate = String(req.query.cutoffDate || '').trim();
-    const cutoff = parseCutoffDateValue(cutoffDate);
 
-    const token = await getGraphToken();
-    const allLists = await getSearchableBidLists(token);
+function escapePdfText(value) {
+  return String(value ?? '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)')
+    .trim();
+}
 
-    // Settlement is anchored to paperwork submission date/time, not pickup/delivery year.
-    // Because older orders can be submitted/processed later, accounting reports must scan
-    // every available archive from the first archive year through the selected cutoff year,
-    // plus the live Bid Listing.
-    // Example: a December 2025 cutoff scans Archive 2024, Archive 2025, and Bid Listing.
-    const sourceLists = allLists
-      .filter((list) => {
-        if (list.label === 'Bid Listing') return true;
+function getPdfTextWidthApprox(value, fontSize = 8) {
+  return String(value ?? '').length * fontSize * 0.52;
+}
 
-        const sourceYear = Number(list.year);
-        if (!Number.isInteger(sourceYear)) return false;
+function truncatePdfText(value, maxWidth, fontSize = 8) {
+  const text = String(value ?? '').replace(/[\r\n]+/g, ' ').trim();
+  if (!text) return '-';
+  if (getPdfTextWidthApprox(text, fontSize) <= maxWidth) return text;
 
-        return sourceYear >= ARCHIVE_YEAR_MIN && sourceYear <= cutoff.year;
-      })
-      .sort((a, b) => {
-        if (a.label === 'Bid Listing') return 1;
-        if (b.label === 'Bid Listing') return -1;
+  const maxChars = Math.max(4, Math.floor(maxWidth / (fontSize * 0.52)) - 1);
+  return `${text.slice(0, maxChars).trim()}...`;
+}
 
-        return Number(a.year || 0) - Number(b.year || 0);
-      });
+function pdfText(x, y, text, options = {}) {
+  const font = options.font || 'F1';
+  const size = Number(options.size || 8);
+  const color = options.color || '0.08 0.10 0.14';
 
-    if (sourceLists.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: `No Bid Listing source list was found for settlement cutoff ${cutoffDate}.`
-      });
-    }
+  return `q ${color} rg BT /${font} ${size} Tf ${Number(x).toFixed(2)} ${Number(y).toFixed(2)} Td (${escapePdfText(text)}) Tj ET Q\n`;
+}
 
-    const settled = await Promise.allSettled(
-      sourceLists.map(async (sourceList) => {
-        const listItems = await getAllListItemsWithFields(
-          token,
-          sourceList.listId,
-          getSettlementFieldSelect()
-        );
+function pdfRect(x, y, width, height, color = '0.95 0.97 1') {
+  return `q ${color} rg ${Number(x).toFixed(2)} ${Number(y).toFixed(2)} ${Number(width).toFixed(2)} ${Number(height).toFixed(2)} re f Q\n`;
+}
 
-        return listItems.map((item) => ({
-          item,
-          sourceList,
-          sourceListId: sourceList.listId
-        }));
-      })
+function pdfLine(x1, y1, x2, y2, color = '0.78 0.82 0.89', width = 0.5) {
+  return `q ${color} RG ${Number(width).toFixed(2)} w ${Number(x1).toFixed(2)} ${Number(y1).toFixed(2)} m ${Number(x2).toFixed(2)} ${Number(y2).toFixed(2)} l S Q\n`;
+}
+
+function formatPdfMoney(value) {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(getNumberValue(value));
+}
+
+function formatPdfNumber(value) {
+  return new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 0
+  }).format(Number(value) || 0);
+}
+
+function formatPdfRosterDate(value) {
+  if (!value) return '-';
+  return formatShortDate(value) || String(value || '-');
+}
+
+function buildPdfDocument(pageContents, options = {}) {
+  const width = options.width || 792;
+  const height = options.height || 612;
+  const objects = [];
+
+  function addObject(body) {
+    objects.push(body);
+    return objects.length;
+  }
+
+  addObject('<< /Type /Catalog /Pages 2 0 R >>');
+  addObject('');
+  addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>');
+  addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>');
+
+  const pageObjectIds = [];
+
+  pageContents.forEach((content) => {
+    const contentObjectId = addObject(`<< /Length ${Buffer.byteLength(content, 'utf8')} >>\nstream\n${content}endstream`);
+    const pageObjectId = addObject(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents ${contentObjectId} 0 R >>`
     );
 
-    const successfulItems = settled
-      .filter((result) => result.status === 'fulfilled')
-      .flatMap((result) => result.value);
+    pageObjectIds.push(pageObjectId);
+  });
 
-    const failedLists = settled
-      .map((result, index) => ({ result, list: sourceLists[index] }))
-      .filter((entry) => entry.result.status === 'rejected')
-      .map((entry) => ({
-        SourceList: entry.list.label,
-        error: entry.result.reason?.message || 'Unknown settlement report list failure'
-      }));
+  objects[1] = `<< /Type /Pages /Kids [${pageObjectIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${pageObjectIds.length} >>`;
 
-    let activeRosterItems = [];
-    let activeRosterWarning = '';
+  const chunks = ['%PDF-1.4\n'];
+  const offsets = [0];
 
-    if (process.env.DRIVER_ROSTER_LIST_ID) {
-      try {
-        activeRosterItems = await getDriverRosterItems(token);
-      } catch (rosterError) {
-        activeRosterWarning = rosterError.message || 'Driver Roster could not be loaded for the active-driver revenue check.';
-      }
-    } else {
-      activeRosterWarning = 'DRIVER_ROSTER_LIST_ID is not configured, so active drivers with no settlement revenue could not be checked.';
+  objects.forEach((body, index) => {
+    offsets.push(Buffer.byteLength(chunks.join(''), 'utf8'));
+    chunks.push(`${index + 1} 0 obj\n${body}\nendobj\n`);
+  });
+
+  const xrefOffset = Buffer.byteLength(chunks.join(''), 'utf8');
+  chunks.push(`xref\n0 ${objects.length + 1}\n`);
+  chunks.push('0000000000 65535 f \n');
+
+  for (let i = 1; i <= objects.length; i += 1) {
+    chunks.push(`${String(offsets[i]).padStart(10, '0')} 00000 n \n`);
+  }
+
+  chunks.push(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+
+  return Buffer.from(chunks.join(''), 'utf8');
+}
+
+
+function createPdfReportWriter(options = {}) {
+  const pageWidth = options.pageWidth || 792;
+  const pageHeight = options.pageHeight || 612;
+  const margin = options.margin || 36;
+  const contentWidth = pageWidth - (margin * 2);
+  const pages = [];
+  let page = '';
+  let y = pageHeight - margin;
+  let pageNumber = 0;
+
+  function add(content) {
+    page += content;
+  }
+
+  function startPage() {
+    if (page) pages.push(page);
+
+    pageNumber += 1;
+    page = '';
+    y = pageHeight - margin;
+
+    add(pdfText(margin, y, 'KOLE TRUCKING', { font: 'F2', size: 11, color: '0.08 0.12 0.22' }));
+    add(pdfText(pageWidth - margin - 58, y, `Page ${pageNumber}`, { font: 'F1', size: 8, color: '0.35 0.42 0.52' }));
+    y -= 19;
+    add(pdfText(margin, y, options.title || 'Kole Report', { font: 'F2', size: 18, color: '0.06 0.09 0.16' }));
+    y -= 14;
+    if (options.subtitle) {
+      add(pdfText(margin, y, truncatePdfText(options.subtitle, contentWidth, 8.5), { font: 'F1', size: 8.5, color: '0.35 0.42 0.52' }));
+      y -= 9;
+    }
+    add(pdfLine(margin, y, pageWidth - margin, y, '0.70 0.76 0.86', 0.75));
+    y -= 18;
+  }
+
+  function finish() {
+    if (page) pages.push(page);
+    return buildPdfDocument(pages, { width: pageWidth, height: pageHeight });
+  }
+
+  function ensureSpace(heightNeeded = 24) {
+    if (y - heightNeeded < margin) startPage();
+  }
+
+  function addParagraph(label, value) {
+    ensureSpace(15);
+    add(pdfText(margin, y, `${label}:`, { font: 'F2', size: 8.5, color: '0.13 0.18 0.28' }));
+    add(pdfText(margin + 128, y, truncatePdfText(value || '-', contentWidth - 128, 8.5), { font: 'F1', size: 8.5, color: '0.18 0.23 0.32' }));
+    y -= 13;
+  }
+
+  function addSectionTitle(title, subtitle = '') {
+    ensureSpace(34);
+    add(pdfRect(margin, y - 15, contentWidth, 20, '0.89 0.93 1'));
+    add(pdfText(margin + 8, y - 9, title, { font: 'F2', size: 10.5, color: '0.08 0.13 0.24' }));
+    if (subtitle) {
+      add(pdfText(pageWidth - margin - 128, y - 9, truncatePdfText(subtitle, 120, 8), { font: 'F1', size: 8, color: '0.35 0.42 0.52' }));
+    }
+    y -= 29;
+  }
+
+  function addTextLine(text, options = {}) {
+    ensureSpace(15);
+    add(pdfText(margin, y, truncatePdfText(text || '-', contentWidth, options.size || 8.5), {
+      font: options.font || 'F1',
+      size: options.size || 8.5,
+      color: options.color || '0.13 0.18 0.28'
+    }));
+    y -= options.lineHeight || 14;
+  }
+
+  function addTable(columns, rows, emptyMessage) {
+    const headerHeight = 15;
+    const rowHeight = 14;
+
+    if (!rows || rows.length === 0) {
+      ensureSpace(20);
+      add(pdfText(margin, y, emptyMessage || 'No rows found.', { font: 'F1', size: 8.5, color: '0.35 0.42 0.52' }));
+      y -= 17;
+      return;
     }
 
-    const report = buildWeeklySettlementResponse(successfulItems, sourceLists, cutoffDate, activeRosterItems, activeRosterWarning);
+    function drawHeader() {
+      ensureSpace(headerHeight + rowHeight);
+      let x = margin;
+      add(pdfRect(margin, y - 11, contentWidth, headerHeight, '0.17 0.21 0.31'));
 
-    res.json({
-      ...report,
-      failedLists
+      columns.forEach((column) => {
+        add(pdfText(x + 3, y - 7, truncatePdfText(column.label, column.width - 6, 7.25), { font: 'F2', size: 7.25, color: '1 1 1' }));
+        x += column.width;
+      });
+
+      y -= headerHeight;
+    }
+
+    drawHeader();
+
+    rows.forEach((row, rowIndex) => {
+      if (y - rowHeight < margin) {
+        startPage();
+        drawHeader();
+      }
+
+      if (rowIndex % 2 === 0) {
+        add(pdfRect(margin, y - 10.5, contentWidth, rowHeight, '0.97 0.98 1'));
+      }
+
+      let x = margin;
+      columns.forEach((column) => {
+        const rawValue = typeof column.value === 'function' ? column.value(row) : row[column.value];
+        const displayValue = truncatePdfText(rawValue || '-', column.width - 6, 7.4);
+        add(pdfText(x + 3, y - 7, displayValue, { font: column.mono ? 'F3' : 'F1', size: 7.4, color: '0.08 0.10 0.14' }));
+        x += column.width;
+      });
+
+      add(pdfLine(margin, y - 12, pageWidth - margin, y - 12, '0.88 0.91 0.96', 0.35));
+      y -= rowHeight;
     });
+
+    y -= 8;
+  }
+
+  startPage();
+
+  return {
+    addParagraph,
+    addSectionTitle,
+    addTextLine,
+    addTable,
+    finish,
+    ensureSpace,
+    getContentWidth: () => contentWidth
+  };
+}
+
+function createDriverSummaryPdfBuffer(report) {
+  const writer = createPdfReportWriter({
+    title: `${report.reportLabel || ''} Driver Summary Report`.trim(),
+    subtitle: `Generated: ${report.generatedAt || '-'}    Data source: ${report.dataSource || '-'}`
+  });
+  const totals = report.totals || {};
+
+  writer.addSectionTitle('Report Summary');
+  writer.addParagraph('Anchor date', report.anchorDate || 'Pickup Offer Date');
+  writer.addParagraph('Included statuses', (report.includedStatuses || []).join(', ') || 'Won, TONU');
+  writer.addTextLine([
+    `Loads ${formatPdfNumber(totals.loadCount)}`,
+    `Gross ${formatPdfMoney(totals.quotedTotal)}`,
+    `Loaded Miles ${formatPdfNumber(totals.loadedMiles)}`,
+    `Empty Miles ${formatPdfNumber(totals.emptyMiles)}`,
+    `$/Load Mile ${formatPdfMoney(totals.revenuePerLoadedMile)}`,
+    `$/All Miles ${formatPdfMoney(totals.revenuePerTotalMile)}`,
+    `Driver Pay ${formatPdfMoney(totals.driverPay)}`
+  ].join('   |   '), { font: 'F2' });
+
+  writer.addSectionTitle('Driver Totals', `${formatPdfNumber((report.drivers || []).length)} driver(s)`);
+  writer.addTable([
+    { label: 'Truck', width: 48, mono: true, value: (row) => row.truck || '-' },
+    { label: 'Operator', width: 135, value: (row) => row.operator || '-' },
+    { label: 'Loads', width: 42, mono: true, value: (row) => formatPdfNumber(row.loadCount) },
+    { label: 'Empty', width: 55, value: (row) => formatPdfNumber(row.emptyMiles) },
+    { label: 'Loaded', width: 55, value: (row) => formatPdfNumber(row.loadedMiles) },
+    { label: 'All Miles', width: 55, value: (row) => formatPdfNumber(row.totalMiles) },
+    { label: 'Gross', width: 82, value: (row) => formatPdfMoney(row.quotedTotal) },
+    { label: '$/Load', width: 70, value: (row) => formatPdfMoney(row.revenuePerLoadedMile) },
+    { label: '$/All', width: 70, value: (row) => formatPdfMoney(row.revenuePerTotalMile) },
+    { label: 'Driver Pay', width: 108, value: (row) => formatPdfMoney(row.driverPay) }
+  ], report.drivers || [], 'No Won or TONU loads were found for this report month.');
+
+  (report.drivers || []).forEach((driver) => {
+    writer.addSectionTitle(`Truck ${driver.truck || '-'}`, `${driver.operator || 'Unknown Operator'} | ${formatPdfNumber(driver.loadCount)} load(s)`);
+    writer.addTextLine([
+      `Gross ${formatPdfMoney(driver.quotedTotal)}`,
+      `Driver Pay ${formatPdfMoney(driver.driverPay)}`,
+      `Loaded ${formatPdfNumber(driver.loadedMiles)}`,
+      `Empty ${formatPdfNumber(driver.emptyMiles)}`,
+      `$/All ${formatPdfMoney(driver.revenuePerTotalMile)}`
+    ].join('   |   '), { font: 'F2' });
+
+    writer.addTable([
+      { label: 'BOL', width: 53, mono: true, value: (row) => row.BOL || '-' },
+      { label: 'Company', width: 112, value: (row) => row.Customer || '-' },
+      { label: 'Pickup', width: 55, value: (row) => row.PickupDateDisplay || '-' },
+      { label: 'Route', width: 168, value: (row) => row.Route || '-' },
+      { label: 'DH', width: 42, value: (row) => formatPdfNumber(row.EmptyMiles) },
+      { label: 'Loaded', width: 46, value: (row) => formatPdfNumber(row.LoadedMiles) },
+      { label: 'Quoted', width: 70, value: (row) => formatPdfMoney(row.QuotedTotal) },
+      { label: '$/Ld', width: 54, value: (row) => formatPdfMoney(row.RatePerLoadedMile ?? row.RatePerMile) },
+      { label: '$/All', width: 54, value: (row) => formatPdfMoney(row.RatePerAllMiles) },
+      { label: 'Pay', width: 66, value: (row) => formatPdfMoney(row.DriverPay) }
+    ], driver.loads || [], 'No loads found for this driver.');
+  });
+
+  return writer.finish();
+}
+
+function createSalesActivityPdfBuffer(report) {
+  const writer = createPdfReportWriter({
+    title: report.reportLabel || 'Sales Activity Snapshot',
+    subtitle: `Activity: ${report.activityPeriodLabel || '-'}    Due window: ${report.duePeriodLabel || '-'}    Generated: ${report.generatedAt || '-'}`
+  });
+  const summary = report.summary || {};
+  const sections = report.sections || {};
+
+  writer.addSectionTitle('Snapshot Summary');
+  writer.addTextLine([
+    `Overdue ${formatPdfNumber(summary.overdueFollowUps)}`,
+    `Due Window ${formatPdfNumber(summary.dueFollowUps)}`,
+    `Notes Added ${formatPdfNumber(summary.notesAdded)}`,
+    `Completed Touches ${formatPdfNumber(summary.completedFollowUps)}`,
+    `Touched Customers ${formatPdfNumber(summary.touchedCustomers)}`
+  ].join('   |   '), { font: 'F2' });
+
+  if (report.notesStatus && report.notesStatus !== 'available') {
+    writer.addParagraph('Notes warning', report.notesError || 'Sales notes are not connected yet.');
+  }
+
+  function addLeadSection(title, description, rows = []) {
+    writer.addSectionTitle(title, `${formatPdfNumber(rows.length)} item(s)`);
+    if (description) writer.addTextLine(description, { size: 8.25, color: '0.35 0.42 0.52' });
+    writer.addTable([
+      { label: 'Company', width: 180, value: (row) => row.CompanyName || '-' },
+      { label: 'Code', width: 70, mono: true, value: (row) => row.CustomerCode || '-' },
+      { label: 'Next Touch', width: 70, value: (row) => row.NextTouchDateDisplay || formatShortDate(row.NextTouchDate) || '-' },
+      { label: 'Quotes', width: 50, value: (row) => formatPdfNumber(row.QuoteCount) },
+      { label: 'First Quote', width: 70, value: (row) => row.FirstQuoteDateDisplay || formatShortDate(row.FirstQuoteDate) || '-' },
+      { label: 'Last Quote', width: 70, value: (row) => row.LastQuoteDateDisplay || formatShortDate(row.LastQuoteDate) || '-' },
+      { label: 'Status', width: 90, value: (row) => row.Status || '-' }
+    ], rows, 'Nothing to show here.');
+  }
+
+  function addNoteSection(title, description, rows = [], dateField = 'ActivityDate') {
+    writer.addSectionTitle(title, `${formatPdfNumber(rows.length)} item(s)`);
+    if (description) writer.addTextLine(description, { size: 8.25, color: '0.35 0.42 0.52' });
+    writer.addTable([
+      { label: 'Company', width: 155, value: (row) => row.CompanyName || '-' },
+      { label: 'Code', width: 70, mono: true, value: (row) => row.CustomerCode || '-' },
+      { label: 'Date', width: 62, value: (row) => row[`${dateField}Display`] || formatShortDate(row[dateField]) || '-' },
+      { label: 'Author', width: 80, value: (row) => row.Author || '-' },
+      { label: 'Type', width: 70, value: (row) => row.NoteType || '-' },
+      { label: 'Note', width: 283, value: (row) => row.Note || row.Title || '-' }
+    ], rows, 'Nothing to show here.');
+  }
+
+  addLeadSection('Overdue Follow-Ups', 'Follow-up pending and Next Touch before today.', sections.overdueFollowUps || []);
+  addLeadSection('Follow-Ups Due in Window', `Follow-up pending from ${report.duePeriodLabel || 'the selected due window'}.`, sections.dueFollowUps || []);
+  addNoteSection('Notes Added', `Notes created from ${report.activityPeriodLabel || 'the selected activity window'}.`, sections.notesAdded || [], 'ActivityDate');
+  addNoteSection('Follow-Ups Completed', `Touch dates recorded from ${report.activityPeriodLabel || 'the selected activity window'}.`, sections.completedFollowUps || [], 'TouchDate');
+
+  return writer.finish();
+}
+
+function createWeeklySettlementPdfBuffer(report) {
+  const pageWidth = 792;
+  const pageHeight = 612;
+  const margin = 36;
+  const contentWidth = pageWidth - (margin * 2);
+  const pages = [];
+  let page = '';
+  let y = pageHeight - margin;
+  let pageNumber = 0;
+
+  function add(content) {
+    page += content;
+  }
+
+  function startPage() {
+    if (page) pages.push(page);
+
+    pageNumber += 1;
+    page = '';
+    y = pageHeight - margin;
+
+    add(pdfText(margin, y, 'KOLE TRUCKING', { font: 'F2', size: 11, color: '0.08 0.12 0.22' }));
+    add(pdfText(pageWidth - margin - 58, y, `Page ${pageNumber}`, { font: 'F1', size: 8, color: '0.35 0.42 0.52' }));
+    y -= 19;
+    add(pdfText(margin, y, report.reportLabel || 'Weekly Settlement Report', { font: 'F2', size: 18, color: '0.06 0.09 0.16' }));
+    y -= 14;
+    add(pdfText(margin, y, `Cutoff: ${report.cutoffLabel || '-'}    Generated: ${report.generatedAt || '-'}`, { font: 'F1', size: 8.5, color: '0.35 0.42 0.52' }));
+    y -= 9;
+    add(pdfLine(margin, y, pageWidth - margin, y, '0.70 0.76 0.86', 0.75));
+    y -= 18;
+  }
+
+  function finish() {
+    if (page) pages.push(page);
+    return buildPdfDocument(pages, { width: pageWidth, height: pageHeight });
+  }
+
+  function ensureSpace(heightNeeded = 24) {
+    if (y - heightNeeded < margin) startPage();
+  }
+
+  function addParagraph(label, value) {
+    ensureSpace(15);
+    add(pdfText(margin, y, `${label}:`, { font: 'F2', size: 8.5, color: '0.13 0.18 0.28' }));
+    add(pdfText(margin + 128, y, truncatePdfText(value || '-', contentWidth - 128, 8.5), { font: 'F1', size: 8.5, color: '0.18 0.23 0.32' }));
+    y -= 13;
+  }
+
+  function addSectionTitle(title, subtitle = '') {
+    ensureSpace(34);
+    add(pdfRect(margin, y - 15, contentWidth, 20, '0.89 0.93 1'));
+    add(pdfText(margin + 8, y - 9, title, { font: 'F2', size: 10.5, color: '0.08 0.13 0.24' }));
+    if (subtitle) {
+      add(pdfText(pageWidth - margin - 128, y - 9, truncatePdfText(subtitle, 120, 8), { font: 'F1', size: 8, color: '0.35 0.42 0.52' }));
+    }
+    y -= 29;
+  }
+
+  function addTotalsLine(label, totals = {}) {
+    ensureSpace(18);
+    const text = [
+      `${label}`,
+      `Orders ${formatPdfNumber(totals.orderCount)}`,
+      `Drivers ${formatPdfNumber(totals.driverCount)}`,
+      `Customers ${formatPdfNumber(totals.customerCount)}`,
+      `Gross ${formatPdfMoney(totals.bidTotal)}`,
+      `Driver Pay ${formatPdfMoney(totals.driverPayTotal)}`,
+      `Margin ${formatPdfMoney(totals.margin)}`
+    ].join('   |   ');
+
+    add(pdfText(margin, y, truncatePdfText(text, contentWidth, 8.5), { font: 'F2', size: 8.5, color: '0.13 0.18 0.28' }));
+    y -= 15;
+  }
+
+  function addTable(columns, rows, emptyMessage) {
+    const headerHeight = 15;
+    const rowHeight = 14;
+
+    if (!rows || rows.length === 0) {
+      ensureSpace(20);
+      add(pdfText(margin, y, emptyMessage || 'No rows found.', { font: 'F1', size: 8.5, color: '0.35 0.42 0.52' }));
+      y -= 17;
+      return;
+    }
+
+    function drawHeader() {
+      ensureSpace(headerHeight + rowHeight);
+      let x = margin;
+      add(pdfRect(margin, y - 11, contentWidth, headerHeight, '0.17 0.21 0.31'));
+
+      columns.forEach((column) => {
+        add(pdfText(x + 3, y - 7, truncatePdfText(column.label, column.width - 6, 7.25), { font: 'F2', size: 7.25, color: '1 1 1' }));
+        x += column.width;
+      });
+
+      y -= headerHeight;
+    }
+
+    drawHeader();
+
+    rows.forEach((row, rowIndex) => {
+      if (y - rowHeight < margin) {
+        startPage();
+        drawHeader();
+      }
+
+      if (rowIndex % 2 === 0) {
+        add(pdfRect(margin, y - 10.5, contentWidth, rowHeight, '0.97 0.98 1'));
+      }
+
+      let x = margin;
+      columns.forEach((column) => {
+        const rawValue = column.value(row);
+        const displayValue = truncatePdfText(rawValue || '-', column.width - 6, 7.4);
+        add(pdfText(x + 3, y - 7, displayValue, { font: column.mono ? 'F3' : 'F1', size: 7.4, color: '0.08 0.10 0.14' }));
+        x += column.width;
+      });
+
+      add(pdfLine(margin, y - 12, pageWidth - margin, y - 12, '0.88 0.91 0.96', 0.35));
+      y -= rowHeight;
+    });
+
+    y -= 8;
+  }
+
+  function addSettlementTable(title, totals, rows, emptyMessage) {
+    addSectionTitle(title, `${formatPdfNumber(rows?.length || 0)} order(s)`);
+    addTotalsLine('Totals', totals || {});
+    addTable([
+      { label: 'BOL', width: 53, mono: true, value: (row) => `${row.Starred ? '* ' : ''}${row.BOL || '-'}` },
+      { label: 'Operator', width: 84, value: (row) => row.Operator || '-' },
+      { label: 'Truck', width: 38, mono: true, value: (row) => row.Truck || '-' },
+      { label: 'Customer', width: 100, value: (row) => row.Customer || '-' },
+      { label: 'Pickup', width: 54, value: (row) => row.PUDateDisplay || '-' },
+      { label: 'Route', width: 158, value: (row) => row.Route || [row.OriginST, row.DestST].filter(Boolean).join(' to ') || '-' },
+      { label: 'Submitted', width: 82, value: (row) => [row.SubmitDateDisplay, row.SubmitTimeDisplay].filter(Boolean).join(' ') || '-' },
+      { label: 'Gross', width: 74, value: (row) => formatPdfMoney(row.BidAmount) },
+      { label: 'Driver Pay', width: 77, value: (row) => formatPdfMoney(row.DriverPay) }
+    ], rows, emptyMessage);
+  }
+
+  function addDriverPaySummary(rows = []) {
+    addSectionTitle('Gross / Driver Pay by Driver', `${formatPdfNumber(rows.length)} driver(s)`);
+    addTable([
+      { label: 'Driver', width: 128, value: (row) => row.driver || 'Unknown Operator' },
+      { label: 'Truck(s)', width: 62, mono: true, value: (row) => row.trucks || '-' },
+      { label: 'Orders', width: 45, mono: true, value: (row) => formatPdfNumber(row.orderCount) },
+      { label: 'BOLs', width: 210, mono: true, value: (row) => (row.bols || []).join(', ') || '-' },
+      { label: 'Gross', width: 92, value: (row) => formatPdfMoney(row.bidTotal) },
+      { label: 'Driver Pay', width: 92, value: (row) => formatPdfMoney(row.driverPayTotal) },
+      { label: 'Margin', width: 91, value: (row) => formatPdfMoney(row.margin) }
+    ], rows, 'No driver pay summary is available for this settlement window.');
+  }
+
+  function addNoRevenueCheck(data = {}) {
+    const rows = data.main || [];
+    addSectionTitle('Active Drivers With No Main-Window Revenue', `${formatPdfNumber(rows.length)} flagged`);
+
+    if (!data.sourceAvailable && data.warning) {
+      addParagraph('Warning', data.warning);
+      return;
+    }
+
+    if (data.warning) addParagraph('Warning', data.warning);
+
+    addTable([
+      { label: 'Operator / Team', width: 132, value: (row) => row.operatorTeamName || '-' },
+      { label: 'TMS Name', width: 112, value: (row) => row.tmsName || '-' },
+      { label: 'Truck', width: 48, mono: true, value: (row) => row.truck || '-' },
+      { label: 'Driver Type', width: 82, value: (row) => row.driverType || '-' },
+      { label: 'Trailer', width: 90, value: (row) => row.trailerType || '-' },
+      { label: 'Start Date', width: 74, value: (row) => formatPdfRosterDate(row.startDate) },
+      { label: 'Check', width: 182, value: (row) => row.hasLikelyNextWeekRevenue ? 'No main-window revenue; appears in likely next week.' : 'No main-window revenue found.' }
+    ], rows, 'Every active roster driver matched main-window settlement revenue.');
+  }
+
+  startPage();
+
+  addSectionTitle('Report Summary');
+  addParagraph('Main settlement window', report.mainWindowLabel);
+  addParagraph('Likely next week', report.suggestWindowLabel);
+  addParagraph('Data source', report.dataSource);
+  if (report.failedLists?.length) {
+    addParagraph('Source warnings', `${report.failedLists.length} list(s) could not be loaded; see app preview for details.`);
+  }
+  y -= 4;
+
+  addSettlementTable('Main Settlement', report.totals?.main, report.main || [], 'No orders were found for the main settlement window.');
+  addDriverPaySummary(report.driverPaySummary?.main || []);
+  addNoRevenueCheck(report.activeDriversWithNoRevenue || {});
+  addSectionTitle('Settlement Note');
+  addParagraph('* Starred BOLs', 'Submitted after the prior cutoff but before the end of that prior cutoff date.');
+
+  addSettlementTable('Likely for Next Week', report.totals?.suggest, report.suggest || [], 'No orders were found for the likely next-week bucket.');
+
+  if (report.counts?.excludedProcessedRecordsMissingSubmissionTimestamp > 0) {
+    addSectionTitle('Skipped Processed Orders');
+    addParagraph('Skipped', `${report.counts.excludedProcessedRecordsMissingSubmissionTimestamp} processed order(s) did not have a usable paperwork submitted date/time.`);
+  }
+
+  return finish();
+}
+
+async function getWeeklySettlementReportPayload(cutoffDateValue) {
+  const cutoffDate = String(cutoffDateValue || '').trim();
+  const cutoff = parseCutoffDateValue(cutoffDate);
+
+  const token = await getGraphToken();
+  const allLists = await getSearchableBidLists(token);
+
+  // Settlement is anchored to paperwork submission date/time, not pickup/delivery year.
+  // Because older orders can be submitted/processed later, accounting reports must scan
+  // every available archive from the first archive year through the selected cutoff year,
+  // plus the live Bid Listing.
+  // Example: a December 2025 cutoff scans Archive 2024, Archive 2025, and Bid Listing.
+  const sourceLists = allLists
+    .filter((list) => {
+      if (list.label === 'Bid Listing') return true;
+
+      const sourceYear = Number(list.year);
+      if (!Number.isInteger(sourceYear)) return false;
+
+      return sourceYear >= ARCHIVE_YEAR_MIN && sourceYear <= cutoff.year;
+    })
+    .sort((a, b) => {
+      if (a.label === 'Bid Listing') return 1;
+      if (b.label === 'Bid Listing') return -1;
+
+      return Number(a.year || 0) - Number(b.year || 0);
+    });
+
+  if (sourceLists.length === 0) {
+    const notFoundError = new Error(`No Bid Listing source list was found for settlement cutoff ${cutoffDate}.`);
+    notFoundError.statusCode = 404;
+    throw notFoundError;
+  }
+
+  const settled = await Promise.allSettled(
+    sourceLists.map(async (sourceList) => {
+      const listItems = await getAllListItemsWithFields(
+        token,
+        sourceList.listId,
+        getSettlementFieldSelect()
+      );
+
+      return listItems.map((item) => ({
+        item,
+        sourceList,
+        sourceListId: sourceList.listId
+      }));
+    })
+  );
+
+  const successfulItems = settled
+    .filter((result) => result.status === 'fulfilled')
+    .flatMap((result) => result.value);
+
+  const failedLists = settled
+    .map((result, index) => ({ result, list: sourceLists[index] }))
+    .filter((entry) => entry.result.status === 'rejected')
+    .map((entry) => ({
+      SourceList: entry.list.label,
+      error: entry.result.reason?.message || 'Unknown settlement report list failure'
+    }));
+
+  let activeRosterItems = [];
+  let activeRosterWarning = '';
+
+  if (process.env.DRIVER_ROSTER_LIST_ID) {
+    try {
+      activeRosterItems = await getDriverRosterItems(token);
+    } catch (rosterError) {
+      activeRosterWarning = rosterError.message || 'Driver Roster could not be loaded for the active-driver revenue check.';
+    }
+  } else {
+    activeRosterWarning = 'DRIVER_ROSTER_LIST_ID is not configured, so active drivers with no settlement revenue could not be checked.';
+  }
+
+  const report = buildWeeklySettlementResponse(successfulItems, sourceLists, cutoffDate, activeRosterItems, activeRosterWarning);
+
+  return {
+    ...report,
+    failedLists
+  };
+}
+
+app.get('/reports/weekly-settlement', requireLookupAccess, async (req, res) => {
+  try {
+    const report = await getWeeklySettlementReportPayload(req.query.cutoffDate);
+    res.json(report);
   } catch (error) {
     console.error(error);
 
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       error: error.message
     });
   }
 });
 
+app.get('/reports/weekly-settlement/pdf', requireLookupAccess, async (req, res) => {
+  try {
+    const report = await getWeeklySettlementReportPayload(req.query.cutoffDate);
+    const pdfBuffer = createWeeklySettlementPdfBuffer(report);
+    const safePayrollDate = String(report.payrollDate || report.cutoffDate || 'weekly-settlement').replace(/[^0-9A-Za-z_-]+/g, '-');
+    const fileName = `Kole_Weekly_Settlement_${safePayrollDate}.pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.end(pdfBuffer);
+  } catch (error) {
+    console.error(error);
+
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to export Weekly Settlement Report PDF.'
+    });
+  }
+});
+
+app.get('/reports/driver-summary/pdf', requireLookupAccess, async (req, res) => {
+  try {
+    const report = await getDriverSummaryReportPayload(req.query.month, req.query.year);
+    const pdfBuffer = createDriverSummaryPdfBuffer(report);
+    const safeLabel = `${report.year || 'year'}-${String(report.month || '').padStart(2, '0')}`.replace(/[^0-9A-Za-z_-]+/g, '-');
+    const fileName = `Kole_Driver_Summary_${safeLabel}.pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.end(pdfBuffer);
+  } catch (error) {
+    console.error(error);
+
+    res.status(error.statusCode || 500).json(error.payload || {
+      success: false,
+      error: error.message || 'Unable to export Monthly Driver Summary Report PDF.'
+    });
+  }
+});
+
+app.get('/reports/sales-activity/pdf', requireLookupAccess, async (req, res) => {
+  try {
+    const report = await getSalesActivityReportPayload(req.query || {});
+    const pdfBuffer = createSalesActivityPdfBuffer(report);
+    const safeWindow = `${report.lookbackDays || 'activity'}-days-${report.activityEndDate || ''}`.replace(/[^0-9A-Za-z_-]+/g, '-');
+    const fileName = `Kole_Sales_Activity_${safeWindow}.pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.end(pdfBuffer);
+  } catch (error) {
+    console.error(error);
+
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to export Sales Activity Snapshot PDF.'
+    });
+  }
+});
+
+async function getDriverSummaryReportPayload(monthValue, yearValue) {
+  const month = parseReportInteger(monthValue, 'month', 1, 12);
+  const year = parseReportInteger(yearValue, 'year', 2024, 2030);
+  const lockStatus = getDriverSummaryLockStatus(year, month);
+
+  if (!lockStatus.isUnlocked) {
+    const lockedError = new Error(`${lockStatus.reportLabel} Driver Summary Report is not available yet.`);
+    lockedError.statusCode = 423;
+    lockedError.payload = {
+      success: false,
+      error: 'REPORT_LOCKED',
+      message: `${lockStatus.reportLabel} Driver Summary Report is not available yet.`,
+      reportLabel: lockStatus.reportLabel,
+      unlockLabel: lockStatus.unlockLabel,
+      lockReason:
+        'Monthly Driver Summary Reports unlock at 8:00 AM Eastern on the 5th day of the following month. This allows time for completed settlements, paperwork review, and final corrections before driver performance data is published.'
+    };
+    throw lockedError;
+  }
+
+  const token = await getGraphToken();
+  const sourceList = await getDriverSummarySourceList(token, year);
+
+  if (!sourceList) {
+    const notFoundError = new Error(`No Bid Listing source list was found for ${year}.`);
+    notFoundError.statusCode = 404;
+    throw notFoundError;
+  }
+
+  const items = await getAllListItemsWithFields(
+    token,
+    sourceList.listId
+  );
+
+  return buildDriverSummaryResponse(items, sourceList, year, month);
+}
 
 app.get('/reports/driver-summary', requireLookupAccess, async (req, res) => {
   try {
-    const month = parseReportInteger(req.query.month, 'month', 1, 12);
-    const year = parseReportInteger(req.query.year, 'year', 2024, 2030);
-    const lockStatus = getDriverSummaryLockStatus(year, month);
-
-    if (!lockStatus.isUnlocked) {
-      return res.status(423).json({
-        success: false,
-        error: 'REPORT_LOCKED',
-        message: `${lockStatus.reportLabel} Driver Summary Report is not available yet.`,
-        reportLabel: lockStatus.reportLabel,
-        unlockLabel: lockStatus.unlockLabel,
-        lockReason:
-          'Monthly Driver Summary Reports unlock at 8:00 AM Eastern on the 5th day of the following month. This allows time for completed settlements, paperwork review, and final corrections before driver performance data is published.'
-      });
-    }
-
-    const token = await getGraphToken();
-    const sourceList = await getDriverSummarySourceList(token, year);
-
-    if (!sourceList) {
-      return res.status(404).json({
-        success: false,
-        error: `No Bid Listing source list was found for ${year}.`
-      });
-    }
-
-    const items = await getAllListItemsWithFields(
-      token,
-      sourceList.listId
-    );
-
-    const report = buildDriverSummaryResponse(items, sourceList, year, month);
-
+    const report = await getDriverSummaryReportPayload(req.query.month, req.query.year);
     res.json(report);
   } catch (error) {
     console.error(error);
 
-    res.status(500).json({
+    res.status(error.statusCode || 500).json(error.payload || {
       success: false,
       error: error.message
     });
