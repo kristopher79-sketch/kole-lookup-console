@@ -5632,8 +5632,22 @@ app.get('/reports/orders-due-for-settlement', requireLookupAccess, async (req, r
 
 
 
-function escapePdfText(value) {
+function sanitizePdfText(value) {
   return String(value ?? '')
+    .normalize('NFKD')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[‘’‚‛]/g, "'")
+    .replace(/[“”„‟]/g, '"')
+    .replace(/[–—−]/g, '-')
+    .replace(/[→⇒⟶⟹]/g, ' to ')
+    .replace(/[←⇐⟵⟸]/g, ' from ')
+    .replace(/[•·]/g, '-')
+    .replace(/×/g, 'x')
+    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, '');
+}
+
+function escapePdfText(value) {
+  return sanitizePdfText(value)
     .replace(/[\r\n]+/g, ' ')
     .replace(/\\/g, '\\\\')
     .replace(/\(/g, '\\(')
@@ -5642,11 +5656,11 @@ function escapePdfText(value) {
 }
 
 function getPdfTextWidthApprox(value, fontSize = 8) {
-  return String(value ?? '').length * fontSize * 0.52;
+  return sanitizePdfText(value).length * fontSize * 0.52;
 }
 
 function truncatePdfText(value, maxWidth, fontSize = 8) {
-  const text = String(value ?? '').replace(/[\r\n]+/g, ' ').trim();
+  const text = sanitizePdfText(value).replace(/[\r\n]+/g, ' ').trim();
   if (!text) return '-';
   if (getPdfTextWidthApprox(text, fontSize) <= maxWidth) return text;
 
