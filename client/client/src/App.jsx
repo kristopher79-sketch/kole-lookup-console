@@ -451,6 +451,26 @@ export default function App() {
   const [noAvailabilityLoading, setNoAvailabilityLoading] = useState(false);
   const [noAvailabilityError, setNoAvailabilityError] = useState(null);
   const [noAvailabilityModalOpen, setNoAvailabilityModalOpen] = useState(false);
+  const [driverTimeOffYear, setDriverTimeOffYear] = useState(() => new Date().getFullYear());
+  const [driverTimeOffReport, setDriverTimeOffReport] = useState(null);
+  const [driverTimeOffLoading, setDriverTimeOffLoading] = useState(false);
+  const [driverTimeOffError, setDriverTimeOffError] = useState(null);
+  const [driverTimeOffModalOpen, setDriverTimeOffModalOpen] = useState(false);
+  const [driverTimeOffReportFilter, setDriverTimeOffReportFilter] = useState(null);
+  const [driverTimeOffFormOpen, setDriverTimeOffFormOpen] = useState(false);
+  const [driverTimeOffEditingRecord, setDriverTimeOffEditingRecord] = useState(null);
+  const [driverTimeOffSubmitting, setDriverTimeOffSubmitting] = useState(false);
+  const [driverTimeOffActionMessage, setDriverTimeOffActionMessage] = useState('');
+  const [driverTimeOffActionError, setDriverTimeOffActionError] = useState('');
+  const [driverTimeOffDraft, setDriverTimeOffDraft] = useState(() => ({
+    rosterDriverKey: '',
+    operatorName: '',
+    truckNumber: '',
+    startDate: getEasternDateInputValue(),
+    endDate: getEasternDateInputValue(),
+    reason: '',
+    status: 'Active'
+  }));
   const [activeReportPanel, setActiveReportPanel] = useState('');
   const [openReportGroups, setOpenReportGroups] = useState([]);
   const [salesLeadsView, setSalesLeadsView] = useState('all');
@@ -465,6 +485,8 @@ export default function App() {
   const [salesActivityError, setSalesActivityError] = useState(null);
   const [salesActivityPdfLoading, setSalesActivityPdfLoading] = useState(false);
   const [salesActivityPdfError, setSalesActivityPdfError] = useState('');
+  const [driverTimeOffPdfLoading, setDriverTimeOffPdfLoading] = useState(false);
+  const [driverTimeOffPdfError, setDriverTimeOffPdfError] = useState('');
   const [customerTrendMonth, setCustomerTrendMonth] = useState(() => initialReportDate.getMonth() + 1);
   const [customerTrendYear, setCustomerTrendYear] = useState(() => initialReportDate.getFullYear());
   const [customerTrendReport, setCustomerTrendReport] = useState(null);
@@ -665,6 +687,8 @@ export default function App() {
         setWonNotRegisteredModalOpen(false);
         setInactiveDriverRosterModalOpen(false);
         setNoAvailabilityModalOpen(false);
+        setDriverTimeOffModalOpen(false);
+        setDriverTimeOffFormOpen(false);
         setSalesActivityModalOpen(false);
         setCustomerTrendModalOpen(false);
         setSelectedCustomerTrend(null);
@@ -805,6 +829,14 @@ export default function App() {
     setReportActionAlerts(null);
     setReportActionAlertsLoading(false);
     setReportActionAlertsError('');
+    setDriverTimeOffReport(null);
+    setDriverTimeOffError(null);
+    setDriverTimeOffModalOpen(false);
+    setDriverTimeOffFormOpen(false);
+    setDriverTimeOffEditingRecord(null);
+    setDriverTimeOffSubmitting(false);
+    setDriverTimeOffActionMessage('');
+    setDriverTimeOffActionError('');
     setReportsSectionOpen(false);
   }
 
@@ -2535,6 +2567,35 @@ function getPositionStatusLabel(position) {
     });
   }
 
+  async function downloadDriverTimeOffPdf() {
+    if (!driverTimeOffYear) {
+      setDriverTimeOffPdfError('Choose a year before exporting the Driver Time Off report PDF.');
+      return;
+    }
+
+    const params = new URLSearchParams({ year: String(driverTimeOffYear) });
+    if (driverTimeOffReportFilter?.type && driverTimeOffReportFilter?.key) {
+      params.set('filterType', driverTimeOffReportFilter.type);
+      params.set('filterKey', driverTimeOffReportFilter.key);
+      params.set('filterLabel', driverTimeOffReportFilter.label || 'Filtered');
+    }
+
+    const filterSuffix = driverTimeOffReportFilter?.label
+      ? `_${String(driverTimeOffReportFilter.label).replace(/[^0-9A-Za-z]+/g, '_').replace(/^_+|_+$/g, '')}`
+      : '';
+
+    await downloadReportPdf({
+      reportKey: 'driverTimeOff',
+      reportName: driverTimeOffReportFilter?.label
+        ? `Driver Time Off Report (${driverTimeOffReportFilter.label})`
+        : 'Driver Time Off Report',
+      endpoint: `${API}/reports/driver-time-off/pdf?${params.toString()}`,
+      fallbackName: `Kole_Driver_Time_Off_${driverTimeOffYear}${filterSuffix}.pdf`,
+      setLoading: setDriverTimeOffPdfLoading,
+      setError: setDriverTimeOffPdfError
+    });
+  }
+
   async function loadWonNotRegisteredReport() {
     setWonNotRegisteredLoading(true);
     setWonNotRegisteredError(null);
@@ -2631,6 +2692,291 @@ function getPositionStatusLabel(position) {
 
   function closeNoAvailabilityModal() {
     setNoAvailabilityModalOpen(false);
+  }
+
+  function getDriverTimeOffOptions() {
+    return driverTimeOffReport?.activeDriverOptions || operationsData?.driverTimeOff?.activeDriverOptions || [];
+  }
+
+  function getDriverTimeOffCurrentRecords() {
+    return operationsData?.driverTimeOff?.records || [];
+  }
+
+  function getDriverTimeOffHistoryRows(record = null) {
+    if (!record) return [];
+
+    const normalizeHistoryKey = (value) => String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/&/g, ' and ')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const driverKey = normalizeHistoryKey(record.operatorName);
+    const truckKey = normalizeHistoryKey(record.truckNumber);
+    const seen = new Set();
+
+    return [
+      ...(driverTimeOffReport?.rows || []),
+      ...(operationsData?.driverTimeOff?.records || [])
+    ]
+      .filter((row) => {
+        const rowDriverKey = normalizeHistoryKey(row.operatorName);
+        const rowTruckKey = normalizeHistoryKey(row.truckNumber);
+
+        return Boolean(
+          (driverKey && rowDriverKey === driverKey) ||
+          (truckKey && rowTruckKey === truckKey)
+        );
+      })
+      .filter((row) => {
+        const uniqueKey = row.id || `${row.operatorName}-${row.truckNumber}-${row.startDate}-${row.endDate}-${row.reason}`;
+        if (seen.has(uniqueKey)) return false;
+        seen.add(uniqueKey);
+        return true;
+      })
+      .sort((a, b) => String(b.startDate || '').localeCompare(String(a.startDate || '')));
+  }
+
+
+  function getDriverTimeOffFilterRowKey(row = {}, type = '') {
+    if (type === 'driver') {
+      return `${row.operatorName || 'Unknown'}|${row.truckNumber || ''}`;
+    }
+
+    if (type === 'month') {
+      const date = String(row.reportStartDate || row.startDate || '').slice(0, 7);
+      return date || 'Unknown';
+    }
+
+    if (type === 'reason') {
+      return row.reason || 'Unspecified';
+    }
+
+    return '';
+  }
+
+  function setDriverTimeOffFilter(type, item = {}) {
+    if (!type || !item?.key) return;
+
+    setDriverTimeOffReportFilter({
+      type,
+      key: String(item.key),
+      label: item.label || String(item.key)
+    });
+    setDriverTimeOffPdfError('');
+    clearPdfExportNotice('driverTimeOff');
+  }
+
+  function clearDriverTimeOffFilter() {
+    setDriverTimeOffReportFilter(null);
+    setDriverTimeOffPdfError('');
+    clearPdfExportNotice('driverTimeOff');
+  }
+
+  function getDriverTimeOffFilteredRows(rows = []) {
+    if (!driverTimeOffReportFilter?.type || !driverTimeOffReportFilter?.key) return rows;
+
+    return rows.filter((row) =>
+      getDriverTimeOffFilterRowKey(row, driverTimeOffReportFilter.type) === driverTimeOffReportFilter.key
+    );
+  }
+
+  function getDriverTimeOffMonthLabel(monthKey) {
+    if (!/^\d{4}-\d{2}$/.test(String(monthKey || ''))) return 'Unknown';
+
+    const [year, month] = String(monthKey).split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString('en-US', {
+      timeZone: 'UTC',
+      month: 'short',
+      year: 'numeric'
+    });
+  }
+
+  function summarizeDriverTimeOffRows(rows = [], type = '') {
+    const map = new Map();
+
+    rows.forEach((row) => {
+      const key = getDriverTimeOffFilterRowKey(row, type) || 'Unknown';
+      const label = type === 'month'
+        ? getDriverTimeOffMonthLabel(key)
+        : (type === 'driver'
+          ? (() => {
+              const [name, truck] = String(key).split('|');
+              return truck ? `${name} · Truck ${truck}` : name || 'Unknown';
+            })()
+          : key);
+      const current = map.get(key) || { key, label, events: 0, days: 0 };
+
+      current.events += 1;
+      current.days += Number(row.reportDays || row.days || 0);
+      map.set(key, current);
+    });
+
+    return Array.from(map.values()).sort((a, b) => {
+      if (type === 'month') return String(a.key).localeCompare(String(b.key));
+      return (b.days - a.days) || (b.events - a.events) || String(a.label).localeCompare(String(b.label));
+    });
+  }
+
+  function buildDriverTimeOffDisplayReport(rows = []) {
+    const totalDays = rows.reduce((sum, row) => sum + Number(row.reportDays || row.days || 0), 0);
+    const uniqueDrivers = new Set(rows.map((row) => getDriverTimeOffFilterRowKey(row, 'driver')).filter(Boolean));
+    const longestEvent = [...rows].sort((a, b) => Number(b.reportDays || b.days || 0) - Number(a.reportDays || a.days || 0))[0] || null;
+
+    return {
+      summary: {
+        totalEvents: rows.length,
+        totalDays,
+        uniqueDrivers: uniqueDrivers.size,
+        currentDriversOff: rows.filter((row) => row.isCurrent || row.timingStatus === 'Current').length,
+        averageDaysPerEvent: rows.length ? Math.round((totalDays / rows.length) * 10) / 10 : 0,
+        longestEventDays: longestEvent ? Number(longestEvent.reportDays || longestEvent.days || 0) : 0,
+        longestEventDriver: longestEvent?.operatorName || ''
+      },
+      analytics: {
+        byDriver: summarizeDriverTimeOffRows(rows, 'driver'),
+        byMonth: summarizeDriverTimeOffRows(rows, 'month'),
+        byReason: summarizeDriverTimeOffRows(rows, 'reason')
+      }
+    };
+  }
+
+  function focusDriverTimeOffRecord(record = null) {
+    if (!record) return;
+    setDriverTimeOffEditingRecord(record);
+    setDriverTimeOffDraft(getDriverTimeOffDefaultDraft(record));
+    setDriverTimeOffActionError('');
+    setDriverTimeOffActionMessage('');
+  }
+
+  function getDriverTimeOffDefaultDraft(record = null) {
+    if (record) {
+      return {
+        rosterDriverKey: '',
+        recordNumber: record.recordNumber || '',
+        operatorName: record.operatorName || '',
+        truckNumber: record.truckNumber || '',
+        startDate: record.startDate || getEasternDateInputValue(),
+        endDate: record.endDate || record.startDate || getEasternDateInputValue(),
+        reason: record.reason || '',
+        status: record.status || 'Active'
+      };
+    }
+
+    const today = getEasternDateInputValue();
+    return {
+      rosterDriverKey: '',
+      operatorName: '',
+      truckNumber: '',
+      startDate: today,
+      endDate: today,
+      reason: '',
+      status: 'Active'
+    };
+  }
+
+  function openDriverTimeOffForm(record = null) {
+    setDriverTimeOffEditingRecord(record);
+    setDriverTimeOffDraft(getDriverTimeOffDefaultDraft(record));
+    setDriverTimeOffActionMessage('');
+    setDriverTimeOffActionError('');
+    setDriverTimeOffFormOpen(true);
+  }
+
+  function closeDriverTimeOffForm() {
+    if (driverTimeOffSubmitting) return;
+    setDriverTimeOffFormOpen(false);
+    setDriverTimeOffEditingRecord(null);
+    setDriverTimeOffActionError('');
+  }
+
+  function updateDriverTimeOffDraft(field, value) {
+    setDriverTimeOffDraft((current) => ({
+      ...current,
+      [field]: value
+    }));
+  }
+
+  function selectDriverTimeOffRosterDriver(rosterDriverKey) {
+    const option = getDriverTimeOffOptions().find((entry) => entry.key === rosterDriverKey);
+    setDriverTimeOffDraft((current) => ({
+      ...current,
+      rosterDriverKey,
+      operatorName: option?.driverName || current.operatorName,
+      truckNumber: option?.unitNo || current.truckNumber
+    }));
+  }
+
+  async function loadDriverTimeOffReport() {
+    setDriverTimeOffLoading(true);
+    setDriverTimeOffError(null);
+    setDriverTimeOffReport(null);
+    setDriverTimeOffReportFilter(null);
+    setDriverTimeOffPdfError('');
+    clearPdfExportNotice('driverTimeOff');
+    setDriverTimeOffModalOpen(false);
+
+    try {
+      const params = new URLSearchParams({ year: String(driverTimeOffYear) });
+      const res = await authedFetch(`${API}/reports/driver-time-off?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to load Driver Time Off report.');
+      }
+
+      setDriverTimeOffReport(data);
+      setDriverTimeOffModalOpen(true);
+    } catch (err) {
+      setDriverTimeOffError({
+        code: 'REPORT_ERROR',
+        message: err.message || 'Unable to load Driver Time Off report.'
+      });
+    } finally {
+      setDriverTimeOffLoading(false);
+    }
+  }
+
+  function closeDriverTimeOffModal() {
+    setDriverTimeOffModalOpen(false);
+  }
+
+  async function submitDriverTimeOff(event) {
+    event.preventDefault();
+    setDriverTimeOffSubmitting(true);
+    setDriverTimeOffActionError('');
+    setDriverTimeOffActionMessage('');
+
+    try {
+      const isEditing = Boolean(driverTimeOffEditingRecord?.id);
+      const url = isEditing
+        ? `${API}/driver-time-off/${encodeURIComponent(driverTimeOffEditingRecord.id)}`
+        : `${API}/driver-time-off`;
+      const res = await authedFetch(url, {
+        method: isEditing ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(driverTimeOffDraft)
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to save Driver Time Off.');
+      }
+
+      setDriverTimeOffActionMessage(data.message || (isEditing ? 'Driver time off updated.' : 'Driver time off added.'));
+      setDriverTimeOffFormOpen(false);
+      setDriverTimeOffEditingRecord(null);
+      await loadOperationsDashboard({ silent: true });
+      if (driverTimeOffReport) {
+        await loadDriverTimeOffReport();
+      }
+    } catch (err) {
+      setDriverTimeOffActionError(err.message || 'Unable to save Driver Time Off.');
+    } finally {
+      setDriverTimeOffSubmitting(false);
+    }
   }
 
 
@@ -4653,6 +4999,405 @@ function openReportLoadDetails(load) {
             </div>
           )}
         </div>
+      </div>
+    );
+  }
+
+
+  function DriverTimeOffCurrentPanel() {
+    const records = getDriverTimeOffCurrentRecords();
+    const warning = operationsData?.driverTimeOff?.warning || '';
+
+    return (
+      <div className="driver-time-off-panel">
+        <div className="driver-position-header driver-time-off-header">
+          <div className="driver-time-off-title-block">
+            <h3>Current Driver Time Off</h3>
+          </div>
+          <div className="driver-time-off-actions">
+            <button type="button" className="view-button driver-time-off-main-add-button" onClick={() => openDriverTimeOffForm()}>
+              Add Time Off
+            </button>
+            <span className="driver-time-off-count-pill">{formatReportNumber(records.length)} current</span>
+          </div>
+        </div>
+
+        {warning && <div className="msg error">{warning}</div>}
+        {driverTimeOffActionMessage && <div className="msg success-message">{driverTimeOffActionMessage}</div>}
+
+        {records.length === 0 ? (
+          <div className="msg">No drivers are currently marked off.</div>
+        ) : (
+          <div className="operations-table-wrap driver-time-off-table-wrap">
+            <table className="driver-time-off-table">
+              <thead>
+                <tr>
+                  <th>Driver</th>
+                  <th>Truck</th>
+                  <th>Start</th>
+                  <th>Return / End</th>
+                  <th>Reason</th>
+                  <th>Days</th>
+                </tr>
+              </thead>
+              <tbody>
+                {records.map((record) => (
+                  <tr
+                    key={record.id || `${record.operatorName}-${record.startDate}`}
+                    className="driver-time-off-clickable-row"
+                    onClick={() => openDriverTimeOffForm(record)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        openDriverTimeOffForm(record);
+                      }
+                    }}
+                    tabIndex={0}
+                    title="Click to view or edit this time-off record"
+                  >
+                    <td><strong>{record.operatorName || '-'}</strong></td>
+                    <td>{record.truckNumber || '-'}</td>
+                    <td>{formatDateOnly(record.startDate)}</td>
+                    <td>{formatDateOnly(record.endDate)}</td>
+                    <td>{record.reason || '-'}</td>
+                    <td>{formatReportNumber(record.days)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function DriverTimeOffFormModal() {
+    if (!driverTimeOffFormOpen) return null;
+
+    const isEditing = Boolean(driverTimeOffEditingRecord?.id);
+    const driverOptions = getDriverTimeOffOptions();
+
+    return (
+      <div className="modal-overlay" onClick={closeDriverTimeOffForm}>
+        <div className="detail-modal driver-time-off-form-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="detail-header">
+            <div>
+              <h2>{isEditing ? 'Edit Driver Time Off' : 'Add Driver Time Off'}</h2>
+              <p>Writes directly to the SharePoint Time Off Log used by the VBA upload.</p>
+            </div>
+            <button className="close-button" onClick={closeDriverTimeOffForm}>Close</button>
+          </div>
+
+          <form className="modal-body driver-time-off-form" onSubmit={submitDriverTimeOff}>
+            {driverTimeOffActionError && <div className="msg error">{driverTimeOffActionError}</div>}
+
+            <div className="driver-time-off-form-grid">
+              <label>
+                <span>Driver</span>
+                {driverOptions.length > 0 && !isEditing ? (
+                  <select
+                    value={driverTimeOffDraft.rosterDriverKey || ''}
+                    onChange={(e) => selectDriverTimeOffRosterDriver(e.target.value)}
+                    disabled={driverTimeOffSubmitting}
+                  >
+                    <option value="">Select active driver</option>
+                    {driverOptions.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.driverName || option.unitNo || 'Unnamed driver'}{option.unitNo ? ` · ${option.unitNo}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value={driverTimeOffDraft.operatorName || ''}
+                    onChange={(e) => updateDriverTimeOffDraft('operatorName', e.target.value)}
+                    placeholder="Driver / team"
+                    disabled={driverTimeOffSubmitting}
+                  />
+                )}
+              </label>
+
+              <label>
+                <span>Truck Number</span>
+                <input
+                  value={driverTimeOffDraft.truckNumber || ''}
+                  onChange={(e) => updateDriverTimeOffDraft('truckNumber', e.target.value)}
+                  placeholder="Truck #"
+                  disabled={driverTimeOffSubmitting || Boolean(driverTimeOffDraft.rosterDriverKey)}
+                />
+              </label>
+
+              <label>
+                <span>Start Date</span>
+                <input
+                  type="date"
+                  value={driverTimeOffDraft.startDate || ''}
+                  onChange={(e) => updateDriverTimeOffDraft('startDate', e.target.value)}
+                  disabled={driverTimeOffSubmitting}
+                />
+              </label>
+
+              <label>
+                <span>End Date</span>
+                <input
+                  type="date"
+                  value={driverTimeOffDraft.endDate || ''}
+                  onChange={(e) => updateDriverTimeOffDraft('endDate', e.target.value)}
+                  disabled={driverTimeOffSubmitting}
+                />
+              </label>
+
+              <label>
+                <span>Reason</span>
+                <input
+                  value={driverTimeOffDraft.reason || ''}
+                  onChange={(e) => updateDriverTimeOffDraft('reason', e.target.value)}
+                  placeholder="Vacation, home time, medical, etc."
+                  disabled={driverTimeOffSubmitting}
+                />
+              </label>
+
+              <label>
+                <span>Status</span>
+                <select
+                  value={driverTimeOffDraft.status || 'Active'}
+                  onChange={(e) => updateDriverTimeOffDraft('status', e.target.value)}
+                  disabled={driverTimeOffSubmitting}
+                >
+                  <option value="Active">Active</option>
+                  <option value="Cancelled">Cancelled</option>
+                  <option value="Completed">Completed</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="driver-time-off-form-actions">
+              <button type="button" className="close-button" onClick={closeDriverTimeOffForm} disabled={driverTimeOffSubmitting}>
+                Cancel
+              </button>
+              <button type="submit" disabled={driverTimeOffSubmitting}>
+                {driverTimeOffSubmitting ? 'Saving...' : (isEditing ? 'Update Time Off' : 'Add Time Off')}
+              </button>
+            </div>
+
+            {isEditing && getDriverTimeOffHistoryRows(driverTimeOffEditingRecord).length > 0 && (
+              <div className="driver-time-off-history-card">
+                <div className="driver-time-off-history-header">
+                  <div>
+                    <h3>Driver Time Off History</h3>
+                    <p>{driverTimeOffEditingRecord?.operatorName || 'Selected driver'} · {driverTimeOffEditingRecord?.truckNumber ? `Truck ${driverTimeOffEditingRecord.truckNumber}` : 'No truck listed'}</p>
+                  </div>
+                  <span>{formatReportNumber(getDriverTimeOffHistoryRows(driverTimeOffEditingRecord).length)} record(s)</span>
+                </div>
+                <div className="report-table-wrap driver-time-off-history-table-wrap">
+                  <table className="driver-report-table driver-time-off-history-table">
+                    <thead>
+                      <tr>
+                        <th>Start</th>
+                        <th>End</th>
+                        <th>Reason</th>
+                        <th>Status</th>
+                        <th>Days</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {getDriverTimeOffHistoryRows(driverTimeOffEditingRecord).map((row, index) => {
+                        const isFocusedHistoryRecord = Boolean(
+                          driverTimeOffEditingRecord?.id && row.id && driverTimeOffEditingRecord.id === row.id
+                        );
+
+                        return (
+                          <tr
+                            key={`${row.id || row.recordNumber || index}-history-${index}`}
+                            className={`driver-time-off-history-row ${isFocusedHistoryRecord ? 'active-history-row' : ''}`}
+                            onClick={() => focusDriverTimeOffRecord(row)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                focusDriverTimeOffRecord(row);
+                              }
+                            }}
+                            tabIndex={0}
+                            title="Click to load this history record into the edit form"
+                          >
+                            <td>{formatDateOnly(row.startDate)}</td>
+                            <td>{formatDateOnly(row.endDate)}</td>
+                            <td>{row.reason || '-'}</td>
+                            <td>{row.timingStatus || row.status || '-'}</td>
+                            <td>{formatReportNumber(row.reportDays || row.days)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  function DriverTimeOffPreview() {
+    if (!driverTimeOffReport) return null;
+    const rows = driverTimeOffReport.rows || [];
+    const visibleRows = getDriverTimeOffFilteredRows(rows);
+    const activeFilterLabel = driverTimeOffReportFilter?.label || '';
+    const displayReport = driverTimeOffReportFilter
+      ? buildDriverTimeOffDisplayReport(visibleRows)
+      : {
+          summary: driverTimeOffReport.summary || {},
+          analytics: driverTimeOffReport.analytics || {}
+        };
+    const summary = displayReport.summary || {};
+    const analytics = displayReport.analytics || {};
+
+    return (
+      <div className="driver-report-preview driver-time-off-preview">
+        {driverTimeOffReport.warning && <div className="msg error">{driverTimeOffReport.warning}</div>}
+        <div className="driver-report-title">
+          <div>
+            <h3>{driverTimeOffReport.reportLabel || 'Driver Time Off'}</h3>
+            <p>{formatReportNumber(rows.length)} event(s) · Generated {driverTimeOffReport.generatedAt || ''}</p>
+          </div>
+          <div className="driver-time-off-report-actions">
+            <button
+              type="button"
+              className="pdf-export-button compact"
+              onClick={downloadDriverTimeOffPdf}
+              disabled={driverTimeOffPdfLoading || driverTimeOffLoading}
+            >
+              {driverTimeOffPdfLoading ? 'Exporting...' : 'Export PDF'}
+            </button>
+            <button type="button" className="view-button" onClick={() => openDriverTimeOffForm()}>
+              Add Time Off
+            </button>
+          </div>
+        </div>
+
+        <div className="pdf-export-guidance">PDF export includes the summary cards and analysis sections only, not the full Time Off Log.</div>
+        {getPdfExportNotice('driverTimeOff') && (
+          <div className="pdf-export-success">{getPdfExportNotice('driverTimeOff')}</div>
+        )}
+        {driverTimeOffPdfError && (
+          <div className="msg error pdf-export-error">{driverTimeOffPdfError}</div>
+        )}
+
+        {driverTimeOffReportFilter && (
+          <div className="driver-time-off-filter-banner">
+            <span>Showing {formatReportNumber(visibleRows.length)} of {formatReportNumber(rows.length)} row(s) for <strong>{activeFilterLabel}</strong>.</span>
+            <button type="button" className="view-button compact-action-button" onClick={clearDriverTimeOffFilter}>Clear Filter</button>
+          </div>
+        )}
+
+        <div className="report-kpi-grid driver-time-off-kpi-grid">
+          <div className="report-kpi-card"><span>Events</span><strong>{formatReportNumber(summary.totalEvents)}</strong></div>
+          <div className="report-kpi-card"><span>Total Days</span><strong>{formatReportNumber(summary.totalDays)}</strong></div>
+          <div className="report-kpi-card"><span>Drivers</span><strong>{formatReportNumber(summary.uniqueDrivers)}</strong></div>
+          <div className="report-kpi-card"><span>Current Off</span><strong>{formatReportNumber(summary.currentDriversOff)}</strong></div>
+          <div className="report-kpi-card"><span>Avg Days/Event</span><strong>{formatReportNumber(summary.averageDaysPerEvent, 1)}</strong></div>
+          <div className="report-kpi-card"><span>Longest</span><strong>{formatReportNumber(summary.longestEventDays)}</strong><small>{summary.longestEventDriver || '-'}</small></div>
+        </div>
+
+        <div className="driver-time-off-analysis-grid">
+          {renderDriverTimeOffPatternList('By Driver', analytics.byDriver || [], (item) => `${formatReportNumber(item.events)} event(s) · ${formatReportNumber(item.days)} day(s)`, 'driver')}
+          {renderDriverTimeOffPatternList('By Month', analytics.byMonth || [], (item) => `${formatReportNumber(item.events)} event(s) · ${formatReportNumber(item.days)} day(s)`, 'month')}
+          {renderDriverTimeOffPatternList('By Reason', analytics.byReason || [], (item) => `${formatReportNumber(item.events)} event(s) · ${formatReportNumber(item.days)} day(s)`, 'reason')}
+        </div>
+
+        <div className="driver-report-section driver-time-off-log-section">
+          <div className="driver-report-section-header">
+            <div>
+              <h4>Time Off Log</h4>
+              <p>Click a row to edit it and view driver time-off history.</p>
+            </div>
+            <div className="driver-report-section-total">{formatReportNumber(visibleRows.length)} row(s)</div>
+          </div>
+
+          {visibleRows.length === 0 ? (
+            <div className="msg">No time-off records matched this report year or active filter.</div>
+          ) : (
+            <div className="report-table-wrap">
+              <table className="driver-report-table driver-time-off-report-table">
+                <thead>
+                  <tr>
+                    <th>Driver</th>
+                    <th>Truck</th>
+                    <th>Start</th>
+                    <th>End</th>
+                    <th>Reason</th>
+                    <th>Status</th>
+                    <th>Days</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleRows.map((row, index) => (
+                    <tr
+                      key={`${row.id || row.recordNumber || index}-${index}`}
+                      className="driver-time-off-clickable-row"
+                      onClick={() => openDriverTimeOffForm(row)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          openDriverTimeOffForm(row);
+                        }
+                      }}
+                      tabIndex={0}
+                      title="Click to edit this time-off record and view driver history"
+                    >
+                      <td>{row.operatorName || '-'}</td>
+                      <td>{row.truckNumber || '-'}</td>
+                      <td>{formatDateOnly(row.startDate)}</td>
+                      <td>{formatDateOnly(row.endDate)}</td>
+                      <td>{row.reason || '-'}</td>
+                      <td>{row.timingStatus || row.status || '-'}</td>
+                      <td>{formatReportNumber(row.reportDays || row.days)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function renderDriverTimeOffPatternList(title, rows, detailFn, filterType = '') {
+    return (
+      <div className="driver-time-off-pattern-card">
+        <div className="driver-time-off-pattern-header">
+          <strong>{title}</strong>
+          <span>{formatReportNumber(rows.length)} item(s)</span>
+        </div>
+        {rows.length === 0 ? (
+          <div className="msg">No records.</div>
+        ) : (
+          <div className="driver-time-off-pattern-list">
+            {rows.map((item) => {
+              const isActive = Boolean(
+                filterType &&
+                driverTimeOffReportFilter?.type === filterType &&
+                driverTimeOffReportFilter?.key === String(item.key || '')
+              );
+
+              return (
+                <button
+                  key={item.key || item.label}
+                  type="button"
+                  className={`driver-time-off-pattern-row ${filterType ? 'clickable-pattern-row' : ''} ${isActive ? 'active-pattern-row' : ''}`}
+                  onClick={() => filterType && setDriverTimeOffFilter(filterType, item)}
+                  disabled={!filterType}
+                  title={filterType ? `Show only ${item.label || item.key || 'this group'}` : undefined}
+                >
+                  <strong>{item.label || item.key || 'Unknown'}</strong>
+                  <span>{detailFn(item)}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   }
@@ -7059,6 +7804,7 @@ function openReportLoadDetails(load) {
     const isWeeklySettlementOpen = activeReportPanel === 'weeklySettlement';
     const isWonNotRegisteredOpen = activeReportPanel === 'wonNotRegistered';
     const isInactiveDriverRosterOpen = activeReportPanel === 'inactiveDriverRoster';
+    const isDriverTimeOffOpen = activeReportPanel === 'driverTimeOff';
     const isNoAvailabilityOpen = activeReportPanel === 'noAvailability';
     const isCustomerTrendsOpen = activeReportPanel === 'customerBookingTrends';
     const isSalesActivityOpen = activeReportPanel === 'salesActivity';
@@ -7530,6 +8276,78 @@ function openReportLoadDetails(load) {
           </div>
 
 
+          <div className={`report-accordion ${isDriverTimeOffOpen ? 'open' : ''}`}>
+            <button
+              type="button"
+              className="report-accordion-button"
+              onClick={() => toggleReportPanel('driverTimeOff')}
+            >
+              <span>Driver Time Off</span>
+              <span className="report-accordion-icon">{isDriverTimeOffOpen ? '▼' : '▶'}</span>
+            </button>
+
+            {isDriverTimeOffOpen && (
+              <div className="report-accordion-body">
+                <div className="report-card compact-report-card accordion-inner-card driver-time-off-card">
+                  <div className="report-card-header centered-report-header">
+                    <div>
+                      <h3>Driver Time Off</h3>
+                      <p>Current time-off visibility plus light year-by-year analysis from the SharePoint Time Off Log.</p>
+                    </div>
+                  </div>
+
+                  <div className="report-controls centered-report-controls">
+                    <label>
+                      <span>Report Year</span>
+                      <select
+                        value={driverTimeOffYear}
+                        onChange={(e) => {
+                          setDriverTimeOffYear(Number(e.target.value));
+                          setDriverTimeOffReport(null);
+                          setDriverTimeOffError(null);
+                          setDriverTimeOffModalOpen(false);
+                        }}
+                        disabled={driverTimeOffLoading}
+                      >
+                        {getReportYears().map((year) => (
+                          <option key={year} value={year}>{year}</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <button onClick={loadDriverTimeOffReport} disabled={driverTimeOffLoading}>
+                      {driverTimeOffLoading ? 'Loading Report...' : 'Preview Report'}
+                    </button>
+                    <button type="button" className="view-button" onClick={() => openDriverTimeOffForm()}>
+                      Add Time Off
+                    </button>
+                  </div>
+
+                  {driverTimeOffReport && !driverTimeOffModalOpen && (
+                    <div className="report-ready-card">
+                      <div>
+                        <strong>{driverTimeOffReport.reportLabel} is ready.</strong>
+                        <span> The preview opens in a report window.</span>
+                      </div>
+                      <button className="view-button" onClick={() => setDriverTimeOffModalOpen(true)}>
+                        Reopen Preview
+                      </button>
+                    </div>
+                  )}
+
+                  {driverTimeOffActionMessage && <div className="msg success-message">{driverTimeOffActionMessage}</div>}
+
+                  {driverTimeOffError && (
+                    <div className="report-alert error">
+                      <h4>Report could not be loaded.</h4>
+                      <p>{driverTimeOffError.message}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className={`report-accordion ${isInactiveDriverRosterOpen ? 'open' : ''}`}>
             <button
               type="button"
@@ -7929,6 +8747,8 @@ function openReportLoadDetails(load) {
             <strong>{operationsData.counts.loadingNext7}</strong>
           </div>
         </div>
+
+        <DriverTimeOffCurrentPanel />
 
         <DriverPositionTrackingPanel />
 
@@ -8372,6 +9192,23 @@ function openReportLoadDetails(load) {
         </div>
       )}
 
+      {driverTimeOffModalOpen && driverTimeOffReport && (
+        <div className="modal-overlay report-modal-overlay" onClick={closeDriverTimeOffModal}>
+          <div className="detail-modal report-modal wide-report-modal driver-time-off-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="detail-header report-modal-header">
+              <div>
+                <h2>{driverTimeOffReport.reportLabel || 'Driver Time Off'}</h2>
+                <p>{formatReportNumber(driverTimeOffReport.count)} record(s) · Generated {driverTimeOffReport.generatedAt || ''}</p>
+              </div>
+              <button className="close-button" onClick={closeDriverTimeOffModal}>Close</button>
+            </div>
+            <div className="modal-body report-modal-body">
+              <DriverTimeOffPreview />
+            </div>
+          </div>
+        </div>
+      )}
+
       {noAvailabilityModalOpen && noAvailabilityReport && (
         <div className="modal-overlay report-modal-overlay" onClick={closeNoAvailabilityModal}>
           <div className="detail-modal report-modal wide-report-modal no-availability-modal" onClick={(e) => e.stopPropagation()}>
@@ -8453,6 +9290,7 @@ function openReportLoadDetails(load) {
         </div>
       )}
 
+      <DriverTimeOffFormModal />
       <DriverRosterModal />
       {SalesLeadProfileModal()}
 

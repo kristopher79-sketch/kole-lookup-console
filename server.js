@@ -22,6 +22,7 @@ const DEFAULT_NO_AVAILABILITY_2024_LIST_ID = '8336e21e-38bb-47c0-bc01-6fea891b7c
 const DEFAULT_AVAILABLE_TRUCKS_SINGLE_LINE_LIST_ID = '67edb153-a389-474a-a7dd-d3bc0d746952';
 const DEFAULT_AVAILABLE_EQUIPMENT_SOURCE_LIST_ID = '96af7972-58ff-4bb8-b5a6-ca86f4d19ee6';
 const DEFAULT_AVAILABLE_TRUCKS_EMAIL_LIST_ID = '2458883d-ea8b-4761-8047-a04e35e9f93f';
+const DRIVER_TIME_OFF_DEFAULT_REPORT_YEARS_BACK = 3;
 const AVAILABLE_TRUCKS_DEFAULT_LOOKBACK_DAYS = 30;
 const SALES_LEAD_NOTE_MAX_LENGTH = 63000;
 
@@ -3603,6 +3604,330 @@ async function getDriverRosterItems(token) {
   return items.map(cleanDriverRosterItem);
 }
 
+
+function getDriverTimeOffListId() {
+  return process.env.DRIVER_TIME_OFF_LOG_LIST_ID || process.env.TIME_OFF_LOG_LIST_ID || '';
+}
+
+function getDriverTimeOffFieldSelect() {
+  return [
+    'Title',
+    'RecordNumber',
+    'TruckNumber',
+    'OperatorName',
+    'StartDate',
+    'EndDate',
+    'Reason',
+    'Status'
+  ].join(',');
+}
+
+function cleanDriverTimeOffItem(item) {
+  const f = item.fields || {};
+  const startDate = normalizeEasternDateOnly(f.StartDate);
+  const endDate = normalizeEasternDateOnly(f.EndDate);
+  return {
+    id: item.id || '',
+    webUrl: item.webUrl || '',
+    recordNumber: cleanRosterText(f.RecordNumber),
+    truckNumber: cleanRosterText(f.TruckNumber),
+    operatorName: cleanRosterText(f.OperatorName),
+    startDate,
+    endDate,
+    reason: cleanRosterText(f.Reason),
+    status: cleanRosterText(f.Status || 'Active'),
+    isCancelled: normalizeText(f.Status) === 'cancelled',
+    title: cleanRosterText(f.Title)
+  };
+}
+
+function isExcludedDriverTimeOffRow(row = {}) {
+  const operatorKey = normalizeSearchValue(row.operatorName || row.OperatorName || '');
+  const titleKey = normalizeSearchValue(row.title || row.Title || '');
+  const truckKey = normalizeSearchValue(row.truckNumber || row.TruckNumber || '');
+
+  // Business rule: New Vision is a separate entity, not an internal KOLE driver/unit.
+  // Hide it from current driver time-off visibility and time-off reporting.
+  return (
+    operatorKey.includes('new vision') ||
+    titleKey.includes('new vision') ||
+    truckKey === '5550'
+  );
+}
+
+function getDateOnlyTime(dateValue) {
+  const normalized = normalizeEasternDateOnly(dateValue);
+  if (!normalized) return null;
+  const time = new Date(`${normalized}T00:00:00Z`).getTime();
+  return Number.isNaN(time) ? null : time;
+}
+
+function getInclusiveDateSpanDays(startDate, endDate) {
+  const start = getDateOnlyTime(startDate);
+  const end = getDateOnlyTime(endDate || startDate);
+  if (start === null || end === null || end < start) return 0;
+  return Math.round((end - start) / 86400000) + 1;
+}
+
+function sortDriverTimeOffRows(a, b) {
+  const startDiff = (getDateOnlyTime(a.startDate) || 0) - (getDateOnlyTime(b.startDate) || 0);
+  if (startDiff !== 0) return startDiff;
+  const nameDiff = String(a.operatorName || '').localeCompare(String(b.operatorName || ''), undefined, { numeric: true });
+  if (nameDiff !== 0) return nameDiff;
+  return String(a.truckNumber || '').localeCompare(String(b.truckNumber || ''), undefined, { numeric: true });
+}
+
+function isDriverTimeOffCurrent(row, targetDate = formatEasternDate()) {
+  if (!row || row.isCancelled) return false;
+  if (!row.startDate) return false;
+  const start = row.startDate;
+  const end = row.endDate || row.startDate;
+  return start <= targetDate && end >= targetDate;
+}
+
+function enrichDriverTimeOffRow(row, targetDate = formatEasternDate()) {
+  const days = getInclusiveDateSpanDays(row.startDate, row.endDate || row.startDate);
+  const isCurrent = isDriverTimeOffCurrent(row, targetDate);
+  const startsFuture = row.startDate > targetDate;
+  const endedPast = (row.endDate || row.startDate) < targetDate;
+  return {
+    ...row,
+    days,
+    isCurrent,
+    timingStatus: row.isCancelled ? 'Cancelled' : (isCurrent ? 'Current' : (startsFuture ? 'Upcoming' : (endedPast ? 'Past' : 'Scheduled')))
+  };
+}
+
+async function getDriverTimeOffRows(token) {
+  const listId = getDriverTimeOffListId();
+  if (!listId) {
+    throw new Error('DRIVER_TIME_OFF_LOG_LIST_ID is not configured on the server.');
+  }
+  const result = await getAllListItemsWithFieldsResilient(token, listId, getDriverTimeOffFieldSelect());
+  return {
+    rows: result.items
+      .map(cleanDriverTimeOffItem)
+      .filter((row) => !isExcludedDriverTimeOffRow(row)),
+    warning: result.warning || ''
+  };
+}
+
+function buildDriverTimeOffCurrentResponse(rows, options = {}) {
+  const targetDate = options.targetDate || formatEasternDate();
+  const currentRows = rows
+    .map((row) => enrichDriverTimeOffRow(row, targetDate))
+    .filter((row) => row.isCurrent)
+    .sort(sortDriverTimeOffRows);
+
+  return {
+    success: true,
+    targetDate,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    count: currentRows.length,
+    records: currentRows
+  };
+}
+
+function getDriverTimeOffMonthKey(row) {
+  const date = normalizeEasternDateOnly(row.reportStartDate || row.startDate);
+  return date ? date.slice(0, 7) : 'Unknown';
+}
+
+function getDriverTimeOffMonthLabel(monthKey) {
+  if (!/^\d{4}-\d{2}$/.test(String(monthKey || ''))) return 'Unknown';
+  const [year, month] = monthKey.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString('en-US', {
+    timeZone: 'UTC',
+    month: 'short',
+    year: 'numeric'
+  });
+}
+
+function summarizeDriverTimeOffBy(rows, keyFn, labelFn = (key) => key || 'Unknown') {
+  const map = new Map();
+  rows.forEach((row) => {
+    const key = keyFn(row) || 'Unknown';
+    const current = map.get(key) || { key, label: labelFn(key), events: 0, days: 0 };
+    current.events += 1;
+    current.days += Number(row.days || 0);
+    map.set(key, current);
+  });
+  return Array.from(map.values()).sort((a, b) => (b.days - a.days) || (b.events - a.events) || String(a.label).localeCompare(String(b.label)));
+}
+
+function buildDriverTimeOffReportResponse(rawRows, options = {}) {
+  const year = Number(options.year) || Number(formatEasternDate().slice(0, 4));
+  const targetDate = options.targetDate || formatEasternDate();
+  const yearStart = `${year}-01-01`;
+  const yearEnd = `${year}-12-31`;
+  const rows = rawRows
+    .map((row) => enrichDriverTimeOffRow(row, targetDate))
+    .filter((row) => !row.isCancelled)
+    .map((row) => {
+      const reportStartDate = row.startDate < yearStart ? yearStart : row.startDate;
+      const rowEndDate = row.endDate || row.startDate;
+      const reportEndDate = rowEndDate > yearEnd ? yearEnd : rowEndDate;
+
+      return {
+        ...row,
+        reportStartDate,
+        reportEndDate,
+        reportDays: reportStartDate <= reportEndDate
+          ? getInclusiveDateSpanDays(reportStartDate, reportEndDate)
+          : 0
+      };
+    })
+    .filter((row) => row.startDate && row.reportStartDate <= row.reportEndDate && Number(row.reportDays || 0) > 0)
+    .sort(sortDriverTimeOffRows);
+
+  const totalDays = rows.reduce((sum, row) => sum + Number(row.reportDays || row.days || 0), 0);
+  const uniqueDriverKeys = new Set(rows.map((row) => normalizeSearchValue(row.operatorName || row.truckNumber)).filter(Boolean));
+  const currentRows = rows.filter((row) => row.isCurrent);
+  const longestEvent = [...rows].sort((a, b) => Number(b.reportDays || b.days || 0) - Number(a.reportDays || a.days || 0))[0] || null;
+
+  const byDriver = summarizeDriverTimeOffBy(
+    rows.map((row) => ({ ...row, days: row.reportDays || row.days || 0 })),
+    (row) => `${row.operatorName || 'Unknown'}|${row.truckNumber || ''}`,
+    (key) => {
+      const [name, truck] = String(key).split('|');
+      return truck ? `${name} · Truck ${truck}` : name;
+    }
+  );
+
+  const byReason = summarizeDriverTimeOffBy(
+    rows.map((row) => ({ ...row, days: row.reportDays || row.days || 0 })),
+    (row) => row.reason || 'Unspecified'
+  );
+
+  const byMonth = summarizeDriverTimeOffBy(
+    rows.map((row) => ({ ...row, days: row.reportDays || row.days || 0 })),
+    getDriverTimeOffMonthKey,
+    getDriverTimeOffMonthLabel
+  ).sort((a, b) => String(a.key).localeCompare(String(b.key)));
+
+  return {
+    success: true,
+    year,
+    reportLabel: `${year} Driver Time Off`,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    count: rows.length,
+    summary: {
+      totalEvents: rows.length,
+      totalDays,
+      uniqueDrivers: uniqueDriverKeys.size,
+      currentDriversOff: currentRows.length,
+      averageDaysPerEvent: rows.length ? Math.round((totalDays / rows.length) * 10) / 10 : 0,
+      longestEventDays: longestEvent ? Number(longestEvent.reportDays || longestEvent.days || 0) : 0,
+      longestEventDriver: longestEvent ? longestEvent.operatorName : ''
+    },
+    analytics: { byDriver, byMonth, byReason },
+    currentRecords: currentRows,
+    rows
+  };
+}
+
+
+function getDriverTimeOffReportFilterKey(row = {}, filterType = '') {
+  if (filterType === 'driver') {
+    return `${row.operatorName || 'Unknown'}|${row.truckNumber || ''}`;
+  }
+
+  if (filterType === 'month') {
+    return getDriverTimeOffMonthKey(row);
+  }
+
+  if (filterType === 'reason') {
+    return row.reason || 'Unspecified';
+  }
+
+  return '';
+}
+
+function getDriverTimeOffFilterLabel(filterType = '', filterKey = '', providedLabel = '') {
+  if (providedLabel) return String(providedLabel).trim();
+
+  if (filterType === 'driver') {
+    const [name, truck] = String(filterKey || '').split('|');
+    return truck ? `${name} · Truck ${truck}` : name || 'Filtered Driver';
+  }
+
+  if (filterType === 'month') {
+    return getDriverTimeOffMonthLabel(filterKey);
+  }
+
+  if (filterType === 'reason') {
+    return filterKey || 'Unspecified';
+  }
+
+  return '';
+}
+
+function applyDriverTimeOffReportFilter(report, options = {}) {
+  const filterType = normalizeText(options.filterType);
+  const filterKey = String(options.filterKey || '').trim();
+
+  if (!filterType || !filterKey || !['driver', 'month', 'reason'].includes(filterType)) {
+    return report;
+  }
+
+  const filteredRows = (report.rows || []).filter((row) =>
+    getDriverTimeOffReportFilterKey(row, filterType) === filterKey
+  );
+
+  const filteredReport = buildDriverTimeOffReportResponse(filteredRows, { year: report.year });
+  const filterLabel = getDriverTimeOffFilterLabel(filterType, filterKey, options.filterLabel);
+
+  return {
+    ...filteredReport,
+    reportLabel: filterLabel ? `${report.reportLabel || `${report.year} Driver Time Off`} - ${filterLabel}` : report.reportLabel,
+    generatedAt: report.generatedAt,
+    sourceReportLabel: report.reportLabel,
+    filter: {
+      type: filterType,
+      key: filterKey,
+      label: filterLabel
+    },
+    warning: report.warning || ''
+  };
+}
+
+function buildDriverTimeOffFieldsFromBody(body = {}, rosterOption = null) {
+  const startDate = normalizeEasternDateOnly(body.startDate);
+  const endDate = normalizeEasternDateOnly(body.endDate);
+  const operatorName = cleanRosterText(rosterOption?.driverName || body.operatorName);
+  const truckNumber = cleanRosterText(rosterOption?.unitNo || body.truckNumber);
+  const reason = cleanRosterText(body.reason);
+  const status = cleanRosterText(body.status || 'Active') || 'Active';
+
+  if (!operatorName) throw new Error('Driver is required.');
+  if (!truckNumber) throw new Error('Truck number is required.');
+  if (!startDate) throw new Error('Start date is required.');
+  if (!endDate) throw new Error('End date is required.');
+  if (endDate < startDate) throw new Error('End date cannot be before start date.');
+
+  const recordNumber = cleanRosterText(body.recordNumber) || `TO-${Date.now()}`;
+
+  return {
+    Title: `${operatorName} ${truckNumber} ${startDate}`.trim(),
+    RecordNumber: recordNumber,
+    TruckNumber: truckNumber,
+    OperatorName: operatorName,
+    StartDate: startDate,
+    EndDate: endDate,
+    Reason: reason,
+    Status: status
+  };
+}
+
+async function resolveDriverTimeOffRosterOption(token, rosterDriverKey) {
+  const key = cleanRosterText(rosterDriverKey);
+  if (!key) return null;
+  const options = await getAvailableTruckRosterOptions(token);
+  const option = options.find((entry) => entry.key === key);
+  if (!option) throw new Error('Selected driver is not currently available in Driver Roster. Refresh and choose the driver again.');
+  return option;
+}
+
 async function getDriverRosterByTruck(token) {
   const rosterByTruck = new Map();
 
@@ -5548,6 +5873,60 @@ function createPdfReportWriter(options = {}) {
     ensureSpace,
     getContentWidth: () => contentWidth
   };
+}
+
+
+function createDriverTimeOffPdfBuffer(report) {
+  const summary = report.summary || {};
+  const analytics = report.analytics || {};
+  const subtitleParts = [
+    `Generated: ${report.generatedAt || '-'}`,
+    report.filter?.label ? `Filtered: ${report.filter.label}` : 'Full year summary',
+    'Raw log excluded'
+  ];
+
+  const writer = createPdfReportWriter({
+    title: report.reportLabel || 'Driver Time Off Report',
+    subtitle: subtitleParts.filter(Boolean).join('    ')
+  });
+
+  writer.addSectionTitle('Report Summary');
+  writer.addParagraph('Report year', String(report.year || '-'));
+  if (report.filter?.label) {
+    writer.addParagraph('Filter', report.filter.label);
+  }
+  writer.addParagraph('Export note', 'This PDF includes summary cards and analysis sections only. The full Time Off Log is intentionally excluded.');
+  writer.addTextLine([
+    `Events ${formatPdfNumber(summary.totalEvents)}`,
+    `Total Days ${formatPdfNumber(summary.totalDays)}`,
+    `Drivers ${formatPdfNumber(summary.uniqueDrivers)}`,
+    `Current Off ${formatPdfNumber(summary.currentDriversOff)}`,
+    `Avg Days/Event ${Number(summary.averageDaysPerEvent || 0).toLocaleString('en-US', { maximumFractionDigits: 1 })}`,
+    `Longest ${formatPdfNumber(summary.longestEventDays)} day(s)${summary.longestEventDriver ? ` - ${summary.longestEventDriver}` : ''}`
+  ].join('   |   '), { font: 'F2' });
+
+  writer.addSectionTitle('By Driver', `${formatPdfNumber((analytics.byDriver || []).length)} driver(s)`);
+  writer.addTable([
+    { label: 'Driver / Truck', width: 360, value: (row) => row.label || row.key || '-' },
+    { label: 'Events', width: 80, value: (row) => formatPdfNumber(row.events) },
+    { label: 'Days', width: 90, value: (row) => formatPdfNumber(row.days) }
+  ], analytics.byDriver || [], 'No driver summary rows found.');
+
+  writer.addSectionTitle('By Month', `${formatPdfNumber((analytics.byMonth || []).length)} month(s)`);
+  writer.addTable([
+    { label: 'Month', width: 360, value: (row) => row.label || row.key || '-' },
+    { label: 'Events', width: 80, value: (row) => formatPdfNumber(row.events) },
+    { label: 'Days', width: 90, value: (row) => formatPdfNumber(row.days) }
+  ], analytics.byMonth || [], 'No monthly summary rows found.');
+
+  writer.addSectionTitle('By Reason', `${formatPdfNumber((analytics.byReason || []).length)} reason(s)`);
+  writer.addTable([
+    { label: 'Reason', width: 360, value: (row) => row.label || row.key || '-' },
+    { label: 'Events', width: 80, value: (row) => formatPdfNumber(row.events) },
+    { label: 'Days', width: 90, value: (row) => formatPdfNumber(row.days) }
+  ], analytics.byReason || [], 'No reason summary rows found.');
+
+  return writer.finish();
 }
 
 function createDriverSummaryPdfBuffer(report) {
@@ -8283,7 +8662,16 @@ app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, asyn
 
     const openWon = allWon.filter((r) => !parseBoolean(r.Processed));
 
-    const evidenceSets = await getUploadEvidenceSets(token);
+    const [evidenceSets, driverTimeOffResult, driverTimeOffRosterOptions] = await Promise.all([
+      getUploadEvidenceSets(token),
+      getDriverTimeOffListId()
+        ? getDriverTimeOffRows(token).catch((error) => ({ rows: [], warning: error.message || 'Driver Time Off could not be loaded.' }))
+        : Promise.resolve({ rows: [], warning: 'DRIVER_TIME_OFF_LOG_LIST_ID is not configured.' }),
+      process.env.DRIVER_ROSTER_LIST_ID
+        ? getAvailableTruckRosterOptions(token).catch(() => [])
+        : Promise.resolve([])
+    ]);
+    const driverTimeOffCurrent = buildDriverTimeOffCurrentResponse(driverTimeOffResult.rows || [], { targetDate });
 
     const activeToday = openWon
       .filter((r) => {
@@ -8327,6 +8715,11 @@ app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, asyn
         checked: true,
         recordsScanned: evidenceSets.uploadDigestCount
       },
+      driverTimeOff: {
+        ...driverTimeOffCurrent,
+        warning: driverTimeOffResult.warning || '',
+        activeDriverOptions: driverTimeOffRosterOptions || []
+      },
       activeToday,
       loadingToday,
       deliveringToday,
@@ -8342,6 +8735,135 @@ app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, asyn
   }
 });
 
+
+
+app.get('/driver-time-off/current', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const [{ rows, warning }, activeDriverOptions] = await Promise.all([
+      getDriverTimeOffRows(token),
+      process.env.DRIVER_ROSTER_LIST_ID ? getAvailableTruckRosterOptions(token).catch(() => []) : Promise.resolve([])
+    ]);
+
+    res.json({
+      ...buildDriverTimeOffCurrentResponse(rows),
+      warning,
+      activeDriverOptions
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: error.message || 'Unable to load current Driver Time Off.' });
+  }
+});
+
+app.get('/reports/driver-time-off', requireLookupAccess, async (req, res) => {
+  try {
+    const currentYear = Number(formatEasternDate().slice(0, 4));
+    const minYear = currentYear - DRIVER_TIME_OFF_DEFAULT_REPORT_YEARS_BACK;
+    const maxYear = currentYear + 1;
+    const year = parseReportInteger(req.query.year || currentYear, 'year', minYear, maxYear);
+    const token = await getGraphToken();
+    const [{ rows, warning }, activeDriverOptions] = await Promise.all([
+      getDriverTimeOffRows(token),
+      process.env.DRIVER_ROSTER_LIST_ID ? getAvailableTruckRosterOptions(token).catch(() => []) : Promise.resolve([])
+    ]);
+
+    res.json({
+      ...buildDriverTimeOffReportResponse(rows, { year }),
+      warning,
+      activeDriverOptions
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Unable to load Driver Time Off report.' });
+  }
+});
+
+
+app.get('/reports/driver-time-off/pdf', requireLookupAccess, async (req, res) => {
+  try {
+    const currentYear = Number(formatEasternDate().slice(0, 4));
+    const minYear = currentYear - DRIVER_TIME_OFF_DEFAULT_REPORT_YEARS_BACK;
+    const maxYear = currentYear + 1;
+    const year = parseReportInteger(req.query.year || currentYear, 'year', minYear, maxYear);
+    const token = await getGraphToken();
+    const { rows, warning } = await getDriverTimeOffRows(token);
+    const baseReport = {
+      ...buildDriverTimeOffReportResponse(rows, { year }),
+      warning
+    };
+    const report = applyDriverTimeOffReportFilter(baseReport, {
+      filterType: req.query.filterType,
+      filterKey: req.query.filterKey,
+      filterLabel: req.query.filterLabel
+    });
+    const pdfBuffer = createDriverTimeOffPdfBuffer(report);
+    const safeYear = String(year || 'driver-time-off').replace(/[^0-9A-Za-z_-]+/g, '-');
+    const safeFilter = report.filter?.label
+      ? `_${String(report.filter.label).replace(/[^0-9A-Za-z_-]+/g, '-').replace(/^-+|-+$/g, '')}`
+      : '';
+    const fileName = `Kole_Driver_Time_Off_${safeYear}${safeFilter}.pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.end(pdfBuffer);
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to export Driver Time Off report PDF.'
+    });
+  }
+});
+
+app.post('/driver-time-off', requireLookupAccess, async (req, res) => {
+  try {
+    const listId = getDriverTimeOffListId();
+    if (!listId) {
+      return res.status(500).json({ success: false, error: 'DRIVER_TIME_OFF_LOG_LIST_ID is not configured on the server.' });
+    }
+    const token = await getGraphToken();
+    const rosterOption = await resolveDriverTimeOffRosterOption(token, req.body?.rosterDriverKey);
+    const fields = buildDriverTimeOffFieldsFromBody(req.body, rosterOption);
+    const createdItem = await graphPost(
+      token,
+      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/items`,
+      { fields }
+    );
+
+    res.status(201).json({ success: true, itemId: createdItem.id || '', message: 'Driver time off added.' });
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({ success: false, error: error.message || 'Unable to add Driver Time Off.' });
+  }
+});
+
+app.patch('/driver-time-off/:id', requireLookupAccess, async (req, res) => {
+  try {
+    const listId = getDriverTimeOffListId();
+    const itemId = String(req.params.id || '').trim();
+    if (!listId) {
+      return res.status(500).json({ success: false, error: 'DRIVER_TIME_OFF_LOG_LIST_ID is not configured on the server.' });
+    }
+    if (!itemId) {
+      return res.status(400).json({ success: false, error: 'A Driver Time Off item ID is required.' });
+    }
+    const token = await getGraphToken();
+    const rosterOption = await resolveDriverTimeOffRosterOption(token, req.body?.rosterDriverKey);
+    const fields = buildDriverTimeOffFieldsFromBody(req.body, rosterOption);
+    await graphPatch(
+      token,
+      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/items/${itemId}/fields`,
+      fields
+    );
+
+    res.json({ success: true, itemId, message: 'Driver time off updated.' });
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({ success: false, error: error.message || 'Unable to update Driver Time Off.' });
+  }
+});
 
 
 app.get('/reports/no-availability', requireLookupAccess, async (req, res) => {

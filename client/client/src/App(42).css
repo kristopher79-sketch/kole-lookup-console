@@ -6270,18 +6270,11 @@ button.available-truck-distribution-summary-card:disabled {
   padding: 14px 16px;
   border-bottom: 1px solid var(--kole-border, #1e293b);
   background: var(--kole-surface, #111827);
-  align-items: center !important;
-}
-
-.driver-time-off-title-block {
-  flex: 1 1 auto;
-  text-align: left !important;
 }
 
 .driver-time-off-header h3 {
-  margin: 0;
-  color: var(--kole-gold-bright, #facc15) !important;
-  text-align: left !important;
+  margin: 0 0 4px;
+  color: var(--kole-text, #f8fafc) !important;
 }
 
 .driver-time-off-header p {
@@ -6308,30 +6301,6 @@ button.available-truck-distribution-summary-card:disabled {
   color: #e5e7eb;
   font-size: 12px;
   font-weight: 800;
-}
-
-.driver-time-off-actions .driver-time-off-count-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 30px;
-  padding: 6px 11px;
-  border: 1px solid rgba(203, 213, 225, 0.24);
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.55);
-  color: var(--kole-text, #f8fafc);
-  font-size: 12px;
-  font-weight: 850;
-  white-space: nowrap;
-}
-
-.driver-time-off-clickable-row {
-  cursor: pointer;
-}
-
-.driver-time-off-clickable-row:focus-visible {
-  outline: 2px solid rgba(250, 204, 21, 0.75);
-  outline-offset: -2px;
 }
 
 .driver-time-off-table,
@@ -6484,140 +6453,5 @@ button.available-truck-distribution-summary-card:disabled {
 
   .driver-time-off-pattern-row span {
     white-space: normal;
-  }
-}
-
-.driver-time-off-main-add-button {
-  min-height: 30px;
-  padding: 7px 11px;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.driver-time-off-report-table .driver-time-off-clickable-row:hover,
-.driver-time-off-history-table tbody tr:hover {
-  background: rgba(30, 41, 59, 0.72);
-}
-
-.driver-time-off-history-card {
-  margin-top: 20px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 14px;
-  background: rgba(15, 23, 42, 0.52);
-  overflow: hidden;
-}
-
-.driver-time-off-history-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 14px;
-  align-items: center;
-  padding: 14px 16px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-  background: rgba(2, 6, 23, 0.26);
-}
-
-.driver-time-off-history-header h3 {
-  margin: 0 0 4px;
-  color: #facc15;
-  font-size: 16px;
-}
-
-.driver-time-off-history-header p {
-  margin: 0;
-  color: #94a3b8;
-  font-size: 13px;
-}
-
-.driver-time-off-history-header span {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 30px;
-  padding: 6px 11px;
-  border: 1px solid rgba(203, 213, 225, 0.24);
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.55);
-  color: #f8fafc;
-  font-size: 12px;
-  font-weight: 850;
-  white-space: nowrap;
-}
-
-.driver-time-off-history-table {
-  min-width: 640px !important;
-}
-
-
-/* DRIVER TIME OFF EXPORT / FILTER REFINEMENTS */
-.driver-time-off-report-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.driver-time-off-filter-banner {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin: 12px 0 0;
-  padding: 10px 12px;
-  border: 1px solid rgba(250, 204, 21, 0.22);
-  border-radius: 12px;
-  background: rgba(250, 204, 21, 0.08);
-  color: #e5e7eb;
-}
-
-.driver-time-off-filter-banner span {
-  color: #cbd5e1;
-  font-size: 13px;
-}
-
-.driver-time-off-filter-banner strong {
-  color: #facc15;
-}
-
-.driver-time-off-pattern-row {
-  width: 100%;
-  border-left: none;
-  border-right: none;
-  border-top: none;
-  border-radius: 0;
-  background: transparent;
-  text-align: left;
-}
-
-.driver-time-off-pattern-row.clickable-pattern-row:hover,
-.driver-time-off-pattern-row.active-pattern-row {
-  background: rgba(30, 41, 59, 0.78);
-}
-
-.driver-time-off-pattern-row.active-pattern-row {
-  box-shadow: inset 4px 0 0 rgba(250, 204, 21, 0.85);
-}
-
-.driver-time-off-history-row {
-  cursor: pointer;
-}
-
-.driver-time-off-history-row.active-history-row {
-  background: rgba(250, 204, 21, 0.10) !important;
-  box-shadow: inset 4px 0 0 rgba(250, 204, 21, 0.85);
-}
-
-.driver-time-off-history-row:focus-visible,
-.driver-time-off-pattern-row:focus-visible {
-  outline: 2px solid rgba(250, 204, 21, 0.75);
-  outline-offset: -2px;
-}
-
-@media (max-width: 700px) {
-  .driver-time-off-report-actions,
-  .driver-time-off-filter-banner {
-    align-items: stretch;
-    flex-direction: column;
   }
 }
