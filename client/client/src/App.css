@@ -2,6 +2,11 @@
   box-sizing: border-box;
 }
 
+
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   margin: 0;
   font-family: Segoe UI, Arial, sans-serif;
@@ -6620,4 +6625,151 @@ button.available-truck-distribution-summary-card:disabled {
     align-items: stretch;
     flex-direction: column;
   }
+}
+
+
+/* AFTERNOON POLISH PASS: report gating, count-pill color, and banner stability */
+.reports-panel.feature-accordion-panel {
+  width: min(1100px, 100%) !important;
+  display: block;
+  overflow: visible;
+}
+
+.reports-section-header-button {
+  min-height: 68px;
+}
+
+.reports-panel .feature-section-body.reports-accordion-list {
+  width: 100%;
+  min-width: 0;
+  margin-top: 12px !important;
+  padding-top: 0;
+  contain: layout;
+}
+
+.report-alert-status-pill {
+  min-width: 118px !important;
+  text-align: center;
+}
+
+.action-report-clear-warning {
+  width: min(760px, 100%);
+  margin: 12px auto 0;
+  text-align: left;
+}
+
+.no-availability-generated-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.no-availability-export-button {
+  flex: 0 0 auto;
+}
+
+.no-availability-export-success {
+  width: min(860px, 100%);
+  margin: 10px auto 0;
+}
+
+.driver-time-off-actions .driver-time-off-count-pill.has-items {
+  border-color: rgba(45, 212, 191, 0.82) !important;
+  background: linear-gradient(180deg, rgba(20, 184, 166, 0.96), rgba(13, 148, 136, 0.92)) !important;
+  color: #ecfeff !important;
+  box-shadow:
+    0 0 0 1px rgba(45, 212, 191, 0.18),
+    0 8px 18px rgba(0,0,0,0.20),
+    inset 0 1px 0 rgba(255,255,255,0.24) !important;
+}
+
+.driver-time-off-actions .driver-time-off-count-pill.is-zero {
+  border-color: rgba(203, 213, 225, 0.22) !important;
+  background: rgba(255,255,255,0.065) !important;
+  color: rgba(226, 232, 240, 0.78) !important;
+}
+
+.driver-position-counts .driver-position-count-pill {
+  font-weight: 900 !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+}
+
+.driver-position-counts .driver-position-count-pill.total {
+  border-color: rgba(125, 211, 252, 0.42) !important;
+  background: rgba(14, 165, 233, 0.22) !important;
+  color: #bae6fd !important;
+}
+
+.driver-position-counts .driver-position-count-pill.moving {
+  border-color: rgba(45, 212, 191, 0.62) !important;
+  background: rgba(20, 184, 166, 0.24) !important;
+  color: #99f6e4 !important;
+}
+
+.driver-position-counts .driver-position-count-pill.stale,
+.driver-position-counts .driver-position-count-pill.missing {
+  border-color: rgba(251, 146, 60, 0.55) !important;
+  background: rgba(154, 52, 18, 0.28) !important;
+  color: #fed7aa !important;
+}
+
+.driver-time-off-report-actions-only {
+  justify-content: flex-end;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+@media (max-width: 700px) {
+  .no-availability-generated-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .driver-time-off-report-actions-only {
+    justify-content: flex-start;
+  }
+}
+
+
+/* AFTERNOON POLISH PASS 2: No Availability PDF, roster pill color matching, Operations Today alignment */
+.driver-position-counts .driver-position-count-pill.total {
+  border-color: rgba(248, 250, 252, 0.52) !important;
+  background: rgba(248, 250, 252, 0.12) !important;
+  color: #f8fafc !important;
+}
+
+.driver-position-counts .driver-position-count-pill.moving {
+  border-color: rgba(52, 211, 153, 0.42) !important;
+  background: #064e3b !important;
+  color: #34d399 !important;
+}
+
+.driver-position-counts .driver-position-count-pill.stale {
+  border-color: rgba(251, 191, 36, 0.42) !important;
+  background: #78350f !important;
+  color: #fbbf24 !important;
+}
+
+.driver-position-counts .driver-position-count-pill.missing {
+  border-color: rgba(248, 113, 113, 0.48) !important;
+  background: rgba(127, 29, 29, 0.35) !important;
+  color: #fecaca !important;
+}
+
+.operations-panel {
+  margin-left: 0 !important;
+  margin-right: auto !important;
+}
+
+.operations-panel,
+.operations-panel > div:first-child,
+.operations-header-bar,
+.operations-header-bar > div {
+  text-align: left !important;
+}
+
+.operations-header-bar {
+  justify-content: space-between !important;
 }

@@ -5876,6 +5876,147 @@ function createPdfReportWriter(options = {}) {
 }
 
 
+
+function createNoAvailabilityPdfBuffer(report) {
+  const summary = report.summary || {};
+  const analytics = report.analytics || {};
+  const insights = report.insights || [];
+  const yearBreakdown = report.yearBreakdown || [];
+
+  const formatPercent = (value) => `${(Number(value || 0) * 100).toLocaleString('en-US', { maximumFractionDigits: 1 })}%`;
+  const selectedYearLabel = report.selectedYear === 'all' ? 'All Years' : String(report.selectedYear || '-');
+
+  const writer = createPdfReportWriter({
+    title: report.reportLabel || 'No Availability Report',
+    subtitle: [
+      `Generated: ${report.generatedAt || '-'}`,
+      `Window: ${selectedYearLabel}`,
+      'Top section only - raw log excluded'
+    ].join('    ')
+  });
+
+  writer.addSectionTitle('Report Summary');
+  writer.addParagraph('Report window', selectedYearLabel);
+  writer.addParagraph('Anchor date', report.anchorDate || 'Solicit Date');
+  writer.addParagraph('No availability records', `${formatPdfNumber(summary.totalNoAvailability)} record(s)`);
+  writer.addParagraph('Unique customers', formatPdfNumber(summary.uniqueCustomers));
+  writer.addParagraph('Unique city/states', formatPdfNumber(summary.uniqueCityStates));
+  writer.addParagraph('Missed miles', `${formatPdfNumber(summary.totalMissedMiles)} total / ${Number(summary.averageMissedMiles || 0).toLocaleString('en-US', { maximumFractionDigits: 1 })} avg`);
+  writer.addParagraph('Most recent solicit date', formatPdfRosterDate(summary.mostRecentSolicitDate));
+  writer.addTextLine('This PDF mirrors the top No Availability analysis section. It intentionally excludes the full raw log.', { font: 'F2', color: '0.13 0.18 0.28' });
+
+  writer.addSectionTitle('Headline Patterns');
+  if (insights.length === 0) {
+    writer.addTextLine('No headline pattern data available.');
+  } else {
+    writer.addTable(
+      [
+        { label: 'Pattern', width: 120, value: 'title' },
+        { label: 'Value', width: 170, value: 'value' },
+        { label: 'Detail', width: 380, value: 'detail' },
+        { label: 'Tone', width: 50, value: 'tone' }
+      ],
+      insights,
+      'No headline pattern data available.'
+    );
+  }
+
+  writer.addSectionTitle('Top 5 City/States');
+  writer.addTable(
+    [
+      { label: 'City/State', width: 180, value: 'cityState' },
+      { label: 'Hits', width: 55, value: (row) => formatPdfNumber(row.count) },
+      { label: 'Share', width: 60, value: (row) => formatPercent(row.percentage) },
+      { label: 'Pickup', width: 60, value: (row) => formatPdfNumber(row.pickupCount) },
+      { label: 'Delivery', width: 65, value: (row) => formatPdfNumber(row.deliveryCount) },
+      { label: 'Customers', width: 80, value: (row) => formatPdfNumber(row.uniqueCustomers) },
+      { label: 'Miles', width: 80, value: (row) => formatPdfNumber(row.miles) }
+    ],
+    analytics.topCityStates || [],
+    'No city/state pattern data available.'
+  );
+
+  writer.addSectionTitle('Top 5 Customers');
+  writer.addTable(
+    [
+      { label: 'Customer', width: 260, value: 'customer' },
+      { label: 'Requests', width: 75, value: (row) => formatPdfNumber(row.count) },
+      { label: 'Share', width: 75, value: (row) => formatPercent(row.percentage) },
+      { label: 'Missed Miles', width: 110, value: (row) => formatPdfNumber(row.miles) }
+    ],
+    analytics.topCustomers || [],
+    'No customer pattern data available.'
+  );
+
+  writer.addSectionTitle('Highest Months');
+  writer.addTable(
+    [
+      { label: 'Month', width: 180, value: 'monthLabel' },
+      { label: 'Requests', width: 75, value: (row) => formatPdfNumber(row.count) },
+      { label: 'Share', width: 75, value: (row) => formatPercent(row.percentage) },
+      { label: 'Customers', width: 85, value: (row) => formatPdfNumber(row.uniqueCustomers) },
+      { label: 'City/States', width: 85, value: (row) => formatPdfNumber(row.uniqueCityStates) },
+      { label: 'Miles', width: 90, value: (row) => formatPdfNumber(row.miles) }
+    ],
+    analytics.topMonths || [],
+    'No monthly pattern data available.'
+  );
+
+  writer.addSectionTitle('Repeating Lanes');
+  writer.addTable(
+    [
+      { label: 'Lane', width: 330, value: 'lane' },
+      { label: 'Requests', width: 75, value: (row) => formatPdfNumber(row.count) },
+      { label: 'Share', width: 75, value: (row) => formatPercent(row.percentage) },
+      { label: 'Customers', width: 85, value: (row) => formatPdfNumber(row.uniqueCustomers) },
+      { label: 'Miles', width: 90, value: (row) => formatPdfNumber(row.miles) }
+    ],
+    analytics.topLanes || [],
+    'No repeating lane pattern data available.'
+  );
+
+  writer.addSectionTitle('Requestors');
+  writer.addTable(
+    [
+      { label: 'Requestor', width: 260, value: 'requestor' },
+      { label: 'Requests', width: 75, value: (row) => formatPdfNumber(row.count) },
+      { label: 'Share', width: 75, value: (row) => formatPercent(row.percentage) },
+      { label: 'Customers', width: 85, value: (row) => formatPdfNumber(row.uniqueCustomers) }
+    ],
+    analytics.topRequestors || [],
+    'No requestor pattern data available.'
+  );
+
+  writer.addSectionTitle('Shipment Types');
+  writer.addTable(
+    [
+      { label: 'Shipment Type', width: 260, value: 'shipmentType' },
+      { label: 'Requests', width: 75, value: (row) => formatPdfNumber(row.count) },
+      { label: 'Share', width: 75, value: (row) => formatPercent(row.percentage) },
+      { label: 'Missed Miles', width: 110, value: (row) => formatPdfNumber(row.miles) }
+    ],
+    analytics.shipmentTypes || [],
+    'No shipment type pattern data available.'
+  );
+
+  if (yearBreakdown.length > 0) {
+    writer.addSectionTitle('Year Context');
+    writer.addTable(
+      [
+        { label: 'Year', width: 80, value: 'year' },
+        { label: 'Requests', width: 90, value: (row) => formatPdfNumber(row.count) },
+        { label: 'Missed Miles', width: 120, value: (row) => formatPdfNumber(row.miles) },
+        { label: 'Customers', width: 95, value: (row) => formatPdfNumber(row.uniqueCustomers) },
+        { label: 'City/States', width: 95, value: (row) => formatPdfNumber(row.uniqueCityStates) }
+      ],
+      yearBreakdown,
+      'No year breakdown data available.'
+    );
+  }
+
+  return writer.finish();
+}
+
 function createDriverTimeOffPdfBuffer(report) {
   const summary = report.summary || {};
   const analytics = report.analytics || {};
@@ -8865,6 +9006,58 @@ app.patch('/driver-time-off/:id', requireLookupAccess, async (req, res) => {
   }
 });
 
+
+
+app.get('/reports/no-availability/pdf', requireLookupAccess, async (req, res) => {
+  try {
+    const yearParam = String(req.query.year || 'all').trim().toLowerCase();
+    const selectedYear = yearParam === 'all'
+      ? 'all'
+      : parseReportInteger(yearParam, 'year', ARCHIVE_YEAR_MIN, ARCHIVE_YEAR_MAX);
+    const sources = getNoAvailabilitySources();
+
+    if (sources.length === 0) {
+      return res.status(500).json({
+        success: false,
+        error: 'No Availability list IDs are not configured on the server.'
+      });
+    }
+
+    const token = await getGraphToken();
+    const settled = await Promise.allSettled(
+      sources.map(async (source) => {
+        const items = await getAllListItemsWithFields(
+          token,
+          source.listId,
+          getNoAvailabilityFieldSelect()
+        );
+
+        return items.map((item) => cleanNoAvailabilityItem(item, source));
+      })
+    );
+
+    const rows = settled
+      .filter((result) => result.status === 'fulfilled')
+      .flatMap((result) => result.value);
+
+    const report = buildNoAvailabilityResponse(rows, { year: selectedYear });
+    const pdfBuffer = createNoAvailabilityPdfBuffer(report);
+    const safeScope = selectedYear === 'all' ? 'All_Years' : String(selectedYear).replace(/[^0-9A-Za-z_-]+/g, '-');
+    const fileName = `Kole_No_Availability_Top_${safeScope}.pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.end(pdfBuffer);
+  } catch (error) {
+    console.error(error);
+
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to export No Availability PDF.'
+    });
+  }
+});
 
 app.get('/reports/no-availability', requireLookupAccess, async (req, res) => {
   try {

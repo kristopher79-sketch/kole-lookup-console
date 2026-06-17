@@ -450,6 +450,8 @@ export default function App() {
   const [noAvailabilityReport, setNoAvailabilityReport] = useState(null);
   const [noAvailabilityLoading, setNoAvailabilityLoading] = useState(false);
   const [noAvailabilityError, setNoAvailabilityError] = useState(null);
+  const [noAvailabilityPdfLoading, setNoAvailabilityPdfLoading] = useState(false);
+  const [noAvailabilityPdfError, setNoAvailabilityPdfError] = useState('');
   const [noAvailabilityModalOpen, setNoAvailabilityModalOpen] = useState(false);
   const [driverTimeOffYear, setDriverTimeOffYear] = useState(() => new Date().getFullYear());
   const [driverTimeOffReport, setDriverTimeOffReport] = useState(null);
@@ -654,18 +656,28 @@ export default function App() {
   const reportActionAlertCounts = useMemo(() => {
     const alertData = reportActionAlerts?.alerts || {};
     const ordersDueSettlementCount = Number(
-      ordersDueSettlementReport?.count ?? alertData.ordersDueSettlement?.count ?? 0
+      alertData.ordersDueSettlement?.count ?? ordersDueSettlementReport?.count ?? 0
     ) || 0;
     const wonNotRegisteredCount = Number(
-      wonNotRegisteredReport?.count ?? alertData.wonNotRegistered?.count ?? 0
+      alertData.wonNotRegistered?.count ?? wonNotRegisteredReport?.count ?? 0
     ) || 0;
 
     return {
       ordersDueSettlement: ordersDueSettlementCount,
       wonNotRegistered: wonNotRegisteredCount,
-      total: ordersDueSettlementCount + wonNotRegisteredCount
+      total: ordersDueSettlementCount + wonNotRegisteredCount,
+      isLoaded: Boolean(reportActionAlerts)
     };
   }, [reportActionAlerts, ordersDueSettlementReport, wonNotRegisteredReport]);
+
+  const ordersDueSettlementActionBlocked =
+    reportActionAlertCounts.isLoaded && reportActionAlertCounts.ordersDueSettlement <= 0;
+  const wonNotRegisteredActionBlocked =
+    reportActionAlertCounts.isLoaded && reportActionAlertCounts.wonNotRegistered <= 0;
+
+  function getActionReportClearMessage(reportLabel) {
+    return `${reportLabel} is already clear in the Reports ticker. This point-in-time report is hidden until the next refresh finds something actionable.`;
+  }
 
 
   useEffect(() => {
@@ -2370,6 +2382,16 @@ function getPositionStatusLabel(position) {
   }
 
   async function loadOrdersDueSettlementReport() {
+    if (ordersDueSettlementActionBlocked) {
+      setOrdersDueSettlementReport(null);
+      setOrdersDueSettlementModalOpen(false);
+      setOrdersDueSettlementError({
+        code: 'NO_ACTION_ITEMS',
+        message: getActionReportClearMessage('Orders Due for Settlement')
+      });
+      return;
+    }
+
     setOrdersDueSettlementLoading(true);
     setOrdersDueSettlementError(null);
     setOrdersDueSettlementReport(null);
@@ -2386,8 +2408,18 @@ function getPositionStatusLabel(position) {
         throw new Error(data.error || data.message || 'Unable to load Orders Due for Settlement.');
       }
 
-      setOrdersDueSettlementReport(data);
       updateReportActionAlertCount('ordersDueSettlement', data.count);
+
+      if ((Number(data.count) || 0) <= 0) {
+        setOrdersDueSettlementReport(null);
+        setOrdersDueSettlementError({
+          code: 'NO_ACTION_ITEMS',
+          message: getActionReportClearMessage('Orders Due for Settlement')
+        });
+        return;
+      }
+
+      setOrdersDueSettlementReport(data);
       setOrdersDueSettlementModalOpen(true);
     } catch (err) {
       setOrdersDueSettlementError({
@@ -2471,6 +2503,25 @@ function getPositionStatusLabel(position) {
     link.remove();
 
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function escapeCsvValue(value) {
+    if (value === null || value === undefined) return '';
+
+    const text = String(value).replace(/\r?\n|\r/g, ' ').trim();
+    return /[",]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  }
+
+  function buildCsv(rows) {
+    return rows.map((row) => row.map(escapeCsvValue).join(',')).join('\r\n');
+  }
+
+  function getSafeFileNamePart(value, fallback = 'export') {
+    const clean = String(value || '')
+      .replace(/[^0-9A-Za-z]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+
+    return clean || fallback;
   }
 
   function getPdfExportNotice(reportKey) {
@@ -2597,6 +2648,16 @@ function getPositionStatusLabel(position) {
   }
 
   async function loadWonNotRegisteredReport() {
+    if (wonNotRegisteredActionBlocked) {
+      setWonNotRegisteredReport(null);
+      setWonNotRegisteredModalOpen(false);
+      setWonNotRegisteredError({
+        code: 'NO_ACTION_ITEMS',
+        message: getActionReportClearMessage('Orders Won and Not Registered')
+      });
+      return;
+    }
+
     setWonNotRegisteredLoading(true);
     setWonNotRegisteredError(null);
     setWonNotRegisteredReport(null);
@@ -2613,8 +2674,18 @@ function getPositionStatusLabel(position) {
         throw new Error(data.error || data.message || 'Unable to load Orders Won and Not Registered report.');
       }
 
-      setWonNotRegisteredReport(data);
       updateReportActionAlertCount('wonNotRegistered', data.count);
+
+      if ((Number(data.count) || 0) <= 0) {
+        setWonNotRegisteredReport(null);
+        setWonNotRegisteredError({
+          code: 'NO_ACTION_ITEMS',
+          message: getActionReportClearMessage('Orders Won and Not Registered')
+        });
+        return;
+      }
+
+      setWonNotRegisteredReport(data);
       setWonNotRegisteredModalOpen(true);
     } catch (err) {
       setWonNotRegisteredError({
@@ -2666,8 +2737,10 @@ function getPositionStatusLabel(position) {
   async function loadNoAvailabilityReport() {
     setNoAvailabilityLoading(true);
     setNoAvailabilityError(null);
+    setNoAvailabilityPdfError('');
     setNoAvailabilityReport(null);
     setNoAvailabilityModalOpen(false);
+    clearPdfExportNotice('noAvailabilityTop');
 
     try {
       const params = new URLSearchParams({ year: String(noAvailabilityYear || 'all') });
@@ -2692,6 +2765,23 @@ function getPositionStatusLabel(position) {
 
   function closeNoAvailabilityModal() {
     setNoAvailabilityModalOpen(false);
+  }
+
+  async function downloadNoAvailabilityTopPdf() {
+    setNoAvailabilityPdfError('');
+
+    const scope = noAvailabilityYear === 'all'
+      ? 'All_Years'
+      : getSafeFileNamePart(noAvailabilityYear, 'Year');
+
+    await downloadReportPdf({
+      reportKey: 'noAvailabilityTop',
+      reportName: 'No Availability Top Section',
+      endpoint: `${API}/reports/no-availability/pdf?year=${encodeURIComponent(noAvailabilityYear || 'all')}`,
+      fallbackName: `Kole_No_Availability_Top_${scope}.pdf`,
+      setLoading: setNoAvailabilityPdfLoading,
+      setError: setNoAvailabilityPdfError
+    });
   }
 
   function getDriverTimeOffOptions() {
@@ -4807,9 +4897,25 @@ function openReportLoadDetails(load) {
 
     return (
       <div className="driver-report-preview modal-report-preview no-availability-preview">
-        <div className="driver-report-generated">
-          Generated: {noAvailabilityReport.generatedAt}
+        <div className="driver-report-generated no-availability-generated-row">
+          <span>Generated: {noAvailabilityReport.generatedAt}</span>
+          <button
+            type="button"
+            className="pdf-export-button compact no-availability-export-button"
+            onClick={downloadNoAvailabilityTopPdf}
+            disabled={noAvailabilityPdfLoading || noAvailabilityLoading}
+          >
+            {noAvailabilityPdfLoading ? 'Exporting...' : 'Export Top PDF'}
+          </button>
         </div>
+
+        {getPdfExportNotice('noAvailabilityTop') && (
+          <div className="pdf-export-success no-availability-export-success">{getPdfExportNotice('noAvailabilityTop')}</div>
+        )}
+
+        {noAvailabilityPdfError && (
+          <div className="msg error pdf-export-error">{noAvailabilityPdfError}</div>
+        )}
 
         <div className="report-kpi-grid no-availability-kpi-grid">
           <div className="report-kpi-card">
@@ -5018,7 +5124,7 @@ function openReportLoadDetails(load) {
             <button type="button" className="view-button driver-time-off-main-add-button" onClick={() => openDriverTimeOffForm()}>
               Add Time Off
             </button>
-            <span className="driver-time-off-count-pill">{formatReportNumber(records.length)} current</span>
+            <span className={`driver-time-off-count-pill ${records.length > 0 ? 'has-items' : 'is-zero'}`}>{formatReportNumber(records.length)} current</span>
           </div>
         </div>
 
@@ -5083,7 +5189,6 @@ function openReportLoadDetails(load) {
           <div className="detail-header">
             <div>
               <h2>{isEditing ? 'Edit Driver Time Off' : 'Add Driver Time Off'}</h2>
-              <p>Writes directly to the SharePoint Time Off Log used by the VBA upload.</p>
             </div>
             <button className="close-button" onClick={closeDriverTimeOffForm}>Close</button>
           </div>
@@ -5256,24 +5361,18 @@ function openReportLoadDetails(load) {
     return (
       <div className="driver-report-preview driver-time-off-preview">
         {driverTimeOffReport.warning && <div className="msg error">{driverTimeOffReport.warning}</div>}
-        <div className="driver-report-title">
-          <div>
-            <h3>{driverTimeOffReport.reportLabel || 'Driver Time Off'}</h3>
-            <p>{formatReportNumber(rows.length)} event(s) · Generated {driverTimeOffReport.generatedAt || ''}</p>
-          </div>
-          <div className="driver-time-off-report-actions">
-            <button
-              type="button"
-              className="pdf-export-button compact"
-              onClick={downloadDriverTimeOffPdf}
-              disabled={driverTimeOffPdfLoading || driverTimeOffLoading}
-            >
-              {driverTimeOffPdfLoading ? 'Exporting...' : 'Export PDF'}
-            </button>
-            <button type="button" className="view-button" onClick={() => openDriverTimeOffForm()}>
-              Add Time Off
-            </button>
-          </div>
+        <div className="driver-time-off-report-actions driver-time-off-report-actions-only">
+          <button
+            type="button"
+            className="pdf-export-button compact"
+            onClick={downloadDriverTimeOffPdf}
+            disabled={driverTimeOffPdfLoading || driverTimeOffLoading}
+          >
+            {driverTimeOffPdfLoading ? 'Exporting...' : 'Export PDF'}
+          </button>
+          <button type="button" className="view-button" onClick={() => openDriverTimeOffForm()}>
+            Add Time Off
+          </button>
         </div>
 
         <div className="pdf-export-guidance">PDF export includes the summary cards and analysis sections only, not the full Time Off Log.</div>
@@ -5415,11 +5514,11 @@ function openReportLoadDetails(load) {
 
           {driverPositionsData?.counts && (
             <div className="driver-position-counts">
-              <span>{driverPositionsData.counts.total} active units</span>
-              <span>{driverPositionsData.counts.moving} moving</span>
-              <span>{driverPositionsData.counts.stale} stale</span>
+              <span className="driver-position-count-pill total">{driverPositionsData.counts.total} active units</span>
+              <span className="driver-position-count-pill moving">{driverPositionsData.counts.moving} moving</span>
+              <span className="driver-position-count-pill stale">{driverPositionsData.counts.stale} stale</span>
               {driverPositionsData.counts.missingRosterDetails > 0 && (
-                <span>{driverPositionsData.counts.missingRosterDetails} missing roster</span>
+                <span className="driver-position-count-pill missing">{driverPositionsData.counts.missingRosterDetails} missing roster</span>
               )}
             </div>
           )}
@@ -8091,11 +8190,18 @@ function openReportLoadDetails(load) {
                     </div>
                   </div>
 
-                  <div className="report-controls centered-report-controls">
-                    <button onClick={loadOrdersDueSettlementReport} disabled={ordersDueSettlementLoading}>
-                      {ordersDueSettlementLoading ? 'Loading Report...' : 'Preview Report'}
-                    </button>
-                  </div>
+                  {ordersDueSettlementActionBlocked ? (
+                    <div className="report-alert locked action-report-clear-warning">
+                      <h4>No settlement action items right now.</h4>
+                      <p>{getActionReportClearMessage('Orders Due for Settlement')}</p>
+                    </div>
+                  ) : (
+                    <div className="report-controls centered-report-controls">
+                      <button onClick={loadOrdersDueSettlementReport} disabled={ordersDueSettlementLoading}>
+                        {ordersDueSettlementLoading ? 'Loading Report...' : 'Preview Report'}
+                      </button>
+                    </div>
+                  )}
 
                   {ordersDueSettlementReport && !ordersDueSettlementModalOpen && (
                     <div className="report-ready-card">
@@ -8109,9 +8215,9 @@ function openReportLoadDetails(load) {
                     </div>
                   )}
 
-                  {ordersDueSettlementError && (
-                    <div className="report-alert error">
-                      <h4>Report could not be loaded.</h4>
+                  {ordersDueSettlementError && !ordersDueSettlementActionBlocked && (
+                    <div className={`report-alert ${ordersDueSettlementError.code === 'NO_ACTION_ITEMS' ? 'locked' : 'error'}`}>
+                      <h4>{ordersDueSettlementError.code === 'NO_ACTION_ITEMS' ? 'Report not needed.' : 'Report could not be loaded.'}</h4>
                       <p>{ordersDueSettlementError.message}</p>
                     </div>
                   )}
@@ -8246,11 +8352,18 @@ function openReportLoadDetails(load) {
                     </div>
                   </div>
 
-                  <div className="report-controls centered-report-controls">
-                    <button onClick={loadWonNotRegisteredReport} disabled={wonNotRegisteredLoading}>
-                      {wonNotRegisteredLoading ? 'Loading Report...' : 'Preview Report'}
-                    </button>
-                  </div>
+                  {wonNotRegisteredActionBlocked ? (
+                    <div className="report-alert locked action-report-clear-warning">
+                      <h4>No unregistered won orders right now.</h4>
+                      <p>{getActionReportClearMessage('Orders Won and Not Registered')}</p>
+                    </div>
+                  ) : (
+                    <div className="report-controls centered-report-controls">
+                      <button onClick={loadWonNotRegisteredReport} disabled={wonNotRegisteredLoading}>
+                        {wonNotRegisteredLoading ? 'Loading Report...' : 'Preview Report'}
+                      </button>
+                    </div>
+                  )}
 
                   {wonNotRegisteredReport && !wonNotRegisteredModalOpen && (
                     <div className="report-ready-card">
@@ -8264,9 +8377,9 @@ function openReportLoadDetails(load) {
                     </div>
                   )}
 
-                  {wonNotRegisteredError && (
-                    <div className="report-alert error">
-                      <h4>Report could not be loaded.</h4>
+                  {wonNotRegisteredError && !wonNotRegisteredActionBlocked && (
+                    <div className={`report-alert ${wonNotRegisteredError.code === 'NO_ACTION_ITEMS' ? 'locked' : 'error'}`}>
+                      <h4>{wonNotRegisteredError.code === 'NO_ACTION_ITEMS' ? 'Report not needed.' : 'Report could not be loaded.'}</h4>
                       <p>{wonNotRegisteredError.message}</p>
                     </div>
                   )}
@@ -8292,7 +8405,7 @@ function openReportLoadDetails(load) {
                   <div className="report-card-header centered-report-header">
                     <div>
                       <h3>Driver Time Off</h3>
-                      <p>Current time-off visibility plus light year-by-year analysis from the SharePoint Time Off Log.</p>
+                      <p>Current time-off visibility plus year-by-year analysis.</p>
                     </div>
                   </div>
 
@@ -8426,6 +8539,7 @@ function openReportLoadDetails(load) {
                           setNoAvailabilityReport(null);
                           setNoAvailabilityError(null);
                           setNoAvailabilityModalOpen(false);
+                          clearPdfExportNotice('noAvailabilityTop');
                         }}
                         disabled={noAvailabilityLoading}
                       >
@@ -8447,10 +8561,28 @@ function openReportLoadDetails(load) {
                         <strong>{noAvailabilityReport.reportLabel} is ready.</strong>
                         <span> The preview opens in a report window.</span>
                       </div>
-                      <button className="view-button" onClick={() => setNoAvailabilityModalOpen(true)}>
-                        Reopen Preview
-                      </button>
+                      <div className="report-ready-actions">
+                        <button className="view-button" onClick={() => setNoAvailabilityModalOpen(true)}>
+                          Reopen Preview
+                        </button>
+                        <button
+                          type="button"
+                          className="pdf-export-button compact"
+                          onClick={downloadNoAvailabilityTopPdf}
+                          disabled={noAvailabilityPdfLoading || noAvailabilityLoading}
+                        >
+                          {noAvailabilityPdfLoading ? 'Exporting...' : 'Export Top PDF'}
+                        </button>
+                      </div>
                     </div>
+                  )}
+
+                  {getPdfExportNotice('noAvailabilityTop') && !noAvailabilityModalOpen && (
+                    <div className="pdf-export-success">{getPdfExportNotice('noAvailabilityTop')}</div>
+                  )}
+
+                  {noAvailabilityPdfError && !noAvailabilityModalOpen && (
+                    <div className="msg error pdf-export-error">{noAvailabilityPdfError}</div>
                   )}
 
                   {noAvailabilityError && (
