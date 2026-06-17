@@ -9290,7 +9290,7 @@ function openReportLoadDetails(load) {
         </div>
       )}
 
-      <DriverTimeOffFormModal />
+      {DriverTimeOffFormModal()}
       <DriverRosterModal />
       {SalesLeadProfileModal()}
 
