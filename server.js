@@ -40,7 +40,10 @@ let cachedBidLists = null;
 let cachedBidListsAt = 0;
 let cachedSalesLeadsNotesListId = null;
 let cachedSalesLeadsNotesListIdAt = 0;
+let cachedSalesLeadsBaseReport = null;
+let cachedSalesLeadsBaseReportAt = 0;
 const BID_LIST_CACHE_MS = 5 * 60 * 1000;
+const SALES_LEADS_REPORT_CACHE_MS = Number(process.env.SALES_LEADS_REPORT_CACHE_MS || BID_LIST_CACHE_MS);
 
 function getAllowedLookupTokens() {
   return [
@@ -940,7 +943,7 @@ async function getSalesLeadsNotesListId(token) {
   if (configured) return configured;
 
   const now = Date.now();
-  if (cachedSalesLeadsNotesListId && now - cachedSalesLeadsNotesListIdAt < BID_LIST_CACHE_MS) {
+  if (cachedSalesLeadsNotesListIdAt && now - cachedSalesLeadsNotesListIdAt < BID_LIST_CACHE_MS) {
     return cachedSalesLeadsNotesListId;
   }
 
@@ -5316,8 +5319,9 @@ app.get('/reports/sales-leads', requireLookupAccess, async (req, res) => {
   try {
     const view = String(req.query.view || 'all').trim() || 'all';
     const sort = String(req.query.sort || '').trim();
+    const forceRefresh = parseBoolean(req.query.forceRefresh || req.query.refresh);
     const token = await getGraphToken();
-    const report = await getSalesLeadsReportData(token, view, sort);
+    const report = await getSalesLeadsReportData(token, view, sort, forceRefresh);
 
     res.json(report);
   } catch (error) {
@@ -5376,6 +5380,7 @@ app.post('/sales-leads/notes', requireLookupAccess, async (req, res) => {
   try {
     const token = await getGraphToken();
     const note = await createSalesLeadNote(token, req.body || {});
+    clearSalesLeadsReportCache();
 
     res.status(201).json({
       success: true,
@@ -5414,15 +5419,8 @@ app.get('/sales-leads/by-customer', requireLookupAccess, async (req, res) => {
     }
 
     const token = await getGraphToken();
-    const [items, customerRevenueIndex, notesBundle] = await Promise.all([
-      getAllListItemsWithFields(token, salesLeadsListId, getSalesLeadFieldSelect()),
-      buildCustomerRevenueIndex(token),
-      getSalesLeadNotesBundle(token)
-    ]);
-    const records = items
-      .map(cleanSalesLeadItem)
-      .map((record) => enrichSalesLeadWithRevenue(record, customerRevenueIndex))
-      .map((record) => enrichSalesLeadWithNotes(record, notesBundle.notesIndex));
+    const baseReport = await getSalesLeadsBaseReportData(token);
+    const records = baseReport.records || [];
     const customerKey = normalizeCustomerName(customer);
     const codeKey = normalizeText(customerCode);
 
@@ -5447,12 +5445,13 @@ app.get('/sales-leads/by-customer', requireLookupAccess, async (req, res) => {
 
     res.json({
       success: true,
-      generatedAt: `${formatEasternTimestamp()} Eastern`,
-      sourceListId: salesLeadsListId,
-      notesSourceListId: notesBundle.sourceListId,
-      notesStatus: notesBundle.status,
-      notesError: notesBundle.error,
-      notesScanned: notesBundle.recordsScanned,
+      generatedAt: baseReport.generatedAt,
+      sourceListId: baseReport.sourceListId,
+      notesSourceListId: baseReport.notesSourceListId,
+      notesStatus: baseReport.notesStatus,
+      notesError: baseReport.notesError,
+      notesScanned: baseReport.notesScanned,
+      recordsScanned: baseReport.recordsScanned,
       query: { customer, customerCode },
       count: matches.length,
       matches
@@ -10131,7 +10130,12 @@ function createSalesLeadSuppressionPdfBuffer(report) {
   return writer.finish();
 }
 
-async function getSalesLeadsReportData(token, view = 'all', sort = '') {
+function clearSalesLeadsReportCache() {
+  cachedSalesLeadsBaseReport = null;
+  cachedSalesLeadsBaseReportAt = 0;
+}
+
+async function getSalesLeadsBaseReportData(token, forceRefresh = false) {
   const salesLeadsListId = getSalesLeadsListId();
 
   if (!salesLeadsListId) {
@@ -10140,15 +10144,44 @@ async function getSalesLeadsReportData(token, view = 'all', sort = '') {
     throw error;
   }
 
+  const now = Date.now();
+  if (
+    !forceRefresh &&
+    cachedSalesLeadsBaseReport &&
+    now - cachedSalesLeadsBaseReportAt < SALES_LEADS_REPORT_CACHE_MS
+  ) {
+    return cachedSalesLeadsBaseReport;
+  }
+
   const [items, customerRevenueIndex, notesBundle] = await Promise.all([
     getAllListItemsWithFields(token, salesLeadsListId, getSalesLeadFieldSelect()),
     buildCustomerRevenueIndex(token),
     getSalesLeadNotesBundle(token)
   ]);
+
   const records = items
     .map(cleanSalesLeadItem)
     .map((record) => enrichSalesLeadWithRevenue(record, customerRevenueIndex))
     .map((record) => enrichSalesLeadWithNotes(record, notesBundle.notesIndex));
+
+  cachedSalesLeadsBaseReport = {
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    sourceListId: salesLeadsListId,
+    notesSourceListId: notesBundle.sourceListId,
+    notesStatus: notesBundle.status,
+    notesError: notesBundle.error,
+    notesScanned: notesBundle.recordsScanned,
+    recordsScanned: records.length,
+    records
+  };
+  cachedSalesLeadsBaseReportAt = now;
+
+  return cachedSalesLeadsBaseReport;
+}
+
+async function getSalesLeadsReportData(token, view = 'all', sort = '', forceRefresh = false) {
+  const baseReport = await getSalesLeadsBaseReportData(token, forceRefresh);
+  const records = baseReport.records || [];
   const filtered = filterSalesLeads(records, view);
 
   let sortMode = sort || 'name';
@@ -10158,16 +10191,16 @@ async function getSalesLeadsReportData(token, view = 'all', sort = '') {
 
   return {
     success: true,
-    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    generatedAt: baseReport.generatedAt,
     reportLabel: normalizeText(view) === 'suppressed' ? 'Lead Suppression Report' : 'Sales Leads',
-    sourceListId: salesLeadsListId,
-    notesSourceListId: notesBundle.sourceListId,
-    notesStatus: notesBundle.status,
-    notesError: notesBundle.error,
-    notesScanned: notesBundle.recordsScanned,
+    sourceListId: baseReport.sourceListId,
+    notesSourceListId: baseReport.notesSourceListId,
+    notesStatus: baseReport.notesStatus,
+    notesError: baseReport.notesError,
+    notesScanned: baseReport.notesScanned,
     view,
     sort: sortMode,
-    recordsScanned: records.length,
+    recordsScanned: baseReport.recordsScanned,
     count: filtered.length,
     summary: getSalesLeadSummary(records),
     records: sortSalesLeads(filtered, sortMode)

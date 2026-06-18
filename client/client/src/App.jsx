@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import './App.css';
 import koleLogo from './assets/kole-logo.png';
@@ -532,6 +532,7 @@ export default function App() {
   const [salesNoteSaving, setSalesNoteSaving] = useState(false);
   const [salesNoteMessage, setSalesNoteMessage] = useState('');
   const [salesNoteError, setSalesNoteError] = useState('');
+  const salesLeadsPrewarmStartedRef = useRef(false);
 
   const [authError, setAuthError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
@@ -698,6 +699,14 @@ export default function App() {
     };
   }, [reportActionAlerts, ordersDueSettlementReport, wonNotRegisteredReport]);
 
+  const visibleSalesLeadRecords = useMemo(() => {
+    const sourceRecords = salesLeadsReport?.records || [];
+    return sortSalesLeadRecords(
+      filterSalesLeadRecords(sourceRecords, salesLeadsView),
+      salesLeadsSort
+    );
+  }, [salesLeadsReport, salesLeadsView, salesLeadsSort]);
+
   const ordersDueSettlementActionBlocked =
     reportActionAlertCounts.isLoaded && reportActionAlertCounts.ordersDueSettlement <= 0;
   const wonNotRegisteredActionBlocked =
@@ -767,6 +776,79 @@ export default function App() {
 
     return () => window.clearInterval(interval);
   }, [isAuthenticated, accessToken, uploadDigestDate]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      salesLeadsPrewarmStartedRef.current = false;
+      return undefined;
+    }
+
+    if (salesLeadsPrewarmStartedRef.current || salesLeadsReport) return undefined;
+
+    const startupSettled = (
+      (operationsData || operationsError) &&
+      (driverPositionsData || driverPositionsError) &&
+      (uploadDigestData || uploadDigestError) &&
+      (intelliTrackData || intelliTrackError) &&
+      (availableTrucksData || availableTrucksError) &&
+      (availableTruckDistributionData || availableTruckDistributionError) &&
+      (reportActionAlerts || reportActionAlertsError) &&
+      !operationsLoading &&
+      !driverPositionsLoading &&
+      !uploadDigestLoading &&
+      !intelliTrackLoading &&
+      !availableTrucksLoading &&
+      !availableTruckDistributionLoading &&
+      !reportActionAlertsLoading
+    );
+
+    if (!startupSettled) return undefined;
+
+    salesLeadsPrewarmStartedRef.current = true;
+
+    let idleCallbackId = null;
+    const timeoutId = window.setTimeout(() => {
+      const runPrewarm = () => prewarmSalesLeadsReport();
+
+      if ('requestIdleCallback' in window) {
+        idleCallbackId = window.requestIdleCallback(runPrewarm, { timeout: 8000 });
+        return;
+      }
+
+      runPrewarm();
+    }, 1500);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      if (idleCallbackId && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(idleCallbackId);
+      }
+    };
+  }, [
+    isAuthenticated,
+    salesLeadsReport,
+    operationsData,
+    operationsError,
+    operationsLoading,
+    driverPositionsData,
+    driverPositionsError,
+    driverPositionsLoading,
+    uploadDigestData,
+    uploadDigestError,
+    uploadDigestLoading,
+    intelliTrackData,
+    intelliTrackError,
+    intelliTrackLoading,
+    availableTrucksData,
+    availableTrucksError,
+    availableTrucksLoading,
+    availableTruckDistributionData,
+    availableTruckDistributionError,
+    availableTruckDistributionLoading,
+    reportActionAlerts,
+    reportActionAlertsError,
+    reportActionAlertsLoading
+  ]);
 
   useEffect(() => {
     const pendingBol = String(intelliTrackPendingBol || '').trim().toUpperCase();
@@ -947,6 +1029,7 @@ export default function App() {
     setAuthError('');
     setLoginStatusMessage('');
     setLoginLoading(false);
+    salesLeadsPrewarmStartedRef.current = false;
     resetAppState();
   }
 
@@ -3651,13 +3734,46 @@ function getPositionStatusLabel(position) {
     return sorted;
   }
 
-  async function loadSalesLeadsReport() {
+  async function prewarmSalesLeadsReport() {
+    if (!isAuthenticated || salesLeadsReport) return;
+
+    try {
+      const params = new URLSearchParams({
+        view: 'all',
+        sort: 'name',
+        prewarm: '1'
+      });
+
+      const res = await authedFetch(`${API}/reports/sales-leads?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to prewarm Sales Leads.');
+      }
+
+      setSalesLeadsReport((current) => current || {
+        ...data,
+        view: 'all',
+        sort: 'name',
+        prewarmed: true
+      });
+    } catch (err) {
+      // This is intentionally quiet. Customer cards can still load on demand.
+      console.warn('Sales Leads background prewarm failed.', err);
+      salesLeadsPrewarmStartedRef.current = false;
+    }
+  }
+
+  async function loadSalesLeadsReport(options = {}) {
+    const forceRefresh = options?.forceRefresh === true;
+
     setSalesLeadsLoading(true);
     setSalesLeadsError(null);
 
     try {
       // Heavy Graph poll happens here only. Filters/sorts are local after this returns.
       const params = new URLSearchParams({ view: 'all', sort: 'name' });
+      if (forceRefresh) params.set('forceRefresh', '1');
       const res = await authedFetch(`${API}/reports/sales-leads?${params.toString()}`);
       const data = await res.json().catch(() => ({}));
 
@@ -3773,12 +3889,57 @@ function getPositionStatusLabel(position) {
     await openCustomerCardForName(customerName);
   }
 
+  function normalizeCustomerLookupKey(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/&/g, ' and ')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function findLocalSalesLeadMatch(customerName, customerCode = '') {
+    const records = salesLeadsReport?.records || [];
+    const customerKey = normalizeCustomerLookupKey(customerName);
+    const codeKey = normalizeSalesLeadText(customerCode);
+
+    if ((!customerKey && !codeKey) || records.length === 0) return null;
+
+    const matches = records
+      .map((record) => {
+        const recordName = normalizeCustomerLookupKey(record.CompanyName);
+        const recordNormalizedName = normalizeCustomerLookupKey(record.NormalizedName);
+        const recordCode = normalizeSalesLeadText(record.CustomerCode);
+        let score = 0;
+
+        if (codeKey && recordCode === codeKey) score += 1000;
+        if (customerKey && recordNormalizedName === customerKey) score += 850;
+        if (customerKey && recordName === customerKey) score += 800;
+        if (customerKey && recordNormalizedName.startsWith(customerKey)) score += 550;
+        if (customerKey && recordName.includes(customerKey)) score += 350;
+        if (customerKey && customerKey.includes(recordNormalizedName) && recordNormalizedName) score += 250;
+
+        return { record, score };
+      })
+      .filter((match) => match.score > 0)
+      .sort((a, b) => b.score - a.score || String(a.record.CompanyName || '').localeCompare(String(b.record.CompanyName || '')));
+
+    return matches[0]?.record || null;
+  }
+
   async function openCustomerCardForName(customerName, customerCode = '') {
     const cleanName = String(customerName || '').trim();
     const cleanCode = String(customerCode || '').trim();
 
     if (!cleanName && !cleanCode) {
       setCustomerLookupError('This order does not have a customer name or customer code to match.');
+      return;
+    }
+
+    const localMatch = findLocalSalesLeadMatch(cleanName, cleanCode);
+    if (localMatch) {
+      openSalesLeadCard(localMatch);
       return;
     }
 
@@ -8422,10 +8583,7 @@ function openReportLoadDetails(load) {
     const activeReportView = salesLeadsView;
     const activeReportSort = salesLeadsSort;
     const activeViewLabel = getSalesLeadViewLabel(activeReportView);
-    const records = sortSalesLeadRecords(
-      filterSalesLeadRecords(allRecords, activeReportView),
-      activeReportSort
-    );
+    const records = visibleSalesLeadRecords;
     const summaryButtons = salesLeadViewOptions.map((option) => ({
       ...option,
       count: Number(summary?.[option.summaryKey] || 0)
@@ -8534,7 +8692,7 @@ function openReportLoadDetails(load) {
                 </select>
               </label>
 
-              <button onClick={loadSalesLeadsReport} disabled={salesLeadsLoading}>
+              <button onClick={() => loadSalesLeadsReport({ forceRefresh: true })} disabled={salesLeadsLoading}>
                 {salesLeadsLoading ? 'Refreshing Customers...' : 'Refresh Customer Cards'}
               </button>
 
