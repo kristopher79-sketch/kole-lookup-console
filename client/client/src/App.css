@@ -6927,3 +6927,219 @@ button.available-truck-distribution-summary-card:disabled {
 .on-this-day-modal.report-modal {
   width: min(1500px, 96vw);
 }
+
+/* ON THIS DAY CLEANUP PASS */
+.on-this-day-preview .on-this-day-kpi-grid .report-kpi-card {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0f172a;
+  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.18);
+}
+
+.on-this-day-preview .on-this-day-kpi-grid .report-kpi-card span {
+  color: #475569;
+  opacity: 1;
+}
+
+.on-this-day-preview .on-this-day-kpi-grid .report-kpi-card strong {
+  color: #0f172a;
+}
+
+.on-this-day-filter-bar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 12px;
+  margin: 4px 0 18px;
+  flex-wrap: wrap;
+}
+
+.on-this-day-filter-bar label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 230px;
+}
+
+.on-this-day-filter-bar label span {
+  color: #cbd5e1;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 800;
+}
+
+.on-this-day-filter-bar select {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #020617;
+  color: #e5e7eb;
+  font-size: 14px;
+  outline: none;
+}
+
+.on-this-day-filter-bar small {
+  color: #94a3b8;
+  padding-bottom: 10px;
+}
+
+.on-this-day-summary-pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.on-this-day-summary-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: #334155;
+  color: #f8fafc;
+}
+
+.on-this-day-summary-pill strong {
+  font-size: 13px;
+}
+
+.on-this-day-summary-pill.pickup {
+  background: rgba(22, 101, 52, 0.9);
+}
+
+.on-this-day-summary-pill.delivery {
+  background: rgba(30, 64, 175, 0.9);
+}
+
+.on-this-day-summary-pill.bid {
+  background: rgba(120, 53, 15, 0.9);
+}
+
+.on-this-day-summary-pill.upload {
+  background: rgba(88, 28, 135, 0.9);
+}
+
+.on-this-day-summary-pill.off {
+  background: rgba(127, 29, 29, 0.9);
+}
+
+.on-this-day-section h5 {
+  color: #e5e7eb;
+  background: rgba(255,255,255,0.055);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+/* ON THIS DAY SECOND CLEANUP PASS */
+.on-this-day-run-hint {
+  margin: 10px 0 0;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.on-this-day-compare-button {
+  background: #475569;
+  color: #f8fafc;
+}
+
+.on-this-day-compare-button:hover {
+  background: #64748b;
+}
+
+.on-this-day-tonu-marker {
+  display: inline-block;
+  margin-left: 3px;
+  color: #facc15;
+  font-weight: 900;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.on-this-day-tonu-row td {
+  background: rgba(120, 53, 15, 0.12);
+}
+
+.on-this-day-tonu-note {
+  margin: 6px 0 2px;
+  color: #fde68a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* ON THIS DAY COMPARISON CARD ROWS */
+.on-this-day-comparison-kpi-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 14px 0 18px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.on-this-day-comparison-kpi-row {
+  display: grid;
+  grid-template-columns: 118px repeat(7, minmax(116px, 1fr));
+  gap: 10px;
+  align-items: stretch;
+  min-width: 1000px;
+}
+
+.on-this-day-comparison-year-card,
+.on-this-day-comparison-metric-card {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  color: #0f172a;
+  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.16);
+}
+
+.on-this-day-comparison-year-card {
+  border-radius: 12px;
+  padding: 12px 14px;
+  border-left: 5px solid #facc15;
+}
+
+.on-this-day-comparison-year-card span,
+.on-this-day-comparison-metric-card span {
+  display: block;
+  color: #475569;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.on-this-day-comparison-year-card strong,
+.on-this-day-comparison-metric-card strong {
+  display: block;
+  color: #0f172a;
+  font-size: 19px;
+  line-height: 1.15;
+}
+
+.on-this-day-comparison-year-card small {
+  display: block;
+  margin-top: 5px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.on-this-day-comparison-metric-card {
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+@media (max-width: 900px) {
+  .on-this-day-comparison-kpi-row {
+    min-width: 920px;
+    grid-template-columns: 108px repeat(7, minmax(104px, 1fr));
+  }
+}

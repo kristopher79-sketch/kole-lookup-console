@@ -462,7 +462,7 @@ export default function App() {
   const [fleetEquipmentPdfLoading, setFleetEquipmentPdfLoading] = useState(false);
   const [fleetEquipmentPdfError, setFleetEquipmentPdfError] = useState('');
   const [onThisDayDate, setOnThisDayDate] = useState(getEasternDateInputValue);
-  const [onThisDayMode, setOnThisDayMode] = useState('across');
+  const [onThisDayMode, setOnThisDayMode] = useState('exact');
   const [onThisDayReport, setOnThisDayReport] = useState(null);
   const [onThisDayLoading, setOnThisDayLoading] = useState(false);
   const [onThisDayError, setOnThisDayError] = useState(null);
@@ -2760,7 +2760,7 @@ function getPositionStatusLabel(position) {
 
     const params = new URLSearchParams({
       date: onThisDayDate,
-      mode: onThisDayMode || 'across'
+      mode: onThisDayMode || 'exact'
     });
 
     await downloadReportPdf({
@@ -2973,7 +2973,7 @@ function getPositionStatusLabel(position) {
     });
   }
 
-  async function loadOnThisDayReport() {
+  async function loadOnThisDayReport(modeOverride = '') {
     if (!onThisDayDate) {
       setOnThisDayError({
         code: 'REPORT_ERROR',
@@ -2982,6 +2982,9 @@ function getPositionStatusLabel(position) {
       return;
     }
 
+    const requestedMode = modeOverride || onThisDayMode || 'exact';
+
+    setOnThisDayMode(requestedMode);
     setOnThisDayLoading(true);
     setOnThisDayError(null);
     setOnThisDayPdfError('');
@@ -2992,7 +2995,7 @@ function getPositionStatusLabel(position) {
     try {
       const params = new URLSearchParams({
         date: onThisDayDate,
-        mode: onThisDayMode || 'across'
+        mode: requestedMode
       });
       const res = await authedFetch(`${API}/reports/on-this-day?${params.toString()}`);
       const data = await res.json().catch(() => ({}));
@@ -3011,6 +3014,14 @@ function getPositionStatusLabel(position) {
     } finally {
       setOnThisDayLoading(false);
     }
+  }
+
+  function loadOnThisDayComparisonReport() {
+    loadOnThisDayReport('across');
+  }
+
+  function loadOnThisDayExactReport() {
+    loadOnThisDayReport('exact');
   }
 
   function closeOnThisDayModal() {
@@ -5230,8 +5241,39 @@ function openReportLoadDetails(load) {
 
     if (!onThisDayReport) return null;
 
+    const isComparisonMode = onThisDayReport?.mode === 'across';
+    const isTonuMovement = (row = {}) => String(row.Status || '').trim().toLowerCase() === 'tonu';
+
+    const getSummaryMetricCards = (sourceSummary = {}) => ([
+      { key: 'pickups', label: 'Pickups', value: sourceSummary.pickups || 0 },
+      { key: 'deliveries', label: 'Deliveries', value: sourceSummary.deliveries || 0 },
+      { key: 'bidRecords', label: 'Bid Records', value: sourceSummary.ordersWon || 0 },
+      { key: 'uploads', label: 'Job Uploads', value: sourceSummary.uploads || 0 },
+      { key: 'driversOff', label: 'Drivers Off', value: sourceSummary.driversOff || 0 },
+      { key: 'noAvailability', label: 'No Availability', value: sourceSummary.noAvailability || 0 },
+      { key: 'availableTrucks', label: 'Available Posted', value: sourceSummary.availableTrucks || 0 }
+    ]);
+
+    const getComparisonYearSubLabel = (group = {}) => {
+      const rawLabel = String(group.label || '').trim();
+      const year = String(group.year || '').trim();
+      if (!rawLabel) return onThisDayReport?.targetLabel || '';
+      if (!year) return rawLabel;
+      return rawLabel.replace(new RegExp(`,?\s*${year}$`), '').trim() || rawLabel;
+    };
+
+    const getGroupSummaryPills = (group = {}) => ([
+      { label: 'Pickups', value: group.summary?.pickups || 0, className: 'pickup' },
+      { label: 'Deliveries', value: group.summary?.deliveries || 0, className: 'delivery' },
+      { label: 'Bid Records', value: group.summary?.ordersWon || 0, className: 'bid' },
+      { label: 'Uploads', value: group.summary?.uploads || 0, className: 'upload' },
+      { label: 'Drivers Off', value: group.summary?.driversOff || 0, className: 'off' }
+    ]);
+
     function renderMovementRows(rows = [], dateType = 'pickup') {
       if (!rows.length) return <div className="msg">No {dateType === 'pickup' ? 'pickups' : 'deliveries'} found.</div>;
+
+      const hasTonuRows = rows.some(isTonuMovement);
 
       return (
         <div className="report-table-wrap on-this-day-table-wrap">
@@ -5245,35 +5287,41 @@ function openReportLoadDetails(load) {
                 <th>Origin</th>
                 <th>Destination</th>
                 <th>Time</th>
-                <th>Status</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, index) => (
-                <tr
-                  key={`${dateType}-${row.id || row.BOL || row.BidID || index}-${index}`}
-                  className={row.id ? 'report-clickable-row' : ''}
-                  onClick={() => row.id && loadDetails(row.id, 'basic', row.SourceListId)}
-                  title={row.id ? 'Open full order screen' : ''}
-                >
-                  <td>{row.BOL || '-'}</td>
-                  <td>{row.Customer || '-'}</td>
-                  <td>{row.Driver || '-'}</td>
-                  <td>{row.Truck || '-'}</td>
-                  <td>{row.Origin || '-'}</td>
-                  <td>{row.Destination || '-'}</td>
-                  <td>{dateType === 'pickup' ? row.PickupTime || '-' : row.DeliveryTime || '-'}</td>
-                  <td>{row.Status || '-'}</td>
-                </tr>
-              ))}
+              {rows.map((row, index) => {
+                const isTonu = isTonuMovement(row);
+
+                return (
+                  <tr
+                    key={`${dateType}-${row.id || row.BOL || row.BidID || index}-${index}`}
+                    className={`${row.id ? 'report-clickable-row' : ''}${isTonu ? ' on-this-day-tonu-row' : ''}`.trim()}
+                    onClick={() => row.id && loadDetails(row.id, 'basic', row.SourceListId)}
+                    title={row.id ? 'Open full order screen' : ''}
+                  >
+                    <td>
+                      {row.BOL || '-'}
+                      {isTonu && <span className="on-this-day-tonu-marker" title="TONU shipment">*</span>}
+                    </td>
+                    <td>{row.Customer || '-'}</td>
+                    <td>{row.Driver || '-'}</td>
+                    <td>{row.Truck || '-'}</td>
+                    <td>{row.Origin || '-'}</td>
+                    <td>{row.Destination || '-'}</td>
+                    <td>{dateType === 'pickup' ? row.PickupTime || '-' : row.DeliveryTime || '-'}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
+          {hasTonuRows && <div className="on-this-day-tonu-note">* TONU shipment</div>}
         </div>
       );
     }
 
-    function renderOrdersWonRows(rows = []) {
-      if (!rows.length) return <div className="msg">No orders won found.</div>;
+    function renderBidRecordRows(rows = []) {
+      if (!rows.length) return <div className="msg">No bid listing records were created.</div>;
 
       return (
         <div className="report-table-wrap on-this-day-table-wrap">
@@ -5281,6 +5329,7 @@ function openReportLoadDetails(load) {
             <thead>
               <tr>
                 <th>BOL / BidID</th>
+                <th>Status</th>
                 <th>Customer</th>
                 <th>Driver / TMS Name</th>
                 <th>Truck</th>
@@ -5292,12 +5341,13 @@ function openReportLoadDetails(load) {
             <tbody>
               {rows.map((row, index) => (
                 <tr
-                  key={`won-${row.id || row.BOL || row.BidID || index}-${index}`}
+                  key={`bid-created-${row.id || row.BOL || row.BidID || index}-${index}`}
                   className={row.id ? 'report-clickable-row' : ''}
                   onClick={() => row.id && loadDetails(row.id, 'basic', row.SourceListId)}
                   title={row.id ? 'Open full order screen' : ''}
                 >
                   <td>{row.BOL || row.BidID || '-'}</td>
+                  <td><span className={getStatusClass(row.Status)}>{row.Status || '-'}</span></td>
                   <td>{row.Customer || '-'}</td>
                   <td>{row.Driver || '-'}</td>
                   <td>{row.Truck || '-'}</td>
@@ -5458,40 +5508,34 @@ function openReportLoadDetails(load) {
 
     return (
       <div className="driver-report-preview modal-report-preview on-this-day-preview">
-        <div className="driver-report-generated">
-          Generated: {onThisDayReport.generatedAt} · {onThisDayReport.modeLabel}
-        </div>
-
-        <div className="report-kpi-grid on-this-day-kpi-grid">
-          <div className="report-kpi-card">
-            <span>Pickups</span>
-            <strong>{formatReportNumber(summary.pickups)}</strong>
+        {isComparisonMode ? (
+          <div className="on-this-day-comparison-kpi-stack">
+            {groups.map((group) => (
+              <div key={`comparison-kpi-${group.year}`} className="on-this-day-comparison-kpi-row">
+                <div className="on-this-day-comparison-year-card">
+                  <span>Year</span>
+                  <strong>{group.year || '-'}</strong>
+                  <small>{getComparisonYearSubLabel(group)}</small>
+                </div>
+                {getSummaryMetricCards(group.summary).map((card) => (
+                  <div key={`${group.year}-${card.key}`} className="report-kpi-card on-this-day-comparison-metric-card">
+                    <span>{card.label}</span>
+                    <strong>{formatReportNumber(card.value)}</strong>
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
-          <div className="report-kpi-card">
-            <span>Deliveries</span>
-            <strong>{formatReportNumber(summary.deliveries)}</strong>
+        ) : (
+          <div className="report-kpi-grid on-this-day-kpi-grid">
+            {getSummaryMetricCards(summary).map((card) => (
+              <div key={card.key} className="report-kpi-card">
+                <span>{card.label}</span>
+                <strong>{formatReportNumber(card.value)}</strong>
+              </div>
+            ))}
           </div>
-          <div className="report-kpi-card">
-            <span>Orders Won</span>
-            <strong>{formatReportNumber(summary.ordersWon)}</strong>
-          </div>
-          <div className="report-kpi-card">
-            <span>Job Uploads</span>
-            <strong>{formatReportNumber(summary.uploads)}</strong>
-          </div>
-          <div className="report-kpi-card">
-            <span>Drivers Off</span>
-            <strong>{formatReportNumber(summary.driversOff)}</strong>
-          </div>
-          <div className="report-kpi-card">
-            <span>No Availability</span>
-            <strong>{formatReportNumber(summary.noAvailability)}</strong>
-          </div>
-          <div className="report-kpi-card">
-            <span>Available Posted</span>
-            <strong>{formatReportNumber(summary.availableTrucks)}</strong>
-          </div>
-        </div>
+        )}
 
         {warnings.length > 0 && (
           <div className="report-alert locked on-this-day-warning-card">
@@ -5510,9 +5554,13 @@ function openReportLoadDetails(load) {
               <div className="driver-report-section-header on-this-day-year-header">
                 <div>
                   <h4>{group.label || group.year}</h4>
-                  <p>
-                    {formatReportNumber(group.summary?.pickups)} pickup(s) · {formatReportNumber(group.summary?.deliveries)} delivery/deliveries · {formatReportNumber(group.summary?.uploads)} upload(s) · {formatReportNumber(group.summary?.driversOff)} driver(s) off
-                  </p>
+                  <div className="on-this-day-summary-pills">
+                    {getGroupSummaryPills(group).map((pill) => (
+                      <span key={`${group.year}-${pill.label}`} className={`on-this-day-summary-pill ${pill.className}`}>
+                        <strong>{formatReportNumber(pill.value)}</strong> {pill.label}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -5527,8 +5575,8 @@ function openReportLoadDetails(load) {
               </div>
 
               <div className="on-this-day-section">
-                <h5>Orders Won</h5>
-                {renderOrdersWonRows(group.ordersWon)}
+                <h5>Bid Listing Records Created</h5>
+                {renderBidRecordRows(group.ordersWon)}
               </div>
 
               <div className="on-this-day-section">
@@ -9151,7 +9199,7 @@ function openReportLoadDetails(load) {
                   <div className="report-card-header centered-report-header">
                     <div>
                       <h3>On This Day</h3>
-                      <p>Daily operational history: pickups, deliveries, orders won, uploads, drivers off, no availability, and available trucks posted.</p>
+                      <p>Daily operational history: Won/TONU pickups and deliveries, bid records created, uploads, drivers off, no availability, and available trucks posted.</p>
                     </div>
                   </div>
 
@@ -9163,6 +9211,7 @@ function openReportLoadDetails(load) {
                         value={onThisDayDate}
                         onChange={(e) => {
                           setOnThisDayDate(e.target.value);
+                          setOnThisDayMode('exact');
                           setOnThisDayReport(null);
                           setOnThisDayError(null);
                           setOnThisDayPdfError('');
@@ -9173,26 +9222,7 @@ function openReportLoadDetails(load) {
                       />
                     </label>
 
-                    <label>
-                      <span>View</span>
-                      <select
-                        value={onThisDayMode}
-                        onChange={(e) => {
-                          setOnThisDayMode(e.target.value);
-                          setOnThisDayReport(null);
-                          setOnThisDayError(null);
-                          setOnThisDayPdfError('');
-                          setOnThisDayModalOpen(false);
-                          clearPdfExportNotice('onThisDay');
-                        }}
-                        disabled={onThisDayLoading}
-                      >
-                        <option value="across">Across Years</option>
-                        <option value="exact">Exact Date</option>
-                      </select>
-                    </label>
-
-                    <button onClick={loadOnThisDayReport} disabled={onThisDayLoading}>
+                    <button onClick={() => loadOnThisDayReport()} disabled={onThisDayLoading}>
                       {onThisDayLoading ? 'Loading Report...' : 'Preview Report'}
                     </button>
                     <button
@@ -9204,6 +9234,10 @@ function openReportLoadDetails(load) {
                       {onThisDayPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
                     </button>
                   </div>
+
+                  <p className="on-this-day-run-hint">
+                    Loads the selected date only. Comparison years are available from the preview.
+                  </p>
 
                   {getPdfExportNotice('onThisDay') && !onThisDayModalOpen && (
                     <div className="pdf-export-success">{getPdfExportNotice('onThisDay')}</div>
@@ -9225,9 +9259,17 @@ function openReportLoadDetails(load) {
                         </button>
                         <button
                           type="button"
+                          className="view-button on-this-day-compare-button"
+                          onClick={onThisDayReport?.mode === 'exact' ? loadOnThisDayComparisonReport : loadOnThisDayExactReport}
+                          disabled={onThisDayLoading}
+                        >
+                          {onThisDayReport?.mode === 'exact' ? 'Load Comparison Years' : 'Back to Selected Date'}
+                        </button>
+                        <button
+                          type="button"
                           className="pdf-export-button compact"
                           onClick={downloadOnThisDayPdf}
-                          disabled={onThisDayPdfLoading}
+                          disabled={onThisDayPdfLoading || onThisDayLoading}
                         >
                           {onThisDayPdfLoading ? 'Exporting...' : 'Export PDF'}
                         </button>
@@ -10556,9 +10598,17 @@ function openReportLoadDetails(load) {
               <div className="report-modal-actions">
                 <button
                   type="button"
+                  className="view-button on-this-day-compare-button"
+                  onClick={onThisDayReport?.mode === 'exact' ? loadOnThisDayComparisonReport : loadOnThisDayExactReport}
+                  disabled={onThisDayLoading}
+                >
+                  {onThisDayReport?.mode === 'exact' ? 'Load Comparison Years' : 'Back to Selected Date'}
+                </button>
+                <button
+                  type="button"
                   className="pdf-export-button"
                   onClick={downloadOnThisDayPdf}
-                  disabled={onThisDayPdfLoading}
+                  disabled={onThisDayPdfLoading || onThisDayLoading}
                 >
                   {onThisDayPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
                 </button>

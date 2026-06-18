@@ -9209,7 +9209,7 @@ app.get('/reports/customer-booking-trends', requireLookupAccess, async (req, res
 
 function normalizeOnThisDayMode(value) {
   const normalized = normalizeText(value);
-  return normalized === 'exact' ? 'exact' : 'across';
+  return normalized === 'across' ? 'across' : 'exact';
 }
 
 function getOnThisDayTargetDate(value) {
@@ -9292,13 +9292,22 @@ function parseOnThisDayBidIdDate(value) {
   return `${match[1]}-${match[2]}-${match[3]}`;
 }
 
-function getOnThisDayBidWonDate(fields = {}, item = {}) {
+function getOnThisDayBidCreatedDate(fields = {}, item = {}) {
   return (
     parseOnThisDayBidIdDate(fields.BidID) ||
     normalizeEasternDateOnly(fields.Created) ||
     normalizeEasternDateOnly(item.createdDateTime) ||
     ''
   );
+}
+
+function normalizeOnThisDayStatus(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isOnThisDayMovementStatus(value) {
+  const status = normalizeOnThisDayStatus(value);
+  return status === 'won' || status === 'tonu';
 }
 
 function getOnThisDayBidFieldSelect() {
@@ -9330,7 +9339,7 @@ function cleanOnThisDayBidItem(item, sourceList) {
   const f = item.fields || {};
   const pickupDate = f.Pickup_x0020_Offer_x0020_Date || '';
   const deliveryDate = f.Expected_x0020_Delivery_x0020_Da || '';
-  const wonDate = getOnThisDayBidWonDate(f, item);
+  const createdDate = getOnThisDayBidCreatedDate(f, item);
   const driverName = cleanRosterText(f.TMSName) || cleanRosterText(f.Operator_x002f_Team);
 
   return {
@@ -9354,7 +9363,8 @@ function cleanOnThisDayBidItem(item, sourceList) {
     DeliveryDate: deliveryDate,
     DeliveryDateKey: normalizeEasternDateOnly(deliveryDate),
     DeliveryTime: formatOnThisDayTime(f.Delivery1Time, f.Delivery1AMorPM, f.Delivery1TimeSnapshot),
-    WonDate: wonDate,
+    CreatedDate: createdDate,
+    WonDate: createdDate,
     Status: f.Status || '',
     QuotedTotal: f.Quoted_x0020_Total || ''
   };
@@ -9479,14 +9489,16 @@ function buildOnThisDayResponse(data = {}, options = {}) {
   const bidRows = data.bidRows || [];
 
   bidRows.forEach((row) => {
-    const pickupYear = getOnThisDayGroupYear(row.PickupDateKey || row.PickupDate, targetDate, mode);
-    if (pickupYear) addOnThisDayRow(groups, 'pickups', pickupYear, row, targetDate, mode);
+    if (isOnThisDayMovementStatus(row.Status)) {
+      const pickupYear = getOnThisDayGroupYear(row.PickupDateKey || row.PickupDate, targetDate, mode);
+      if (pickupYear) addOnThisDayRow(groups, 'pickups', pickupYear, row, targetDate, mode);
 
-    const deliveryYear = getOnThisDayGroupYear(row.DeliveryDateKey || row.DeliveryDate, targetDate, mode);
-    if (deliveryYear) addOnThisDayRow(groups, 'deliveries', deliveryYear, row, targetDate, mode);
+      const deliveryYear = getOnThisDayGroupYear(row.DeliveryDateKey || row.DeliveryDate, targetDate, mode);
+      if (deliveryYear) addOnThisDayRow(groups, 'deliveries', deliveryYear, row, targetDate, mode);
+    }
 
-    const wonYear = getOnThisDayGroupYear(row.WonDate, targetDate, mode);
-    if (wonYear) addOnThisDayRow(groups, 'ordersWon', wonYear, row, targetDate, mode);
+    const createdYear = getOnThisDayGroupYear(row.CreatedDate || row.WonDate, targetDate, mode);
+    if (createdYear) addOnThisDayRow(groups, 'ordersWon', createdYear, row, targetDate, mode);
   });
 
   (data.uploadRows || []).forEach((row) => {
@@ -9519,7 +9531,7 @@ function buildOnThisDayResponse(data = {}, options = {}) {
       ...group,
       pickups: group.pickups.sort((a, b) => sortOnThisDayLoads(a, b, 'PickupDateKey')),
       deliveries: group.deliveries.sort((a, b) => sortOnThisDayLoads(a, b, 'DeliveryDateKey')),
-      ordersWon: group.ordersWon.sort((a, b) => sortOnThisDayLoads(a, b, 'WonDate')),
+      ordersWon: group.ordersWon.sort((a, b) => sortOnThisDayLoads(a, b, 'CreatedDate')),
       uploads: group.uploads.sort((a, b) => new Date(b.UploadDate).getTime() - new Date(a.UploadDate).getTime()),
       driversOff: group.driversOff.sort(sortDriverTimeOffRows),
       noAvailability: group.noAvailability.sort(sortOnThisDayTextRows),
@@ -9616,8 +9628,13 @@ async function getOnThisDayReportData(token, options = {}) {
 
   let driverTimeOffRows = [];
   try {
-    driverTimeOffRows = await getDriverTimeOffRows(token);
+    const driverTimeOffResult = await getDriverTimeOffRows(token);
+    driverTimeOffRows = Array.isArray(driverTimeOffResult?.rows) ? driverTimeOffResult.rows : [];
     recordsScanned.driverTimeOff = driverTimeOffRows.length;
+
+    if (driverTimeOffResult?.warning) {
+      warnings.push({ source: 'Driver Time Off', message: driverTimeOffResult.warning });
+    }
   } catch (error) {
     warnings.push({ source: 'Driver Time Off', message: error.message || 'Unable to load Driver Time Off.' });
   }
@@ -9679,16 +9696,30 @@ function createOnThisDayPdfBuffer(report) {
   });
 
   const summary = report.summary || {};
-  writer.addSectionTitle('Daily Activity Summary');
+  writer.addSectionTitle(report.mode === 'across' ? 'Comparison Year Summary' : 'Daily Activity Summary');
   writer.addParagraph('Report date', report.targetLabel || report.targetDate || '-');
   writer.addParagraph('View', report.modeLabel || '-');
   writer.addParagraph('Years returned', formatPdfNumber(report.yearsReturned));
-  writer.addParagraph('Pickups / Deliveries', `${formatPdfNumber(summary.pickups)} / ${formatPdfNumber(summary.deliveries)}`);
-  writer.addParagraph('Orders won', formatPdfNumber(summary.ordersWon));
-  writer.addParagraph('Job uploads', formatPdfNumber(summary.uploads));
-  writer.addParagraph('Drivers off', formatPdfNumber(summary.driversOff));
-  writer.addParagraph('No availability', formatPdfNumber(summary.noAvailability));
-  writer.addParagraph('Available trucks posted', formatPdfNumber(summary.availableTrucks));
+
+  if (report.mode === 'across') {
+    writer.addTable([
+      { label: 'Year', width: 52, value: 'year', mono: true },
+      { label: 'Pickups', width: 64, value: (group) => formatPdfNumber(group.summary?.pickups) },
+      { label: 'Deliveries', width: 70, value: (group) => formatPdfNumber(group.summary?.deliveries) },
+      { label: 'Bid Records', width: 76, value: (group) => formatPdfNumber(group.summary?.ordersWon) },
+      { label: 'Uploads', width: 62, value: (group) => formatPdfNumber(group.summary?.uploads) },
+      { label: 'Drivers Off', width: 78, value: (group) => formatPdfNumber(group.summary?.driversOff) },
+      { label: 'No Avail.', width: 70, value: (group) => formatPdfNumber(group.summary?.noAvailability) },
+      { label: 'Avail. Posted', width: 88, value: (group) => formatPdfNumber(group.summary?.availableTrucks) }
+    ], report.yearGroups || [], 'No comparison-year activity was found.');
+  } else {
+    writer.addParagraph('Pickups / Deliveries', `${formatPdfNumber(summary.pickups)} / ${formatPdfNumber(summary.deliveries)}`);
+    writer.addParagraph('Bid listing records created', formatPdfNumber(summary.ordersWon));
+    writer.addParagraph('Job uploads', formatPdfNumber(summary.uploads));
+    writer.addParagraph('Drivers off', formatPdfNumber(summary.driversOff));
+    writer.addParagraph('No availability', formatPdfNumber(summary.noAvailability));
+    writer.addParagraph('Available trucks posted', formatPdfNumber(summary.availableTrucks));
+  }
 
   if ((report.warnings || []).length > 0) {
     writer.addSectionTitle('Source Warnings', `${formatPdfNumber(report.warnings.length)} warning(s)`);
@@ -9698,44 +9729,49 @@ function createOnThisDayPdfBuffer(report) {
   }
 
   const movementColumns = [
-    { label: 'BOL', width: 58, value: 'BOL', mono: true },
-    { label: 'Customer', width: 132, value: 'Customer' },
-    { label: 'Driver / TMS', width: 104, value: 'Driver' },
-    { label: 'Truck', width: 44, value: 'Truck', mono: true },
-    { label: 'Origin', width: 124, value: 'Origin' },
-    { label: 'Destination', width: 124, value: 'Destination' },
-    { label: 'Time', width: 74, value: (row) => row.PickupTime || row.DeliveryTime || '-' },
-    { label: 'Status', width: 60, value: 'Status' }
+    { label: 'BOL', width: 70, value: (row) => `${row.BOL || '-'}${normalizeOnThisDayStatus(row.Status) === 'tonu' ? ' *' : ''}`, mono: true },
+    { label: 'Customer', width: 148, value: 'Customer' },
+    { label: 'Driver / TMS', width: 112, value: 'Driver' },
+    { label: 'Truck', width: 48, value: 'Truck', mono: true },
+    { label: 'Origin', width: 136, value: 'Origin' },
+    { label: 'Destination', width: 136, value: 'Destination' },
+    { label: 'Time', width: 70, value: (row) => row.PickupTime || row.DeliveryTime || '-' }
   ];
+
+  const getTonuFootnote = (rows = []) => (
+    rows.some((row) => normalizeOnThisDayStatus(row.Status) === 'tonu') ? ' · * TONU shipment' : ''
+  );
 
   (report.yearGroups || []).forEach((group) => {
     writer.addSectionTitle(group.label || group.year, [
       `${formatPdfNumber(group.summary?.pickups)} pickup(s)`,
       `${formatPdfNumber(group.summary?.deliveries)} delivery/deliveries`,
+      `${formatPdfNumber(group.summary?.ordersWon)} bid record(s)`,
       `${formatPdfNumber(group.summary?.uploads)} upload(s)`,
       `${formatPdfNumber(group.summary?.driversOff)} driver(s) off`
     ].join(' · '));
 
-    writer.addSectionTitle('Pickups', `${formatPdfNumber(group.pickups?.length)} row(s)`);
+    writer.addSectionTitle('Pickups', `${formatPdfNumber(group.pickups?.length)} row(s)${getTonuFootnote(group.pickups || [])}`);
     writer.addTable(movementColumns.map((column) => (
       column.label === 'Time' ? { ...column, value: 'PickupTime' } : column
     )), group.pickups || [], 'No pickups found.');
 
-    writer.addSectionTitle('Deliveries', `${formatPdfNumber(group.deliveries?.length)} row(s)`);
+    writer.addSectionTitle('Deliveries', `${formatPdfNumber(group.deliveries?.length)} row(s)${getTonuFootnote(group.deliveries || [])}`);
     writer.addTable(movementColumns.map((column) => (
       column.label === 'Time' ? { ...column, value: 'DeliveryTime' } : column
     )), group.deliveries || [], 'No deliveries found.');
 
-    writer.addSectionTitle('Orders Won', `${formatPdfNumber(group.ordersWon?.length)} row(s)`);
+    writer.addSectionTitle('Bid Listing Records Created', `${formatPdfNumber(group.ordersWon?.length)} row(s)`);
     writer.addTable([
-      { label: 'Bid/BOL', width: 90, value: (row) => row.BOL || row.BidID || '-' },
-      { label: 'Customer', width: 148, value: 'Customer' },
-      { label: 'Driver / TMS', width: 110, value: 'Driver' },
-      { label: 'Truck', width: 48, value: 'Truck', mono: true },
-      { label: 'Origin', width: 132, value: 'Origin' },
-      { label: 'Destination', width: 132, value: 'Destination' },
+      { label: 'Bid/BOL', width: 92, value: (row) => row.BOL || row.BidID || '-' },
+      { label: 'Status', width: 52, value: 'Status' },
+      { label: 'Customer', width: 136, value: 'Customer' },
+      { label: 'Driver / TMS', width: 104, value: 'Driver' },
+      { label: 'Truck', width: 44, value: 'Truck', mono: true },
+      { label: 'Pickup', width: 76, value: (row) => formatPdfRosterDate(row.PickupDateKey || row.PickupDate) },
+      { label: 'Delivery', width: 76, value: (row) => formatPdfRosterDate(row.DeliveryDateKey || row.DeliveryDate) },
       { label: 'Quote', width: 60, value: (row) => formatPdfMoney(row.QuotedTotal) }
-    ], group.ordersWon || [], 'No orders won found.');
+    ], group.ordersWon || [], 'No bid listing records were created.');
 
     writer.addSectionTitle('Job Upload Activity', `${formatPdfNumber(group.uploads?.length)} row(s)`);
     writer.addTable([
