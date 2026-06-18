@@ -3954,8 +3954,8 @@ async function getDriverRosterByTruck(token) {
 }
 
 function sortDriverRosterRecords(a, b) {
-  const aName = normalizeText(a.operatorTeamName || a.tmsName);
-  const bName = normalizeText(b.operatorTeamName || b.tmsName);
+  const aName = normalizeText(a.tmsName || a.operatorTeamName);
+  const bName = normalizeText(b.tmsName || b.operatorTeamName);
 
   const nameCompare = aName.localeCompare(bName);
   if (nameCompare !== 0) return nameCompare;
@@ -5314,54 +5314,16 @@ app.get('/reports/sales-activity', requireLookupAccess, async (req, res) => {
 
 app.get('/reports/sales-leads', requireLookupAccess, async (req, res) => {
   try {
-    const salesLeadsListId = getSalesLeadsListId();
-
-    if (!salesLeadsListId) {
-      return res.status(500).json({
-        success: false,
-        error: 'SALES_LEADS_LIST_ID is not configured on the server.'
-      });
-    }
-
     const view = String(req.query.view || 'all').trim() || 'all';
     const sort = String(req.query.sort || '').trim();
     const token = await getGraphToken();
-    const [items, customerRevenueIndex, notesBundle] = await Promise.all([
-      getAllListItemsWithFields(token, salesLeadsListId, getSalesLeadFieldSelect()),
-      buildCustomerRevenueIndex(token),
-      getSalesLeadNotesBundle(token)
-    ]);
-    const records = items
-      .map(cleanSalesLeadItem)
-      .map((record) => enrichSalesLeadWithRevenue(record, customerRevenueIndex))
-      .map((record) => enrichSalesLeadWithNotes(record, notesBundle.notesIndex));
-    const filtered = filterSalesLeads(records, view);
+    const report = await getSalesLeadsReportData(token, view, sort);
 
-    let sortMode = sort || 'name';
-    if (normalizeText(view) === 'followupdue') sortMode = sort || 'followUp';
-    if (normalizeText(view) === 'unconverted') sortMode = sort || 'quotes';
-    if (normalizeText(view) === 'aviation') sortMode = sort || 'quotes';
-
-    res.json({
-      success: true,
-      generatedAt: `${formatEasternTimestamp()} Eastern`,
-      reportLabel: 'Sales Leads',
-      sourceListId: salesLeadsListId,
-      notesSourceListId: notesBundle.sourceListId,
-      notesStatus: notesBundle.status,
-      notesError: notesBundle.error,
-      notesScanned: notesBundle.recordsScanned,
-      view,
-      sort: sortMode,
-      recordsScanned: records.length,
-      count: filtered.length,
-      summary: getSalesLeadSummary(records),
-      records: sortSalesLeads(filtered, sortMode)
-    });
+    res.json(report);
   } catch (error) {
     console.error(error);
 
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       error: error.message || 'Unable to load Sales Leads.'
     });
@@ -9243,6 +9205,944 @@ app.get('/reports/customer-booking-trends', requireLookupAccess, async (req, res
   }
 });
 
+
+
+function normalizeOnThisDayMode(value) {
+  const normalized = normalizeText(value);
+  return normalized === 'exact' ? 'exact' : 'across';
+}
+
+function getOnThisDayTargetDate(value) {
+  const candidate = normalizeEasternDateOnly(value) || String(value || '').trim();
+  return isValidDateInput(candidate) ? candidate : formatEasternDate();
+}
+
+function getDateMonthDayKey(value) {
+  const dateKey = normalizeEasternDateOnly(value);
+  return dateKey ? dateKey.slice(5) : '';
+}
+
+function getDateYearKey(value) {
+  const dateKey = normalizeEasternDateOnly(value);
+  return dateKey ? dateKey.slice(0, 4) : '';
+}
+
+function isDateMatchForOnThisDay(value, targetDate, mode = 'across') {
+  const dateKey = normalizeEasternDateOnly(value);
+  if (!dateKey) return false;
+
+  if (normalizeOnThisDayMode(mode) === 'exact') {
+    return dateKey === targetDate;
+  }
+
+  return dateKey.slice(5) === targetDate.slice(5);
+}
+
+function getOnThisDayGroupYear(value, targetDate, mode = 'across') {
+  const dateKey = normalizeEasternDateOnly(value);
+  if (!dateKey || !isDateMatchForOnThisDay(dateKey, targetDate, mode)) return '';
+  return normalizeOnThisDayMode(mode) === 'exact' ? targetDate.slice(0, 4) : dateKey.slice(0, 4);
+}
+
+function buildOnThisDayDateForYear(year, targetDate) {
+  const candidate = `${year}-${String(targetDate || '').slice(5)}`;
+  return isValidDateInput(candidate) ? candidate : '';
+}
+
+function formatOnThisDayFullDate(value) {
+  const dateKey = normalizeEasternDateOnly(value);
+  if (!dateKey) return String(value || '-');
+
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  return date.toLocaleDateString('en-US', {
+    timeZone: 'UTC',
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
+}
+
+function formatOnThisDayMonthDay(value) {
+  const dateKey = normalizeEasternDateOnly(value);
+  if (!dateKey) return String(value || '-');
+
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  return date.toLocaleDateString('en-US', {
+    timeZone: 'UTC',
+    month: 'long',
+    day: 'numeric'
+  });
+}
+
+function formatOnThisDayTime(timeValue, ampmValue, snapshotValue) {
+  const snapshot = cleanRosterText(snapshotValue);
+  if (snapshot) return snapshot;
+
+  return uniqueNonEmpty([timeValue, ampmValue]).join(' ') || '-';
+}
+
+function parseOnThisDayBidIdDate(value) {
+  const match = String(value || '').match(/Q-(\d{4})(\d{2})(\d{2})/i);
+  if (!match) return '';
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
+function getOnThisDayBidWonDate(fields = {}, item = {}) {
+  return (
+    parseOnThisDayBidIdDate(fields.BidID) ||
+    normalizeEasternDateOnly(fields.Created) ||
+    normalizeEasternDateOnly(item.createdDateTime) ||
+    ''
+  );
+}
+
+function getOnThisDayBidFieldSelect() {
+  return [
+    'BOLNumber_x0028_Won_x0029_',
+    'BidID',
+    'Company',
+    'CustomerCode',
+    'Shipment_x0020_Origin',
+    'Shipment_x0020_Destination',
+    'Operator_x002f_Team',
+    'TMSName',
+    'Truck_x0020_Number',
+    'Pickup_x0020_Offer_x0020_Date',
+    'Expected_x0020_Delivery_x0020_Da',
+    'Pickup1PickupTime',
+    'Pickup1AMorPM',
+    'Pickup1TimeSnapshot',
+    'Delivery1Time',
+    'Delivery1AMorPM',
+    'Delivery1TimeSnapshot',
+    'Status',
+    'Quoted_x0020_Total',
+    'Created'
+  ].join(',');
+}
+
+function cleanOnThisDayBidItem(item, sourceList) {
+  const f = item.fields || {};
+  const pickupDate = f.Pickup_x0020_Offer_x0020_Date || '';
+  const deliveryDate = f.Expected_x0020_Delivery_x0020_Da || '';
+  const wonDate = getOnThisDayBidWonDate(f, item);
+  const driverName = cleanRosterText(f.TMSName) || cleanRosterText(f.Operator_x002f_Team);
+
+  return {
+    id: item.id || '',
+    SourceListId: sourceList?.listId || '',
+    SourceList: sourceList?.label || '',
+    SourceYear: sourceList?.year || '',
+    BOL: f.BOLNumber_x0028_Won_x0029_ || '',
+    BidID: f.BidID || '',
+    Customer: f.Company || '',
+    CustomerCode: f.CustomerCode || '',
+    Origin: f.Shipment_x0020_Origin || '',
+    Destination: f.Shipment_x0020_Destination || '',
+    Driver: driverName,
+    OperatorTeam: f.Operator_x002f_Team || '',
+    TMSName: f.TMSName || '',
+    Truck: f.Truck_x0020_Number || '',
+    PickupDate: pickupDate,
+    PickupDateKey: normalizeEasternDateOnly(pickupDate),
+    PickupTime: formatOnThisDayTime(f.Pickup1PickupTime, f.Pickup1AMorPM, f.Pickup1TimeSnapshot),
+    DeliveryDate: deliveryDate,
+    DeliveryDateKey: normalizeEasternDateOnly(deliveryDate),
+    DeliveryTime: formatOnThisDayTime(f.Delivery1Time, f.Delivery1AMorPM, f.Delivery1TimeSnapshot),
+    WonDate: wonDate,
+    Status: f.Status || '',
+    QuotedTotal: f.Quoted_x0020_Total || ''
+  };
+}
+
+function sortOnThisDayLoads(a, b, dateField = '') {
+  const dateDiff = String(a?.[dateField] || '').localeCompare(String(b?.[dateField] || ''));
+  if (dateDiff !== 0) return dateDiff;
+
+  const truckDiff = String(a.Truck || '').localeCompare(String(b.Truck || ''), undefined, { numeric: true, sensitivity: 'base' });
+  if (truckDiff !== 0) return truckDiff;
+
+  return String(a.Customer || '').localeCompare(String(b.Customer || ''), undefined, { sensitivity: 'base' });
+}
+
+function sortOnThisDayTextRows(a, b) {
+  return String(a.Driver || a.driverName || a.operatorName || a.Customer || a.company || '').localeCompare(
+    String(b.Driver || b.driverName || b.operatorName || b.Customer || b.company || ''),
+    undefined,
+    { numeric: true, sensitivity: 'base' }
+  );
+}
+
+function getOnThisDayGroup(map, year, targetDate, mode) {
+  const cleanYear = String(year || '').trim() || 'Unknown';
+
+  if (!map.has(cleanYear)) {
+    const groupDate = cleanYear === 'Unknown' ? '' : buildOnThisDayDateForYear(cleanYear, targetDate);
+    map.set(cleanYear, {
+      year: cleanYear,
+      date: groupDate,
+      label: normalizeOnThisDayMode(mode) === 'exact'
+        ? formatOnThisDayFullDate(targetDate)
+        : (groupDate ? formatOnThisDayFullDate(groupDate) : `${formatOnThisDayMonthDay(targetDate)} · ${cleanYear}`),
+      summary: {
+        pickups: 0,
+        deliveries: 0,
+        ordersWon: 0,
+        uploads: 0,
+        driversOff: 0,
+        noAvailability: 0,
+        availableTrucks: 0
+      },
+      pickups: [],
+      deliveries: [],
+      ordersWon: [],
+      uploads: [],
+      driversOff: [],
+      noAvailability: [],
+      availableTrucks: []
+    });
+  }
+
+  return map.get(cleanYear);
+}
+
+function addOnThisDayRow(groups, sectionKey, year, row, targetDate, mode) {
+  const group = getOnThisDayGroup(groups, year, targetDate, mode);
+  group[sectionKey].push(row);
+  group.summary[sectionKey] = group[sectionKey].length;
+}
+
+function getOnThisDayTimeOffMatches(row = {}, targetDate, mode = 'across') {
+  const startDate = normalizeEasternDateOnly(row.startDate);
+  const endDate = normalizeEasternDateOnly(row.endDate || row.startDate);
+  if (!startDate || !endDate) return [];
+
+  if (normalizeOnThisDayMode(mode) === 'exact') {
+    return startDate <= targetDate && endDate >= targetDate ? [targetDate.slice(0, 4)] : [];
+  }
+
+  const startYear = Number(startDate.slice(0, 4));
+  const endYear = Number(endDate.slice(0, 4));
+  if (Number.isNaN(startYear) || Number.isNaN(endYear)) return [];
+
+  const years = [];
+  for (let year = startYear; year <= endYear; year += 1) {
+    const candidate = buildOnThisDayDateForYear(year, targetDate);
+    if (candidate && candidate >= startDate && candidate <= endDate) {
+      years.push(String(year));
+    }
+  }
+
+  return years;
+}
+
+function getOnThisDayNoAvailabilityRow(row = {}) {
+  return {
+    id: row.id || '',
+    sourceLabel: row.sourceLabel || '',
+    date: row.solicitDateKey || row.solicitDate || '',
+    company: row.company || '',
+    requestor: row.requestor || '',
+    pickupLocation: row.pickupCityState || normalizeNoAvailabilityCityState(row.pickupLocation),
+    deliveryLocation: row.deliveryCityState || normalizeNoAvailabilityCityState(row.deliveryLocation),
+    shipmentType: row.shipmentType || '',
+    totalMiles: row.totalMiles || 0
+  };
+}
+
+function getOnThisDayAvailableTruckRow(record = {}) {
+  return {
+    id: record.id || '',
+    dateSent: record.dateSent || '',
+    timeOfDay: record.timeOfDay || '',
+    driverName: record.driverName || '',
+    unitNo: record.unitNo || '',
+    equipmentType: record.equipmentType || '',
+    currentLocation: record.currentLocation || '',
+    proximitySummary: (record.proximityStops || [])
+      .slice(0, 4)
+      .map((stop) => uniqueNonEmpty([stop.location, stop.timeLabel]).join(' · '))
+      .filter(Boolean)
+      .join(' | ')
+  };
+}
+
+function buildOnThisDayResponse(data = {}, options = {}) {
+  const targetDate = getOnThisDayTargetDate(options.date);
+  const mode = normalizeOnThisDayMode(options.mode);
+  const groups = new Map();
+  const bidRows = data.bidRows || [];
+
+  bidRows.forEach((row) => {
+    const pickupYear = getOnThisDayGroupYear(row.PickupDateKey || row.PickupDate, targetDate, mode);
+    if (pickupYear) addOnThisDayRow(groups, 'pickups', pickupYear, row, targetDate, mode);
+
+    const deliveryYear = getOnThisDayGroupYear(row.DeliveryDateKey || row.DeliveryDate, targetDate, mode);
+    if (deliveryYear) addOnThisDayRow(groups, 'deliveries', deliveryYear, row, targetDate, mode);
+
+    const wonYear = getOnThisDayGroupYear(row.WonDate, targetDate, mode);
+    if (wonYear) addOnThisDayRow(groups, 'ordersWon', wonYear, row, targetDate, mode);
+  });
+
+  (data.uploadRows || []).forEach((row) => {
+    const year = getOnThisDayGroupYear(row.UploadDate, targetDate, mode);
+    if (year) addOnThisDayRow(groups, 'uploads', year, row, targetDate, mode);
+  });
+
+  (data.driverTimeOffRows || []).forEach((row) => {
+    getOnThisDayTimeOffMatches(row, targetDate, mode).forEach((year) => {
+      addOnThisDayRow(groups, 'driversOff', year, row, targetDate, mode);
+    });
+  });
+
+  (data.noAvailabilityRows || []).forEach((row) => {
+    const year = getOnThisDayGroupYear(row.solicitDateKey || row.solicitDate, targetDate, mode);
+    if (year) addOnThisDayRow(groups, 'noAvailability', year, getOnThisDayNoAvailabilityRow(row), targetDate, mode);
+  });
+
+  (data.availableTruckRows || []).forEach((row) => {
+    const year = getOnThisDayGroupYear(row.dateSent, targetDate, mode);
+    if (year) addOnThisDayRow(groups, 'availableTrucks', year, getOnThisDayAvailableTruckRow(row), targetDate, mode);
+  });
+
+  if (groups.size === 0 && mode === 'exact') {
+    getOnThisDayGroup(groups, targetDate.slice(0, 4), targetDate, mode);
+  }
+
+  const yearGroups = [...groups.values()]
+    .map((group) => ({
+      ...group,
+      pickups: group.pickups.sort((a, b) => sortOnThisDayLoads(a, b, 'PickupDateKey')),
+      deliveries: group.deliveries.sort((a, b) => sortOnThisDayLoads(a, b, 'DeliveryDateKey')),
+      ordersWon: group.ordersWon.sort((a, b) => sortOnThisDayLoads(a, b, 'WonDate')),
+      uploads: group.uploads.sort((a, b) => new Date(b.UploadDate).getTime() - new Date(a.UploadDate).getTime()),
+      driversOff: group.driversOff.sort(sortDriverTimeOffRows),
+      noAvailability: group.noAvailability.sort(sortOnThisDayTextRows),
+      availableTrucks: group.availableTrucks.sort(sortOnThisDayTextRows)
+    }))
+    .sort((a, b) => Number(b.year || 0) - Number(a.year || 0));
+
+  const summary = yearGroups.reduce((totals, group) => {
+    Object.keys(totals).forEach((key) => {
+      totals[key] += Number(group.summary?.[key] || 0);
+    });
+    return totals;
+  }, {
+    pickups: 0,
+    deliveries: 0,
+    ordersWon: 0,
+    uploads: 0,
+    driversOff: 0,
+    noAvailability: 0,
+    availableTrucks: 0
+  });
+
+  return {
+    success: true,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    reportLabel: mode === 'exact'
+      ? `On This Day: ${formatOnThisDayFullDate(targetDate)}`
+      : `On This Day: ${formatOnThisDayMonthDay(targetDate)} Across Years`,
+    targetDate,
+    targetMonthDay: targetDate.slice(5),
+    targetLabel: mode === 'exact' ? formatOnThisDayFullDate(targetDate) : formatOnThisDayMonthDay(targetDate),
+    mode,
+    modeLabel: mode === 'exact' ? 'Exact Date' : 'Across Years',
+    summary,
+    count: Object.values(summary).reduce((sum, value) => sum + Number(value || 0), 0),
+    yearsReturned: yearGroups.length,
+    yearGroups,
+    recordsScanned: data.recordsScanned || {},
+    warnings: data.warnings || []
+  };
+}
+
+async function getOnThisDayReportData(token, options = {}) {
+  const targetDate = getOnThisDayTargetDate(options.date);
+  const mode = normalizeOnThisDayMode(options.mode);
+  const warnings = [];
+  const recordsScanned = {};
+
+  const sourceLists = await getSearchableBidLists(token);
+  const bidSettled = await Promise.allSettled(
+    sourceLists.map(async (sourceList) => {
+      const bundle = await getAllListItemsWithFieldsResilient(
+        token,
+        sourceList.listId,
+        getOnThisDayBidFieldSelect()
+      );
+
+      if (bundle.usedFallback) {
+        warnings.push({
+          source: sourceList.label,
+          message: bundle.warning || 'Bid Listing selected-field fetch failed; retried with full fields.'
+        });
+      }
+
+      return bundle.items.map((item) => cleanOnThisDayBidItem(item, sourceList));
+    })
+  );
+
+  const bidRows = bidSettled
+    .filter((result) => result.status === 'fulfilled')
+    .flatMap((result) => result.value);
+
+  bidSettled.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      warnings.push({
+        source: sourceLists[index]?.label || 'Bid Listing',
+        message: result.reason?.message || 'Unable to load this Bid Listing source.'
+      });
+    }
+  });
+  recordsScanned.bidListings = bidRows.length;
+
+  let uploadRows = [];
+  const uploadDigestListId = process.env.UPLOAD_DIGEST_LIST_ID || DEFAULT_UPLOAD_DIGEST_LIST_ID;
+  if (uploadDigestListId) {
+    try {
+      const uploadItems = await getAllListItemsWithFields(token, uploadDigestListId);
+      uploadRows = uploadItems.map(buildUploadDigestRecord);
+      recordsScanned.uploadDigest = uploadRows.length;
+    } catch (error) {
+      warnings.push({ source: 'Upload Digest', message: error.message || 'Unable to load Upload Digest.' });
+    }
+  }
+
+  let driverTimeOffRows = [];
+  try {
+    driverTimeOffRows = await getDriverTimeOffRows(token);
+    recordsScanned.driverTimeOff = driverTimeOffRows.length;
+  } catch (error) {
+    warnings.push({ source: 'Driver Time Off', message: error.message || 'Unable to load Driver Time Off.' });
+  }
+
+  let noAvailabilityRows = [];
+  const noAvailabilitySources = getNoAvailabilitySources();
+  if (noAvailabilitySources.length) {
+    const noAvailabilitySettled = await Promise.allSettled(
+      noAvailabilitySources.map(async (source) => {
+        const items = await getAllListItemsWithFields(token, source.listId, getNoAvailabilityFieldSelect());
+        return items.map((item) => cleanNoAvailabilityItem(item, source));
+      })
+    );
+
+    noAvailabilityRows = noAvailabilitySettled
+      .filter((result) => result.status === 'fulfilled')
+      .flatMap((result) => result.value);
+
+    noAvailabilitySettled.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        warnings.push({
+          source: noAvailabilitySources[index]?.label || 'No Availability',
+          message: result.reason?.message || 'Unable to load this No Availability source.'
+        });
+      }
+    });
+    recordsScanned.noAvailability = noAvailabilityRows.length;
+  }
+
+  let availableTruckRows = [];
+  const availableTrucksListId = getAvailableTrucksSingleLineListId();
+  if (availableTrucksListId) {
+    try {
+      const availableTruckItems = await getAllListItemsWithFields(token, availableTrucksListId, getAvailableTruckFieldSelect());
+      availableTruckRows = availableTruckItems
+        .map(cleanAvailableTruckRecord)
+        .filter((record) => record.driverName || record.unitNo || record.currentLocation);
+      recordsScanned.availableTrucks = availableTruckRows.length;
+    } catch (error) {
+      warnings.push({ source: 'Available Trucks', message: error.message || 'Unable to load Available Trucks.' });
+    }
+  }
+
+  return buildOnThisDayResponse({
+    bidRows,
+    uploadRows,
+    driverTimeOffRows,
+    noAvailabilityRows,
+    availableTruckRows,
+    recordsScanned,
+    warnings
+  }, { date: targetDate, mode });
+}
+
+function createOnThisDayPdfBuffer(report) {
+  const writer = createPdfReportWriter({
+    title: report.reportLabel || 'On This Day',
+    subtitle: `Generated: ${report.generatedAt || '-'}    View: ${report.modeLabel || '-'}`
+  });
+
+  const summary = report.summary || {};
+  writer.addSectionTitle('Daily Activity Summary');
+  writer.addParagraph('Report date', report.targetLabel || report.targetDate || '-');
+  writer.addParagraph('View', report.modeLabel || '-');
+  writer.addParagraph('Years returned', formatPdfNumber(report.yearsReturned));
+  writer.addParagraph('Pickups / Deliveries', `${formatPdfNumber(summary.pickups)} / ${formatPdfNumber(summary.deliveries)}`);
+  writer.addParagraph('Orders won', formatPdfNumber(summary.ordersWon));
+  writer.addParagraph('Job uploads', formatPdfNumber(summary.uploads));
+  writer.addParagraph('Drivers off', formatPdfNumber(summary.driversOff));
+  writer.addParagraph('No availability', formatPdfNumber(summary.noAvailability));
+  writer.addParagraph('Available trucks posted', formatPdfNumber(summary.availableTrucks));
+
+  if ((report.warnings || []).length > 0) {
+    writer.addSectionTitle('Source Warnings', `${formatPdfNumber(report.warnings.length)} warning(s)`);
+    (report.warnings || []).slice(0, 8).forEach((warning) => {
+      writer.addParagraph(warning.source || 'Source', warning.message || 'Unable to load source.');
+    });
+  }
+
+  const movementColumns = [
+    { label: 'BOL', width: 58, value: 'BOL', mono: true },
+    { label: 'Customer', width: 132, value: 'Customer' },
+    { label: 'Driver / TMS', width: 104, value: 'Driver' },
+    { label: 'Truck', width: 44, value: 'Truck', mono: true },
+    { label: 'Origin', width: 124, value: 'Origin' },
+    { label: 'Destination', width: 124, value: 'Destination' },
+    { label: 'Time', width: 74, value: (row) => row.PickupTime || row.DeliveryTime || '-' },
+    { label: 'Status', width: 60, value: 'Status' }
+  ];
+
+  (report.yearGroups || []).forEach((group) => {
+    writer.addSectionTitle(group.label || group.year, [
+      `${formatPdfNumber(group.summary?.pickups)} pickup(s)`,
+      `${formatPdfNumber(group.summary?.deliveries)} delivery/deliveries`,
+      `${formatPdfNumber(group.summary?.uploads)} upload(s)`,
+      `${formatPdfNumber(group.summary?.driversOff)} driver(s) off`
+    ].join(' · '));
+
+    writer.addSectionTitle('Pickups', `${formatPdfNumber(group.pickups?.length)} row(s)`);
+    writer.addTable(movementColumns.map((column) => (
+      column.label === 'Time' ? { ...column, value: 'PickupTime' } : column
+    )), group.pickups || [], 'No pickups found.');
+
+    writer.addSectionTitle('Deliveries', `${formatPdfNumber(group.deliveries?.length)} row(s)`);
+    writer.addTable(movementColumns.map((column) => (
+      column.label === 'Time' ? { ...column, value: 'DeliveryTime' } : column
+    )), group.deliveries || [], 'No deliveries found.');
+
+    writer.addSectionTitle('Orders Won', `${formatPdfNumber(group.ordersWon?.length)} row(s)`);
+    writer.addTable([
+      { label: 'Bid/BOL', width: 90, value: (row) => row.BOL || row.BidID || '-' },
+      { label: 'Customer', width: 148, value: 'Customer' },
+      { label: 'Driver / TMS', width: 110, value: 'Driver' },
+      { label: 'Truck', width: 48, value: 'Truck', mono: true },
+      { label: 'Origin', width: 132, value: 'Origin' },
+      { label: 'Destination', width: 132, value: 'Destination' },
+      { label: 'Quote', width: 60, value: (row) => formatPdfMoney(row.QuotedTotal) }
+    ], group.ordersWon || [], 'No orders won found.');
+
+    writer.addSectionTitle('Job Upload Activity', `${formatPdfNumber(group.uploads?.length)} row(s)`);
+    writer.addTable([
+      { label: 'BOL', width: 70, value: 'BOLNumber', mono: true },
+      { label: 'Driver', width: 150, value: 'DriverName' },
+      { label: 'Upload Type', width: 130, value: 'UploadType' },
+      { label: 'Uploaded', width: 180, value: 'UploadDateDisplay' },
+      { label: 'Composite Key', width: 190, value: 'CompositeKey' }
+    ], group.uploads || [], 'No job upload activity found.');
+
+    writer.addSectionTitle('Driver Availability Context');
+    writer.addTable([
+      { label: 'Driver', width: 160, value: 'operatorName' },
+      { label: 'Truck', width: 60, value: 'truckNumber', mono: true },
+      { label: 'Start', width: 78, value: (row) => formatPdfRosterDate(row.startDate) },
+      { label: 'End', width: 78, value: (row) => formatPdfRosterDate(row.endDate) },
+      { label: 'Reason', width: 230, value: 'reason' },
+      { label: 'Status', width: 70, value: 'status' }
+    ], group.driversOff || [], 'No driver time-off records found.');
+
+    writer.addSectionTitle('No Availability', `${formatPdfNumber(group.noAvailability?.length)} row(s)`);
+    writer.addTable([
+      { label: 'Customer', width: 142, value: 'company' },
+      { label: 'Requestor', width: 110, value: 'requestor' },
+      { label: 'Pickup', width: 156, value: 'pickupLocation' },
+      { label: 'Delivery', width: 156, value: 'deliveryLocation' },
+      { label: 'Type', width: 86, value: 'shipmentType' },
+      { label: 'Miles', width: 60, value: (row) => formatPdfNumber(row.totalMiles) }
+    ], group.noAvailability || [], 'No no-availability records found.');
+
+    writer.addSectionTitle('Available Trucks Posted', `${formatPdfNumber(group.availableTrucks?.length)} row(s)`);
+    writer.addTable([
+      { label: 'Driver', width: 140, value: 'driverName' },
+      { label: 'Truck', width: 54, value: 'unitNo', mono: true },
+      { label: 'Equipment', width: 120, value: 'equipmentType' },
+      { label: 'Current Location', width: 150, value: 'currentLocation' },
+      { label: 'Time of Day', width: 82, value: 'timeOfDay' },
+      { label: 'Proximity', width: 174, value: 'proximitySummary' }
+    ], group.availableTrucks || [], 'No available-truck postings found.');
+  });
+
+  return writer.finish();
+}
+
+app.get('/reports/on-this-day', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const report = await getOnThisDayReportData(token, {
+      date: req.query.date,
+      mode: req.query.mode
+    });
+
+    res.json(report);
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to load On This Day report.'
+    });
+  }
+});
+
+app.get('/reports/on-this-day/pdf', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const report = await getOnThisDayReportData(token, {
+      date: req.query.date,
+      mode: req.query.mode
+    });
+    const pdfBuffer = createOnThisDayPdfBuffer(report);
+    const safeDate = getOnThisDayTargetDate(req.query.date).replace(/[^0-9A-Za-z_-]+/g, '-');
+    const safeMode = normalizeOnThisDayMode(req.query.mode) === 'exact' ? 'Exact' : 'Across_Years';
+
+    sendPdfResponse(res, pdfBuffer, `Kole_On_This_Day_${safeDate}_${safeMode}.pdf`);
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to export On This Day PDF.'
+    });
+  }
+});
+
+
+function getRosterReportDisplayName(roster = {}) {
+  return cleanRosterText(roster.tmsName) || cleanRosterText(roster.operatorTeamName) || '-';
+}
+
+function getDriverRosterStatusLabel(status) {
+  const normalized = normalizeText(status);
+  if (normalized === 'active') return 'Active';
+  if (normalized === 'inactive') return 'Inactive';
+  return String(status || 'Unknown').trim() || 'Unknown';
+}
+
+function normalizeDriverRosterReportStatus(value, fallback = 'active') {
+  const normalized = normalizeText(value || fallback);
+  if (normalized === 'all') return 'all';
+  if (normalized === 'inactive') return 'inactive';
+  return 'active';
+}
+
+function filterDriverRosterByStatus(rosterItems = [], status = 'active') {
+  const normalized = normalizeDriverRosterReportStatus(status);
+  if (normalized === 'all') return [...rosterItems];
+  return rosterItems.filter((roster) => normalizeText(roster.status) === normalized);
+}
+
+function buildDriverRosterReportResponse(rosterItems = [], status = 'active') {
+  const normalizedStatus = normalizeDriverRosterReportStatus(status);
+  const rows = filterDriverRosterByStatus(rosterItems, normalizedStatus)
+    .sort(sortDriverRosterRecords)
+    .map((roster) => ({
+      ...roster,
+      displayName: getRosterReportDisplayName(roster)
+    }));
+  const activeCount = rosterItems.filter((roster) => normalizeText(roster.status) === 'active').length;
+  const inactiveCount = rosterItems.filter((roster) => normalizeText(roster.status) === 'inactive').length;
+  const reportLabel = normalizedStatus === 'inactive'
+    ? 'Inactive Driver Roster'
+    : normalizedStatus === 'all'
+      ? 'Driver Roster'
+      : 'Active Driver Roster';
+
+  return {
+    success: true,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    reportLabel,
+    status: normalizedStatus,
+    sourceListId: process.env.DRIVER_ROSTER_LIST_ID,
+    count: rows.length,
+    activeCount,
+    inactiveCount,
+    rows
+  };
+}
+
+function getRosterEquipmentLabel(roster = {}) {
+  return uniqueNonEmpty([roster.soloOrTeam, roster.trailerType]).join(' / ') || '-';
+}
+
+function getRosterTractorLabel(roster = {}) {
+  return uniqueNonEmpty([
+    roster.tractorYear,
+    roster.tractorMake,
+    roster.tractorPlate ? `Plate ${roster.tractorPlate}` : '',
+    roster.tractorOwner ? `Owner ${roster.tractorOwner}` : ''
+  ]).join(' · ') || '-';
+}
+
+function getRosterTrailerLabel(roster = {}) {
+  return uniqueNonEmpty([
+    roster.trailerUnitNumber ? `Unit ${roster.trailerUnitNumber}` : '',
+    roster.trailerLength ? `${roster.trailerLength} ft` : '',
+    roster.trailerYear,
+    roster.trailerMake,
+    roster.trailerPlate ? `Plate ${roster.trailerPlate}` : '',
+    roster.trailerOwner ? `Owner ${roster.trailerOwner}` : ''
+  ]).join(' · ') || '-';
+}
+
+function buildFleetEquipmentReportResponse(rosterItems = [], status = 'active') {
+  const normalizedStatus = normalizeDriverRosterReportStatus(status);
+  const filtered = filterDriverRosterByStatus(rosterItems, normalizedStatus).sort((a, b) => {
+    if (normalizedStatus === 'all') {
+      const statusCompare = getDriverRosterStatusLabel(a.status).localeCompare(getDriverRosterStatusLabel(b.status));
+      if (statusCompare !== 0) return statusCompare;
+    }
+
+    return sortDriverRosterRecords(a, b);
+  });
+
+  const rows = filtered.map((roster) => ({
+    ...roster,
+    displayName: getRosterReportDisplayName(roster),
+    equipmentLabel: getRosterEquipmentLabel(roster),
+    tractorLabel: getRosterTractorLabel(roster),
+    trailerLabel: getRosterTrailerLabel(roster),
+    statusLabel: getDriverRosterStatusLabel(roster.status)
+  }));
+
+  const statusLabel = normalizedStatus === 'all' ? 'All' : getDriverRosterStatusLabel(normalizedStatus);
+
+  return {
+    success: true,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    reportLabel: `${statusLabel} Fleet Equipment`,
+    status: normalizedStatus,
+    sourceListId: process.env.DRIVER_ROSTER_LIST_ID,
+    count: rows.length,
+    activeCount: rosterItems.filter((roster) => normalizeText(roster.status) === 'active').length,
+    inactiveCount: rosterItems.filter((roster) => normalizeText(roster.status) === 'inactive').length,
+    rows
+  };
+}
+
+function sendPdfResponse(res, pdfBuffer, fileName) {
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Length', pdfBuffer.length);
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+  res.end(pdfBuffer);
+}
+
+function createDriverRosterPdfBuffer(report) {
+  const statusLabel = report.status === 'inactive' ? 'Inactive' : report.status === 'all' ? 'All' : 'Active';
+  const writer = createPdfReportWriter({
+    title: report.reportLabel || `${statusLabel} Driver Roster`,
+    subtitle: `Generated: ${report.generatedAt || '-'}    Source: Driver Roster`
+  });
+
+  writer.addSectionTitle('Roster Summary');
+  writer.addParagraph('Report scope', statusLabel);
+  if (report.status === 'all') {
+    writer.addParagraph('Total drivers', `${formatPdfNumber(report.count)} driver(s)`);
+    writer.addParagraph('Active drivers', formatPdfNumber(report.activeCount));
+    writer.addParagraph('Inactive drivers', formatPdfNumber(report.inactiveCount));
+  } else {
+    writer.addParagraph(`${statusLabel} drivers`, `${formatPdfNumber(report.count)} driver(s)`);
+  }
+
+  const isInactive = report.status === 'inactive';
+  const columns = isInactive
+    ? [
+        { label: 'Driver / TMS Name', width: 150, value: (row) => row.displayName || getRosterReportDisplayName(row) },
+        { label: 'Truck', width: 50, value: 'truck', mono: true },
+        { label: 'Phone', width: 88, value: 'cellPhone1' },
+        { label: 'Email', width: 162, value: 'emailAddress1' },
+        { label: 'Equipment', width: 104, value: (row) => getRosterEquipmentLabel(row) },
+        { label: 'Start', width: 68, value: (row) => formatPdfRosterDate(row.startDate) },
+        { label: 'Term', width: 68, value: (row) => formatPdfRosterDate(row.termDate) }
+      ]
+    : [
+        { label: 'Driver / TMS Name', width: 172, value: (row) => row.displayName || getRosterReportDisplayName(row) },
+        { label: 'Truck', width: 58, value: 'truck', mono: true },
+        { label: 'Phone', width: 94, value: 'cellPhone1' },
+        { label: 'Email', width: 182, value: 'emailAddress1' },
+        { label: 'Equipment', width: 136, value: (row) => getRosterEquipmentLabel(row) },
+        { label: 'Start', width: 78, value: (row) => formatPdfRosterDate(row.startDate) }
+      ];
+
+  writer.addSectionTitle(report.reportLabel || 'Driver Roster', `${formatPdfNumber(report.count)} row(s)`);
+  writer.addTable(columns, report.rows || [], 'No driver roster rows found.');
+
+  return writer.finish();
+}
+
+function createFleetEquipmentPdfBuffer(report) {
+  const statusLabel = report.status === 'all' ? 'All' : getDriverRosterStatusLabel(report.status);
+  const writer = createPdfReportWriter({
+    title: report.reportLabel || 'Fleet Equipment',
+    subtitle: `Generated: ${report.generatedAt || '-'}    Source: Driver Roster`
+  });
+
+  writer.addSectionTitle('Fleet Summary');
+  writer.addParagraph('Report scope', statusLabel);
+  if (report.status === 'all') {
+    writer.addParagraph('Total equipment rows', `${formatPdfNumber(report.count)} row(s)`);
+    writer.addParagraph('Active drivers', formatPdfNumber(report.activeCount));
+    writer.addParagraph('Inactive drivers', formatPdfNumber(report.inactiveCount));
+  } else {
+    writer.addParagraph(`${statusLabel} equipment rows`, `${formatPdfNumber(report.count)} row(s)`);
+  }
+
+  const summaryColumns = [
+    { label: 'Driver / TMS Name', width: report.status === 'all' ? 150 : 176, value: (row) => row.displayName || getRosterReportDisplayName(row) },
+    { label: 'Truck', width: 50, value: 'truck', mono: true }
+  ];
+
+  if (report.status === 'all') {
+    summaryColumns.push({ label: 'Status', width: 58, value: 'statusLabel' });
+  }
+
+  summaryColumns.push(
+    { label: 'Equipment', width: 150, value: 'equipmentLabel' },
+    { label: 'Reg Weight', width: 86, value: (row) => row.registeredWeight || '-' },
+    { label: 'Empty Weight', width: 92, value: (row) => row.emptyWeight || '-' },
+    { label: 'Overall Length', width: 108, value: (row) => row.overallLength || '-' }
+  );
+
+  writer.addSectionTitle('Fleet Equipment Summary', `${formatPdfNumber(report.count)} row(s)`);
+  writer.addTable(summaryColumns, report.rows || [], 'No fleet equipment rows found.');
+
+  writer.addSectionTitle('Tractor / Trailer Details', `${formatPdfNumber(report.count)} row(s)`);
+  writer.addTable([
+    { label: 'Driver / TMS Name', width: 160, value: (row) => row.displayName || getRosterReportDisplayName(row) },
+    { label: 'Truck', width: 48, value: 'truck', mono: true },
+    { label: 'Tractor', width: 246, value: 'tractorLabel' },
+    { label: 'Trailer', width: 266, value: 'trailerLabel' }
+  ], report.rows || [], 'No tractor/trailer details found.');
+
+  return writer.finish();
+}
+
+function getSalesLeadSuppressionReason(record = {}) {
+  if (record.SuppressionReason) return record.SuppressionReason;
+  if (normalizeText(record.FollowUpHandling) === 'suppressed') return 'Follow-up suppressed';
+  if (normalizeText(record.Status) === 'ignore') return 'Status: Ignore';
+  if (normalizeText(record.Status) === 'inactive') return 'Status: Inactive';
+  return '-';
+}
+
+function createSalesLeadSuppressionPdfBuffer(report) {
+  const rows = report.records || [];
+  const writer = createPdfReportWriter({
+    title: report.reportLabel || 'Lead Suppression Report',
+    subtitle: `Generated: ${report.generatedAt || '-'}    Source: Sales Leads`
+  });
+
+  writer.addSectionTitle('Suppression Summary');
+  writer.addParagraph('Suppressed / ignored leads', `${formatPdfNumber(report.count)} customer(s)`);
+  writer.addParagraph('Sales leads scanned', formatPdfNumber(report.recordsScanned));
+  writer.addParagraph('Includes', 'Follow-up suppressed, Ignore status, and Inactive status records.');
+
+  writer.addSectionTitle('Suppressed / Ignored Leads', `${formatPdfNumber(rows.length)} row(s)`);
+  writer.addTable([
+    { label: 'Company', width: 210, value: 'CompanyName' },
+    { label: 'Status', width: 65, value: 'Status' },
+    { label: 'Handling', width: 82, value: 'FollowUpHandling' },
+    { label: 'Reason', width: 170, value: (row) => getSalesLeadSuppressionReason(row) },
+    { label: 'Date', width: 68, value: (row) => formatPdfRosterDate(row.SuppressionDate) },
+    { label: 'Quotes', width: 52, value: (row) => formatPdfNumber(row.QuoteCount) },
+    { label: 'Notes', width: 52, value: (row) => formatPdfNumber(row.SalesNotesCount) }
+  ], rows, 'No suppressed or ignored leads found.');
+
+  return writer.finish();
+}
+
+async function getSalesLeadsReportData(token, view = 'all', sort = '') {
+  const salesLeadsListId = getSalesLeadsListId();
+
+  if (!salesLeadsListId) {
+    const error = new Error('SALES_LEADS_LIST_ID is not configured on the server.');
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const [items, customerRevenueIndex, notesBundle] = await Promise.all([
+    getAllListItemsWithFields(token, salesLeadsListId, getSalesLeadFieldSelect()),
+    buildCustomerRevenueIndex(token),
+    getSalesLeadNotesBundle(token)
+  ]);
+  const records = items
+    .map(cleanSalesLeadItem)
+    .map((record) => enrichSalesLeadWithRevenue(record, customerRevenueIndex))
+    .map((record) => enrichSalesLeadWithNotes(record, notesBundle.notesIndex));
+  const filtered = filterSalesLeads(records, view);
+
+  let sortMode = sort || 'name';
+  if (normalizeText(view) === 'followupdue') sortMode = sort || 'followUp';
+  if (normalizeText(view) === 'unconverted') sortMode = sort || 'quotes';
+  if (normalizeText(view) === 'aviation') sortMode = sort || 'quotes';
+
+  return {
+    success: true,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    reportLabel: normalizeText(view) === 'suppressed' ? 'Lead Suppression Report' : 'Sales Leads',
+    sourceListId: salesLeadsListId,
+    notesSourceListId: notesBundle.sourceListId,
+    notesStatus: notesBundle.status,
+    notesError: notesBundle.error,
+    notesScanned: notesBundle.recordsScanned,
+    view,
+    sort: sortMode,
+    recordsScanned: records.length,
+    count: filtered.length,
+    summary: getSalesLeadSummary(records),
+    records: sortSalesLeads(filtered, sortMode)
+  };
+}
+
+app.get('/reports/active-driver-roster', requireLookupAccess, async (req, res) => {
+  try {
+    if (!process.env.DRIVER_ROSTER_LIST_ID) {
+      return res.status(500).json({
+        success: false,
+        error: 'DRIVER_ROSTER_LIST_ID is not configured on the server.'
+      });
+    }
+
+    const token = await getGraphToken();
+    const rosterItems = await getDriverRosterItems(token);
+    res.json(buildDriverRosterReportResponse(rosterItems, 'active'));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to load active driver roster.'
+    });
+  }
+});
+
+app.get('/reports/active-driver-roster/pdf', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const rosterItems = await getDriverRosterItems(token);
+    const report = buildDriverRosterReportResponse(rosterItems, 'active');
+    const pdfBuffer = createDriverRosterPdfBuffer(report);
+    sendPdfResponse(res, pdfBuffer, 'Kole_Active_Driver_Roster.pdf');
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to export Active Driver Roster PDF.'
+    });
+  }
+});
+
 app.get('/reports/inactive-driver-roster', requireLookupAccess, async (req, res) => {
   try {
     if (!process.env.DRIVER_ROSTER_LIST_ID) {
@@ -9254,25 +10154,82 @@ app.get('/reports/inactive-driver-roster', requireLookupAccess, async (req, res)
 
     const token = await getGraphToken();
     const rosterItems = await getDriverRosterItems(token);
-
-    const inactiveDrivers = rosterItems
-      .filter((roster) => normalizeText(roster.status) === 'inactive')
-      .sort(sortDriverRosterRecords);
-
-    res.json({
-      success: true,
-      generatedAt: `${formatEasternTimestamp()} Eastern`,
-      reportLabel: 'Inactive Driver Roster',
-      sourceListId: process.env.DRIVER_ROSTER_LIST_ID,
-      count: inactiveDrivers.length,
-      rows: inactiveDrivers
-    });
+    res.json(buildDriverRosterReportResponse(rosterItems, 'inactive'));
   } catch (error) {
     console.error(error);
-
     res.status(500).json({
       success: false,
       error: error.message || 'Unable to load inactive driver roster.'
+    });
+  }
+});
+
+app.get('/reports/inactive-driver-roster/pdf', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const rosterItems = await getDriverRosterItems(token);
+    const report = buildDriverRosterReportResponse(rosterItems, 'inactive');
+    const pdfBuffer = createDriverRosterPdfBuffer(report);
+    sendPdfResponse(res, pdfBuffer, 'Kole_Inactive_Driver_Roster.pdf');
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to export Inactive Driver Roster PDF.'
+    });
+  }
+});
+
+app.get('/reports/fleet-equipment', requireLookupAccess, async (req, res) => {
+  try {
+    if (!process.env.DRIVER_ROSTER_LIST_ID) {
+      return res.status(500).json({
+        success: false,
+        error: 'DRIVER_ROSTER_LIST_ID is not configured on the server.'
+      });
+    }
+
+    const token = await getGraphToken();
+    const rosterItems = await getDriverRosterItems(token);
+    res.json(buildFleetEquipmentReportResponse(rosterItems, req.query.status || 'active'));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to load Fleet Equipment report.'
+    });
+  }
+});
+
+app.get('/reports/fleet-equipment/pdf', requireLookupAccess, async (req, res) => {
+  try {
+    const status = normalizeDriverRosterReportStatus(req.query.status || 'active');
+    const token = await getGraphToken();
+    const rosterItems = await getDriverRosterItems(token);
+    const report = buildFleetEquipmentReportResponse(rosterItems, status);
+    const pdfBuffer = createFleetEquipmentPdfBuffer(report);
+    const safeStatus = status === 'all' ? 'All' : getDriverRosterStatusLabel(status);
+    sendPdfResponse(res, pdfBuffer, `Kole_Fleet_Equipment_${safeStatus}.pdf`);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to export Fleet Equipment PDF.'
+    });
+  }
+});
+
+app.get('/reports/sales-leads/suppression/pdf', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const report = await getSalesLeadsReportData(token, 'suppressed', 'name');
+    const pdfBuffer = createSalesLeadSuppressionPdfBuffer(report);
+    sendPdfResponse(res, pdfBuffer, 'Kole_Lead_Suppression_Report.pdf');
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to export Lead Suppression Report PDF.'
     });
   }
 });

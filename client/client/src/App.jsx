@@ -442,10 +442,33 @@ export default function App() {
   const [reportActionAlerts, setReportActionAlerts] = useState(null);
   const [reportActionAlertsLoading, setReportActionAlertsLoading] = useState(false);
   const [reportActionAlertsError, setReportActionAlertsError] = useState('');
+  const [activeDriverRosterReport, setActiveDriverRosterReport] = useState(null);
+  const [activeDriverRosterLoading, setActiveDriverRosterLoading] = useState(false);
+  const [activeDriverRosterError, setActiveDriverRosterError] = useState(null);
+  const [activeDriverRosterModalOpen, setActiveDriverRosterModalOpen] = useState(false);
+  const [activeDriverRosterPdfLoading, setActiveDriverRosterPdfLoading] = useState(false);
+  const [activeDriverRosterPdfError, setActiveDriverRosterPdfError] = useState('');
   const [inactiveDriverRosterReport, setInactiveDriverRosterReport] = useState(null);
   const [inactiveDriverRosterLoading, setInactiveDriverRosterLoading] = useState(false);
   const [inactiveDriverRosterError, setInactiveDriverRosterError] = useState(null);
   const [inactiveDriverRosterModalOpen, setInactiveDriverRosterModalOpen] = useState(false);
+  const [inactiveDriverRosterPdfLoading, setInactiveDriverRosterPdfLoading] = useState(false);
+  const [inactiveDriverRosterPdfError, setInactiveDriverRosterPdfError] = useState('');
+  const [fleetEquipmentStatus, setFleetEquipmentStatus] = useState('active');
+  const [fleetEquipmentReport, setFleetEquipmentReport] = useState(null);
+  const [fleetEquipmentLoading, setFleetEquipmentLoading] = useState(false);
+  const [fleetEquipmentError, setFleetEquipmentError] = useState(null);
+  const [fleetEquipmentModalOpen, setFleetEquipmentModalOpen] = useState(false);
+  const [fleetEquipmentPdfLoading, setFleetEquipmentPdfLoading] = useState(false);
+  const [fleetEquipmentPdfError, setFleetEquipmentPdfError] = useState('');
+  const [onThisDayDate, setOnThisDayDate] = useState(getEasternDateInputValue);
+  const [onThisDayMode, setOnThisDayMode] = useState('across');
+  const [onThisDayReport, setOnThisDayReport] = useState(null);
+  const [onThisDayLoading, setOnThisDayLoading] = useState(false);
+  const [onThisDayError, setOnThisDayError] = useState(null);
+  const [onThisDayModalOpen, setOnThisDayModalOpen] = useState(false);
+  const [onThisDayPdfLoading, setOnThisDayPdfLoading] = useState(false);
+  const [onThisDayPdfError, setOnThisDayPdfError] = useState('');
   const [noAvailabilityYear, setNoAvailabilityYear] = useState('all');
   const [noAvailabilityReport, setNoAvailabilityReport] = useState(null);
   const [noAvailabilityLoading, setNoAvailabilityLoading] = useState(false);
@@ -480,6 +503,8 @@ export default function App() {
   const [salesLeadsReport, setSalesLeadsReport] = useState(null);
   const [salesLeadsLoading, setSalesLeadsLoading] = useState(false);
   const [salesLeadsError, setSalesLeadsError] = useState(null);
+  const [salesSuppressionPdfLoading, setSalesSuppressionPdfLoading] = useState(false);
+  const [salesSuppressionPdfError, setSalesSuppressionPdfError] = useState('');
   const [salesActivityLookbackDays, setSalesActivityLookbackDays] = useState(7);
   const [salesActivityReport, setSalesActivityReport] = useState(null);
   const [salesActivityModalOpen, setSalesActivityModalOpen] = useState(false);
@@ -508,6 +533,8 @@ export default function App() {
   const [salesNoteError, setSalesNoteError] = useState('');
 
   const [authError, setAuthError] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginStatusMessage, setLoginStatusMessage] = useState('');
   const [uploadDigestDate, setUploadDigestDate] = useState(getEasternDateInputValue);
   const [uploadDigestData, setUploadDigestData] = useState(null);
   const [uploadDigestLoading, setUploadDigestLoading] = useState(false);
@@ -697,7 +724,9 @@ export default function App() {
         setOrdersDueSettlementModalOpen(false);
         setWeeklySettlementModalOpen(false);
         setWonNotRegisteredModalOpen(false);
+        setActiveDriverRosterModalOpen(false);
         setInactiveDriverRosterModalOpen(false);
+        setFleetEquipmentModalOpen(false);
         setNoAvailabilityModalOpen(false);
         setDriverTimeOffModalOpen(false);
         setDriverTimeOffFormOpen(false);
@@ -853,6 +882,8 @@ export default function App() {
   }
 
   async function handleLogin() {
+    if (loginLoading) return;
+
     const token = password.trim();
 
     if (!token) {
@@ -861,12 +892,28 @@ export default function App() {
     }
 
     setAuthError('');
+    setLoginLoading(true);
+    setLoginStatusMessage('Checking access token...');
+
+    const wakeTimer = window.setTimeout(() => {
+      setLoginStatusMessage('Waking up Kole Connect. The server may take 30-60 seconds to start after being idle.');
+    }, 1200);
+
+    const stillWorkingTimer = window.setTimeout(() => {
+      setLoginStatusMessage('Still waking up. Please leave this window open; this is normal after the server has spun down.');
+    }, 12000);
+
+    const controller = new AbortController();
+    const timeoutTimer = window.setTimeout(() => {
+      controller.abort();
+    }, 90000);
 
     try {
       const res = await fetch(`${API}/auth-check`, {
         headers: {
           'X-Lookup-Token': token
-        }
+        },
+        signal: controller.signal
       });
 
       const data = await res.json().catch(() => ({}));
@@ -878,8 +925,17 @@ export default function App() {
       sessionStorage.setItem('koleLookupToken', token);
       setAccessToken(token);
       setPassword('');
+      setLoginStatusMessage('');
     } catch (err) {
-      setAuthError(err.message || 'Login failed.');
+      const isAbort = err?.name === 'AbortError';
+      setAuthError(isAbort
+        ? 'The server did not respond within 90 seconds. Try again in a moment; it may still be waking up.'
+        : (err.message || 'Login failed.'));
+    } finally {
+      window.clearTimeout(wakeTimer);
+      window.clearTimeout(stillWorkingTimer);
+      window.clearTimeout(timeoutTimer);
+      setLoginLoading(false);
     }
   }
 
@@ -887,6 +943,9 @@ export default function App() {
     sessionStorage.removeItem('koleLookupToken');
     setAccessToken('');
     setPassword('');
+    setAuthError('');
+    setLoginStatusMessage('');
+    setLoginLoading(false);
     resetAppState();
   }
 
@@ -1844,6 +1903,10 @@ function formatRosterNumber(value) {
   return number.toLocaleString('en-US');
 }
 
+function getRosterDisplayName(roster = {}) {
+  return roster.displayName || roster.tmsName || roster.operatorTeamName || '-';
+}
+
 function formatPhone(value) {
   const digits = String(value || '').replace(/\D/g, '');
 
@@ -2505,17 +2568,6 @@ function getPositionStatusLabel(position) {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  function escapeCsvValue(value) {
-    if (value === null || value === undefined) return '';
-
-    const text = String(value).replace(/\r?\n|\r/g, ' ').trim();
-    return /[",]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-  }
-
-  function buildCsv(rows) {
-    return rows.map((row) => row.map(escapeCsvValue).join(',')).join('\r\n');
-  }
-
   function getSafeFileNamePart(value, fallback = 'export') {
     const clean = String(value || '')
       .replace(/[^0-9A-Za-z]+/g, '_')
@@ -2647,6 +2699,144 @@ function getPositionStatusLabel(position) {
     });
   }
 
+
+  async function downloadActiveDriverRosterPdf() {
+    await downloadReportPdf({
+      reportKey: 'activeDriverRoster',
+      reportName: 'Active Driver Roster',
+      endpoint: `${API}/reports/active-driver-roster/pdf`,
+      fallbackName: 'Kole_Active_Driver_Roster.pdf',
+      setLoading: setActiveDriverRosterPdfLoading,
+      setError: setActiveDriverRosterPdfError
+    });
+  }
+
+  async function downloadInactiveDriverRosterPdf() {
+    await downloadReportPdf({
+      reportKey: 'inactiveDriverRoster',
+      reportName: 'Inactive Driver Roster',
+      endpoint: `${API}/reports/inactive-driver-roster/pdf`,
+      fallbackName: 'Kole_Inactive_Driver_Roster.pdf',
+      setLoading: setInactiveDriverRosterPdfLoading,
+      setError: setInactiveDriverRosterPdfError
+    });
+  }
+
+  function getFleetEquipmentStatusLabel(status = fleetEquipmentStatus) {
+    if (status === 'inactive') return 'Inactive';
+    if (status === 'all') return 'All';
+    return 'Active';
+  }
+
+  async function downloadFleetEquipmentPdf() {
+    const status = fleetEquipmentStatus || 'active';
+
+    await downloadReportPdf({
+      reportKey: 'fleetEquipment',
+      reportName: `${getFleetEquipmentStatusLabel(status)} Fleet Equipment`,
+      endpoint: `${API}/reports/fleet-equipment/pdf?status=${encodeURIComponent(status)}`,
+      fallbackName: `Kole_Fleet_Equipment_${getFleetEquipmentStatusLabel(status)}.pdf`,
+      setLoading: setFleetEquipmentPdfLoading,
+      setError: setFleetEquipmentPdfError
+    });
+  }
+
+  async function downloadSalesSuppressionPdf() {
+    await downloadReportPdf({
+      reportKey: 'salesSuppression',
+      reportName: 'Lead Suppression Report',
+      endpoint: `${API}/reports/sales-leads/suppression/pdf`,
+      fallbackName: 'Kole_Lead_Suppression_Report.pdf',
+      setLoading: setSalesSuppressionPdfLoading,
+      setError: setSalesSuppressionPdfError
+    });
+  }
+
+  async function downloadOnThisDayPdf() {
+    if (!onThisDayDate) {
+      setOnThisDayPdfError('Choose a date before exporting On This Day.');
+      return;
+    }
+
+    const params = new URLSearchParams({
+      date: onThisDayDate,
+      mode: onThisDayMode || 'across'
+    });
+
+    await downloadReportPdf({
+      reportKey: 'onThisDay',
+      reportName: 'On This Day',
+      endpoint: `${API}/reports/on-this-day/pdf?${params.toString()}`,
+      fallbackName: `Kole_On_This_Day_${getSafeFileNamePart(onThisDayDate, 'date')}_${onThisDayMode === 'exact' ? 'Exact' : 'Across_Years'}.pdf`,
+      setLoading: setOnThisDayPdfLoading,
+      setError: setOnThisDayPdfError
+    });
+  }
+
+  async function loadActiveDriverRosterReport() {
+    setActiveDriverRosterLoading(true);
+    setActiveDriverRosterError(null);
+    setActiveDriverRosterPdfError('');
+    setActiveDriverRosterReport(null);
+    setActiveDriverRosterModalOpen(false);
+    clearPdfExportNotice('activeDriverRoster');
+
+    try {
+      const res = await authedFetch(`${API}/reports/active-driver-roster`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to load Active Driver Roster.');
+      }
+
+      setActiveDriverRosterReport(data);
+      setActiveDriverRosterModalOpen(true);
+    } catch (err) {
+      setActiveDriverRosterError({
+        code: 'REPORT_ERROR',
+        message: err.message || 'Unable to load Active Driver Roster.'
+      });
+    } finally {
+      setActiveDriverRosterLoading(false);
+    }
+  }
+
+  function closeActiveDriverRosterModal() {
+    setActiveDriverRosterModalOpen(false);
+  }
+
+  async function loadFleetEquipmentReport() {
+    setFleetEquipmentLoading(true);
+    setFleetEquipmentError(null);
+    setFleetEquipmentPdfError('');
+    setFleetEquipmentReport(null);
+    setFleetEquipmentModalOpen(false);
+    clearPdfExportNotice('fleetEquipment');
+
+    try {
+      const res = await authedFetch(`${API}/reports/fleet-equipment?status=${encodeURIComponent(fleetEquipmentStatus)}`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to load Fleet Equipment report.');
+      }
+
+      setFleetEquipmentReport(data);
+      setFleetEquipmentModalOpen(true);
+    } catch (err) {
+      setFleetEquipmentError({
+        code: 'REPORT_ERROR',
+        message: err.message || 'Unable to load Fleet Equipment report.'
+      });
+    } finally {
+      setFleetEquipmentLoading(false);
+    }
+  }
+
+  function closeFleetEquipmentModal() {
+    setFleetEquipmentModalOpen(false);
+  }
+
   async function loadWonNotRegisteredReport() {
     if (wonNotRegisteredActionBlocked) {
       setWonNotRegisteredReport(null);
@@ -2704,14 +2894,13 @@ function getPositionStatusLabel(position) {
   async function loadInactiveDriverRosterReport() {
     setInactiveDriverRosterLoading(true);
     setInactiveDriverRosterError(null);
+    setInactiveDriverRosterPdfError('');
     setInactiveDriverRosterReport(null);
     setInactiveDriverRosterModalOpen(false);
+    clearPdfExportNotice('inactiveDriverRoster');
 
     try {
-      const res = await authedFetch(
-        `${API}/reports/inactive-driver-roster`
-      );
-
+      const res = await authedFetch(`${API}/reports/inactive-driver-roster`);
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok || !data.success) {
@@ -2782,6 +2971,50 @@ function getPositionStatusLabel(position) {
       setLoading: setNoAvailabilityPdfLoading,
       setError: setNoAvailabilityPdfError
     });
+  }
+
+  async function loadOnThisDayReport() {
+    if (!onThisDayDate) {
+      setOnThisDayError({
+        code: 'REPORT_ERROR',
+        message: 'Choose a date before previewing On This Day.'
+      });
+      return;
+    }
+
+    setOnThisDayLoading(true);
+    setOnThisDayError(null);
+    setOnThisDayPdfError('');
+    setOnThisDayReport(null);
+    setOnThisDayModalOpen(false);
+    clearPdfExportNotice('onThisDay');
+
+    try {
+      const params = new URLSearchParams({
+        date: onThisDayDate,
+        mode: onThisDayMode || 'across'
+      });
+      const res = await authedFetch(`${API}/reports/on-this-day?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to load On This Day.');
+      }
+
+      setOnThisDayReport(data);
+      setOnThisDayModalOpen(true);
+    } catch (err) {
+      setOnThisDayError({
+        code: 'REPORT_ERROR',
+        message: err.message || 'Unable to load On This Day.'
+      });
+    } finally {
+      setOnThisDayLoading(false);
+    }
+  }
+
+  function closeOnThisDayModal() {
+    setOnThisDayModalOpen(false);
   }
 
   function getDriverTimeOffOptions() {
@@ -3079,12 +3312,36 @@ function getPositionStatusLabel(position) {
     { value: 'suppressed', label: 'Suppressed / Ignored', summaryKey: 'suppressed', defaultSort: 'name' }
   ];
 
+  function preserveReportScroll(runUpdate) {
+    const scrollPosition = {
+      left: window.scrollX || window.pageXOffset || 0,
+      top: window.scrollY || window.pageYOffset || 0
+    };
+
+    runUpdate();
+
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ ...scrollPosition, behavior: 'auto' });
+      window.requestAnimationFrame(() => {
+        window.scrollTo({ ...scrollPosition, behavior: 'auto' });
+      });
+    });
+  }
+
+  function toggleReportsSection() {
+    preserveReportScroll(() => {
+      setReportsSectionOpen((current) => !current);
+    });
+  }
+
   function toggleReportGroup(groupName) {
-    setOpenReportGroups((current) => (
-      current.includes(groupName)
-        ? current.filter((name) => name !== groupName)
-        : [...current, groupName]
-    ));
+    preserveReportScroll(() => {
+      setOpenReportGroups((current) => (
+        current.includes(groupName)
+          ? current.filter((name) => name !== groupName)
+          : [...current, groupName]
+      ));
+    });
   }
 
   function isReportGroupOpen(groupName) {
@@ -3593,7 +3850,9 @@ function getPositionStatusLabel(position) {
   }
 
   function toggleReportPanel(panelName) {
-    setActiveReportPanel((current) => (current === panelName ? '' : panelName));
+    preserveReportScroll(() => {
+      setActiveReportPanel((current) => (current === panelName ? '' : panelName));
+    });
   }
 
 function openReportLoadDetails(load) {
@@ -4770,6 +5029,168 @@ function openReportLoadDetails(load) {
   }
 
 
+  function DriverRosterReportTable({ rows = [], inactive = false }) {
+    return (
+      <div className="report-table-wrap">
+        <table className={`driver-report-table ${inactive ? 'inactive-driver-roster-table' : 'active-driver-roster-table'}`}>
+          <thead>
+            <tr>
+              <th>Driver / TMS Name</th>
+              <th>Truck</th>
+              <th>Phone</th>
+              <th>Email</th>
+              <th>Equipment</th>
+              <th>Start Date</th>
+              {inactive && <th>Term Date</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((roster, index) => (
+              <tr
+                key={`${roster.id || roster.truck || roster.tmsName || index}-${index}`}
+                className="report-clickable-row"
+                onClick={() => openRosterFromReport(roster)}
+                title="Open driver roster details"
+              >
+                <td>{getRosterDisplayName(roster)}</td>
+                <td>{roster.truck || '-'}</td>
+                <td>{formatPhone(roster.cellPhone1) || '-'}</td>
+                <td>{roster.emailAddress1 || '-'}</td>
+                <td>{[roster.soloOrTeam, roster.trailerType].filter(Boolean).join(' / ') || '-'}</td>
+                <td>{formatRosterDate(roster.startDate)}</td>
+                {inactive && <td>{formatRosterDate(roster.termDate)}</td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  function ActiveDriverRosterPreview() {
+    const rows = activeDriverRosterReport?.rows || [];
+
+    if (!activeDriverRosterReport) return null;
+
+    return (
+      <div className="driver-report-preview modal-report-preview">
+        <div className="driver-report-generated">
+          Generated: {activeDriverRosterReport.generatedAt}
+        </div>
+
+        <div className="report-kpi-grid driver-roster-kpi-grid">
+          <div className="report-kpi-card">
+            <span>Active Drivers</span>
+            <strong>{formatReportNumber(activeDriverRosterReport.count)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Source</span>
+            <strong>Driver Roster</strong>
+          </div>
+        </div>
+
+        {rows.length === 0 ? (
+          <div className="msg">No active drivers were found in the Driver Roster.</div>
+        ) : (
+          <DriverRosterReportTable rows={rows} />
+        )}
+      </div>
+    );
+  }
+
+  function FleetEquipmentPreview() {
+    const rows = fleetEquipmentReport?.rows || [];
+
+    if (!fleetEquipmentReport) return null;
+
+    const isAllFleetEquipment = fleetEquipmentReport.status === 'all';
+    const scopeLabel = fleetEquipmentReport.status === 'inactive'
+      ? 'Inactive'
+      : isAllFleetEquipment
+        ? 'All'
+        : 'Active';
+
+    return (
+      <div className="driver-report-preview modal-report-preview">
+        <div className="driver-report-generated">
+          Generated: {fleetEquipmentReport.generatedAt}
+        </div>
+
+        <div className="report-kpi-grid fleet-equipment-kpi-grid">
+          <div className="report-kpi-card">
+            <span>Report Scope</span>
+            <strong>{scopeLabel}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Equipment Rows</span>
+            <strong>{formatReportNumber(fleetEquipmentReport.count)}</strong>
+          </div>
+          {isAllFleetEquipment && (
+            <>
+              <div className="report-kpi-card">
+                <span>Active Drivers</span>
+                <strong>{formatReportNumber(fleetEquipmentReport.activeCount)}</strong>
+              </div>
+              <div className="report-kpi-card">
+                <span>Inactive Drivers</span>
+                <strong>{formatReportNumber(fleetEquipmentReport.inactiveCount)}</strong>
+              </div>
+            </>
+          )}
+          <div className="report-kpi-card">
+            <span>Source</span>
+            <strong>Driver Roster</strong>
+          </div>
+        </div>
+
+        {rows.length === 0 ? (
+          <div className="msg">No fleet equipment rows matched this report scope.</div>
+        ) : (
+          <div className="report-table-wrap">
+            <table className="driver-report-table fleet-equipment-table">
+              <thead>
+                <tr>
+                  <th>Driver / TMS Name</th>
+                  <th>Truck</th>
+                  {isAllFleetEquipment && <th>Status</th>}
+                  <th>Equipment</th>
+                  <th>Tractor</th>
+                  <th>Trailer</th>
+                  <th>Weight / Length</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((roster, index) => (
+                  <tr
+                    key={`${roster.id || roster.truck || roster.tmsName || index}-${index}`}
+                    className="report-clickable-row"
+                    onClick={() => openRosterFromReport(roster)}
+                    title="Open driver roster details"
+                  >
+                    <td>{getRosterDisplayName(roster)}</td>
+                    <td>{roster.truck || '-'}</td>
+                    {isAllFleetEquipment && <td>{roster.statusLabel || roster.status || '-'}</td>}
+                    <td>{roster.equipmentLabel || [roster.soloOrTeam, roster.trailerType].filter(Boolean).join(' / ') || '-'}</td>
+                    <td>
+                      <strong>{[roster.tractorYear, roster.tractorMake].filter(Boolean).join(' ') || '-'}</strong>
+                      <small>{[roster.tractorPlate && `Plate ${roster.tractorPlate}`, roster.tractorOwner && `Owner ${roster.tractorOwner}`].filter(Boolean).join(' · ')}</small>
+                    </td>
+                    <td>
+                      <strong>{[roster.trailerUnitNumber && `Unit ${roster.trailerUnitNumber}`, roster.trailerLength && `${roster.trailerLength} ft`, roster.trailerYear, roster.trailerMake].filter(Boolean).join(' · ') || '-'}</strong>
+                      <small>{[roster.trailerPlate && `Plate ${roster.trailerPlate}`, roster.trailerOwner && `Owner ${roster.trailerOwner}`].filter(Boolean).join(' · ')}</small>
+                    </td>
+                    <td>{[roster.registeredWeight && `Reg ${roster.registeredWeight}`, roster.emptyWeight && `Empty ${roster.emptyWeight}`, roster.overallLength && `OAL ${roster.overallLength}`].filter(Boolean).join(' / ') || '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+
   function InactiveDriverRosterPreview() {
     const rows = inactiveDriverRosterReport?.rows || [];
 
@@ -4795,41 +5216,342 @@ function openReportLoadDetails(load) {
         {rows.length === 0 ? (
           <div className="msg">No inactive drivers were found in the Driver Roster.</div>
         ) : (
-          <div className="report-table-wrap">
-            <table className="driver-report-table inactive-driver-roster-table">
-              <thead>
-                <tr>
-                  <th>Operator / Team</th>
-                  <th>TMS Name</th>
-                  <th>Truck</th>
-                  <th>Phone</th>
-                  <th>Email</th>
-                  <th>Trailer Type</th>
-                  <th>Start Date</th>
-                  <th>Term Date</th>
+          <DriverRosterReportTable rows={rows} inactive />
+        )}
+      </div>
+    );
+  }
+
+
+  function OnThisDayPreview() {
+    const groups = onThisDayReport?.yearGroups || [];
+    const summary = onThisDayReport?.summary || {};
+    const warnings = onThisDayReport?.warnings || [];
+
+    if (!onThisDayReport) return null;
+
+    function renderMovementRows(rows = [], dateType = 'pickup') {
+      if (!rows.length) return <div className="msg">No {dateType === 'pickup' ? 'pickups' : 'deliveries'} found.</div>;
+
+      return (
+        <div className="report-table-wrap on-this-day-table-wrap">
+          <table className="driver-report-table on-this-day-table">
+            <thead>
+              <tr>
+                <th>BOL</th>
+                <th>Customer</th>
+                <th>Driver / TMS Name</th>
+                <th>Truck</th>
+                <th>Origin</th>
+                <th>Destination</th>
+                <th>Time</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr
+                  key={`${dateType}-${row.id || row.BOL || row.BidID || index}-${index}`}
+                  className={row.id ? 'report-clickable-row' : ''}
+                  onClick={() => row.id && loadDetails(row.id, 'basic', row.SourceListId)}
+                  title={row.id ? 'Open full order screen' : ''}
+                >
+                  <td>{row.BOL || '-'}</td>
+                  <td>{row.Customer || '-'}</td>
+                  <td>{row.Driver || '-'}</td>
+                  <td>{row.Truck || '-'}</td>
+                  <td>{row.Origin || '-'}</td>
+                  <td>{row.Destination || '-'}</td>
+                  <td>{dateType === 'pickup' ? row.PickupTime || '-' : row.DeliveryTime || '-'}</td>
+                  <td>{row.Status || '-'}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {rows.map((roster, index) => (
-                  <tr
-                    key={`${roster.id || roster.truck || roster.tmsName || index}-${index}`}
-                    className="report-clickable-row"
-                    onClick={() => openRosterFromReport(roster)}
-                    title="Open inactive driver roster details"
-                  >
-                    <td>{roster.operatorTeamName || '-'}</td>
-                    <td>{roster.tmsName || '-'}</td>
-                    <td>{roster.truck || '-'}</td>
-                    <td>{formatPhone(roster.cellPhone1) || '-'}</td>
-                    <td>{roster.emailAddress1 || '-'}</td>
-                    <td>{roster.trailerType || '-'}</td>
-                    <td>{formatRosterDate(roster.startDate)}</td>
-                    <td>{formatRosterDate(roster.termDate)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    function renderOrdersWonRows(rows = []) {
+      if (!rows.length) return <div className="msg">No orders won found.</div>;
+
+      return (
+        <div className="report-table-wrap on-this-day-table-wrap">
+          <table className="driver-report-table on-this-day-table">
+            <thead>
+              <tr>
+                <th>BOL / BidID</th>
+                <th>Customer</th>
+                <th>Driver / TMS Name</th>
+                <th>Truck</th>
+                <th>Pickup</th>
+                <th>Delivery</th>
+                <th>Quote</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr
+                  key={`won-${row.id || row.BOL || row.BidID || index}-${index}`}
+                  className={row.id ? 'report-clickable-row' : ''}
+                  onClick={() => row.id && loadDetails(row.id, 'basic', row.SourceListId)}
+                  title={row.id ? 'Open full order screen' : ''}
+                >
+                  <td>{row.BOL || row.BidID || '-'}</td>
+                  <td>{row.Customer || '-'}</td>
+                  <td>{row.Driver || '-'}</td>
+                  <td>{row.Truck || '-'}</td>
+                  <td>{formatDateOnly(row.PickupDateKey || row.PickupDate)}</td>
+                  <td>{formatDateOnly(row.DeliveryDateKey || row.DeliveryDate)}</td>
+                  <td>{formatMoney(row.QuotedTotal)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    function renderUploadRows(rows = []) {
+      if (!rows.length) return <div className="msg">No job upload activity found.</div>;
+
+      return (
+        <div className="report-table-wrap on-this-day-table-wrap">
+          <table className="driver-report-table on-this-day-table">
+            <thead>
+              <tr>
+                <th>BOL</th>
+                <th>Driver</th>
+                <th>Upload Type</th>
+                <th>Uploaded</th>
+                <th>Folder</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={`upload-${row.id || row.BOLNumber || index}-${index}`}>
+                  <td>{row.BOLNumber || '-'}</td>
+                  <td>{row.DriverName || '-'}</td>
+                  <td>{row.UploadType || '-'}</td>
+                  <td>{row.UploadDateDisplay || formatDateOnly(row.UploadDate)}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="table-link-button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openUploadDigestLoadPhotos(row);
+                      }}
+                      disabled={!row.BOLNumber || documentLoading === `upload-digest-loadphotos-${row.id || row.BOLNumber}`}
+                    >
+                      {documentLoading === `upload-digest-loadphotos-${row.id || row.BOLNumber}`
+                        ? 'Opening...'
+                        : `${row.UploadType || 'Open'} Folder`}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    function renderDriversOffRows(rows = []) {
+      if (!rows.length) return <div className="msg">No driver time-off records found.</div>;
+
+      return (
+        <div className="report-table-wrap on-this-day-table-wrap">
+          <table className="driver-report-table on-this-day-table">
+            <thead>
+              <tr>
+                <th>Driver</th>
+                <th>Truck</th>
+                <th>Start</th>
+                <th>End</th>
+                <th>Reason</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={`off-${row.id || row.recordNumber || index}-${index}`}>
+                  <td>{row.operatorName || '-'}</td>
+                  <td>{row.truckNumber || '-'}</td>
+                  <td>{formatDateOnly(row.startDate)}</td>
+                  <td>{formatDateOnly(row.endDate)}</td>
+                  <td>{row.reason || '-'}</td>
+                  <td>{row.status || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    function renderNoAvailabilityRows(rows = []) {
+      if (!rows.length) return <div className="msg">No no-availability records found.</div>;
+
+      return (
+        <div className="report-table-wrap on-this-day-table-wrap">
+          <table className="driver-report-table on-this-day-table">
+            <thead>
+              <tr>
+                <th>Customer</th>
+                <th>Requestor</th>
+                <th>Pickup</th>
+                <th>Delivery</th>
+                <th>Type</th>
+                <th>Miles</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={`na-${row.id || row.company || index}-${index}`}>
+                  <td>{row.company || '-'}</td>
+                  <td>{row.requestor || '-'}</td>
+                  <td>{row.pickupLocation || '-'}</td>
+                  <td>{row.deliveryLocation || '-'}</td>
+                  <td>{row.shipmentType || '-'}</td>
+                  <td>{formatReportNumber(row.totalMiles)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    function renderAvailableTruckRows(rows = []) {
+      if (!rows.length) return <div className="msg">No available-truck postings found.</div>;
+
+      return (
+        <div className="report-table-wrap on-this-day-table-wrap">
+          <table className="driver-report-table on-this-day-table">
+            <thead>
+              <tr>
+                <th>Driver</th>
+                <th>Truck</th>
+                <th>Equipment</th>
+                <th>Current Location</th>
+                <th>Time of Day</th>
+                <th>Proximity</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={`avail-${row.id || row.unitNo || index}-${index}`}>
+                  <td>{row.driverName || '-'}</td>
+                  <td>{row.unitNo || '-'}</td>
+                  <td>{row.equipmentType || '-'}</td>
+                  <td>{row.currentLocation || '-'}</td>
+                  <td>{row.timeOfDay || '-'}</td>
+                  <td>{row.proximitySummary || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    return (
+      <div className="driver-report-preview modal-report-preview on-this-day-preview">
+        <div className="driver-report-generated">
+          Generated: {onThisDayReport.generatedAt} · {onThisDayReport.modeLabel}
+        </div>
+
+        <div className="report-kpi-grid on-this-day-kpi-grid">
+          <div className="report-kpi-card">
+            <span>Pickups</span>
+            <strong>{formatReportNumber(summary.pickups)}</strong>
           </div>
+          <div className="report-kpi-card">
+            <span>Deliveries</span>
+            <strong>{formatReportNumber(summary.deliveries)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Orders Won</span>
+            <strong>{formatReportNumber(summary.ordersWon)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Job Uploads</span>
+            <strong>{formatReportNumber(summary.uploads)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Drivers Off</span>
+            <strong>{formatReportNumber(summary.driversOff)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>No Availability</span>
+            <strong>{formatReportNumber(summary.noAvailability)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Available Posted</span>
+            <strong>{formatReportNumber(summary.availableTrucks)}</strong>
+          </div>
+        </div>
+
+        {warnings.length > 0 && (
+          <div className="report-alert locked on-this-day-warning-card">
+            <h4>Some sources reported warnings.</h4>
+            {warnings.slice(0, 4).map((warning, index) => (
+              <p key={`${warning.source || 'source'}-${index}`}><strong>{warning.source || 'Source'}:</strong> {warning.message || 'Unable to load source.'}</p>
+            ))}
+          </div>
+        )}
+
+        {groups.length === 0 ? (
+          <div className="msg">No activity was found for this date.</div>
+        ) : (
+          groups.map((group) => (
+            <div key={group.year} className="on-this-day-year-block">
+              <div className="driver-report-section-header on-this-day-year-header">
+                <div>
+                  <h4>{group.label || group.year}</h4>
+                  <p>
+                    {formatReportNumber(group.summary?.pickups)} pickup(s) · {formatReportNumber(group.summary?.deliveries)} delivery/deliveries · {formatReportNumber(group.summary?.uploads)} upload(s) · {formatReportNumber(group.summary?.driversOff)} driver(s) off
+                  </p>
+                </div>
+              </div>
+
+              <div className="on-this-day-section">
+                <h5>Pickups</h5>
+                {renderMovementRows(group.pickups, 'pickup')}
+              </div>
+
+              <div className="on-this-day-section">
+                <h5>Deliveries</h5>
+                {renderMovementRows(group.deliveries, 'delivery')}
+              </div>
+
+              <div className="on-this-day-section">
+                <h5>Orders Won</h5>
+                {renderOrdersWonRows(group.ordersWon)}
+              </div>
+
+              <div className="on-this-day-section">
+                <h5>Job Upload Activity</h5>
+                {renderUploadRows(group.uploads)}
+              </div>
+
+              <div className="on-this-day-section">
+                <h5>Drivers Off</h5>
+                {renderDriversOffRows(group.driversOff)}
+              </div>
+
+              <div className="on-this-day-section">
+                <h5>No Availability</h5>
+                {renderNoAvailabilityRows(group.noAvailability)}
+              </div>
+
+              <div className="on-this-day-section">
+                <h5>Available Trucks Posted</h5>
+                {renderAvailableTruckRows(group.availableTrucks)}
+              </div>
+            </div>
+          ))
         )}
       </div>
     );
@@ -7681,7 +8403,26 @@ function openReportLoadDetails(load) {
               <button onClick={loadSalesLeadsReport} disabled={salesLeadsLoading}>
                 {salesLeadsLoading ? 'Refreshing Customers...' : 'Refresh Customer Cards'}
               </button>
+
+              <button
+                type="button"
+                className="pdf-export-button"
+                onClick={downloadSalesSuppressionPdf}
+                disabled={salesSuppressionPdfLoading || salesLeadsLoading}
+              >
+                {salesSuppressionPdfLoading ? 'Exporting PDF...' : 'Export Suppression PDF'}
+              </button>
             </div>
+
+            <div className="pdf-export-guidance">Lead suppression exports are PDF only and download to your default Downloads folder.</div>
+
+            {getPdfExportNotice('salesSuppression') && (
+              <div className="pdf-export-success">{getPdfExportNotice('salesSuppression')}</div>
+            )}
+
+            {salesSuppressionPdfError && (
+              <div className="msg error pdf-export-error">{salesSuppressionPdfError}</div>
+            )}
 
             <div className="sales-report-results">
               {records.length === 0 ? (
@@ -7902,13 +8643,17 @@ function openReportLoadDetails(load) {
     const isOrdersDueSettlementOpen = activeReportPanel === 'ordersDueSettlement';
     const isWeeklySettlementOpen = activeReportPanel === 'weeklySettlement';
     const isWonNotRegisteredOpen = activeReportPanel === 'wonNotRegistered';
+    const isOnThisDayOpen = activeReportPanel === 'onThisDay';
+    const isActiveDriverRosterOpen = activeReportPanel === 'activeDriverRoster';
     const isInactiveDriverRosterOpen = activeReportPanel === 'inactiveDriverRoster';
+    const isFleetEquipmentOpen = activeReportPanel === 'fleetEquipment';
     const isDriverTimeOffOpen = activeReportPanel === 'driverTimeOff';
     const isNoAvailabilityOpen = activeReportPanel === 'noAvailability';
     const isCustomerTrendsOpen = activeReportPanel === 'customerBookingTrends';
     const isSalesActivityOpen = activeReportPanel === 'salesActivity';
     const isSalesLeadsOpen = activeReportPanel === 'salesLeads';
     const isOperationalReportsOpen = isReportGroupOpen('operational');
+    const isDriverFleetReportsOpen = isReportGroupOpen('driverFleet');
     const isSalesReportsOpen = isReportGroupOpen('sales');
 
     return (
@@ -7916,7 +8661,7 @@ function openReportLoadDetails(load) {
         <button
           type="button"
           className="feature-section-header-button reports-section-header-button"
-          onClick={() => setReportsSectionOpen((current) => !current)}
+          onClick={toggleReportsSection}
           aria-expanded={reportsSectionOpen}
         >
           <span className="feature-section-title-block">
@@ -8389,119 +9134,111 @@ function openReportLoadDetails(load) {
           </div>
 
 
-          <div className={`report-accordion ${isDriverTimeOffOpen ? 'open' : ''}`}>
+
+          <div className={`report-accordion ${isOnThisDayOpen ? 'open' : ''}`}>
             <button
               type="button"
               className="report-accordion-button"
-              onClick={() => toggleReportPanel('driverTimeOff')}
+              onClick={() => toggleReportPanel('onThisDay')}
             >
-              <span>Driver Time Off</span>
-              <span className="report-accordion-icon">{isDriverTimeOffOpen ? '▼' : '▶'}</span>
+              <span>On This Day</span>
+              <span className="report-accordion-icon">{isOnThisDayOpen ? '▼' : '▶'}</span>
             </button>
 
-            {isDriverTimeOffOpen && (
+            {isOnThisDayOpen && (
               <div className="report-accordion-body">
-                <div className="report-card compact-report-card accordion-inner-card driver-time-off-card">
+                <div className="report-card compact-report-card accordion-inner-card on-this-day-card">
                   <div className="report-card-header centered-report-header">
                     <div>
-                      <h3>Driver Time Off</h3>
-                      <p>Current time-off visibility plus year-by-year analysis.</p>
+                      <h3>On This Day</h3>
+                      <p>Daily operational history: pickups, deliveries, orders won, uploads, drivers off, no availability, and available trucks posted.</p>
                     </div>
                   </div>
 
                   <div className="report-controls centered-report-controls">
                     <label>
-                      <span>Report Year</span>
-                      <select
-                        value={driverTimeOffYear}
+                      <span>Report Date</span>
+                      <input
+                        type="date"
+                        value={onThisDayDate}
                         onChange={(e) => {
-                          setDriverTimeOffYear(Number(e.target.value));
-                          setDriverTimeOffReport(null);
-                          setDriverTimeOffError(null);
-                          setDriverTimeOffModalOpen(false);
+                          setOnThisDayDate(e.target.value);
+                          setOnThisDayReport(null);
+                          setOnThisDayError(null);
+                          setOnThisDayPdfError('');
+                          setOnThisDayModalOpen(false);
+                          clearPdfExportNotice('onThisDay');
                         }}
-                        disabled={driverTimeOffLoading}
+                        disabled={onThisDayLoading}
+                      />
+                    </label>
+
+                    <label>
+                      <span>View</span>
+                      <select
+                        value={onThisDayMode}
+                        onChange={(e) => {
+                          setOnThisDayMode(e.target.value);
+                          setOnThisDayReport(null);
+                          setOnThisDayError(null);
+                          setOnThisDayPdfError('');
+                          setOnThisDayModalOpen(false);
+                          clearPdfExportNotice('onThisDay');
+                        }}
+                        disabled={onThisDayLoading}
                       >
-                        {getReportYears().map((year) => (
-                          <option key={year} value={year}>{year}</option>
-                        ))}
+                        <option value="across">Across Years</option>
+                        <option value="exact">Exact Date</option>
                       </select>
                     </label>
 
-                    <button onClick={loadDriverTimeOffReport} disabled={driverTimeOffLoading}>
-                      {driverTimeOffLoading ? 'Loading Report...' : 'Preview Report'}
+                    <button onClick={loadOnThisDayReport} disabled={onThisDayLoading}>
+                      {onThisDayLoading ? 'Loading Report...' : 'Preview Report'}
                     </button>
-                    <button type="button" className="view-button" onClick={() => openDriverTimeOffForm()}>
-                      Add Time Off
+                    <button
+                      type="button"
+                      className="pdf-export-button compact"
+                      onClick={downloadOnThisDayPdf}
+                      disabled={onThisDayPdfLoading || onThisDayLoading}
+                    >
+                      {onThisDayPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
                     </button>
                   </div>
 
-                  {driverTimeOffReport && !driverTimeOffModalOpen && (
+                  {getPdfExportNotice('onThisDay') && !onThisDayModalOpen && (
+                    <div className="pdf-export-success">{getPdfExportNotice('onThisDay')}</div>
+                  )}
+
+                  {onThisDayPdfError && !onThisDayModalOpen && (
+                    <div className="msg error pdf-export-error">{onThisDayPdfError}</div>
+                  )}
+
+                  {onThisDayReport && !onThisDayModalOpen && (
                     <div className="report-ready-card">
                       <div>
-                        <strong>{driverTimeOffReport.reportLabel} is ready.</strong>
+                        <strong>{onThisDayReport.reportLabel} is ready.</strong>
                         <span> The preview opens in a report window.</span>
                       </div>
-                      <button className="view-button" onClick={() => setDriverTimeOffModalOpen(true)}>
-                        Reopen Preview
-                      </button>
-                    </div>
-                  )}
-
-                  {driverTimeOffActionMessage && <div className="msg success-message">{driverTimeOffActionMessage}</div>}
-
-                  {driverTimeOffError && (
-                    <div className="report-alert error">
-                      <h4>Report could not be loaded.</h4>
-                      <p>{driverTimeOffError.message}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className={`report-accordion ${isInactiveDriverRosterOpen ? 'open' : ''}`}>
-            <button
-              type="button"
-              className="report-accordion-button"
-              onClick={() => toggleReportPanel('inactiveDriverRoster')}
-            >
-              <span>Inactive Driver Roster</span>
-              <span className="report-accordion-icon">{isInactiveDriverRosterOpen ? '▼' : '▶'}</span>
-            </button>
-
-            {isInactiveDriverRosterOpen && (
-              <div className="report-accordion-body">
-                <div className="report-card compact-report-card accordion-inner-card">
-                  <div className="report-card-header centered-report-header">
-                    <div>
-                      <h3>Inactive Driver Roster</h3>
-                    </div>
-                  </div>
-
-                  <div className="report-controls centered-report-controls">
-                    <button onClick={loadInactiveDriverRosterReport} disabled={inactiveDriverRosterLoading}>
-                      {inactiveDriverRosterLoading ? 'Loading Report...' : 'Preview Report'}
-                    </button>
-                  </div>
-
-                  {inactiveDriverRosterReport && !inactiveDriverRosterModalOpen && (
-                    <div className="report-ready-card">
-                      <div>
-                        <strong>{inactiveDriverRosterReport.reportLabel} is ready.</strong>
-                        <span> The preview opens in a report window.</span>
+                      <div className="report-ready-actions">
+                        <button className="view-button" onClick={() => setOnThisDayModalOpen(true)}>
+                          Reopen Preview
+                        </button>
+                        <button
+                          type="button"
+                          className="pdf-export-button compact"
+                          onClick={downloadOnThisDayPdf}
+                          disabled={onThisDayPdfLoading}
+                        >
+                          {onThisDayPdfLoading ? 'Exporting...' : 'Export PDF'}
+                        </button>
                       </div>
-                      <button className="view-button" onClick={() => setInactiveDriverRosterModalOpen(true)}>
-                        Reopen Preview
-                      </button>
                     </div>
                   )}
 
-                  {inactiveDriverRosterError && (
+                  {onThisDayError && (
                     <div className="report-alert error">
                       <h4>Report could not be loaded.</h4>
-                      <p>{inactiveDriverRosterError.message}</p>
+                      <p>{onThisDayError.message}</p>
                     </div>
                   )}
                 </div>
@@ -8599,6 +9336,382 @@ function openReportLoadDetails(load) {
             )}
           </div>
 
+
+          <div className={`report-group-accordion ${isDriverFleetReportsOpen ? 'open' : ''}`}>
+            <button
+              type="button"
+              className="report-group-button"
+              onClick={() => toggleReportGroup('driverFleet')}
+            >
+              <div>
+                <strong>Driver / Fleet Reports</strong>
+                <span>Roster, equipment, and time-off reporting</span>
+              </div>
+              <span className="report-accordion-icon">{isDriverFleetReportsOpen ? '▼' : '▶'}</span>
+            </button>
+
+            {isDriverFleetReportsOpen && (
+              <div className="report-group-body">
+
+                <div className={`report-accordion ${isActiveDriverRosterOpen ? 'open' : ''}`}>
+                  <button
+                    type="button"
+                    className="report-accordion-button"
+                    onClick={() => toggleReportPanel('activeDriverRoster')}
+                  >
+                    <span>Active Driver Roster</span>
+                    <span className="report-accordion-icon">{isActiveDriverRosterOpen ? '▼' : '▶'}</span>
+                  </button>
+
+                  {isActiveDriverRosterOpen && (
+                    <div className="report-accordion-body">
+                      <div className="report-card compact-report-card accordion-inner-card">
+                        <div className="report-card-header centered-report-header">
+                          <div>
+                            <h3>Active Driver Roster</h3>
+                            <p>Active roster drivers with quick contact and equipment context.</p>
+                          </div>
+                        </div>
+
+                        <div className="report-controls centered-report-controls">
+                          <button onClick={loadActiveDriverRosterReport} disabled={activeDriverRosterLoading}>
+                            {activeDriverRosterLoading ? 'Loading Report...' : 'Preview Report'}
+                          </button>
+                          <button
+                            type="button"
+                            className="pdf-export-button"
+                            onClick={downloadActiveDriverRosterPdf}
+                            disabled={activeDriverRosterPdfLoading || activeDriverRosterLoading}
+                          >
+                            {activeDriverRosterPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                          </button>
+                        </div>
+
+                        <div className="pdf-export-guidance">PDF exports download to your default Downloads folder. If your browser asks, use the folder you choose.</div>
+
+                        {getPdfExportNotice('activeDriverRoster') && !activeDriverRosterModalOpen && (
+                          <div className="pdf-export-success">{getPdfExportNotice('activeDriverRoster')}</div>
+                        )}
+
+                        {activeDriverRosterPdfError && !activeDriverRosterModalOpen && (
+                          <div className="msg error pdf-export-error">{activeDriverRosterPdfError}</div>
+                        )}
+
+                        {activeDriverRosterReport && !activeDriverRosterModalOpen && (
+                          <div className="report-ready-card">
+                            <div>
+                              <strong>{activeDriverRosterReport.reportLabel} is ready.</strong>
+                              <span> The preview opens in a report window.</span>
+                            </div>
+                            <div className="report-ready-actions">
+                              <button className="view-button" onClick={() => setActiveDriverRosterModalOpen(true)}>
+                                Reopen Preview
+                              </button>
+                              <button
+                                type="button"
+                                className="pdf-export-button compact"
+                                onClick={downloadActiveDriverRosterPdf}
+                                disabled={activeDriverRosterPdfLoading}
+                              >
+                                {activeDriverRosterPdfLoading ? 'Exporting...' : 'Export PDF'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {activeDriverRosterError && (
+                          <div className="report-alert error">
+                            <h4>Report could not be loaded.</h4>
+                            <p>{activeDriverRosterError.message}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+
+                <div className={`report-accordion ${isInactiveDriverRosterOpen ? 'open' : ''}`}>
+                  <button
+                    type="button"
+                    className="report-accordion-button"
+                    onClick={() => toggleReportPanel('inactiveDriverRoster')}
+                  >
+                    <span>Inactive Driver Roster</span>
+                    <span className="report-accordion-icon">{isInactiveDriverRosterOpen ? '▼' : '▶'}</span>
+                  </button>
+
+                  {isInactiveDriverRosterOpen && (
+                    <div className="report-accordion-body">
+                      <div className="report-card compact-report-card accordion-inner-card">
+                        <div className="report-card-header centered-report-header">
+                          <div>
+                            <h3>Inactive Driver Roster</h3>
+                            <p>Termed/inactive roster records for lookup and cleanup.</p>
+                          </div>
+                        </div>
+
+                        <div className="report-controls centered-report-controls">
+                          <button onClick={loadInactiveDriverRosterReport} disabled={inactiveDriverRosterLoading}>
+                            {inactiveDriverRosterLoading ? 'Loading Report...' : 'Preview Report'}
+                          </button>
+                          <button
+                            type="button"
+                            className="pdf-export-button"
+                            onClick={downloadInactiveDriverRosterPdf}
+                            disabled={inactiveDriverRosterPdfLoading || inactiveDriverRosterLoading}
+                          >
+                            {inactiveDriverRosterPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                          </button>
+                        </div>
+
+                        <div className="pdf-export-guidance">PDF exports download to your default Downloads folder. If your browser asks, use the folder you choose.</div>
+
+                        {getPdfExportNotice('inactiveDriverRoster') && !inactiveDriverRosterModalOpen && (
+                          <div className="pdf-export-success">{getPdfExportNotice('inactiveDriverRoster')}</div>
+                        )}
+
+                        {inactiveDriverRosterPdfError && !inactiveDriverRosterModalOpen && (
+                          <div className="msg error pdf-export-error">{inactiveDriverRosterPdfError}</div>
+                        )}
+
+                        {inactiveDriverRosterReport && !inactiveDriverRosterModalOpen && (
+                          <div className="report-ready-card">
+                            <div>
+                              <strong>{inactiveDriverRosterReport.reportLabel} is ready.</strong>
+                              <span> The preview opens in a report window.</span>
+                            </div>
+                            <div className="report-ready-actions">
+                              <button className="view-button" onClick={() => setInactiveDriverRosterModalOpen(true)}>
+                                Reopen Preview
+                              </button>
+                              <button
+                                type="button"
+                                className="pdf-export-button compact"
+                                onClick={downloadInactiveDriverRosterPdf}
+                                disabled={inactiveDriverRosterPdfLoading}
+                              >
+                                {inactiveDriverRosterPdfLoading ? 'Exporting...' : 'Export PDF'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {inactiveDriverRosterError && (
+                          <div className="report-alert error">
+                            <h4>Report could not be loaded.</h4>
+                            <p>{inactiveDriverRosterError.message}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+
+                <div className={`report-accordion ${isFleetEquipmentOpen ? 'open' : ''}`}>
+                  <button
+                    type="button"
+                    className="report-accordion-button"
+                    onClick={() => toggleReportPanel('fleetEquipment')}
+                  >
+                    <span>Fleet Equipment</span>
+                    <span className="report-accordion-icon">{isFleetEquipmentOpen ? '▼' : '▶'}</span>
+                  </button>
+
+                  {isFleetEquipmentOpen && (
+                    <div className="report-accordion-body">
+                      <div className="report-card compact-report-card accordion-inner-card">
+                        <div className="report-card-header centered-report-header">
+                          <div>
+                            <h3>Fleet Equipment</h3>
+                            <p>Driver Roster equipment view with active/inactive scope.</p>
+                          </div>
+                        </div>
+
+                        <div className="report-controls centered-report-controls">
+                          <label>
+                            <span>Roster Scope</span>
+                            <select
+                              value={fleetEquipmentStatus}
+                              onChange={(e) => {
+                                setFleetEquipmentStatus(e.target.value);
+                                setFleetEquipmentReport(null);
+                                setFleetEquipmentError(null);
+                                setFleetEquipmentModalOpen(false);
+                                setFleetEquipmentPdfError('');
+                                clearPdfExportNotice('fleetEquipment');
+                              }}
+                              disabled={fleetEquipmentLoading}
+                            >
+                              <option value="active">Active</option>
+                              <option value="inactive">Inactive</option>
+                              <option value="all">All</option>
+                            </select>
+                          </label>
+
+                          <button onClick={loadFleetEquipmentReport} disabled={fleetEquipmentLoading}>
+                            {fleetEquipmentLoading ? 'Loading Report...' : 'Preview Report'}
+                          </button>
+                          <button
+                            type="button"
+                            className="pdf-export-button"
+                            onClick={downloadFleetEquipmentPdf}
+                            disabled={fleetEquipmentPdfLoading || fleetEquipmentLoading}
+                          >
+                            {fleetEquipmentPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                          </button>
+                        </div>
+
+                        <div className="pdf-export-guidance">PDF exports download to your default Downloads folder. If your browser asks, use the folder you choose.</div>
+
+                        {getPdfExportNotice('fleetEquipment') && !fleetEquipmentModalOpen && (
+                          <div className="pdf-export-success">{getPdfExportNotice('fleetEquipment')}</div>
+                        )}
+
+                        {fleetEquipmentPdfError && !fleetEquipmentModalOpen && (
+                          <div className="msg error pdf-export-error">{fleetEquipmentPdfError}</div>
+                        )}
+
+                        {fleetEquipmentReport && !fleetEquipmentModalOpen && (
+                          <div className="report-ready-card">
+                            <div>
+                              <strong>{fleetEquipmentReport.reportLabel} is ready.</strong>
+                              <span> The preview opens in a report window.</span>
+                            </div>
+                            <div className="report-ready-actions">
+                              <button className="view-button" onClick={() => setFleetEquipmentModalOpen(true)}>
+                                Reopen Preview
+                              </button>
+                              <button
+                                type="button"
+                                className="pdf-export-button compact"
+                                onClick={downloadFleetEquipmentPdf}
+                                disabled={fleetEquipmentPdfLoading}
+                              >
+                                {fleetEquipmentPdfLoading ? 'Exporting...' : 'Export PDF'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {fleetEquipmentError && (
+                          <div className="report-alert error">
+                            <h4>Report could not be loaded.</h4>
+                            <p>{fleetEquipmentError.message}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+
+                <div className={`report-accordion ${isDriverTimeOffOpen ? 'open' : ''}`}>
+                  <button
+                    type="button"
+                    className="report-accordion-button"
+                    onClick={() => toggleReportPanel('driverTimeOff')}
+                  >
+                    <span>Driver Time Off</span>
+                    <span className="report-accordion-icon">{isDriverTimeOffOpen ? '▼' : '▶'}</span>
+                  </button>
+
+                  {isDriverTimeOffOpen && (
+                    <div className="report-accordion-body">
+                      <div className="report-card compact-report-card accordion-inner-card driver-time-off-card">
+                        <div className="report-card-header centered-report-header">
+                          <div>
+                            <h3>Driver Time Off</h3>
+                            <p>Current time-off visibility plus year-by-year analysis.</p>
+                          </div>
+                        </div>
+
+                        <div className="report-controls centered-report-controls">
+                          <label>
+                            <span>Report Year</span>
+                            <select
+                              value={driverTimeOffYear}
+                              onChange={(e) => {
+                                setDriverTimeOffYear(Number(e.target.value));
+                                setDriverTimeOffReport(null);
+                                setDriverTimeOffError(null);
+                                setDriverTimeOffPdfError('');
+                                clearPdfExportNotice('driverTimeOff');
+                                setDriverTimeOffModalOpen(false);
+                              }}
+                              disabled={driverTimeOffLoading}
+                            >
+                              {getReportYears().map((year) => (
+                                <option key={year} value={year}>{year}</option>
+                              ))}
+                            </select>
+                          </label>
+
+                          <button onClick={loadDriverTimeOffReport} disabled={driverTimeOffLoading}>
+                            {driverTimeOffLoading ? 'Loading Report...' : 'Preview Report'}
+                          </button>
+                          <button
+                            type="button"
+                            className="pdf-export-button"
+                            onClick={downloadDriverTimeOffPdf}
+                            disabled={driverTimeOffPdfLoading || driverTimeOffLoading}
+                          >
+                            {driverTimeOffPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                          </button>
+                          <button type="button" className="view-button" onClick={() => openDriverTimeOffForm()}>
+                            Add Time Off
+                          </button>
+                        </div>
+
+                        <div className="pdf-export-guidance">PDF exports download to your default Downloads folder. If your browser asks, use the folder you choose.</div>
+
+                        {getPdfExportNotice('driverTimeOff') && !driverTimeOffModalOpen && (
+                          <div className="pdf-export-success">{getPdfExportNotice('driverTimeOff')}</div>
+                        )}
+
+                        {driverTimeOffPdfError && !driverTimeOffModalOpen && (
+                          <div className="msg error pdf-export-error">{driverTimeOffPdfError}</div>
+                        )}
+
+                        {driverTimeOffReport && !driverTimeOffModalOpen && (
+                          <div className="report-ready-card">
+                            <div>
+                              <strong>{driverTimeOffReport.reportLabel} is ready.</strong>
+                              <span> The preview opens in a report window.</span>
+                            </div>
+                            <div className="report-ready-actions">
+                              <button className="view-button" onClick={() => setDriverTimeOffModalOpen(true)}>
+                                Reopen Preview
+                              </button>
+                              <button
+                                type="button"
+                                className="pdf-export-button compact"
+                                onClick={downloadDriverTimeOffPdf}
+                                disabled={driverTimeOffPdfLoading}
+                              >
+                                {driverTimeOffPdfLoading ? 'Exporting...' : 'Export PDF'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {driverTimeOffActionMessage && <div className="msg success-message">{driverTimeOffActionMessage}</div>}
+
+                        {driverTimeOffError && (
+                          <div className="report-alert error">
+                            <h4>Report could not be loaded.</h4>
+                            <p>{driverTimeOffError.message}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+              </div>
+            )}
+          </div>
           <div className={`report-group-accordion ${isSalesReportsOpen ? 'open' : ''}`}>
             <button
               type="button"
@@ -8701,19 +9814,34 @@ function openReportLoadDetails(load) {
               onChange={(e) => {
                 setPassword(e.target.value);
                 setAuthError('');
+                setLoginStatusMessage('');
               }}
-              onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !loginLoading) handleLogin();
+              }}
               placeholder="Access token"
               autoFocus
+              disabled={loginLoading}
+              aria-busy={loginLoading}
             />
 
             <button
               onClick={handleLogin}
-              disabled={!password.trim()}
+              disabled={!password.trim() || loginLoading}
             >
-              Log In
+              {loginLoading ? 'Connecting...' : 'Log In'}
             </button>
           </div>
+
+          {loginLoading && (
+            <div className="login-status-card" role="status" aria-live="polite">
+              <span className="login-spinner" aria-hidden="true" />
+              <div>
+                <strong>{loginStatusMessage || 'Connecting to Kole Connect...'}</strong>
+                <small>Free hosting may need a short wake-up before the first login responds.</small>
+              </div>
+            </div>
+          )}
 
           {authError && <div className="msg error">{authError}</div>}
 
@@ -9304,21 +10432,150 @@ function openReportLoadDetails(load) {
       )}
 
 
-      {inactiveDriverRosterModalOpen && inactiveDriverRosterReport && (
-        <div className="modal-overlay report-modal-overlay" onClick={closeInactiveDriverRosterModal}>
-          <div className="detail-modal report-modal" onClick={(e) => e.stopPropagation()}>
+      {activeDriverRosterModalOpen && activeDriverRosterReport && (
+        <div className="modal-overlay report-modal-overlay" onClick={closeActiveDriverRosterModal}>
+          <div className="detail-modal report-modal wide-report-modal" onClick={(e) => e.stopPropagation()}>
             <div className="detail-header report-modal-header">
               <div>
-                <h2>{inactiveDriverRosterReport.reportLabel || 'Inactive Driver Roster'}</h2>
+                <h2>{activeDriverRosterReport.reportLabel || 'Active Driver Roster'}</h2>
+                <p>{formatReportNumber(activeDriverRosterReport.count)} active driver(s) · Generated {activeDriverRosterReport.generatedAt || ''}</p>
               </div>
 
-              <button className="close-button" onClick={closeInactiveDriverRosterModal}>
-                Close
-              </button>
+              <div className="report-modal-actions">
+                <button
+                  type="button"
+                  className="pdf-export-button"
+                  onClick={downloadActiveDriverRosterPdf}
+                  disabled={activeDriverRosterPdfLoading}
+                >
+                  {activeDriverRosterPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                </button>
+                <button className="close-button" onClick={closeActiveDriverRosterModal}>
+                  Close
+                </button>
+              </div>
             </div>
 
             <div className="modal-body report-modal-body">
+              {getPdfExportNotice('activeDriverRoster') && (
+                <div className="pdf-export-success">{getPdfExportNotice('activeDriverRoster')}</div>
+              )}
+              {activeDriverRosterPdfError && (
+                <div className="msg error pdf-export-error">{activeDriverRosterPdfError}</div>
+              )}
+              <ActiveDriverRosterPreview />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {inactiveDriverRosterModalOpen && inactiveDriverRosterReport && (
+        <div className="modal-overlay report-modal-overlay" onClick={closeInactiveDriverRosterModal}>
+          <div className="detail-modal report-modal wide-report-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="detail-header report-modal-header">
+              <div>
+                <h2>{inactiveDriverRosterReport.reportLabel || 'Inactive Driver Roster'}</h2>
+                <p>{formatReportNumber(inactiveDriverRosterReport.count)} inactive driver(s) · Generated {inactiveDriverRosterReport.generatedAt || ''}</p>
+              </div>
+
+              <div className="report-modal-actions">
+                <button
+                  type="button"
+                  className="pdf-export-button"
+                  onClick={downloadInactiveDriverRosterPdf}
+                  disabled={inactiveDriverRosterPdfLoading}
+                >
+                  {inactiveDriverRosterPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                </button>
+                <button className="close-button" onClick={closeInactiveDriverRosterModal}>
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="modal-body report-modal-body">
+              {getPdfExportNotice('inactiveDriverRoster') && (
+                <div className="pdf-export-success">{getPdfExportNotice('inactiveDriverRoster')}</div>
+              )}
+              {inactiveDriverRosterPdfError && (
+                <div className="msg error pdf-export-error">{inactiveDriverRosterPdfError}</div>
+              )}
               <InactiveDriverRosterPreview />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {fleetEquipmentModalOpen && fleetEquipmentReport && (
+        <div className="modal-overlay report-modal-overlay" onClick={closeFleetEquipmentModal}>
+          <div className="detail-modal report-modal wide-report-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="detail-header report-modal-header">
+              <div>
+                <h2>{fleetEquipmentReport.reportLabel || 'Fleet Equipment'}</h2>
+                <p>{formatReportNumber(fleetEquipmentReport.count)} equipment row(s) · Generated {fleetEquipmentReport.generatedAt || ''}</p>
+              </div>
+
+              <div className="report-modal-actions">
+                <button
+                  type="button"
+                  className="pdf-export-button"
+                  onClick={downloadFleetEquipmentPdf}
+                  disabled={fleetEquipmentPdfLoading}
+                >
+                  {fleetEquipmentPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                </button>
+                <button className="close-button" onClick={closeFleetEquipmentModal}>
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="modal-body report-modal-body">
+              {getPdfExportNotice('fleetEquipment') && (
+                <div className="pdf-export-success">{getPdfExportNotice('fleetEquipment')}</div>
+              )}
+              {fleetEquipmentPdfError && (
+                <div className="msg error pdf-export-error">{fleetEquipmentPdfError}</div>
+              )}
+              <FleetEquipmentPreview />
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {onThisDayModalOpen && onThisDayReport && (
+        <div className="modal-overlay report-modal-overlay" onClick={closeOnThisDayModal}>
+          <div className="detail-modal report-modal wide-report-modal on-this-day-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="detail-header report-modal-header">
+              <div>
+                <h2>{onThisDayReport.reportLabel || 'On This Day'}</h2>
+                <p>{onThisDayReport.modeLabel || '-'} · {formatReportNumber(onThisDayReport.count)} activity item(s) · Generated {onThisDayReport.generatedAt || ''}</p>
+              </div>
+
+              <div className="report-modal-actions">
+                <button
+                  type="button"
+                  className="pdf-export-button"
+                  onClick={downloadOnThisDayPdf}
+                  disabled={onThisDayPdfLoading}
+                >
+                  {onThisDayPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                </button>
+                <button className="close-button" onClick={closeOnThisDayModal}>
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="modal-body report-modal-body">
+              {getPdfExportNotice('onThisDay') && (
+                <div className="pdf-export-success">{getPdfExportNotice('onThisDay')}</div>
+              )}
+              {onThisDayPdfError && (
+                <div className="msg error pdf-export-error">{onThisDayPdfError}</div>
+              )}
+              <OnThisDayPreview />
             </div>
           </div>
         </div>
@@ -9332,9 +10589,25 @@ function openReportLoadDetails(load) {
                 <h2>{driverTimeOffReport.reportLabel || 'Driver Time Off'}</h2>
                 <p>{formatReportNumber(driverTimeOffReport.count)} record(s) · Generated {driverTimeOffReport.generatedAt || ''}</p>
               </div>
-              <button className="close-button" onClick={closeDriverTimeOffModal}>Close</button>
+              <div className="report-modal-actions">
+                <button
+                  type="button"
+                  className="pdf-export-button"
+                  onClick={downloadDriverTimeOffPdf}
+                  disabled={driverTimeOffPdfLoading}
+                >
+                  {driverTimeOffPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                </button>
+                <button className="close-button" onClick={closeDriverTimeOffModal}>Close</button>
+              </div>
             </div>
             <div className="modal-body report-modal-body">
+              {getPdfExportNotice('driverTimeOff') && (
+                <div className="pdf-export-success">{getPdfExportNotice('driverTimeOff')}</div>
+              )}
+              {driverTimeOffPdfError && (
+                <div className="msg error pdf-export-error">{driverTimeOffPdfError}</div>
+              )}
               <DriverTimeOffPreview />
             </div>
           </div>
