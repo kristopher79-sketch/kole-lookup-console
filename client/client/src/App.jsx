@@ -501,6 +501,8 @@ export default function App() {
   const [openReportGroups, setOpenReportGroups] = useState([]);
   const [salesLeadsView, setSalesLeadsView] = useState('all');
   const [salesLeadsSort, setSalesLeadsSort] = useState('name');
+  const [leadSuppressionView, setLeadSuppressionView] = useState('suppressed');
+  const [leadSuppressionSort, setLeadSuppressionSort] = useState('name');
   const [salesLeadsReport, setSalesLeadsReport] = useState(null);
   const [salesLeadsLoading, setSalesLeadsLoading] = useState(false);
   const [salesLeadsError, setSalesLeadsError] = useState(null);
@@ -532,6 +534,10 @@ export default function App() {
   const [salesNoteSaving, setSalesNoteSaving] = useState(false);
   const [salesNoteMessage, setSalesNoteMessage] = useState('');
   const [salesNoteError, setSalesNoteError] = useState('');
+  const [salesLeadSuppressionReason, setSalesLeadSuppressionReason] = useState('');
+  const [salesLeadSuppressionSaving, setSalesLeadSuppressionSaving] = useState(false);
+  const [salesLeadSuppressionMessage, setSalesLeadSuppressionMessage] = useState('');
+  const [salesLeadSuppressionError, setSalesLeadSuppressionError] = useState('');
   const salesLeadsPrewarmStartedRef = useRef(false);
 
   const [authError, setAuthError] = useState('');
@@ -2829,7 +2835,7 @@ function getPositionStatusLabel(position) {
   async function downloadSalesSuppressionPdf() {
     await downloadReportPdf({
       reportKey: 'salesSuppression',
-      reportName: 'Lead Suppression Report',
+      reportName: 'Follow-Up Suppression',
       endpoint: `${API}/reports/sales-leads/suppression/pdf`,
       fallbackName: 'Kole_Lead_Suppression_Report.pdf',
       setLoading: setSalesSuppressionPdfLoading,
@@ -3481,13 +3487,22 @@ function getPositionStatusLabel(position) {
   }
 
 
-  const salesLeadViewOptions = [
+  const customerSalesLeadViewOptions = [
     { value: 'all', label: 'Total Customers', summaryKey: 'total', defaultSort: 'name' },
     { value: 'converted', label: 'Converted', summaryKey: 'converted', defaultSort: 'wins' },
     { value: 'unconverted', label: 'Unconverted', summaryKey: 'unconverted', defaultSort: 'quotes' },
     { value: 'followUpDue', label: 'Follow-up Due', summaryKey: 'followUpDue', defaultSort: 'followUp' },
-    { value: 'aviation', label: 'Aviation', summaryKey: 'aviation', defaultSort: 'quotes' },
-    { value: 'suppressed', label: 'Suppressed / Ignored', summaryKey: 'suppressed', defaultSort: 'name' }
+    { value: 'aviation', label: 'Aviation', summaryKey: 'aviation', defaultSort: 'quotes' }
+  ];
+
+  const leadSuppressionViewOptions = [
+    { value: 'suppressed', label: 'Suppressed / Ignored', summaryKey: 'suppressed', defaultSort: 'name' },
+    { value: 'suppressionCandidates', label: 'Can Suppress', summaryKey: 'suppressionCandidates', defaultSort: 'lastQuote' }
+  ];
+
+  const salesLeadViewOptions = [
+    ...customerSalesLeadViewOptions,
+    ...leadSuppressionViewOptions
   ];
 
   function preserveReportScroll(runUpdate) {
@@ -3532,6 +3547,14 @@ function getPositionStatusLabel(position) {
 
   function getDefaultSalesLeadSort(view = salesLeadsView) {
     return salesLeadViewOptions.find((option) => option.value === view)?.defaultSort || 'name';
+  }
+
+  function isCustomerSalesLeadView(view) {
+    return customerSalesLeadViewOptions.some((option) => option.value === view);
+  }
+
+  function isLeadSuppressionView(view) {
+    return leadSuppressionViewOptions.some((option) => option.value === view);
   }
 
   function normalizeSalesLeadDate(value) {
@@ -3665,6 +3688,27 @@ function getPositionStatusLabel(position) {
     return String(value || '').trim().toLowerCase();
   }
 
+  function isSalesLeadSuppressedByHandling(lead = {}) {
+    return normalizeSalesLeadText(lead.FollowUpHandling) === 'suppressed';
+  }
+
+  function isSalesLeadStatusSuppressionLocked(lead = {}) {
+    const status = normalizeSalesLeadText(lead.Status);
+    return status === 'ignore' || status === 'inactive';
+  }
+
+  function isSalesLeadSuppressionReportRow(lead = {}) {
+    return isSalesLeadSuppressedByHandling(lead) || isSalesLeadStatusSuppressionLocked(lead);
+  }
+
+  function canSuppressSalesLead(lead = {}) {
+    return Boolean(lead.id) && !isSalesLeadSuppressionReportRow(lead);
+  }
+
+  function canUnsuppressSalesLead(lead = {}) {
+    return Boolean(lead.id) && isSalesLeadSuppressedByHandling(lead);
+  }
+
   function filterSalesLeadRecords(records, view = 'all') {
     const normalized = normalizeSalesLeadText(view);
 
@@ -3685,11 +3729,11 @@ function getPositionStatusLabel(position) {
     }
 
     if (normalized === 'suppressed') {
-      return records.filter((record) => (
-        normalizeSalesLeadText(record.FollowUpHandling) === 'suppressed' ||
-        normalizeSalesLeadText(record.Status) === 'ignore' ||
-        normalizeSalesLeadText(record.Status) === 'inactive'
-      ));
+      return records.filter(isSalesLeadSuppressionReportRow);
+    }
+
+    if (normalized === 'suppressioncandidates' || normalized === 'suppression candidates') {
+      return records.filter((record) => !isSalesLeadSuppressionReportRow(record));
     }
 
     return records;
@@ -4071,12 +4115,108 @@ function getPositionStatusLabel(position) {
     }
   }
 
+  function mergeUpdatedSalesLead(updatedLead, nextSummary = null, nextGeneratedAt = '') {
+    if (!updatedLead?.id) return;
+
+    setSalesLeadsReport((current) => {
+      if (!current?.records) return current;
+
+      const nextRecords = current.records.map((record) => (
+        String(record.id) === String(updatedLead.id)
+          ? {
+              ...record,
+              ...updatedLead,
+              SalesNotes: updatedLead.SalesNotes || record.SalesNotes,
+              SalesNotesCount: updatedLead.SalesNotesCount ?? record.SalesNotesCount,
+              RevenueWon: updatedLead.RevenueWon ?? record.RevenueWon,
+              YearDetails: updatedLead.YearDetails || record.YearDetails
+            }
+          : record
+      ));
+
+      return {
+        ...current,
+        generatedAt: nextGeneratedAt || current.generatedAt,
+        summary: nextSummary || current.summary,
+        records: nextRecords
+      };
+    });
+
+    setSelectedSalesLead((current) => {
+      if (!current || String(current.id) !== String(updatedLead.id)) return current;
+
+      return {
+        ...current,
+        ...updatedLead,
+        SalesNotes: updatedLead.SalesNotes || current.SalesNotes,
+        SalesNotesCount: updatedLead.SalesNotesCount ?? current.SalesNotesCount,
+        RevenueWon: updatedLead.RevenueWon ?? current.RevenueWon,
+        YearDetails: updatedLead.YearDetails || current.YearDetails
+      };
+    });
+  }
+
+  async function updateSelectedSalesLeadSuppression(action) {
+    if (!selectedSalesLead?.id) {
+      setSalesLeadSuppressionError('This customer card does not have a Sales Leads item id, so suppression cannot be changed here.');
+      return;
+    }
+
+    const normalizedAction = normalizeSalesLeadText(action);
+    const isSuppressing = normalizedAction === 'suppress';
+    const reason = salesLeadSuppressionReason.trim();
+
+    if (isSuppressing && !reason) {
+      setSalesLeadSuppressionError('Add a suppression reason before suppressing the lead.');
+      return;
+    }
+
+    setSalesLeadSuppressionSaving(true);
+    setSalesLeadSuppressionError('');
+    setSalesLeadSuppressionMessage('');
+
+    try {
+      const res = await authedFetch(`${API}/sales-leads/${encodeURIComponent(selectedSalesLead.id)}/suppression`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          action: isSuppressing ? 'suppress' : 'unsuppress',
+          reason
+        })
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to update follow-up suppression.');
+      }
+
+      if (data.record) {
+        mergeUpdatedSalesLead(data.record, data.summary || null, data.generatedAt || '');
+      } else {
+        await loadSalesLeadsReport({ forceRefresh: true });
+      }
+
+      setSalesLeadSuppressionReason('');
+      setSalesLeadSuppressionMessage(data.message || (isSuppressing ? 'Follow-up suppressed.' : 'Follow-up unsuppressed.'));
+    } catch (err) {
+      setSalesLeadSuppressionError(err.message || 'Unable to update follow-up lead suppression.');
+    } finally {
+      setSalesLeadSuppressionSaving(false);
+    }
+  }
+
   function openSalesLeadCard(lead) {
     setSelectedSalesLead(lead);
     setCustomerLookupError('');
     setSalesNoteDraft('');
     setSalesNoteMessage('');
     setSalesNoteError('');
+    setSalesLeadSuppressionReason('');
+    setSalesLeadSuppressionMessage('');
+    setSalesLeadSuppressionError('');
   }
 
   function closeSalesLeadModal() {
@@ -4084,6 +4224,9 @@ function getPositionStatusLabel(position) {
     setSalesNoteDraft('');
     setSalesNoteMessage('');
     setSalesNoteError('');
+    setSalesLeadSuppressionReason('');
+    setSalesLeadSuppressionMessage('');
+    setSalesLeadSuppressionError('');
   }
 
   function openRosterFromReport(roster) {
@@ -7822,9 +7965,11 @@ function openReportLoadDetails(load) {
     const winRate = lead.QuoteCount > 0 ? lead.QuotesWon / lead.QuoteCount : 0;
     const followUpLabel = lead.FollowUpDue
       ? `Due ${formatSalesDate(lead.NextTouchDate)}`
-      : lead.FollowUpHandling === 'Suppressed'
+      : isSalesLeadSuppressedByHandling(lead)
         ? 'Suppressed'
-        : 'None due';
+        : isSalesLeadStatusSuppressionLocked(lead)
+          ? 'Status locked'
+          : 'None due';
 
     return (
       <button
@@ -8580,11 +8725,14 @@ function openReportLoadDetails(load) {
     const summary = salesLeadsReport?.summary || {};
     const allRecords = salesLeadsReport?.records || [];
     const hasSalesLeadsReport = Boolean(salesLeadsReport);
-    const activeReportView = salesLeadsView;
+    const activeReportView = isCustomerSalesLeadView(salesLeadsView) ? salesLeadsView : 'all';
     const activeReportSort = salesLeadsSort;
     const activeViewLabel = getSalesLeadViewLabel(activeReportView);
-    const records = visibleSalesLeadRecords;
-    const summaryButtons = salesLeadViewOptions.map((option) => ({
+    const records = sortSalesLeadRecords(
+      filterSalesLeadRecords(allRecords, activeReportView),
+      activeReportSort
+    );
+    const summaryButtons = customerSalesLeadViewOptions.map((option) => ({
       ...option,
       count: Number(summary?.[option.summaryKey] || 0)
     }));
@@ -8672,7 +8820,7 @@ function openReportLoadDetails(load) {
             </div>
 
             <p className="sales-summary-helper">
-              Click a card to filter the customer cards below.
+              Click a summary card to filter the customer cards below. Use the Follow-Up Suppression tab for suppress/unsuppress review work.
             </p>
 
             <div className="report-controls centered-report-controls sales-report-controls">
@@ -8696,6 +8844,149 @@ function openReportLoadDetails(load) {
                 {salesLeadsLoading ? 'Refreshing Customers...' : 'Refresh Customer Cards'}
               </button>
 
+            </div>
+
+            <div className="sales-report-results">
+              {records.length === 0 ? (
+                <div className="msg">No customers matched this sales view.</div>
+              ) : (
+                <div className="sales-lead-card-grid">
+                  {records.map((lead) => (
+                    <SalesLeadCard key={lead.id || lead.CompanyName} lead={lead} />
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+
+  function LeadSuppressionReportPanel() {
+    const summary = salesLeadsReport?.summary || {};
+    const allRecords = salesLeadsReport?.records || [];
+    const hasSalesLeadsReport = Boolean(salesLeadsReport);
+    const activeReportView = isLeadSuppressionView(leadSuppressionView) ? leadSuppressionView : 'suppressed';
+    const activeReportSort = leadSuppressionSort;
+    const activeViewLabel = getSalesLeadViewLabel(activeReportView);
+    const records = sortSalesLeadRecords(
+      filterSalesLeadRecords(allRecords, activeReportView),
+      activeReportSort
+    );
+    const summaryButtons = leadSuppressionViewOptions.map((option) => ({
+      ...option,
+      count: Number(summary?.[option.summaryKey] || 0)
+    }));
+
+    function loadInitialSuppressionReport() {
+      const initialView = 'suppressed';
+      const initialSort = getDefaultSalesLeadSort(initialView);
+
+      setLeadSuppressionView(initialView);
+      setLeadSuppressionSort(initialSort);
+      loadSalesLeadsReport();
+    }
+
+    function changeLeadSuppressionView(nextView) {
+      const nextSort = getDefaultSalesLeadSort(nextView);
+
+      setLeadSuppressionView(nextView);
+      setLeadSuppressionSort(nextSort);
+      setSelectedSalesLead(null);
+      setSalesLeadsError(null);
+    }
+
+    function changeLeadSuppressionSort(nextSort) {
+      setLeadSuppressionSort(nextSort);
+      setSelectedSalesLead(null);
+      setSalesLeadsError(null);
+    }
+
+    return (
+      <div className="report-card compact-report-card accordion-inner-card sales-report-card lead-suppression-report-card">
+        <div className="report-card-header centered-report-header">
+          <div>
+            <h3>Follow-Up Suppression</h3>
+            {hasSalesLeadsReport && (
+              <p>
+                {activeViewLabel} · {formatReportNumber(records.length)} shown · {formatReportNumber(salesLeadsReport.recordsScanned || 0)} scanned · {salesLeadsReport.generatedAt || ''}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {!hasSalesLeadsReport && !salesLeadsLoading && (
+          <div className="sales-report-start">
+            <button onClick={loadInitialSuppressionReport} disabled={salesLeadsLoading}>
+              Load Follow-Up Suppression
+            </button>
+          </div>
+        )}
+
+        {salesLeadsLoading && (
+          <div className="sales-report-loading">
+            Loading follow-up suppression...
+          </div>
+        )}
+
+        {salesLeadsError && (
+          <div className="report-alert error">
+            <h4>Follow-up Suppression data could not be loaded.</h4>
+            <p>{salesLeadsError.message}</p>
+          </div>
+        )}
+
+        {hasSalesLeadsReport && salesLeadsReport.notesStatus && salesLeadsReport.notesStatus !== 'available' && (
+          <div className="report-alert locked sales-notes-alert">
+            <h4>Sales notes are not connected yet.</h4>
+            <p>{salesLeadsReport.notesError || 'Confirm the Sales Leads Notes Log list name or set SALES_LEADS_NOTES_LIST_ID on the server.'}</p>
+          </div>
+        )}
+
+        {hasSalesLeadsReport && (
+          <>
+            <div className="sales-summary-grid sales-summary-button-grid lead-suppression-summary-grid">
+              {summaryButtons.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`sales-summary-button ${activeReportView === option.value ? 'active-sales-summary-button' : ''}`}
+                  onClick={() => changeLeadSuppressionView(option.value)}
+                  disabled={salesLeadsLoading}
+                >
+                  <span>{option.label}</span>
+                  <strong>{formatReportNumber(option.count)}</strong>
+                </button>
+              ))}
+            </div>
+
+            <p className="sales-summary-helper">
+              Review suppressed or ignored leads, then open a card to suppress or unsuppress follow-up handling.
+            </p>
+
+            <div className="report-controls centered-report-controls sales-report-controls">
+              <label>
+                <span>Sort</span>
+                <select
+                  value={activeReportSort}
+                  onChange={(e) => changeLeadSuppressionSort(e.target.value)}
+                  disabled={salesLeadsLoading}
+                >
+                  <option value="name">Alphabetical</option>
+                  <option value="lastQuote">Recently quoted</option>
+                  <option value="followUp">Follow-up due</option>
+                  <option value="quotes">Most quotes</option>
+                  <option value="wins">Most wins</option>
+                  <option value="revenue">Most revenue won</option>
+                </select>
+              </label>
+
+              <button onClick={() => loadSalesLeadsReport({ forceRefresh: true })} disabled={salesLeadsLoading}>
+                {salesLeadsLoading ? 'Refreshing Report...' : 'Refresh Report'}
+              </button>
+
               <button
                 type="button"
                 className="pdf-export-button"
@@ -8706,7 +8997,7 @@ function openReportLoadDetails(load) {
               </button>
             </div>
 
-            <div className="pdf-export-guidance">Lead suppression exports are PDF only and download to your default Downloads folder.</div>
+            <div className="pdf-export-guidance">Follow-up suppression exports are PDF only and download to your default Downloads folder.</div>
 
             {getPdfExportNotice('salesSuppression') && (
               <div className="pdf-export-success">{getPdfExportNotice('salesSuppression')}</div>
@@ -8716,9 +9007,9 @@ function openReportLoadDetails(load) {
               <div className="msg error pdf-export-error">{salesSuppressionPdfError}</div>
             )}
 
-            <div className="sales-report-results">
+            <div className="sales-report-results lead-suppression-results">
               {records.length === 0 ? (
-                <div className="msg">No customers matched this sales view.</div>
+                <div className="msg">No leads matched this suppression view.</div>
               ) : (
                 <div className="sales-lead-card-grid">
                   {records.map((lead) => (
@@ -8807,6 +9098,69 @@ function openReportLoadDetails(load) {
               <DetailItem label="Handling" value={lead.FollowUpHandling} />
               <DetailItem label="Suppression Date" value={formatSalesDate(lead.SuppressionDate)} />
               <DetailItem label="Suppression Reason" value={lead.SuppressionReason} className="full" />
+            </div>
+
+            <div className="driver-report-section sales-suppression-control-section">
+              <div className="driver-report-section-header">
+                <div>
+                  <h4>Follow-up Suppression Control</h4>
+                  <p>Suppressing a lead marks FollowUpHandling as Suppressed and records today as the suppression date. Unsuppressing clears that handling so the customer can re-enter follow-up workflows.</p>
+                </div>
+              </div>
+
+              {canUnsuppressSalesLead(lead) ? (
+                <div className="sales-suppression-control-card">
+                  <div>
+                    <strong>This lead is currently suppressed.</strong>
+                    <p>{lead.SuppressionReason || 'No suppression reason was saved.'}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary-action-button"
+                    onClick={() => updateSelectedSalesLeadSuppression('unsuppress')}
+                    disabled={salesLeadSuppressionSaving}
+                  >
+                    {salesLeadSuppressionSaving ? 'Updating...' : 'Unsuppress Lead'}
+                  </button>
+                </div>
+              ) : canSuppressSalesLead(lead) ? (
+                <div className="sales-suppression-control-card sales-suppression-control-card-column">
+                  <label>
+                    <span>Suppression Reason</span>
+                    <textarea
+                      value={salesLeadSuppressionReason}
+                      placeholder="Why should this lead be removed from follow-up?"
+                      onChange={(e) => {
+                        setSalesLeadSuppressionReason(e.target.value);
+                        setSalesLeadSuppressionError('');
+                        setSalesLeadSuppressionMessage('');
+                      }}
+                      disabled={salesLeadSuppressionSaving}
+                    />
+                  </label>
+                  <div className="sales-suppression-control-footer">
+                    <small>Reason is required. The customer record stays visible in Sales Leads; only automated follow-up handling is suppressed.</small>
+                    <button
+                      type="button"
+                      className="danger-button"
+                      onClick={() => updateSelectedSalesLeadSuppression('suppress')}
+                      disabled={salesLeadSuppressionSaving || !salesLeadSuppressionReason.trim()}
+                    >
+                      {salesLeadSuppressionSaving ? 'Suppressing...' : 'Suppress Lead'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="sales-suppression-control-card">
+                  <div>
+                    <strong>This lead is locked by status.</strong>
+                    <p>It appears in the suppression report because its Sales Leads status is {lead.Status || 'not active'}. Change the status in Sales Leads if it should re-enter follow-up.</p>
+                  </div>
+                </div>
+              )}
+
+              {salesLeadSuppressionMessage && <div className="msg sales-note-save-message">{salesLeadSuppressionMessage}</div>}
+              {salesLeadSuppressionError && <div className="msg error sales-note-save-message">{salesLeadSuppressionError}</div>}
             </div>
 
             <div className="driver-report-section sales-notes-section">
@@ -8943,6 +9297,7 @@ function openReportLoadDetails(load) {
     const isNoAvailabilityOpen = activeReportPanel === 'noAvailability';
     const isCustomerTrendsOpen = activeReportPanel === 'customerBookingTrends';
     const isSalesActivityOpen = activeReportPanel === 'salesActivity';
+    const isLeadSuppressionOpen = activeReportPanel === 'leadSuppression';
     const isSalesLeadsOpen = activeReportPanel === 'salesLeads';
     const isOperationalReportsOpen = isReportGroupOpen('operational');
     const isDriverFleetReportsOpen = isReportGroupOpen('driverFleet');
@@ -10048,13 +10403,31 @@ function openReportLoadDetails(load) {
                   )}
                 </div>
 
+
+                <div className={`report-accordion ${isLeadSuppressionOpen ? 'open' : ''}`}>
+                  <button
+                    type="button"
+                    className="report-accordion-button"
+                    onClick={() => toggleReportPanel('leadSuppression')}
+                  >
+                    <span>Follow-Up Suppression</span>
+                    <span className="report-accordion-icon">{isLeadSuppressionOpen ? '▼' : '▶'}</span>
+                  </button>
+
+                  {isLeadSuppressionOpen && (
+                    <div className="report-accordion-body">
+                      <LeadSuppressionReportPanel />
+                    </div>
+                  )}
+                </div>
+
                 <div className={`report-accordion ${isSalesLeadsOpen ? 'open' : ''}`}>
                   <button
                     type="button"
                     className="report-accordion-button"
                     onClick={() => toggleReportPanel('salesLeads')}
                   >
-                    <span>{getSalesLeadViewLabel()}</span>
+                    <span>Customer Cards</span>
                     <span className="report-accordion-icon">{isSalesLeadsOpen ? '▼' : '▶'}</span>
                   </button>
 

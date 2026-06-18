@@ -674,7 +674,7 @@ function buildRecordResponse(data, sourceList) {
     Destination: f.Shipment_x0020_Destination || '',
     Driver: f.Operator_x002f_Team || '',
     Truck: f.Truck_x0020_Number || '',
-    Status: f.Status || '',
+    Status: getFlexibleFieldValue(f.Status) || '',
     Freight: f.Freight_x0020_Description || '',
     Length: f.Length || '',
     Width: f.Width || '',
@@ -1001,6 +1001,23 @@ function isSalesFollowUpDue(record, targetDate = formatEasternDate()) {
   if (!nextTouch || isPlaceholderFutureDate(nextTouch)) return false;
 
   return nextTouch <= targetDate;
+}
+
+function isSalesLeadSuppressedByHandling(record = {}) {
+  return normalizeText(record.FollowUpHandling) === 'suppressed';
+}
+
+function isSalesLeadStatusSuppressed(record = {}) {
+  const status = normalizeText(record.Status);
+  return status === 'ignore' || status === 'inactive';
+}
+
+function isSalesLeadSuppressionReportRow(record = {}) {
+  return isSalesLeadSuppressedByHandling(record) || isSalesLeadStatusSuppressed(record);
+}
+
+function isSalesLeadSuppressionCandidate(record = {}) {
+  return !isSalesLeadSuppressionReportRow(record);
 }
 
 function getCustomerRevenueFieldSelect() {
@@ -1365,7 +1382,7 @@ function cleanSalesLeadItem(item) {
     QuotesWon: quotesWon,
     WinRate: winRate,
     FollowUpPending: f.FollowUpPending === true,
-    FollowUpHandling: f.FollowUpHandling || '',
+    FollowUpHandling: getFlexibleFieldValue(f.FollowUpHandling) || '',
     FollowUpInitialized: f.FollowUpInitialized === true,
     SuppressionReason: f.SuppressionReason || '',
     SuppressionDate: f.SuppressionDate || '',
@@ -1437,7 +1454,11 @@ function filterSalesLeads(records, view = 'all') {
   }
 
   if (normalized === 'suppressed') {
-    return records.filter((record) => normalizeText(record.FollowUpHandling) === 'suppressed' || normalizeText(record.Status) === 'ignore' || normalizeText(record.Status) === 'inactive');
+    return records.filter(isSalesLeadSuppressionReportRow);
+  }
+
+  if (normalized === 'suppressioncandidates' || normalized === 'suppression candidates') {
+    return records.filter(isSalesLeadSuppressionCandidate);
   }
 
   return records;
@@ -1450,7 +1471,8 @@ function getSalesLeadSummary(records) {
     unconverted: records.filter((record) => normalizeText(record.Status) === 'unconverted').length,
     followUpDue: records.filter((record) => record.FollowUpDue === true).length,
     aviation: records.filter((record) => record.AviationRelated === true).length,
-    suppressed: records.filter((record) => normalizeText(record.FollowUpHandling) === 'suppressed' || normalizeText(record.Status) === 'ignore' || normalizeText(record.Status) === 'inactive').length
+    suppressed: records.filter(isSalesLeadSuppressionReportRow).length,
+    suppressionCandidates: records.filter(isSalesLeadSuppressionCandidate).length
   };
 }
 
@@ -5314,6 +5336,102 @@ app.get('/reports/sales-activity', requireLookupAccess, async (req, res) => {
   }
 });
 
+
+function normalizeSalesLeadAction(value) {
+  return normalizeText(value).replace(/[^a-z0-9]+/g, '');
+}
+
+async function updateSalesLeadSuppression(token, leadId, input = {}) {
+  const salesLeadsListId = getSalesLeadsListId();
+
+  if (!salesLeadsListId) {
+    const error = new Error('SALES_LEADS_LIST_ID is not configured on the server.');
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const cleanLeadId = String(leadId || '').trim();
+
+  if (!cleanLeadId) {
+    const error = new Error('Sales lead id is required.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const action = normalizeSalesLeadAction(input.action || '');
+  const shouldSuppress = action
+    ? action === 'suppress' || action === 'suppressed'
+    : parseBoolean(input.suppressed);
+  const shouldUnsuppress = action === 'unsuppress' || action === 'restore' || input.suppressed === false;
+
+  if (!shouldSuppress && !shouldUnsuppress) {
+    const error = new Error('Use action "suppress" or "unsuppress".');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const patchUrl = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${salesLeadsListId}/items/${encodeURIComponent(cleanLeadId)}/fields`;
+
+  if (shouldSuppress) {
+    const reason = String(input.reason || input.suppressionReason || '').trim();
+
+    if (!reason) {
+      const error = new Error('Enter a suppression reason before suppressing this lead.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    await graphPatch(token, patchUrl, {
+      FollowUpHandling: 'Suppressed',
+      SuppressionReason: reason.slice(0, 4000),
+      SuppressionDate: formatEasternDate()
+    });
+  } else {
+    const clearPayload = {
+      FollowUpHandling: null,
+      SuppressionReason: '',
+      SuppressionDate: null
+    };
+
+    try {
+      await graphPatch(token, patchUrl, clearPayload);
+    } catch (error) {
+      const activeHandlingValue = String(process.env.SALES_LEADS_ACTIVE_HANDLING_VALUE || 'Active').trim();
+      await graphPatch(token, patchUrl, {
+        ...clearPayload,
+        FollowUpHandling: activeHandlingValue
+      });
+    }
+  }
+
+  clearSalesLeadsReportCache();
+  const baseReport = await getSalesLeadsBaseReportData(token, true);
+  const updatedRecord = (baseReport.records || []).find((record) => String(record.id) === cleanLeadId) || null;
+
+  return {
+    success: true,
+    action: shouldSuppress ? 'suppress' : 'unsuppress',
+    message: shouldSuppress ? 'Lead suppressed.' : 'Lead unsuppressed.',
+    record: updatedRecord,
+    summary: getSalesLeadSummary(baseReport.records || []),
+    generatedAt: baseReport.generatedAt
+  };
+}
+
+app.patch('/sales-leads/:id/suppression', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const payload = await updateSalesLeadSuppression(token, req.params.id, req.body || {});
+    res.json(payload);
+  } catch (error) {
+    console.error(error);
+
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to update sales lead suppression status.'
+    });
+  }
+});
 
 app.get('/reports/sales-leads', requireLookupAccess, async (req, res) => {
   try {
