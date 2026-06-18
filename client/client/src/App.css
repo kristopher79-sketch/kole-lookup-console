@@ -218,6 +218,11 @@ tbody tr:hover {
   color: #9ca3af;
 }
 
+.status.quote {
+  background: #e5e7eb;
+  color: #334155;
+}
+
 .row-actions {
   display: flex;
   gap: 6px;

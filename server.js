@@ -9305,6 +9305,33 @@ function normalizeOnThisDayStatus(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function isOnThisDayPlaceholderText(value) {
+  const normalized = normalizeText(value);
+  return !normalized || normalized === '-' || normalized === 'n/a' || normalized === 'na';
+}
+
+function cleanOnThisDayAssignmentValue(value) {
+  return isOnThisDayPlaceholderText(value) ? '' : cleanRosterText(value);
+}
+
+function cleanOnThisDayStatusValue(value) {
+  return isOnThisDayPlaceholderText(value) ? 'Quote' : cleanRosterText(value);
+}
+
+function isOnThisDayPlaceholderDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw === '-') return true;
+
+  const compact = raw.replace(/\s+/g, '').toLowerCase();
+  if (compact === '12/31/99' || compact === '12/31/1999') return true;
+
+  return normalizeEasternDateOnly(raw) === '1999-12-31';
+}
+
+function cleanOnThisDayDateValue(value) {
+  return isOnThisDayPlaceholderDate(value) ? '' : String(value || '').trim();
+}
+
 function isOnThisDayMovementStatus(value) {
   const status = normalizeOnThisDayStatus(value);
   return status === 'won' || status === 'tonu';
@@ -9337,26 +9364,30 @@ function getOnThisDayBidFieldSelect() {
 
 function cleanOnThisDayBidItem(item, sourceList) {
   const f = item.fields || {};
-  const pickupDate = f.Pickup_x0020_Offer_x0020_Date || '';
-  const deliveryDate = f.Expected_x0020_Delivery_x0020_Da || '';
+  const rawPickupDate = f.Pickup_x0020_Offer_x0020_Date || '';
+  const rawDeliveryDate = f.Expected_x0020_Delivery_x0020_Da || '';
+  const pickupDate = cleanOnThisDayDateValue(rawPickupDate);
+  const deliveryDate = cleanOnThisDayDateValue(rawDeliveryDate);
   const createdDate = getOnThisDayBidCreatedDate(f, item);
-  const driverName = cleanRosterText(f.TMSName) || cleanRosterText(f.Operator_x002f_Team);
+  const driverName = cleanOnThisDayAssignmentValue(f.TMSName) || cleanOnThisDayAssignmentValue(f.Operator_x002f_Team);
+  const truckNumber = cleanOnThisDayAssignmentValue(f.Truck_x0020_Number);
+  const rawStatus = f.Status || '';
 
   return {
     id: item.id || '',
     SourceListId: sourceList?.listId || '',
     SourceList: sourceList?.label || '',
     SourceYear: sourceList?.year || '',
-    BOL: f.BOLNumber_x0028_Won_x0029_ || '',
+    BOL: cleanOnThisDayAssignmentValue(f.BOLNumber_x0028_Won_x0029_),
     BidID: f.BidID || '',
     Customer: f.Company || '',
     CustomerCode: f.CustomerCode || '',
     Origin: f.Shipment_x0020_Origin || '',
     Destination: f.Shipment_x0020_Destination || '',
     Driver: driverName,
-    OperatorTeam: f.Operator_x002f_Team || '',
-    TMSName: f.TMSName || '',
-    Truck: f.Truck_x0020_Number || '',
+    OperatorTeam: cleanOnThisDayAssignmentValue(f.Operator_x002f_Team),
+    TMSName: cleanOnThisDayAssignmentValue(f.TMSName),
+    Truck: truckNumber,
     PickupDate: pickupDate,
     PickupDateKey: normalizeEasternDateOnly(pickupDate),
     PickupTime: formatOnThisDayTime(f.Pickup1PickupTime, f.Pickup1AMorPM, f.Pickup1TimeSnapshot),
@@ -9365,7 +9396,8 @@ function cleanOnThisDayBidItem(item, sourceList) {
     DeliveryTime: formatOnThisDayTime(f.Delivery1Time, f.Delivery1AMorPM, f.Delivery1TimeSnapshot),
     CreatedDate: createdDate,
     WonDate: createdDate,
-    Status: f.Status || '',
+    StatusRaw: rawStatus,
+    Status: cleanOnThisDayStatusValue(rawStatus),
     QuotedTotal: f.Quoted_x0020_Total || ''
   };
 }
@@ -9489,7 +9521,7 @@ function buildOnThisDayResponse(data = {}, options = {}) {
   const bidRows = data.bidRows || [];
 
   bidRows.forEach((row) => {
-    if (isOnThisDayMovementStatus(row.Status)) {
+    if (isOnThisDayMovementStatus(row.StatusRaw || row.Status)) {
       const pickupYear = getOnThisDayGroupYear(row.PickupDateKey || row.PickupDate, targetDate, mode);
       if (pickupYear) addOnThisDayRow(groups, 'pickups', pickupYear, row, targetDate, mode);
 
@@ -9729,7 +9761,7 @@ function createOnThisDayPdfBuffer(report) {
   }
 
   const movementColumns = [
-    { label: 'BOL', width: 70, value: (row) => `${row.BOL || '-'}${normalizeOnThisDayStatus(row.Status) === 'tonu' ? ' *' : ''}`, mono: true },
+    { label: 'BOL', width: 70, value: (row) => `${row.BOL || '-'}${normalizeOnThisDayStatus(row.StatusRaw || row.Status) === 'tonu' ? ' *' : ''}`, mono: true },
     { label: 'Customer', width: 148, value: 'Customer' },
     { label: 'Driver / TMS', width: 112, value: 'Driver' },
     { label: 'Truck', width: 48, value: 'Truck', mono: true },
@@ -9739,7 +9771,7 @@ function createOnThisDayPdfBuffer(report) {
   ];
 
   const getTonuFootnote = (rows = []) => (
-    rows.some((row) => normalizeOnThisDayStatus(row.Status) === 'tonu') ? ' · * TONU shipment' : ''
+    rows.some((row) => normalizeOnThisDayStatus(row.StatusRaw || row.Status) === 'tonu') ? ' · * TONU shipment' : ''
   );
 
   (report.yearGroups || []).forEach((group) => {
@@ -9766,10 +9798,10 @@ function createOnThisDayPdfBuffer(report) {
       { label: 'Bid/BOL', width: 92, value: (row) => row.BOL || row.BidID || '-' },
       { label: 'Status', width: 52, value: 'Status' },
       { label: 'Customer', width: 136, value: 'Customer' },
-      { label: 'Driver / TMS', width: 104, value: 'Driver' },
-      { label: 'Truck', width: 44, value: 'Truck', mono: true },
-      { label: 'Pickup', width: 76, value: (row) => formatPdfRosterDate(row.PickupDateKey || row.PickupDate) },
-      { label: 'Delivery', width: 76, value: (row) => formatPdfRosterDate(row.DeliveryDateKey || row.DeliveryDate) },
+      { label: 'Driver / TMS', width: 104, value: (row) => row.Driver || 'Not assigned' },
+      { label: 'Truck', width: 44, value: (row) => row.Truck || 'Not assigned', mono: true },
+      { label: 'Pickup', width: 76, value: (row) => row.PickupDateKey || row.PickupDate ? formatPdfRosterDate(row.PickupDateKey || row.PickupDate) : 'Not set' },
+      { label: 'Delivery', width: 76, value: (row) => row.DeliveryDateKey || row.DeliveryDate ? formatPdfRosterDate(row.DeliveryDateKey || row.DeliveryDate) : 'Not set' },
       { label: 'Quote', width: 60, value: (row) => formatPdfMoney(row.QuotedTotal) }
     ], group.ordersWon || [], 'No bid listing records were created.');
 

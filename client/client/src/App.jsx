@@ -464,6 +464,7 @@ export default function App() {
   const [onThisDayDate, setOnThisDayDate] = useState(getEasternDateInputValue);
   const [onThisDayMode, setOnThisDayMode] = useState('exact');
   const [onThisDayReport, setOnThisDayReport] = useState(null);
+  const [onThisDayCachedReport, setOnThisDayCachedReport] = useState(null);
   const [onThisDayLoading, setOnThisDayLoading] = useState(false);
   const [onThisDayError, setOnThisDayError] = useState(null);
   const [onThisDayModalOpen, setOnThisDayModalOpen] = useState(false);
@@ -2157,6 +2158,7 @@ function getPositionStatusLabel(position) {
     if (s === 'won') return 'status won';
     if (s === 'lost') return 'status lost';
     if (s === 'tonu') return 'status tonu';
+    if (s === 'quote') return 'status quote';
     if (s === 'can') return 'status cancelled';
 
     return 'status';
@@ -2973,6 +2975,73 @@ function getPositionStatusLabel(position) {
     });
   }
 
+  function getEmptyOnThisDaySummary() {
+    return {
+      pickups: 0,
+      deliveries: 0,
+      ordersWon: 0,
+      uploads: 0,
+      driversOff: 0,
+      noAvailability: 0,
+      availableTrucks: 0
+    };
+  }
+
+  function getEmptyOnThisDayGroup(dateValue = onThisDayDate) {
+    const targetDate = dateValue || getEasternDateInputValue();
+    return {
+      year: String(targetDate).slice(0, 4),
+      date: targetDate,
+      label: formatDateInputLabel(targetDate),
+      summary: getEmptyOnThisDaySummary(),
+      pickups: [],
+      deliveries: [],
+      ordersWon: [],
+      uploads: [],
+      driversOff: [],
+      noAvailability: [],
+      availableTrucks: []
+    };
+  }
+
+  function getOnThisDaySummaryCount(sourceSummary = {}) {
+    return Object.keys(getEmptyOnThisDaySummary()).reduce((sum, key) => (
+      sum + Number(sourceSummary?.[key] || 0)
+    ), 0);
+  }
+
+  function buildOnThisDayDisplayReport(sourceReport, requestedMode = 'exact') {
+    if (!sourceReport) return null;
+
+    const mode = requestedMode === 'across' ? 'across' : 'exact';
+
+    if (mode === 'across') {
+      return {
+        ...sourceReport,
+        mode: 'across',
+        modeLabel: 'Comparison Years',
+        count: getOnThisDaySummaryCount(sourceReport.summary || {})
+      };
+    }
+
+    const targetDate = sourceReport.targetDate || onThisDayDate || getEasternDateInputValue();
+    const targetYear = String(targetDate).slice(0, 4);
+    const targetGroup = (sourceReport.yearGroups || []).find((group) => String(group.year || '') === targetYear) || getEmptyOnThisDayGroup(targetDate);
+    const summary = targetGroup.summary || getEmptyOnThisDaySummary();
+
+    return {
+      ...sourceReport,
+      reportLabel: `On This Day: ${formatDateInputLabel(targetDate)}`,
+      targetLabel: formatDateInputLabel(targetDate),
+      mode: 'exact',
+      modeLabel: 'Selected Date',
+      summary,
+      count: getOnThisDaySummaryCount(summary),
+      yearsReturned: targetGroup ? 1 : 0,
+      yearGroups: [targetGroup]
+    };
+  }
+
   async function loadOnThisDayReport(modeOverride = '') {
     if (!onThisDayDate) {
       setOnThisDayError({
@@ -2983,19 +3052,27 @@ function getPositionStatusLabel(position) {
     }
 
     const requestedMode = modeOverride || onThisDayMode || 'exact';
+    const cachedMatchesDate = onThisDayCachedReport?.targetDate === onThisDayDate;
 
     setOnThisDayMode(requestedMode);
-    setOnThisDayLoading(true);
     setOnThisDayError(null);
     setOnThisDayPdfError('');
+    clearPdfExportNotice('onThisDay');
+
+    if (cachedMatchesDate && onThisDayCachedReport) {
+      setOnThisDayReport(buildOnThisDayDisplayReport(onThisDayCachedReport, requestedMode));
+      setOnThisDayModalOpen(true);
+      return;
+    }
+
+    setOnThisDayLoading(true);
     setOnThisDayReport(null);
     setOnThisDayModalOpen(false);
-    clearPdfExportNotice('onThisDay');
 
     try {
       const params = new URLSearchParams({
         date: onThisDayDate,
-        mode: requestedMode
+        mode: 'across'
       });
       const res = await authedFetch(`${API}/reports/on-this-day?${params.toString()}`);
       const data = await res.json().catch(() => ({}));
@@ -3004,7 +3081,14 @@ function getPositionStatusLabel(position) {
         throw new Error(data.error || data.message || 'Unable to load On This Day.');
       }
 
-      setOnThisDayReport(data);
+      const comparisonSource = {
+        ...data,
+        mode: 'across',
+        modeLabel: 'Comparison Years'
+      };
+
+      setOnThisDayCachedReport(comparisonSource);
+      setOnThisDayReport(buildOnThisDayDisplayReport(comparisonSource, requestedMode));
       setOnThisDayModalOpen(true);
     } catch (err) {
       setOnThisDayError({
@@ -5242,7 +5326,9 @@ function openReportLoadDetails(load) {
     if (!onThisDayReport) return null;
 
     const isComparisonMode = onThisDayReport?.mode === 'across';
-    const isTonuMovement = (row = {}) => String(row.Status || '').trim().toLowerCase() === 'tonu';
+    const isTonuMovement = (row = {}) => String(row.StatusRaw || row.Status || '').trim().toLowerCase() === 'tonu';
+    const formatBidAssignment = (value) => String(value || '').trim() || 'Not assigned';
+    const formatBidDateValue = (value) => String(value || '').trim() ? formatDateOnly(value) : 'Not set';
 
     const getSummaryMetricCards = (sourceSummary = {}) => ([
       { key: 'pickups', label: 'Pickups', value: sourceSummary.pickups || 0 },
@@ -5349,10 +5435,10 @@ function openReportLoadDetails(load) {
                   <td>{row.BOL || row.BidID || '-'}</td>
                   <td><span className={getStatusClass(row.Status)}>{row.Status || '-'}</span></td>
                   <td>{row.Customer || '-'}</td>
-                  <td>{row.Driver || '-'}</td>
-                  <td>{row.Truck || '-'}</td>
-                  <td>{formatDateOnly(row.PickupDateKey || row.PickupDate)}</td>
-                  <td>{formatDateOnly(row.DeliveryDateKey || row.DeliveryDate)}</td>
+                  <td>{formatBidAssignment(row.Driver)}</td>
+                  <td>{formatBidAssignment(row.Truck)}</td>
+                  <td>{formatBidDateValue(row.PickupDateKey || row.PickupDate)}</td>
+                  <td>{formatBidDateValue(row.DeliveryDateKey || row.DeliveryDate)}</td>
                   <td>{formatMoney(row.QuotedTotal)}</td>
                 </tr>
               ))}
@@ -9213,6 +9299,7 @@ function openReportLoadDetails(load) {
                           setOnThisDayDate(e.target.value);
                           setOnThisDayMode('exact');
                           setOnThisDayReport(null);
+                          setOnThisDayCachedReport(null);
                           setOnThisDayError(null);
                           setOnThisDayPdfError('');
                           setOnThisDayModalOpen(false);
@@ -9236,7 +9323,7 @@ function openReportLoadDetails(load) {
                   </div>
 
                   <p className="on-this-day-run-hint">
-                    Loads the selected date only. Comparison years are available from the preview.
+                    Loads comparison data once, then opens the selected date first. Comparison years are available from the preview.
                   </p>
 
                   {getPdfExportNotice('onThisDay') && !onThisDayModalOpen && (
