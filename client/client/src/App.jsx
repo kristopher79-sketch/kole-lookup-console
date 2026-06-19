@@ -470,6 +470,11 @@ export default function App() {
   const [wonNotRegisteredLoading, setWonNotRegisteredLoading] = useState(false);
   const [wonNotRegisteredError, setWonNotRegisteredError] = useState(null);
   const [wonNotRegisteredModalOpen, setWonNotRegisteredModalOpen] = useState(false);
+  const [permitGovernanceReport, setPermitGovernanceReport] = useState(null);
+  const [permitGovernanceLoading, setPermitGovernanceLoading] = useState(false);
+  const [permitGovernanceError, setPermitGovernanceError] = useState(null);
+  const [permitGovernanceModalOpen, setPermitGovernanceModalOpen] = useState(false);
+  const [permitGovernanceFilter, setPermitGovernanceFilter] = useState('currentlyPermitted');
   const [reportActionAlerts, setReportActionAlerts] = useState(null);
   const [reportActionAlertsLoading, setReportActionAlertsLoading] = useState(false);
   const [reportActionAlertsError, setReportActionAlertsError] = useState('');
@@ -730,14 +735,18 @@ export default function App() {
     const wonNotRegisteredCount = Number(
       alertData.wonNotRegistered?.count ?? wonNotRegisteredReport?.count ?? 0
     ) || 0;
+    const permitGovernanceCount = Number(
+      alertData.permitGovernance?.count ?? permitGovernanceReport?.alertCount ?? permitGovernanceReport?.counts?.ordersNeedingPermits ?? 0
+    ) || 0;
 
     return {
       ordersDueSettlement: ordersDueSettlementCount,
       wonNotRegistered: wonNotRegisteredCount,
-      total: ordersDueSettlementCount + wonNotRegisteredCount,
+      permitGovernance: permitGovernanceCount,
+      total: ordersDueSettlementCount + wonNotRegisteredCount + permitGovernanceCount,
       isLoaded: Boolean(reportActionAlerts)
     };
-  }, [reportActionAlerts, ordersDueSettlementReport, wonNotRegisteredReport]);
+  }, [reportActionAlerts, ordersDueSettlementReport, wonNotRegisteredReport, permitGovernanceReport]);
 
   const visibleSalesLeadRecords = useMemo(() => {
     const sourceRecords = salesLeadsReport?.records || [];
@@ -774,6 +783,7 @@ export default function App() {
         setOrdersDueSettlementModalOpen(false);
         setWeeklySettlementModalOpen(false);
         setWonNotRegisteredModalOpen(false);
+        setPermitGovernanceModalOpen(false);
         setActiveDriverRosterModalOpen(false);
         setInactiveDriverRosterModalOpen(false);
         setFleetEquipmentModalOpen(false);
@@ -2563,8 +2573,13 @@ function getPositionStatusLabel(position) {
         reportLabel: 'Orders Won and Not Registered',
         ...(currentAlerts.wonNotRegistered || {})
       };
+      const permitGovernance = {
+        reportKey: 'permitGovernance',
+        reportLabel: 'Permit Governance',
+        ...(currentAlerts.permitGovernance || {})
+      };
 
-      const alerts = { ordersDueSettlement, wonNotRegistered };
+      const alerts = { ordersDueSettlement, wonNotRegistered, permitGovernance };
 
       if (alerts[alertKey]) {
         alerts[alertKey] = {
@@ -2576,7 +2591,8 @@ function getPositionStatusLabel(position) {
 
       const totalAlerts =
         (Number(alerts.ordersDueSettlement.count) || 0) +
-        (Number(alerts.wonNotRegistered.count) || 0);
+        (Number(alerts.wonNotRegistered.count) || 0) +
+        (Number(alerts.permitGovernance.count) || 0);
 
       return {
         ...(current || {}),
@@ -3060,6 +3076,53 @@ function getPositionStatusLabel(position) {
 
   function closeWonNotRegisteredModal() {
     setWonNotRegisteredModalOpen(false);
+  }
+
+  async function loadPermitGovernanceReport() {
+    setPermitGovernanceLoading(true);
+    setPermitGovernanceError(null);
+    setPermitGovernanceReport(null);
+    setPermitGovernanceModalOpen(false);
+
+    try {
+      const res = await authedFetch(`${API}/reports/permit-governance`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to load Permit Governance report.');
+      }
+
+      updateReportActionAlertCount('permitGovernance', data.alertCount ?? data.counts?.ordersNeedingPermits ?? 0);
+      setPermitGovernanceReport(data);
+      setPermitGovernanceFilter(data.counts?.ordersNeedingPermits > 0 ? 'ordersNeedingPermits' : 'currentlyPermitted');
+      setPermitGovernanceModalOpen(true);
+    } catch (err) {
+      setPermitGovernanceError({
+        code: 'REPORT_ERROR',
+        message: err.message || 'Unable to load Permit Governance report.'
+      });
+    } finally {
+      setPermitGovernanceLoading(false);
+    }
+  }
+
+  function closePermitGovernanceModal() {
+    setPermitGovernanceModalOpen(false);
+  }
+
+  async function openPermitReportFolder(row, event) {
+    if (event) event.stopPropagation();
+
+    if (row?.PermitFolderWebUrl) {
+      await openExternalLink(row.PermitFolderWebUrl);
+      return;
+    }
+
+    await openPermitFolder({
+      BOL: row?.BOL || '',
+      Driver: row?.OperatorTeam || row?.Operator || '',
+      PermitsEscortFees: row?.PermitEstimate || 1
+    });
   }
 
   async function loadInactiveDriverRosterReport() {
@@ -5519,6 +5582,145 @@ function openReportLoadDetails(load) {
             </table>
           </div>
         )}
+      </div>
+    );
+  }
+
+
+  function PermitGovernancePreview() {
+    if (!permitGovernanceReport) return null;
+
+    const sections = permitGovernanceReport.sections || {};
+    const counts = permitGovernanceReport.counts || {};
+    const filterDefs = [
+      {
+        key: 'currentlyPermitted',
+        label: 'Currently Permitted',
+        count: counts.currentlyPermitted || 0,
+        description: 'Permit requested and pickup/delivery today or later.'
+      },
+      {
+        key: 'ordersNeedingPermits',
+        label: 'Orders Needing Permits',
+        count: counts.ordersNeedingPermits || 0,
+        description: 'Permit estimate exists but request has not been filed.'
+      },
+      {
+        key: 'permitFolderNeedsDocs',
+        label: 'Permit Docs Pending',
+        count: counts.permitFolderNeedsDocs || 0,
+        description: 'Folder missing, unaudited, or still has one file or less.'
+      }
+    ];
+    const activeFilter = filterDefs.some((item) => item.key === permitGovernanceFilter)
+      ? permitGovernanceFilter
+      : 'currentlyPermitted';
+    const rows = sections[activeFilter] || [];
+    const activeLabel = filterDefs.find((item) => item.key === activeFilter)?.label || 'Permit Records';
+
+    function getPermitFolderStatus(row) {
+      if (!row.PermitsRequested) return 'Not requested';
+      if (!row.PermitFolderFound) return 'Folder missing';
+      if (row.PermitFolderAuditError) return 'Audit failed';
+      if (row.PermitFolderFileCount === null || row.PermitFolderFileCount === undefined) return 'Folder found';
+      return `${formatReportNumber(row.PermitFolderFileCount)} file${Number(row.PermitFolderFileCount) === 1 ? '' : 's'}`;
+    }
+
+    return (
+      <div className="driver-report-preview modal-report-preview permit-governance-preview">
+        <div className="driver-report-generated">
+          Generated: {permitGovernanceReport.generatedAt}
+        </div>
+
+        {permitGovernanceReport.warnings?.length > 0 && (
+          <div className="report-alert locked permit-governance-warning">
+            <h4>Permit folder audit note</h4>
+            {permitGovernanceReport.warnings.map((warning, index) => (
+              <p key={`${warning}-${index}`}>{warning}</p>
+            ))}
+          </div>
+        )}
+
+        <div className="permit-governance-card-grid">
+          {filterDefs.map((filter) => (
+            <button
+              key={filter.key}
+              type="button"
+              className={`permit-governance-filter-card ${activeFilter === filter.key ? 'active' : ''}`}
+              onClick={() => setPermitGovernanceFilter(filter.key)}
+            >
+              <span>{filter.label}</span>
+              <strong>{formatReportNumber(filter.count)}</strong>
+              <small>{filter.description}</small>
+            </button>
+          ))}
+        </div>
+
+        <div className="driver-report-section permit-governance-section">
+          <div className="driver-report-section-header">
+            <div>
+              <h4>{activeLabel}</h4>
+              <p>Bid Listing records with pickup and delivery dates today or later.</p>
+            </div>
+            <div className="driver-report-section-total">{formatReportNumber(rows.length)} row(s)</div>
+          </div>
+
+          {rows.length === 0 ? (
+            <div className="msg good-news">No records match this permit filter right now.</div>
+          ) : (
+            <div className="report-table-wrap permit-governance-table-wrap">
+              <table className="driver-report-table permit-governance-table">
+                <thead>
+                  <tr>
+                    <th>BOL</th>
+                    <th>Operator</th>
+                    <th>Truck</th>
+                    <th>Customer</th>
+                    <th>Pickup</th>
+                    <th>Delivery</th>
+                    <th>Route</th>
+                    <th>Permit Estimate</th>
+                    <th>Folder Status</th>
+                    <th>Folder</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((load, index) => (
+                    <tr
+                      key={`${load.BOL || load.BidID || load.id || index}-${index}`}
+                      className={load.id ? 'report-clickable-row' : ''}
+                      onClick={() => openReportLoadDetails(load)}
+                      title={load.id ? 'Open full order screen' : ''}
+                    >
+                      <td>{load.BOL || '-'}</td>
+                      <td>{load.Operator || load.OperatorTeam || '-'}</td>
+                      <td>{load.Truck || '-'}</td>
+                      <td>{load.Customer || '-'}</td>
+                      <td>{load.PickupDateDisplay || formatDateOnly(load.PickupDate)}</td>
+                      <td>{load.DeliveryDateDisplay || formatDateOnly(load.DeliveryDate)}</td>
+                      <td>{load.Route || [load.OriginST, load.DestST].filter(Boolean).join(' to ') || '-'}</td>
+                      <td>{formatReportMoney(load.PermitEstimate)}</td>
+                      <td>{getPermitFolderStatus(load)}</td>
+                      <td>
+                        {load.PermitFolderFound ? (
+                          <button
+                            type="button"
+                            className="view-button compact-action-button"
+                            onClick={(event) => openPermitReportFolder(load, event)}
+                          >
+                            Open Folder
+                          </button>
+                        ) : (
+                          <span className="muted-table-note">Not found</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -9385,6 +9587,7 @@ function openReportLoadDetails(load) {
     const isOrdersDueSettlementOpen = activeReportPanel === 'ordersDueSettlement';
     const isWeeklySettlementOpen = activeReportPanel === 'weeklySettlement';
     const isWonNotRegisteredOpen = activeReportPanel === 'wonNotRegistered';
+    const isPermitGovernanceOpen = activeReportPanel === 'permitGovernance';
     const isOnThisDayOpen = activeReportPanel === 'onThisDay';
     const isActiveDriverRosterOpen = activeReportPanel === 'activeDriverRoster';
     const isInactiveDriverRosterOpen = activeReportPanel === 'inactiveDriverRoster';
@@ -9415,7 +9618,7 @@ function openReportLoadDetails(load) {
             className={`feature-section-status-pill report-alert-status-pill ${
               reportActionAlertCounts.total > 0 ? 'has-alerts' : 'is-zero'
             } ${reportActionAlertsLoading ? 'is-loading' : ''} ${reportActionAlertsError ? 'is-error' : ''}`}
-            title={reportActionAlertsError || 'Action alerts from Orders Due for Settlement and Orders Won and Not Registered'}
+            title={reportActionAlertsError || 'Action alerts from Orders Due for Settlement, Orders Won and Not Registered, and Permit Governance'}
           >
             {reportActionAlertsLoading && !reportActionAlerts
               ? 'Checking...'
@@ -9869,6 +10072,67 @@ function openReportLoadDetails(load) {
                     <div className={`report-alert ${wonNotRegisteredError.code === 'NO_ACTION_ITEMS' ? 'locked' : 'error'}`}>
                       <h4>{wonNotRegisteredError.code === 'NO_ACTION_ITEMS' ? 'Report not needed.' : 'Report could not be loaded.'}</h4>
                       <p>{wonNotRegisteredError.message}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+
+          <div className={`report-accordion ${isPermitGovernanceOpen ? 'open' : ''}`}>
+            <button
+              type="button"
+              className="report-accordion-button"
+              onClick={() => toggleReportPanel('permitGovernance')}
+            >
+              <span>
+                Permit Governance
+                {reportActionAlertCounts.permitGovernance > 0 && (
+                  <span
+                    className="report-action-alert-marker"
+                    title={`${formatReportNumber(reportActionAlertCounts.permitGovernance)} order${reportActionAlertCounts.permitGovernance === 1 ? '' : 's'} needing permit requests`}
+                    aria-label={`${formatReportNumber(reportActionAlertCounts.permitGovernance)} order${reportActionAlertCounts.permitGovernance === 1 ? '' : 's'} needing permit requests`}
+                  >
+                    *
+                  </span>
+                )}
+              </span>
+              <span className="report-accordion-icon">{isPermitGovernanceOpen ? '▼' : '▶'}</span>
+            </button>
+
+            {isPermitGovernanceOpen && (
+              <div className="report-accordion-body">
+                <div className="report-card compact-report-card accordion-inner-card permit-governance-card">
+                  <div className="report-card-header centered-report-header">
+                    <div>
+                      <h3>Permit Governance</h3>
+                      <p>Current/future Bid Listing loads with permit request, permit estimate, and permit folder status.</p>
+                    </div>
+                  </div>
+
+                  <div className="report-controls centered-report-controls">
+                    <button onClick={loadPermitGovernanceReport} disabled={permitGovernanceLoading}>
+                      {permitGovernanceLoading ? 'Loading Report...' : 'Preview Report'}
+                    </button>
+                  </div>
+
+                  {permitGovernanceReport && !permitGovernanceModalOpen && (
+                    <div className="report-ready-card">
+                      <div>
+                        <strong>{permitGovernanceReport.reportLabel} is ready.</strong>
+                        <span> The preview opens in a report window.</span>
+                      </div>
+                      <button className="view-button" onClick={() => setPermitGovernanceModalOpen(true)}>
+                        Reopen Preview
+                      </button>
+                    </div>
+                  )}
+
+                  {permitGovernanceError && (
+                    <div className="report-alert error">
+                      <h4>Report could not be loaded.</h4>
+                      <p>{permitGovernanceError.message}</p>
                     </div>
                   )}
                 </div>
@@ -11181,6 +11445,28 @@ function openReportLoadDetails(load) {
 
             <div className="modal-body report-modal-body">
               <WonNotRegisteredPreview />
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {permitGovernanceModalOpen && permitGovernanceReport && (
+        <div className="modal-overlay report-modal-overlay" onClick={closePermitGovernanceModal}>
+          <div className="detail-modal report-modal wide-report-modal permit-governance-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="detail-header report-modal-header">
+              <div>
+                <h2>{permitGovernanceReport.reportLabel || 'Permit Governance'}</h2>
+                <p>{formatReportNumber(permitGovernanceReport.count)} current/future permit-related row(s) · Generated {permitGovernanceReport.generatedAt || ''}</p>
+              </div>
+
+              <button className="close-button" onClick={closePermitGovernanceModal}>
+                Close
+              </button>
+            </div>
+
+            <div className="modal-body report-modal-body">
+              <PermitGovernancePreview />
             </div>
           </div>
         </div>

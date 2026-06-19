@@ -3492,16 +3492,312 @@ function buildOrdersDueForSettlementResponse(items, sourceList) {
   };
 }
 
+
+
+function getPermitGovernanceFieldSelect() {
+  return [
+    'BOLNumber_x0028_Won_x0029_',
+    'BidID',
+    'Company',
+    'Pickup_x0020_Offer_x0020_Date',
+    'Expected_x0020_Delivery_x0020_Da',
+    'Shipment_x0020_Origin',
+    'Shipment_x0020_Destination',
+    'Pickup2State',
+    'Delivery1State',
+    'Truck_x0020_Number',
+    'Operator_x002f_Team',
+    'TMSName',
+    'Status',
+    'PermitsRequested',
+    'Permits_x002f_Escort_x0020_Fees_'
+  ].join(',');
+}
+
+function getPermitFolderNameCandidates(bol, operatorTeam) {
+  const cleanBol = String(bol || '').trim();
+  const cleanOperator = String(operatorTeam || '').trim();
+  const bolWithoutPrefix = cleanBol ? cleanBol.replace(/^[A-Za-z]/, '') : '';
+
+  return [
+    cleanBol && cleanOperator ? `${cleanBol} (${cleanOperator})` : '',
+    bolWithoutPrefix && cleanOperator ? `${bolWithoutPrefix} (${cleanOperator})` : ''
+  ].filter(Boolean).filter((value, index, array) => array.indexOf(value) === index);
+}
+
+function findPermitFolderMatch(rootItems = [], bol, operatorTeam) {
+  const folders = (rootItems || []).filter((item) => item.folder);
+  const candidates = getPermitFolderNameCandidates(bol, operatorTeam);
+  const normalizedCandidates = candidates.map((candidate) => normalizeSearchValue(candidate));
+
+  for (const candidate of candidates) {
+    const exact = folders.find((item) => item.name === candidate);
+    if (exact) return { item: exact, matchedFolderName: candidate, matchStrategy: 'exact-name' };
+  }
+
+  for (const candidateKey of normalizedCandidates) {
+    const normalized = folders.find((item) => normalizeSearchValue(item.name) === candidateKey);
+    if (normalized) return { item: normalized, matchedFolderName: normalized.name, matchStrategy: 'normalized-name' };
+  }
+
+  const cleanBol = String(bol || '').trim();
+  const cleanBolKey = normalizeSearchValue(cleanBol);
+  const bolWithoutPrefix = cleanBol ? cleanBol.replace(/^[A-Za-z]/, '') : '';
+  const legacyBolKey = normalizeSearchValue(bolWithoutPrefix);
+  const bolPrefixMatches = folders.filter((item) => {
+    const folderName = normalizeSearchValue(item.name);
+    return (
+      (cleanBolKey && folderName.startsWith(cleanBolKey)) ||
+      (legacyBolKey && folderName.startsWith(legacyBolKey))
+    );
+  });
+
+  if (bolPrefixMatches.length === 1) {
+    return {
+      item: bolPrefixMatches[0],
+      matchedFolderName: bolPrefixMatches[0].name,
+      matchStrategy: 'bol-prefix-fallback'
+    };
+  }
+
+  return null;
+}
+
+function getPermitGovernanceReportItem(item, sourceList, permitRootItems = []) {
+  const f = item.fields || {};
+  const truck = getChoiceValue(f.Truck_x0020_Number || f['Truck_x0020_Number/Value'] || '');
+  const operatorTeam = getChoiceValue(f.Operator_x002f_Team || f['Operator_x002f_Team/Value'] || '');
+  const customer = getChoiceValue(f.Company || f['Company/Value'] || '');
+  const permitFolder = findPermitFolderMatch(permitRootItems, f.BOLNumber_x0028_Won_x0029_, operatorTeam);
+
+  return {
+    id: item.id || '',
+    webUrl: item.webUrl || '',
+    SourceListId: sourceList.listId,
+    SourceYear: sourceList.year,
+    BOL: f.BOLNumber_x0028_Won_x0029_ || '',
+    BidID: f.BidID || '',
+    Customer: customer || '',
+    Operator: f.TMSName || operatorTeam || 'Unknown Operator',
+    OperatorTeam: operatorTeam || '',
+    Truck: truck || '',
+    Status: f.Status || '',
+    PickupDate: f.Pickup_x0020_Offer_x0020_Date || '',
+    PickupDateDisplay: formatShortDate(f.Pickup_x0020_Offer_x0020_Date),
+    DeliveryDate: f.Expected_x0020_Delivery_x0020_Da || '',
+    DeliveryDateDisplay: formatShortDate(f.Expected_x0020_Delivery_x0020_Da),
+    Origin: f.Shipment_x0020_Origin || '',
+    Destination: f.Shipment_x0020_Destination || '',
+    OriginST: f.Pickup2State || '',
+    DestST: f.Delivery1State || '',
+    Route: [f.Shipment_x0020_Origin, f.Shipment_x0020_Destination].filter(Boolean).join(' to '),
+    PermitEstimate: getNumberValue(f.Permits_x002f_Escort_x0020_Fees_),
+    PermitsRequested: parseBoolean(f.PermitsRequested),
+    PermitFolderFound: Boolean(permitFolder?.item),
+    PermitFolderName: permitFolder?.item?.name || '',
+    PermitFolderWebUrl: permitFolder?.item?.webUrl || '',
+    PermitFolderId: permitFolder?.item?.id || '',
+    PermitFolderLastModified: permitFolder?.item?.lastModifiedDateTime || '',
+    PermitFolderMatchedName: permitFolder?.matchedFolderName || '',
+    PermitFolderMatchStrategy: permitFolder?.matchStrategy || '',
+    PermitFolderFileCount: null,
+    PermitFolderItemCount: null,
+    PermitFolderAuditError: ''
+  };
+}
+
+function isPermitGovernanceOperationalRow(record, today) {
+  const delivery = getDateOnlyComparable(record.DeliveryDate);
+  const status = normalizeText(record.Status);
+
+  return (
+    status === 'won' &&
+    Boolean(record.BOL) &&
+    delivery && delivery >= today
+  );
+}
+
+function getPermitGovernanceRowKey(row) {
+  return [row.SourceListId || '', row.id || '', row.BOL || '', row.BidID || '']
+    .map((value) => String(value || '').trim().toLowerCase())
+    .join('|');
+}
+
+function getUniquePermitGovernanceRows(sectionRows = []) {
+  const seen = new Set();
+  const rows = [];
+
+  sectionRows.forEach((row) => {
+    const key = getPermitGovernanceRowKey(row);
+    if (seen.has(key)) return;
+
+    seen.add(key);
+    rows.push(row);
+  });
+
+  return rows.sort(sortPermitGovernanceRows);
+}
+
+function sortPermitGovernanceRows(a, b) {
+  const pickupDiff = String(a.PickupDate || '').localeCompare(String(b.PickupDate || ''));
+  if (pickupDiff !== 0) return pickupDiff;
+
+  const deliveryDiff = String(a.DeliveryDate || '').localeCompare(String(b.DeliveryDate || ''));
+  if (deliveryDiff !== 0) return deliveryDiff;
+
+  const operatorDiff = String(a.Operator || '').localeCompare(String(b.Operator || ''), undefined, { numeric: true });
+  if (operatorDiff !== 0) return operatorDiff;
+
+  return String(a.BOL || '').localeCompare(String(b.BOL || ''), undefined, { numeric: true });
+}
+
+async function addPermitFolderAuditCounts(token, rows) {
+  const foldersToAudit = Array.from(
+    new Map(
+      rows
+        .filter((row) => row.PermitFolderId)
+        .map((row) => [row.PermitFolderId, row])
+    ).values()
+  );
+
+  const auditResults = await Promise.allSettled(
+    foldersToAudit.map(async (row) => {
+      const children = await getAllChildrenFromFolder(
+        token,
+        process.env.DISPATCH_ONEDRIVE_ID,
+        row.PermitFolderId
+      );
+
+      return {
+        folderId: row.PermitFolderId,
+        fileCount: children.filter((child) => child.file).length,
+        itemCount: children.length
+      };
+    })
+  );
+
+  const auditByFolderId = new Map();
+
+  auditResults.forEach((result, index) => {
+    const row = foldersToAudit[index];
+    if (!row?.PermitFolderId) return;
+
+    if (result.status === 'fulfilled') {
+      auditByFolderId.set(row.PermitFolderId, result.value);
+    } else {
+      auditByFolderId.set(row.PermitFolderId, {
+        folderId: row.PermitFolderId,
+        fileCount: null,
+        itemCount: null,
+        error: result.reason?.message || 'Unable to audit permit folder contents.'
+      });
+    }
+  });
+
+  return rows.map((row) => {
+    if (!row.PermitFolderId) return row;
+
+    const audit = auditByFolderId.get(row.PermitFolderId);
+    if (!audit) return row;
+
+    return {
+      ...row,
+      PermitFolderFileCount: audit.fileCount,
+      PermitFolderItemCount: audit.itemCount,
+      PermitFolderAuditError: audit.error || ''
+    };
+  });
+}
+
+async function buildPermitGovernanceResponse(items, sourceList, options = {}) {
+  const today = formatEasternDate();
+  const includeFolderAudit = options.includeFolderAudit !== false;
+  const warnings = [];
+  let permitRootItems = [];
+  let permitRootLoaded = false;
+
+  if (process.env.DISPATCH_ONEDRIVE_ID && process.env.PERMIT_REQUESTS_FOLDER_ID && options.token) {
+    try {
+      permitRootItems = await getAllChildrenFromFolder(
+        options.token,
+        process.env.DISPATCH_ONEDRIVE_ID,
+        process.env.PERMIT_REQUESTS_FOLDER_ID
+      );
+      permitRootLoaded = true;
+    } catch (error) {
+      warnings.push(error.message || 'Permit root folder could not be loaded.');
+    }
+  } else if (includeFolderAudit) {
+    warnings.push('Permit folder environment variables are not configured, so permit folder links and file counts could not be checked.');
+  }
+
+  let operationalRows = items
+    .map((item) => getPermitGovernanceReportItem(item, sourceList, permitRootItems))
+    .filter((record) => isPermitGovernanceOperationalRow(record, today))
+    .sort(sortPermitGovernanceRows);
+
+  if (includeFolderAudit && options.token && permitRootLoaded) {
+    operationalRows = await addPermitFolderAuditCounts(options.token, operationalRows);
+  }
+
+  const currentlyPermitted = operationalRows.filter((row) => row.PermitsRequested);
+  const ordersNeedingPermits = operationalRows.filter((row) => row.PermitEstimate > 0 && !row.PermitsRequested);
+  const permitFolderNeedsDocs = includeFolderAudit && permitRootLoaded
+    ? operationalRows.filter((row) => {
+        if (!row.PermitsRequested) return false;
+        if (!row.PermitFolderFound) return true;
+        if (row.PermitFolderAuditError) return true;
+        if (row.PermitFolderFileCount === null || row.PermitFolderFileCount === undefined) return false;
+        return Number(row.PermitFolderFileCount) <= 1;
+      })
+    : [];
+  const rows = getUniquePermitGovernanceRows([
+    ...currentlyPermitted,
+    ...ordersNeedingPermits,
+    ...permitFolderNeedsDocs
+  ]);
+
+  return {
+    success: true,
+    reportType: 'permitGovernance',
+    reportLabel: 'Permit Governance',
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    dataSource: sourceList.label,
+    targetDate: today,
+    count: rows.length,
+    alertCount: ordersNeedingPermits.length,
+    counts: {
+      currentlyPermitted: currentlyPermitted.length,
+      ordersNeedingPermits: ordersNeedingPermits.length,
+      permitFolderNeedsDocs: permitFolderNeedsDocs.length,
+      totalOperationalRows: operationalRows.length,
+      totalPermitGovernanceRows: rows.length
+    },
+    warnings,
+    sections: {
+      currentlyPermitted,
+      ordersNeedingPermits,
+      permitFolderNeedsDocs
+    },
+    rows
+  };
+}
+
 function getReportActionAlertFieldSelect() {
   return Array.from(new Set([
     ...getOrdersDueForSettlementFieldSelect().split(','),
-    ...getWonNotRegisteredFieldSelect().split(',')
+    ...getWonNotRegisteredFieldSelect().split(','),
+    ...getPermitGovernanceFieldSelect().split(',')
   ])).join(',');
 }
 
-function buildReportActionAlertsResponse(items, sourceList) {
+async function buildReportActionAlertsResponse(items, sourceList, options = {}) {
   const ordersDueSettlement = buildOrdersDueForSettlementResponse(items, sourceList);
   const wonNotRegistered = buildWonNotRegisteredResponse(items, sourceList);
+  const permitGovernance = await buildPermitGovernanceResponse(items, sourceList, {
+    ...options,
+    includeFolderAudit: false
+  });
 
   const alerts = {
     ordersDueSettlement: {
@@ -3515,6 +3811,12 @@ function buildReportActionAlertsResponse(items, sourceList) {
       reportLabel: wonNotRegistered.reportLabel,
       count: wonNotRegistered.count,
       hasAlert: wonNotRegistered.count > 0
+    },
+    permitGovernance: {
+      reportKey: 'permitGovernance',
+      reportLabel: permitGovernance.reportLabel,
+      count: permitGovernance.alertCount,
+      hasAlert: permitGovernance.alertCount > 0
     }
   };
 
@@ -3523,7 +3825,7 @@ function buildReportActionAlertsResponse(items, sourceList) {
     reportType: 'reportActionAlerts',
     generatedAt: `${formatEasternTimestamp()} Eastern`,
     dataSource: sourceList.label,
-    totalAlerts: alerts.ordersDueSettlement.count + alerts.wonNotRegistered.count,
+    totalAlerts: alerts.ordersDueSettlement.count + alerts.wonNotRegistered.count + alerts.permitGovernance.count,
     alerts
   };
 }
@@ -5694,7 +5996,7 @@ app.get('/reports/action-alerts', requireLookupAccess, async (req, res) => {
       getReportActionAlertFieldSelect()
     );
 
-    res.json(buildReportActionAlertsResponse(items, currentList));
+    res.json(await buildReportActionAlertsResponse(items, currentList, { token }));
   } catch (error) {
     console.error(error);
 
@@ -5766,6 +6068,38 @@ app.get('/reports/gross-revenue-totals', requireLookupAccess, async (req, res) =
     res.status(500).json({
       success: false,
       error: error.message || 'Unable to load Gross Revenue Totals.'
+    });
+  }
+});
+
+
+
+app.get('/reports/permit-governance', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const lists = await getSearchableBidLists(token);
+    const currentList = lists.find((list) => list.label === 'Bid Listing');
+
+    if (!currentList) {
+      return res.status(404).json({
+        success: false,
+        error: 'Bid Listing not found.'
+      });
+    }
+
+    const items = await getAllListItemsWithFields(
+      token,
+      currentList.listId,
+      getPermitGovernanceFieldSelect()
+    );
+
+    res.json(await buildPermitGovernanceResponse(items, currentList, { token }));
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to load Permit Governance report.'
     });
   }
 });
