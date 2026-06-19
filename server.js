@@ -42,7 +42,18 @@ let cachedSalesLeadsNotesListId = null;
 let cachedSalesLeadsNotesListIdAt = 0;
 let cachedSalesLeadsBaseReport = null;
 let cachedSalesLeadsBaseReportAt = 0;
+let cachedGraphToken = null;
+let cachedGraphTokenExpiresAt = 0;
+let cachedOperationsToday = null;
+let cachedOperationsTodayAt = 0;
+const cachedBidItemsByList = new Map();
+const cachedOnThisDayItemsBySource = new Map();
+const cachedOnThisDayReports = new Map();
 const BID_LIST_CACHE_MS = 5 * 60 * 1000;
+const BID_ITEM_CACHE_MS = Number(process.env.BID_ITEM_CACHE_MS || 2 * 60 * 1000);
+const OPERATIONS_TODAY_CACHE_MS = Number(process.env.OPERATIONS_TODAY_CACHE_MS || 60 * 1000);
+const ON_THIS_DAY_SOURCE_CACHE_MS = Number(process.env.ON_THIS_DAY_SOURCE_CACHE_MS || 5 * 60 * 1000);
+const ON_THIS_DAY_REPORT_CACHE_MS = Number(process.env.ON_THIS_DAY_REPORT_CACHE_MS || 5 * 60 * 1000);
 const SALES_LEADS_REPORT_CACHE_MS = Number(process.env.SALES_LEADS_REPORT_CACHE_MS || BID_LIST_CACHE_MS);
 
 function getAllowedLookupTokens() {
@@ -84,7 +95,13 @@ function requireLookupAccess(req, res, next) {
   next();
 }
 
-async function getGraphToken() {
+async function getGraphToken(forceRefresh = false) {
+  const now = Date.now();
+
+  if (!forceRefresh && cachedGraphToken && cachedGraphTokenExpiresAt > now) {
+    return cachedGraphToken;
+  }
+
   if (!process.env.TENANT_ID || !process.env.CLIENT_ID || !process.env.CLIENT_SECRET) {
     throw new Error('Graph client credentials are not configured on the server.');
   }
@@ -110,10 +127,16 @@ async function getGraphToken() {
   const data = await response.json();
 
   if (!response.ok) {
+    cachedGraphToken = null;
+    cachedGraphTokenExpiresAt = 0;
     throw new Error(data.error_description || data.error || 'Unable to acquire Graph token.');
   }
 
-  return data.access_token;
+  const expiresInMs = Math.max(Number(data.expires_in || 3599) * 1000, 60 * 1000);
+  cachedGraphToken = data.access_token;
+  cachedGraphTokenExpiresAt = Date.now() + Math.max(expiresInMs - 60 * 1000, 30 * 1000);
+
+  return cachedGraphToken;
 }
 
 async function graphGet(token, url, extraHeaders = {}) {
@@ -170,6 +193,34 @@ async function graphPost(token, url, body) {
   }
 
   return data;
+}
+
+function getCacheRecord(cache, key, ttlMs) {
+  const cached = cache.get(key);
+  if (!cached) return null;
+
+  if (Date.now() - cached.cachedAt > ttlMs) {
+    cache.delete(key);
+    return null;
+  }
+
+  return cached.value;
+}
+
+function setCacheRecord(cache, key, value, maxEntries = 40) {
+  if (cache.has(key)) cache.delete(key);
+
+  cache.set(key, {
+    cachedAt: Date.now(),
+    value
+  });
+
+  while (cache.size > maxEntries) {
+    const oldestKey = cache.keys().next().value;
+    cache.delete(oldestKey);
+  }
+
+  return value;
 }
 
 async function getAllChildrenFromFolder(token, driveId, folderId) {
@@ -639,21 +690,59 @@ function cleanBidItem(item, sourceList) {
     TMSName: fields.TMSName || '',
     OperatorInactive: fields.OperatorInactive ?? false,
     PickupDate: fields.Pickup_x0020_Offer_x0020_Date || '',
-    PermitsEscortFees: fields.Permits_x002f_Escort_x0020_Fees_ || ''
+    DeliveryDate: fields.Expected_x0020_Delivery_x0020_Da || '',
+    PermitsEscortFees: fields.Permits_x002f_Escort_x0020_Fees_ || '',
+    Processed: fields.Processed ?? false,
+    IsProcessed: parseBoolean(fields.Processed),
+    IsSettled: parseBoolean(fields.Processed)
   };
 }
 
-async function getAllBidItemsFromList(token, sourceList) {
-  let url = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${sourceList.listId}/items?$expand=fields&$top=999`;
-  const allItems = [];
+function getBidSearchFieldSelect() {
+  return [
+    'BOLNumber_x0028_Won_x0029_',
+    'BidID',
+    'Company',
+    'CustomerCode',
+    'Shipment_x0020_Origin',
+    'Shipment_x0020_Destination',
+    'Status',
+    'Truck_x0020_Number',
+    'Operator_x002f_Team',
+    'TMSName',
+    'OperatorInactive',
+    'Pickup_x0020_Offer_x0020_Date',
+    'Expected_x0020_Delivery_x0020_Da',
+    'Permits_x002f_Escort_x0020_Fees_',
+    'Processed'
+  ].join(',');
+}
 
-  while (url) {
-    const data = await graphGet(token, url);
-    allItems.push(...(data.value || []));
-    url = data['@odata.nextLink'] || null;
+function getBidItemsCacheKey(sourceList) {
+  return `${sourceList?.listId || ''}|${sourceList?.year || ''}|${sourceList?.label || ''}`;
+}
+
+async function getAllBidItemsFromList(token, sourceList, options = {}) {
+  const { forceRefresh = false } = options;
+  const cacheKey = getBidItemsCacheKey(sourceList);
+
+  if (!forceRefresh) {
+    const cached = getCacheRecord(cachedBidItemsByList, cacheKey, BID_ITEM_CACHE_MS);
+    if (cached) return cached;
   }
 
-  return allItems.map((item) => cleanBidItem(item, sourceList));
+  let items = [];
+  try {
+    items = await getAllListItemsWithFields(token, sourceList.listId, getBidSearchFieldSelect());
+  } catch (error) {
+    // If Graph rejects a selected-field query, fall back to the previous full-field behavior.
+    items = await getAllListItemsWithFields(token, sourceList.listId);
+  }
+
+  const records = items.map((item) => cleanBidItem(item, sourceList));
+  setCacheRecord(cachedBidItemsByList, cacheKey, records, 24);
+
+  return records;
 }
 
 function buildRecordResponse(data, sourceList) {
@@ -4660,8 +4749,10 @@ app.get('/search', requireLookupAccess, async (req, res) => {
       ? allLists
       : allLists.filter((list) => list.label === 'Bid Listing');
 
+    const forceRefresh = String(req.query.refresh || '').toLowerCase() === 'true';
+
     const settled = await Promise.allSettled(
-      lists.map((list) => getAllBidItemsFromList(token, list))
+      lists.map((list) => getAllBidItemsFromList(token, list, { forceRefresh }))
     );
 
     const successfulGroups = settled
@@ -8854,6 +8945,24 @@ app.get('/upload-digest', requireLookupAccess, async (req, res) => {
 
 app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, async (req, res) => {
   try {
+    const targetDate = formatEasternDate();
+    const forceRefresh = String(req.query.refresh || '').toLowerCase() === 'true';
+
+    if (
+      !forceRefresh &&
+      cachedOperationsToday &&
+      cachedOperationsToday.targetDate === targetDate &&
+      Date.now() - cachedOperationsTodayAt < OPERATIONS_TODAY_CACHE_MS
+    ) {
+      return res.json({
+        ...cachedOperationsToday.payload,
+        cache: {
+          hit: true,
+          ageSeconds: Math.round((Date.now() - cachedOperationsTodayAt) / 1000)
+        }
+      });
+    }
+
     const token = await getGraphToken();
 
     const lists = await getSearchableBidLists(token);
@@ -8887,7 +8996,6 @@ app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, asyn
       ].join(',')
     );
 
-    const targetDate = formatEasternDate();
     const plus7 = addDaysToDateInput(targetDate, 7);
 
     const allWon = items
@@ -8931,7 +9039,7 @@ app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, asyn
       })
       .map((r) => addUploadEvidence(r, evidenceSets));
 
-    res.json({
+    const payload = {
       success: true,
       generatedAt: `${formatEasternTimestamp()} Eastern`,
       targetDate,
@@ -8958,7 +9066,15 @@ app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, asyn
       loadingToday,
       deliveringToday,
       loadingNext7
-    });
+    };
+
+    cachedOperationsToday = {
+      targetDate,
+      payload
+    };
+    cachedOperationsTodayAt = Date.now();
+
+    res.json(payload);
   } catch (error) {
     console.error(error);
 
@@ -9723,17 +9839,97 @@ function buildOnThisDayResponse(data = {}, options = {}) {
   };
 }
 
+function getOnThisDayCurrentYear() {
+  return Number(formatEasternDate().slice(0, 4));
+}
+
+function getOnThisDaySourceListYear(sourceList = {}) {
+  if (sourceList.year === 'Current') return getOnThisDayCurrentYear();
+
+  const year = Number(sourceList.year);
+  return Number.isNaN(year) ? null : year;
+}
+
+function getOnThisDaySourceListsForMode(sourceLists = [], targetDate, mode) {
+  if (mode !== 'exact') return sourceLists;
+
+  const targetYear = Number(String(targetDate || '').slice(0, 4));
+  const exactSources = sourceLists.filter((sourceList) => (
+    getOnThisDaySourceListYear(sourceList) === targetYear
+  ));
+
+  return exactSources.length ? exactSources : sourceLists;
+}
+
+function getNoAvailabilitySourcesForOnThisDay(sources = [], targetDate, mode) {
+  if (mode !== 'exact') return sources;
+
+  const targetYear = Number(String(targetDate || '').slice(0, 4));
+  const currentYear = getOnThisDayCurrentYear();
+
+  const exactSources = sources.filter((source) => (
+    Number(source.sourceYear) === targetYear ||
+    (source.sourceYear === 'Main' && targetYear === currentYear)
+  ));
+
+  return exactSources.length ? exactSources : sources;
+}
+
+async function getCachedOnThisDayItems(token, sourceName, listId, fieldSelect = '') {
+  const cacheKey = `${sourceName}|${listId}|${fieldSelect || 'all'}`;
+  const cached = getCacheRecord(cachedOnThisDayItemsBySource, cacheKey, ON_THIS_DAY_SOURCE_CACHE_MS);
+
+  if (cached) return cached;
+
+  const items = await getAllListItemsWithFields(token, listId, fieldSelect);
+  setCacheRecord(cachedOnThisDayItemsBySource, cacheKey, items, 60);
+
+  return items;
+}
+
+async function getCachedOnThisDayItemsResilient(token, sourceName, listId, fieldSelect = '') {
+  try {
+    return {
+      items: await getCachedOnThisDayItems(token, sourceName, listId, fieldSelect),
+      usedFallback: false,
+      warning: ''
+    };
+  } catch (error) {
+    if (!fieldSelect) throw error;
+
+    return {
+      items: await getCachedOnThisDayItems(token, `${sourceName}:fallback`, listId, ''),
+      usedFallback: true,
+      warning: error.message || 'Selected field fetch failed; retried with full fields.'
+    };
+  }
+}
+
 async function getOnThisDayReportData(token, options = {}) {
   const targetDate = getOnThisDayTargetDate(options.date);
   const mode = normalizeOnThisDayMode(options.mode);
+  const reportCacheKey = `${targetDate}|${mode}`;
+  const cachedReport = getCacheRecord(cachedOnThisDayReports, reportCacheKey, ON_THIS_DAY_REPORT_CACHE_MS);
+
+  if (cachedReport) {
+    return {
+      ...cachedReport,
+      cache: {
+        hit: true
+      }
+    };
+  }
+
   const warnings = [];
   const recordsScanned = {};
 
-  const sourceLists = await getSearchableBidLists(token);
+  const allSourceLists = await getSearchableBidLists(token);
+  const sourceLists = getOnThisDaySourceListsForMode(allSourceLists, targetDate, mode);
   const bidSettled = await Promise.allSettled(
     sourceLists.map(async (sourceList) => {
-      const bundle = await getAllListItemsWithFieldsResilient(
+      const bundle = await getCachedOnThisDayItemsResilient(
         token,
+        `bid:${sourceList.label}`,
         sourceList.listId,
         getOnThisDayBidFieldSelect()
       );
@@ -9767,7 +9963,7 @@ async function getOnThisDayReportData(token, options = {}) {
   const uploadDigestListId = process.env.UPLOAD_DIGEST_LIST_ID || DEFAULT_UPLOAD_DIGEST_LIST_ID;
   if (uploadDigestListId) {
     try {
-      const uploadItems = await getAllListItemsWithFields(token, uploadDigestListId);
+      const uploadItems = await getCachedOnThisDayItems(token, 'upload-digest', uploadDigestListId);
       uploadRows = uploadItems.map(buildUploadDigestRecord);
       recordsScanned.uploadDigest = uploadRows.length;
     } catch (error) {
@@ -9789,11 +9985,11 @@ async function getOnThisDayReportData(token, options = {}) {
   }
 
   let noAvailabilityRows = [];
-  const noAvailabilitySources = getNoAvailabilitySources();
+  const noAvailabilitySources = getNoAvailabilitySourcesForOnThisDay(getNoAvailabilitySources(), targetDate, mode);
   if (noAvailabilitySources.length) {
     const noAvailabilitySettled = await Promise.allSettled(
       noAvailabilitySources.map(async (source) => {
-        const items = await getAllListItemsWithFields(token, source.listId, getNoAvailabilityFieldSelect());
+        const items = await getCachedOnThisDayItems(token, `no-availability:${source.label}`, source.listId, getNoAvailabilityFieldSelect());
         return items.map((item) => cleanNoAvailabilityItem(item, source));
       })
     );
@@ -9817,7 +10013,7 @@ async function getOnThisDayReportData(token, options = {}) {
   const availableTrucksListId = getAvailableTrucksSingleLineListId();
   if (availableTrucksListId) {
     try {
-      const availableTruckItems = await getAllListItemsWithFields(token, availableTrucksListId, getAvailableTruckFieldSelect());
+      const availableTruckItems = await getCachedOnThisDayItems(token, 'available-trucks', availableTrucksListId, getAvailableTruckFieldSelect());
       availableTruckRows = availableTruckItems
         .map(cleanAvailableTruckRecord)
         .filter((record) => record.driverName || record.unitNo || record.currentLocation);
@@ -9827,7 +10023,7 @@ async function getOnThisDayReportData(token, options = {}) {
     }
   }
 
-  return buildOnThisDayResponse({
+  const report = buildOnThisDayResponse({
     bidRows,
     uploadRows,
     driverTimeOffRows,
@@ -9836,6 +10032,10 @@ async function getOnThisDayReportData(token, options = {}) {
     recordsScanned,
     warnings
   }, { date: targetDate, mode });
+
+  setCacheRecord(cachedOnThisDayReports, reportCacheKey, report, 20);
+
+  return report;
 }
 
 function createOnThisDayPdfBuffer(report) {

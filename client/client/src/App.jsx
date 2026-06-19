@@ -16,6 +16,37 @@ const API =
 
 const SALES_NOTE_MAX_LENGTH = 63000;
 const AVAILABLE_TRUCK_MAX_ROWS = 8;
+const SEARCH_RESULT_CACHE_MS = 2 * 60 * 1000;
+const ON_THIS_DAY_CLIENT_CACHE_MS = 5 * 60 * 1000;
+const ON_THIS_DAY_CLIENT_CACHE_LIMIT = 10;
+
+function getClientCacheRecord(cache, key, ttlMs) {
+  const cached = cache.get(key);
+  if (!cached) return null;
+
+  if (Date.now() - cached.cachedAt > ttlMs) {
+    cache.delete(key);
+    return null;
+  }
+
+  return cached.value;
+}
+
+function setLimitedClientCacheRecord(cache, key, value, maxEntries = 20) {
+  if (cache.has(key)) cache.delete(key);
+
+  cache.set(key, {
+    cachedAt: Date.now(),
+    value
+  });
+
+  while (cache.size > maxEntries) {
+    const oldestKey = cache.keys().next().value;
+    cache.delete(oldestKey);
+  }
+
+  return value;
+}
 
 function createAvailableTruckDraftRow(seed = Date.now()) {
   return {
@@ -539,6 +570,9 @@ export default function App() {
   const [salesLeadSuppressionMessage, setSalesLeadSuppressionMessage] = useState('');
   const [salesLeadSuppressionError, setSalesLeadSuppressionError] = useState('');
   const salesLeadsPrewarmStartedRef = useRef(false);
+  const searchCacheRef = useRef(new Map());
+  const pendingSearchControllerRef = useRef(null);
+  const onThisDayReportCacheRef = useRef(new Map());
 
   const [authError, setAuthError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
@@ -968,6 +1002,13 @@ export default function App() {
     setDriverTimeOffActionMessage('');
     setDriverTimeOffActionError('');
     setReportsSectionOpen(false);
+    searchCacheRef.current.clear();
+    onThisDayReportCacheRef.current.clear();
+
+    if (pendingSearchControllerRef.current) {
+      pendingSearchControllerRef.current.abort();
+      pendingSearchControllerRef.current = null;
+    }
   }
 
   async function handleLogin() {
@@ -1111,7 +1152,9 @@ export default function App() {
     const q = query.trim();
     if (!q) return;
 
-    setLoading(true);
+    const searchKey = `${includeArchives ? 'archives' : 'current'}|${q.toLowerCase()}`;
+    const cachedSearch = getClientCacheRecord(searchCacheRef.current, searchKey, SEARCH_RESULT_CACHE_MS);
+
     setError('');
     setHasSearched(true);
     setSelected(null);
@@ -1122,26 +1165,59 @@ export default function App() {
     setSortDirection('asc');
     setSalesSearchReturnLead(null);
 
+    if (cachedSearch) {
+      if (pendingSearchControllerRef.current) {
+        pendingSearchControllerRef.current.abort();
+        pendingSearchControllerRef.current = null;
+      }
+
+      setLoading(false);
+      setResults(cachedSearch.results || []);
+      setSearchedRecords(cachedSearch.searchedRecords || 0);
+      return;
+    }
+
+    if (pendingSearchControllerRef.current) {
+      pendingSearchControllerRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    pendingSearchControllerRef.current = controller;
+    setLoading(true);
+
     try {
       const res = await authedFetch(
-        `${API}/search?q=${encodeURIComponent(q)}&includeArchives=${includeArchives}`
+        `${API}/search?q=${encodeURIComponent(q)}&includeArchives=${includeArchives}`,
+        { signal: controller.signal }
       );
       const data = await res.json();
 
       if (!data.success) throw new Error(data.error || 'Search failed');
 
-      setResults(data.results || []);
-      setSearchedRecords(data.searchedRecords || 0);
+      const cachedPayload = {
+        results: data.results || [],
+        searchedRecords: data.searchedRecords || 0
+      };
+
+      setLimitedClientCacheRecord(searchCacheRef.current, searchKey, cachedPayload, 12);
+      setResults(cachedPayload.results);
+      setSearchedRecords(cachedPayload.searchedRecords);
     } catch (err) {
+      if (err?.name === 'AbortError') return;
+
       setError(err.message);
       setResults([]);
     } finally {
+      if (pendingSearchControllerRef.current === controller) {
+        pendingSearchControllerRef.current = null;
+      }
+
       setLoading(false);
     }
   }
   
 async function loadOperationsDashboard(options = {}) {
-  const { silent = false } = options;
+  const { silent = false, forceRefresh = false } = options;
 
   if (!silent) {
     setOperationsLoading(true);
@@ -1150,8 +1226,12 @@ async function loadOperationsDashboard(options = {}) {
   setOperationsError('');
 
   try {
+    const operationsParams = new URLSearchParams();
+    if (forceRefresh) operationsParams.set('refresh', 'true');
+
+    const operationsQuery = operationsParams.toString();
     const res = await authedFetch(
-      `${API}/operations/today`
+      `${API}/operations/today${operationsQuery ? `?${operationsQuery}` : ''}`
     );
 
     const data = await res.json();
@@ -1939,7 +2019,7 @@ async function openUploadDigestLoadPhotos(record) {
 }
 
 function refreshOperationsAndTracking() {
-  loadOperationsDashboard();
+  loadOperationsDashboard({ forceRefresh: true });
   loadDriverPositions();
   loadUploadDigest(uploadDigestDate);
   loadIntelliTrack();
@@ -3141,15 +3221,24 @@ function getPositionStatusLabel(position) {
     }
 
     const requestedMode = modeOverride || onThisDayMode || 'exact';
-    const cachedMatchesDate = onThisDayCachedReport?.targetDate === onThisDayDate;
+    const normalizedMode = requestedMode === 'across' ? 'across' : 'exact';
+    const exactCacheKey = `${onThisDayDate}|exact`;
+    const acrossCacheKey = `${onThisDayDate}|across`;
+    const cachedSource = normalizedMode === 'exact'
+      ? (
+          getClientCacheRecord(onThisDayReportCacheRef.current, exactCacheKey, ON_THIS_DAY_CLIENT_CACHE_MS) ||
+          getClientCacheRecord(onThisDayReportCacheRef.current, acrossCacheKey, ON_THIS_DAY_CLIENT_CACHE_MS)
+        )
+      : getClientCacheRecord(onThisDayReportCacheRef.current, acrossCacheKey, ON_THIS_DAY_CLIENT_CACHE_MS);
 
-    setOnThisDayMode(requestedMode);
+    setOnThisDayMode(normalizedMode);
     setOnThisDayError(null);
     setOnThisDayPdfError('');
     clearPdfExportNotice('onThisDay');
 
-    if (cachedMatchesDate && onThisDayCachedReport) {
-      setOnThisDayReport(buildOnThisDayDisplayReport(onThisDayCachedReport, requestedMode));
+    if (cachedSource) {
+      setOnThisDayCachedReport(cachedSource);
+      setOnThisDayReport(buildOnThisDayDisplayReport(cachedSource, normalizedMode));
       setOnThisDayModalOpen(true);
       return;
     }
@@ -3161,7 +3250,7 @@ function getPositionStatusLabel(position) {
     try {
       const params = new URLSearchParams({
         date: onThisDayDate,
-        mode: 'across'
+        mode: normalizedMode
       });
       const res = await authedFetch(`${API}/reports/on-this-day?${params.toString()}`);
       const data = await res.json().catch(() => ({}));
@@ -3170,14 +3259,21 @@ function getPositionStatusLabel(position) {
         throw new Error(data.error || data.message || 'Unable to load On This Day.');
       }
 
-      const comparisonSource = {
+      const reportSource = {
         ...data,
-        mode: 'across',
-        modeLabel: 'Comparison Years'
+        mode: normalizedMode,
+        modeLabel: normalizedMode === 'across' ? 'Comparison Years' : 'Selected Date'
       };
 
-      setOnThisDayCachedReport(comparisonSource);
-      setOnThisDayReport(buildOnThisDayDisplayReport(comparisonSource, requestedMode));
+      setLimitedClientCacheRecord(
+        onThisDayReportCacheRef.current,
+        `${onThisDayDate}|${normalizedMode}`,
+        reportSource,
+        ON_THIS_DAY_CLIENT_CACHE_LIMIT
+      );
+
+      setOnThisDayCachedReport(reportSource);
+      setOnThisDayReport(buildOnThisDayDisplayReport(reportSource, normalizedMode));
       setOnThisDayModalOpen(true);
     } catch (err) {
       setOnThisDayError({
@@ -9822,7 +9918,7 @@ function openReportLoadDetails(load) {
                       />
                     </label>
 
-                    <button onClick={() => loadOnThisDayReport()} disabled={onThisDayLoading}>
+                    <button onClick={() => loadOnThisDayReport('exact')} disabled={onThisDayLoading}>
                       {onThisDayLoading ? 'Loading Report...' : 'Preview Report'}
                     </button>
                     <button
@@ -9836,7 +9932,7 @@ function openReportLoadDetails(load) {
                   </div>
 
                   <p className="on-this-day-run-hint">
-                    Loads comparison data once, then opens the selected date first. Comparison years are available from the preview.
+                    Opens the selected date first for a lighter preview. Comparison years load only when requested and are cached for quick toggling.
                   </p>
 
                   {getPdfExportNotice('onThisDay') && !onThisDayModalOpen && (
@@ -10498,8 +10594,7 @@ function openReportLoadDetails(load) {
               <span className="login-spinner" aria-hidden="true" />
               <div>
                 <strong>{loginStatusMessage || 'Connecting to Kole Connect...'}</strong>
-                <small>Free hosting may need a short wake-up before the first login responds.</small>
-              </div>
+                 </div>
             </div>
           )}
 
