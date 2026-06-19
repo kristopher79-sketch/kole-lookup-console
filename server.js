@@ -3510,8 +3510,64 @@ function getPermitGovernanceFieldSelect() {
     'TMSName',
     'Status',
     'PermitsRequested',
-    'Permits_x002f_Escort_x0020_Fees_'
+    'Permits_x002f_Escort_x0020_Fees_',
+    'Freight_x0020_Description',
+    'Length',
+    'Width',
+    'Height'
   ].join(',');
+}
+
+function getFirstExistingFieldValue(fields = {}, fieldNames = []) {
+  for (const fieldName of fieldNames) {
+    if (!Object.prototype.hasOwnProperty.call(fields, fieldName)) continue;
+
+    const value = fields[fieldName];
+
+    if (value !== null && value !== undefined && value !== '') {
+      return { value, fieldName };
+    }
+  }
+
+  return { value: '', fieldName: '' };
+}
+
+function getActualPermitCostField(fields = {}) {
+  return getFirstExistingFieldValue(fields, [
+    'ActualPilotandPermitFees',
+    'Actual_x0020_PilotandPermitFees',
+    'Actual_x0020_Pilot_x0020_and_x0020_Permit_x0020_Fees',
+    'Actual_x0020_Permit_x0020_Cost',
+    'ActualPermitCost',
+    'Actual_x0020_Permit_x0020_Costs',
+    'Permit_x0020_Cost',
+    'PermitCost',
+    'Permit_x0020_Actual_x0020_Cost',
+    'Actual_x0020_Permits_x002f_Escort_x0020_Fees_',
+    'Permits_x002f_Escort_x0020_Actual',
+    'ActualPermitsEscortFees',
+    'PermitActualCost'
+  ]);
+}
+
+function formatPermitDimensionValue(value) {
+  if (value === null || value === undefined || value === '') return '';
+
+  const number = Number(value);
+
+  if (Number.isFinite(number)) {
+    return `${number}"`;
+  }
+
+  return String(value).trim();
+}
+
+function getPermitDimensionsDisplay(fields = {}) {
+  const length = formatPermitDimensionValue(fields.Length);
+  const width = formatPermitDimensionValue(fields.Width);
+  const height = formatPermitDimensionValue(fields.Height);
+
+  return [length, width, height].filter(Boolean).join(' × ');
 }
 
 function getPermitFolderNameCandidates(bol, operatorTeam) {
@@ -3569,6 +3625,7 @@ function getPermitGovernanceReportItem(item, sourceList, permitRootItems = []) {
   const operatorTeam = getChoiceValue(f.Operator_x002f_Team || f['Operator_x002f_Team/Value'] || '');
   const customer = getChoiceValue(f.Company || f['Company/Value'] || '');
   const permitFolder = findPermitFolderMatch(permitRootItems, f.BOLNumber_x0028_Won_x0029_, operatorTeam);
+  const actualPermitCost = getActualPermitCostField(f);
 
   return {
     id: item.id || '',
@@ -3591,7 +3648,16 @@ function getPermitGovernanceReportItem(item, sourceList, permitRootItems = []) {
     OriginST: f.Pickup2State || '',
     DestST: f.Delivery1State || '',
     Route: [f.Shipment_x0020_Origin, f.Shipment_x0020_Destination].filter(Boolean).join(' to '),
+    FreightDescription: f.Freight_x0020_Description || '',
+    Length: f.Length || '',
+    Width: f.Width || '',
+    Height: f.Height || '',
+    DimensionsDisplay: getPermitDimensionsDisplay(f),
     PermitEstimate: getNumberValue(f.Permits_x002f_Escort_x0020_Fees_),
+    ActualPermitCost: actualPermitCost.fieldName ? getNumberValue(actualPermitCost.value) : null,
+    ActualPermitCostRaw: actualPermitCost.value || '',
+    ActualPermitCostField: actualPermitCost.fieldName || '',
+    HasActualPermitCost: Boolean(actualPermitCost.fieldName),
     PermitsRequested: parseBoolean(f.PermitsRequested),
     PermitFolderFound: Boolean(permitFolder?.item),
     PermitFolderName: permitFolder?.item?.name || '',
@@ -3615,6 +3681,29 @@ function isPermitGovernanceOperationalRow(record, today) {
     Boolean(record.BOL) &&
     delivery && delivery >= today
   );
+}
+
+function isPermitGovernanceHistoricalRow(record, today) {
+  const delivery = getDateOnlyComparable(record.DeliveryDate);
+  const status = normalizeText(record.Status);
+
+  return (
+    status === 'won' &&
+    Boolean(record.BOL) &&
+    record.PermitsRequested &&
+    delivery &&
+    delivery < today
+  );
+}
+
+function sortPermitGovernanceHistoryRows(a, b) {
+  const deliveryDiff = String(b.DeliveryDate || '').localeCompare(String(a.DeliveryDate || ''));
+  if (deliveryDiff !== 0) return deliveryDiff;
+
+  const pickupDiff = String(b.PickupDate || '').localeCompare(String(a.PickupDate || ''));
+  if (pickupDiff !== 0) return pickupDiff;
+
+  return String(a.BOL || '').localeCompare(String(b.BOL || ''), undefined, { numeric: true });
 }
 
 function getPermitGovernanceRowKey(row) {
@@ -3731,13 +3820,20 @@ async function buildPermitGovernanceResponse(items, sourceList, options = {}) {
     warnings.push('Permit folder environment variables are not configured, so permit folder links and file counts could not be checked.');
   }
 
-  let operationalRows = items
-    .map((item) => getPermitGovernanceReportItem(item, sourceList, permitRootItems))
+  const allReportRows = items
+    .map((item) => getPermitGovernanceReportItem(item, sourceList, permitRootItems));
+
+  let operationalRows = allReportRows
     .filter((record) => isPermitGovernanceOperationalRow(record, today))
     .sort(sortPermitGovernanceRows);
 
+  let historicalPermittedLoads = allReportRows
+    .filter((record) => isPermitGovernanceHistoricalRow(record, today))
+    .sort(sortPermitGovernanceHistoryRows);
+
   if (includeFolderAudit && options.token && permitRootLoaded) {
     operationalRows = await addPermitFolderAuditCounts(options.token, operationalRows);
+    historicalPermittedLoads = await addPermitFolderAuditCounts(options.token, historicalPermittedLoads);
   }
 
   const currentlyPermitted = operationalRows.filter((row) => row.PermitsRequested);
@@ -3770,6 +3866,7 @@ async function buildPermitGovernanceResponse(items, sourceList, options = {}) {
       currentlyPermitted: currentlyPermitted.length,
       ordersNeedingPermits: ordersNeedingPermits.length,
       permitFolderNeedsDocs: permitFolderNeedsDocs.length,
+      historicalPermittedLoads: historicalPermittedLoads.length,
       totalOperationalRows: operationalRows.length,
       totalPermitGovernanceRows: rows.length
     },
@@ -3777,7 +3874,8 @@ async function buildPermitGovernanceResponse(items, sourceList, options = {}) {
     sections: {
       currentlyPermitted,
       ordersNeedingPermits,
-      permitFolderNeedsDocs
+      permitFolderNeedsDocs,
+      historicalPermittedLoads
     },
     rows
   };
@@ -6087,11 +6185,9 @@ app.get('/reports/permit-governance', requireLookupAccess, async (req, res) => {
       });
     }
 
-    const items = await getAllListItemsWithFields(
-      token,
-      currentList.listId,
-      getPermitGovernanceFieldSelect()
-    );
+    // Permit Governance intentionally loads full fields because the historical pane
+    // can display actual permit cost from whichever Bid Listing column is present.
+    const items = await getAllListItemsWithFields(token, currentList.listId);
 
     res.json(await buildPermitGovernanceResponse(items, currentList, { token }));
   } catch (error) {

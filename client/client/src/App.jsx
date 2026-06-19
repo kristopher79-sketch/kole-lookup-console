@@ -475,6 +475,8 @@ export default function App() {
   const [permitGovernanceError, setPermitGovernanceError] = useState(null);
   const [permitGovernanceModalOpen, setPermitGovernanceModalOpen] = useState(false);
   const [permitGovernanceFilter, setPermitGovernanceFilter] = useState('currentlyPermitted');
+  const [selectedPermitHistoryLoad, setSelectedPermitHistoryLoad] = useState(null);
+  const [permitHistoryOrderReturnLoad, setPermitHistoryOrderReturnLoad] = useState(null);
   const [reportActionAlerts, setReportActionAlerts] = useState(null);
   const [reportActionAlertsLoading, setReportActionAlertsLoading] = useState(false);
   const [reportActionAlertsError, setReportActionAlertsError] = useState('');
@@ -784,6 +786,8 @@ export default function App() {
         setWeeklySettlementModalOpen(false);
         setWonNotRegisteredModalOpen(false);
         setPermitGovernanceModalOpen(false);
+        setSelectedPermitHistoryLoad(null);
+        setPermitHistoryOrderReturnLoad(null);
         setActiveDriverRosterModalOpen(false);
         setInactiveDriverRosterModalOpen(false);
         setFleetEquipmentModalOpen(false);
@@ -2329,6 +2333,11 @@ function getPositionStatusLabel(position) {
   function closeModal() {
     setSelected(null);
     setDocumentError('');
+
+    if (permitHistoryOrderReturnLoad) {
+      setSelectedPermitHistoryLoad(permitHistoryOrderReturnLoad);
+      setPermitHistoryOrderReturnLoad(null);
+    }
   }
 
   function getStatusClass(status) {
@@ -3108,6 +3117,12 @@ function getPositionStatusLabel(position) {
 
   function closePermitGovernanceModal() {
     setPermitGovernanceModalOpen(false);
+    setSelectedPermitHistoryLoad(null);
+    setPermitHistoryOrderReturnLoad(null);
+  }
+
+  function closePermitHistoryDetailModal() {
+    setSelectedPermitHistoryLoad(null);
   }
 
   async function openPermitReportFolder(row, event) {
@@ -5597,7 +5612,7 @@ function openReportLoadDetails(load) {
         key: 'currentlyPermitted',
         label: 'Currently Permitted',
         count: counts.currentlyPermitted || 0,
-        description: 'Permit requested and pickup/delivery today or later.'
+        description: 'Permit requested and delivery date today or later.'
       },
       {
         key: 'ordersNeedingPermits',
@@ -5610,6 +5625,12 @@ function openReportLoadDetails(load) {
         label: 'Permit Docs Pending',
         count: counts.permitFolderNeedsDocs || 0,
         description: 'Folder missing, unaudited, or still has one file or less.'
+      },
+      {
+        key: 'historicalPermittedLoads',
+        label: 'Permit History',
+        count: counts.historicalPermittedLoads || 0,
+        description: 'Delivered loads where a permit request was filed.'
       }
     ];
     const activeFilter = filterDefs.some((item) => item.key === permitGovernanceFilter)
@@ -5617,6 +5638,7 @@ function openReportLoadDetails(load) {
       : 'currentlyPermitted';
     const rows = sections[activeFilter] || [];
     const activeLabel = filterDefs.find((item) => item.key === activeFilter)?.label || 'Permit Records';
+    const isHistoricalFilter = activeFilter === 'historicalPermittedLoads';
 
     function getPermitFolderStatus(row) {
       if (!row.PermitsRequested) return 'Not requested';
@@ -5660,13 +5682,65 @@ function openReportLoadDetails(load) {
           <div className="driver-report-section-header">
             <div>
               <h4>{activeLabel}</h4>
-              <p>Bid Listing records with pickup and delivery dates today or later.</p>
+              <p>
+                {isHistoricalFilter
+                  ? 'Delivered permitted loads from Bid Listing. Click a row for permit details.'
+                  : 'Bid Listing records in the selected permit-governance bucket.'}
+              </p>
             </div>
             <div className="driver-report-section-total">{formatReportNumber(rows.length)} row(s)</div>
           </div>
 
           {rows.length === 0 ? (
             <div className="msg good-news">No records match this permit filter right now.</div>
+          ) : isHistoricalFilter ? (
+            <div className="report-table-wrap permit-governance-table-wrap">
+              <table className="driver-report-table permit-governance-table permit-history-table">
+                <thead>
+                  <tr>
+                    <th>BOL</th>
+                    <th>Delivery</th>
+                    <th>Customer</th>
+                    <th>Operator</th>
+                    <th>Truck</th>
+                    <th>Route</th>
+                    <th>Actual Permit Cost</th>
+                    <th>Folder</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((load, index) => (
+                    <tr
+                      key={`${load.BOL || load.BidID || load.id || index}-${index}`}
+                      className="report-clickable-row"
+                      onClick={() => setSelectedPermitHistoryLoad(load)}
+                      title="Open permit history detail"
+                    >
+                      <td>{load.BOL || '-'}</td>
+                      <td>{load.DeliveryDateDisplay || formatDateOnly(load.DeliveryDate)}</td>
+                      <td>{load.Customer || '-'}</td>
+                      <td>{load.Operator || load.OperatorTeam || '-'}</td>
+                      <td>{load.Truck || '-'}</td>
+                      <td>{load.Route || [load.OriginST, load.DestST].filter(Boolean).join(' to ') || '-'}</td>
+                      <td>{load.HasActualPermitCost ? formatReportMoney(load.ActualPermitCost) : <span className="muted-table-note">Not mapped</span>}</td>
+                      <td>
+                        {load.PermitFolderFound ? (
+                          <button
+                            type="button"
+                            className="view-button compact-action-button"
+                            onClick={(event) => openPermitReportFolder(load, event)}
+                          >
+                            Open Folder
+                          </button>
+                        ) : (
+                          <span className="muted-table-note">Not found</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <div className="report-table-wrap permit-governance-table-wrap">
               <table className="driver-report-table permit-governance-table">
@@ -5720,6 +5794,117 @@ function openReportLoadDetails(load) {
               </table>
             </div>
           )}
+        </div>
+      </div>
+    );
+  }
+
+
+  function PermitHistoryDetailModal() {
+    const load = selectedPermitHistoryLoad;
+
+    if (!load) return null;
+
+    const route = load.Route || [load.OriginST, load.DestST].filter(Boolean).join(' to ') || '-';
+    const dimensions = load.DimensionsDisplay || [load.Length, load.Width, load.Height].filter(Boolean).join(' × ') || '-';
+
+    function openFullOrderFromPermitHistory() {
+      if (!load?.id) return;
+
+      setPermitHistoryOrderReturnLoad(load);
+      setSelectedPermitHistoryLoad(null);
+      loadDetails(load.id, 'basic', load.SourceListId || '');
+    }
+
+    return (
+      <div className="modal-overlay report-modal-overlay permit-history-detail-overlay" onClick={closePermitHistoryDetailModal}>
+        <div className="detail-modal permit-history-detail-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="detail-header report-modal-header">
+            <div>
+              <h2>{load.BOL || 'Permit History Detail'}</h2>
+              <p>{load.Customer || '-'} · {load.Operator || load.OperatorTeam || '-'} · Delivered {load.DeliveryDateDisplay || formatDateOnly(load.DeliveryDate)}</p>
+            </div>
+
+            <button className="close-button" onClick={closePermitHistoryDetailModal}>
+              Close
+            </button>
+          </div>
+
+          <div className="modal-body report-modal-body">
+            <div className="permit-history-detail-grid">
+              <div className="detail-item">
+                <span>Customer</span>
+                <strong>{load.Customer || '-'}</strong>
+              </div>
+              <div className="detail-item">
+                <span>Operator / Team</span>
+                <strong>{load.Operator || load.OperatorTeam || '-'}</strong>
+              </div>
+              <div className="detail-item">
+                <span>Truck</span>
+                <strong>{load.Truck || '-'}</strong>
+              </div>
+              <div className="detail-item">
+                <span>Route</span>
+                <strong>{route}</strong>
+              </div>
+
+              <div className="detail-item wide">
+                <span>Freight Description</span>
+                <strong>{load.FreightDescription || '-'}</strong>
+              </div>
+              <div className="detail-item">
+                <span>Dimensions</span>
+                <strong>{dimensions}</strong>
+              </div>
+              <div className="detail-item">
+                <span>Actual Permit Cost</span>
+                <strong>{load.HasActualPermitCost ? formatReportMoney(load.ActualPermitCost) : '-'}</strong>
+                {!load.HasActualPermitCost && (
+                  <small>Actual permit cost was not found in the mapped Bid Listing fields.</small>
+                )}
+              </div>
+
+              <div className="detail-item">
+                <span>Permit Estimate</span>
+                <strong>{formatReportMoney(load.PermitEstimate)}</strong>
+              </div>
+              <div className="detail-item">
+                <span>Pickup</span>
+                <strong>{load.PickupDateDisplay || formatDateOnly(load.PickupDate)}</strong>
+              </div>
+              <div className="detail-item">
+                <span>Delivery</span>
+                <strong>{load.DeliveryDateDisplay || formatDateOnly(load.DeliveryDate)}</strong>
+              </div>
+              <div className="detail-item permit-history-folder-action">
+                <span>Permit Folder</span>
+                {load.PermitFolderFound ? (
+                  <button
+                    type="button"
+                    className="view-button compact-action-button"
+                    onClick={(event) => openPermitReportFolder(load, event)}
+                  >
+                    Open Permit Folder
+                  </button>
+                ) : (
+                  <strong>Not found</strong>
+                )}
+              </div>
+            </div>
+
+            <div className="permit-history-detail-actions">
+              <button
+                type="button"
+                className="view-button"
+                onClick={openFullOrderFromPermitHistory}
+                disabled={!load?.id}
+              >
+                Open Full Order Details
+              </button>
+              <span>Opens the normal order detail card from Bid Listing.</span>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -10107,7 +10292,7 @@ function openReportLoadDetails(load) {
                   <div className="report-card-header centered-report-header">
                     <div>
                       <h3>Permit Governance</h3>
-                      <p>Current/future Bid Listing loads with permit request, permit estimate, and permit folder status.</p>
+                      <p>Current/future Bid Listing loads with permit requests, permit estimates, and permit folder status.</p>
                     </div>
                   </div>
 
@@ -11457,7 +11642,13 @@ function openReportLoadDetails(load) {
             <div className="detail-header report-modal-header">
               <div>
                 <h2>{permitGovernanceReport.reportLabel || 'Permit Governance'}</h2>
-                <p>{formatReportNumber(permitGovernanceReport.count)} current/future permit-related row(s) · Generated {permitGovernanceReport.generatedAt || ''}</p>
+                <p>
+                  {formatReportNumber(permitGovernanceReport.counts?.totalPermitGovernanceRows || permitGovernanceReport.count || 0)} active/open row(s)
+                  {' · '}
+                  {formatReportNumber(permitGovernanceReport.counts?.historicalPermittedLoads || 0)} historical row(s)
+                  {' · Generated '}
+                  {permitGovernanceReport.generatedAt || ''}
+                </p>
               </div>
 
               <button className="close-button" onClick={closePermitGovernanceModal}>
@@ -11471,6 +11662,8 @@ function openReportLoadDetails(load) {
           </div>
         </div>
       )}
+
+      <PermitHistoryDetailModal />
 
 
       {activeDriverRosterModalOpen && activeDriverRosterReport && (

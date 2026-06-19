@@ -7243,7 +7243,7 @@ button.available-truck-distribution-summary-card:disabled {
 /* PASS 30: Permit Governance operational report */
 .permit-governance-card-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin: 16px 0 20px;
 }
@@ -7320,14 +7320,129 @@ button.available-truck-distribution-summary-card:disabled {
   margin: 6px 0 0;
 }
 
+.permit-history-table {
+  min-width: 1180px;
+}
+
+.permit-history-table th:nth-child(7),
+.permit-history-table td:nth-child(7),
+.permit-history-table th:nth-child(8),
+.permit-history-table td:nth-child(8) {
+  white-space: nowrap;
+}
+
+.permit-history-detail-overlay {
+  z-index: 1100;
+}
+
+.permit-history-detail-modal {
+  width: min(980px, 92vw);
+}
+
+.permit-history-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.permit-history-detail-grid .detail-item.wide {
+  grid-column: span 2;
+}
+
+.permit-history-folder-action button {
+  width: 100%;
+  margin-top: 4px;
+}
+
 .muted-table-note {
   color: #94a3b8;
   font-size: 12px;
   font-weight: 700;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .permit-governance-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .permit-governance-card-grid,
+  .permit-history-detail-grid {
     grid-template-columns: 1fr;
   }
+
+  .permit-history-detail-grid .detail-item.wide {
+    grid-column: span 1;
+  }
+}
+
+
+/* PASS 31: Permit History polish */
+.permit-history-table th:last-child,
+.permit-history-table td:last-child,
+.permit-governance-table th:last-child,
+.permit-governance-table td:last-child {
+  padding-right: 18px;
+}
+
+.permit-history-table td:last-child,
+.permit-governance-table td:last-child {
+  text-align: right;
+}
+
+.permit-history-table td:last-child .compact-action-button,
+.permit-governance-table td:last-child .compact-action-button {
+  margin-right: 2px;
+}
+
+.permit-history-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.66);
+}
+
+.permit-history-detail-actions span {
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+@media (max-width: 700px) {
+  .permit-history-detail-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+
+/* PASS 32: Permit history action-column breathing room and return-stack polish */
+.permit-history-table th:last-child,
+.permit-history-table td:last-child {
+  width: 150px;
+  min-width: 150px;
+  padding-left: 18px;
+  padding-right: 40px !important;
+  text-align: left;
+}
+
+.permit-governance-table th:last-child,
+.permit-governance-table td:last-child {
+  width: 150px;
+  min-width: 150px;
+  padding-left: 18px;
+  padding-right: 40px !important;
+  text-align: left;
+}
+
+.permit-history-table td:last-child .compact-action-button,
+.permit-governance-table td:last-child .compact-action-button {
+  margin-right: 0;
+  min-width: 98px;
+  white-space: nowrap;
 }
