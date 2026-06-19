@@ -9783,6 +9783,7 @@ function openReportLoadDetails(load) {
     const isSalesActivityOpen = activeReportPanel === 'salesActivity';
     const isLeadSuppressionOpen = activeReportPanel === 'leadSuppression';
     const isSalesLeadsOpen = activeReportPanel === 'salesLeads';
+    const isFinancialReportsOpen = isReportGroupOpen('financial');
     const isOperationalReportsOpen = isReportGroupOpen('operational');
     const isDriverFleetReportsOpen = isReportGroupOpen('driverFleet');
     const isSalesReportsOpen = isReportGroupOpen('sales');
@@ -9797,7 +9798,7 @@ function openReportLoadDetails(load) {
         >
           <span className="feature-section-title-block">
             <span className="feature-section-title">Reports</span>
-            <span className="feature-section-subtitle">Operational and sales reporting.</span>
+            <span className="feature-section-subtitle">Financial, operational, driver/fleet, and sales reporting.</span>
           </span>
           <span
             className={`feature-section-status-pill report-alert-status-pill ${
@@ -9814,20 +9815,20 @@ function openReportLoadDetails(load) {
 
         {reportsSectionOpen && (
           <div className="feature-section-body reports-accordion-list">
-          <div className={`report-group-accordion ${isOperationalReportsOpen ? 'open' : ''}`}>
+          <div className={`report-group-accordion ${isFinancialReportsOpen ? 'open' : ''}`}>
             <button
               type="button"
               className="report-group-button"
-              onClick={() => toggleReportGroup('operational')}
+              onClick={() => toggleReportGroup('financial')}
             >
               <div>
-                <strong>Operational Reports</strong>
-                <span>Revenue, settlements, driver/order reporting</span>
+                <strong>Financial Reports</strong>
+                <span>Revenue totals, monthly driver summaries, and weekly settlements</span>
               </div>
-              <span className="report-accordion-icon">{isOperationalReportsOpen ? '▼' : '▶'}</span>
+              <span className="report-accordion-icon">{isFinancialReportsOpen ? '▼' : '▶'}</span>
             </button>
 
-            {isOperationalReportsOpen && (
+            {isFinancialReportsOpen && (
               <div className="report-group-body">
           <div className={`report-accordion ${isGrossRevenueOpen ? 'open' : ''}`}>
             <button
@@ -10036,72 +10037,6 @@ function openReportLoadDetails(load) {
             )}
           </div>
 
-          <div className={`report-accordion ${isOrdersDueSettlementOpen ? 'open' : ''}`}>
-            <button
-              type="button"
-              className="report-accordion-button"
-              onClick={() => toggleReportPanel('ordersDueSettlement')}
-            >
-              <span>
-                Orders Due for Settlement
-                {reportActionAlertCounts.ordersDueSettlement > 0 && (
-                  <span
-                    className="report-action-alert-marker"
-                    title={`${formatReportNumber(reportActionAlertCounts.ordersDueSettlement)} order${reportActionAlertCounts.ordersDueSettlement === 1 ? '' : 's'} due for settlement`}
-                    aria-label={`${formatReportNumber(reportActionAlertCounts.ordersDueSettlement)} order${reportActionAlertCounts.ordersDueSettlement === 1 ? '' : 's'} due for settlement`}
-                  >
-                    *
-                  </span>
-                )}
-              </span>
-              <span className="report-accordion-icon">{isOrdersDueSettlementOpen ? '▼' : '▶'}</span>
-            </button>
-
-            {isOrdersDueSettlementOpen && (
-              <div className="report-accordion-body">
-                <div className="report-card compact-report-card accordion-inner-card">
-                  <div className="report-card-header centered-report-header">
-                    <div>
-                      <h3>Orders Due for Settlement</h3>
-                    </div>
-                  </div>
-
-                  {ordersDueSettlementActionBlocked ? (
-                    <div className="report-alert locked action-report-clear-warning">
-                      <h4>No settlement action items right now.</h4>
-                      <p>{getActionReportClearMessage('Orders Due for Settlement')}</p>
-                    </div>
-                  ) : (
-                    <div className="report-controls centered-report-controls">
-                      <button onClick={loadOrdersDueSettlementReport} disabled={ordersDueSettlementLoading}>
-                        {ordersDueSettlementLoading ? 'Loading Report...' : 'Preview Report'}
-                      </button>
-                    </div>
-                  )}
-
-                  {ordersDueSettlementReport && !ordersDueSettlementModalOpen && (
-                    <div className="report-ready-card">
-                      <div>
-                        <strong>{ordersDueSettlementReport.reportLabel} is ready.</strong>
-                        <span> The preview opens in a report window.</span>
-                      </div>
-                      <button className="view-button" onClick={() => setOrdersDueSettlementModalOpen(true)}>
-                        Reopen Preview
-                      </button>
-                    </div>
-                  )}
-
-                  {ordersDueSettlementError && !ordersDueSettlementActionBlocked && (
-                    <div className={`report-alert ${ordersDueSettlementError.code === 'NO_ACTION_ITEMS' ? 'locked' : 'error'}`}>
-                      <h4>{ordersDueSettlementError.code === 'NO_ACTION_ITEMS' ? 'Report not needed.' : 'Report could not be loaded.'}</h4>
-                      <p>{ordersDueSettlementError.message}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
           <div className={`report-accordion ${isWeeklySettlementOpen ? 'open' : ''}`}>
             <button
               type="button"
@@ -10196,7 +10131,91 @@ function openReportLoadDetails(load) {
               </div>
             )}
           </div>
+              </div>
+            )}
+          </div>
 
+
+          <div className={`report-group-accordion ${isOperationalReportsOpen ? 'open' : ''}`}>
+            <button
+              type="button"
+              className="report-group-button"
+              onClick={() => toggleReportGroup('operational')}
+            >
+              <div>
+                <strong>Operational Reports</strong>
+                <span>Action items, permit control, daily history, and availability reporting</span>
+              </div>
+              <span className="report-accordion-icon">{isOperationalReportsOpen ? '▼' : '▶'}</span>
+            </button>
+
+            {isOperationalReportsOpen && (
+              <div className="report-group-body">
+          <div className={`report-accordion ${isOrdersDueSettlementOpen ? 'open' : ''}`}>
+            <button
+              type="button"
+              className="report-accordion-button"
+              onClick={() => toggleReportPanel('ordersDueSettlement')}
+            >
+              <span>
+                Orders Due for Settlement
+                {reportActionAlertCounts.ordersDueSettlement > 0 && (
+                  <span
+                    className="report-action-alert-marker"
+                    title={`${formatReportNumber(reportActionAlertCounts.ordersDueSettlement)} order${reportActionAlertCounts.ordersDueSettlement === 1 ? '' : 's'} due for settlement`}
+                    aria-label={`${formatReportNumber(reportActionAlertCounts.ordersDueSettlement)} order${reportActionAlertCounts.ordersDueSettlement === 1 ? '' : 's'} due for settlement`}
+                  >
+                    *
+                  </span>
+                )}
+              </span>
+              <span className="report-accordion-icon">{isOrdersDueSettlementOpen ? '▼' : '▶'}</span>
+            </button>
+
+            {isOrdersDueSettlementOpen && (
+              <div className="report-accordion-body">
+                <div className="report-card compact-report-card accordion-inner-card">
+                  <div className="report-card-header centered-report-header">
+                    <div>
+                      <h3>Orders Due for Settlement</h3>
+                    </div>
+                  </div>
+
+                  {ordersDueSettlementActionBlocked ? (
+                    <div className="report-alert locked action-report-clear-warning">
+                      <h4>No settlement action items right now.</h4>
+                      <p>{getActionReportClearMessage('Orders Due for Settlement')}</p>
+                    </div>
+                  ) : (
+                    <div className="report-controls centered-report-controls">
+                      <button onClick={loadOrdersDueSettlementReport} disabled={ordersDueSettlementLoading}>
+                        {ordersDueSettlementLoading ? 'Loading Report...' : 'Preview Report'}
+                      </button>
+                    </div>
+                  )}
+
+                  {ordersDueSettlementReport && !ordersDueSettlementModalOpen && (
+                    <div className="report-ready-card">
+                      <div>
+                        <strong>{ordersDueSettlementReport.reportLabel} is ready.</strong>
+                        <span> The preview opens in a report window.</span>
+                      </div>
+                      <button className="view-button" onClick={() => setOrdersDueSettlementModalOpen(true)}>
+                        Reopen Preview
+                      </button>
+                    </div>
+                  )}
+
+                  {ordersDueSettlementError && !ordersDueSettlementActionBlocked && (
+                    <div className={`report-alert ${ordersDueSettlementError.code === 'NO_ACTION_ITEMS' ? 'locked' : 'error'}`}>
+                      <h4>{ordersDueSettlementError.code === 'NO_ACTION_ITEMS' ? 'Report not needed.' : 'Report could not be loaded.'}</h4>
+                      <p>{ordersDueSettlementError.message}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
 
           <div className={`report-accordion ${isWonNotRegisteredOpen ? 'open' : ''}`}>
             <button
