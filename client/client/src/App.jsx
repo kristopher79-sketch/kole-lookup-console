@@ -20,6 +20,87 @@ const SEARCH_RESULT_CACHE_MS = 2 * 60 * 1000;
 const ON_THIS_DAY_CLIENT_CACHE_MS = 5 * 60 * 1000;
 const ON_THIS_DAY_CLIENT_CACHE_LIMIT = 10;
 
+const STARTUP_SPLASH_MIN_MS = 5000;
+const STARTUP_SPLASH_EXIT_MS = 420;
+
+function getStartupStepClass(state) {
+  return `startup-splash-step ${state === 'complete' ? 'complete' : ''} ${state === 'active' ? 'active' : ''}`.trim();
+}
+
+function StartupSplashStep({ label, detail, state = 'waiting' }) {
+  return (
+    <li className={getStartupStepClass(state)}>
+      <span className="startup-splash-step-dot" aria-hidden="true" />
+      <div>
+        <strong>{label}</strong>
+        {detail && <small>{detail}</small>}
+      </div>
+    </li>
+  );
+}
+
+function KoleStartupSplash({
+  exiting = false,
+  operationsData,
+  operationsError,
+  uploadDigestData,
+  uploadDigestError,
+  reportActionAlerts,
+  reportActionAlertsError,
+  onSkip
+}) {
+  const operationsSettled = Boolean(operationsData || operationsError);
+  const uploadsSettled = Boolean(uploadDigestData || uploadDigestError);
+  const reportsSettled = Boolean(reportActionAlerts || reportActionAlertsError);
+
+  return (
+    <div
+      className={`startup-splash-overlay ${exiting ? 'startup-splash-exiting' : ''}`}
+      role="status"
+      aria-live="polite"
+      aria-label="Kole Connect is loading"
+    >
+      <div className="startup-splash-card">
+        <div className="startup-splash-orbit" aria-hidden="true" />
+        <img src={koleLogo} alt="Kole Trucking" className="startup-splash-logo" />
+        <div className="startup-splash-route" aria-hidden="true">
+          <span />
+        </div>
+        <h2>Dispatch Console Online</h2>
+        <p>Loading Operations Today and staging the dashboard.</p>
+
+        <ul className="startup-splash-steps">
+          <StartupSplashStep
+            label="Access token accepted"
+            detail="Kole Connect session authenticated"
+            state="complete"
+          />
+          <StartupSplashStep
+            label="Loading Operations Today"
+            detail={operationsSettled ? 'Active loads are ready' : 'Active jobs, loading today, delivering today'}
+            state={operationsSettled ? 'complete' : 'active'}
+          />
+          <StartupSplashStep
+            label="Checking job uploads"
+            detail={uploadsSettled ? 'Upload digest checked' : 'Pickup and delivery photos'}
+            state={operationsSettled ? (uploadsSettled ? 'complete' : 'active') : 'waiting'}
+          />
+          <StartupSplashStep
+            label="Scanning report alerts"
+            detail={reportsSettled ? 'Report alerts checked' : 'Operational alerts standing by'}
+            state={uploadsSettled ? (reportsSettled ? 'complete' : 'active') : 'waiting'}
+          />
+        </ul>
+
+        <div className="startup-splash-footer">
+          <span>{operationsSettled ? 'Systems online' : 'Operations Today usually takes a few seconds.'}</span>
+          <button type="button" onClick={onSkip}>Skip</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function getClientCacheRecord(cache, key, ttlMs) {
   const cached = cache.get(key);
   if (!cached) return null;
@@ -580,17 +661,21 @@ export default function App() {
   const searchCacheRef = useRef(new Map());
   const pendingSearchControllerRef = useRef(null);
   const onThisDayReportCacheRef = useRef(new Map());
+  const startupSplashStartedAtRef = useRef(Date.now());
+  const startupSplashCloseTimerRef = useRef(null);
 
   const [authError, setAuthError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginStatusMessage, setLoginStatusMessage] = useState('');
+  const [startupSplashVisible, setStartupSplashVisible] = useState(() => Boolean(sessionStorage.getItem('koleLookupToken')));
+  const [startupSplashExiting, setStartupSplashExiting] = useState(false);
+  const [startupSplashDismissed, setStartupSplashDismissed] = useState(false);
   const [uploadDigestDate, setUploadDigestDate] = useState(getEasternDateInputValue);
   const [uploadDigestData, setUploadDigestData] = useState(null);
   const [uploadDigestLoading, setUploadDigestLoading] = useState(false);
   const [uploadDigestError, setUploadDigestError] = useState('');
   const [uploadDigestActionError, setUploadDigestActionError] = useState('');
   const [uploadDigestSectionOpen, setUploadDigestSectionOpen] = useState(false);
-  const [uploadDigestOpen, setUploadDigestOpen] = useState(false);
   const [intelliTrackSectionOpen, setIntelliTrackSectionOpen] = useState(false);
   const [intelliTrackOpen, setIntelliTrackOpen] = useState(false);
   const [intelliTrackActionOpen, setIntelliTrackActionOpen] = useState(false);
@@ -632,6 +717,22 @@ export default function App() {
   const [availableTruckActionError, setAvailableTruckActionError] = useState('');
   const [availableTruckDrilldown, setAvailableTruckDrilldown] = useState(null);
   const [reportsSectionOpen, setReportsSectionOpen] = useState(false);
+
+  function beginStartupSplashClose() {
+    if (startupSplashCloseTimerRef.current) {
+      window.clearTimeout(startupSplashCloseTimerRef.current);
+      startupSplashCloseTimerRef.current = null;
+    }
+
+    setStartupSplashExiting(true);
+
+    startupSplashCloseTimerRef.current = window.setTimeout(() => {
+      setStartupSplashVisible(false);
+      setStartupSplashExiting(false);
+      setStartupSplashDismissed(true);
+      startupSplashCloseTimerRef.current = null;
+    }, STARTUP_SPLASH_EXIT_MS);
+  }
   
 
   function isBolLookup(value) {
@@ -763,6 +864,29 @@ export default function App() {
   const wonNotRegisteredActionBlocked =
     reportActionAlertCounts.isLoaded && reportActionAlertCounts.wonNotRegistered <= 0;
 
+  const reportActionAlertSummary = useMemo(() => {
+    if (reportActionAlertsLoading && !reportActionAlerts) return 'Checking Operations Reports...';
+    if (reportActionAlertsError) return 'Operations Reports alert check failed';
+
+    const total = reportActionAlertCounts.total;
+
+    if (total <= 0) return 'Operations Reports: Clear';
+
+    const parts = [
+      reportActionAlertCounts.ordersDueSettlement > 0
+        ? `${formatReportNumber(reportActionAlertCounts.ordersDueSettlement)} settlement`
+        : '',
+      reportActionAlertCounts.wonNotRegistered > 0
+        ? `${formatReportNumber(reportActionAlertCounts.wonNotRegistered)} won/not registered`
+        : '',
+      reportActionAlertCounts.permitGovernance > 0
+        ? `${formatReportNumber(reportActionAlertCounts.permitGovernance)} permit`
+        : ''
+    ].filter(Boolean);
+
+    return `Operations Reports: ${formatReportNumber(total)} ${total === 1 ? 'alert' : 'alerts'}${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
+  }, [reportActionAlertCounts, reportActionAlertsLoading, reportActionAlerts, reportActionAlertsError]);
+
   function getActionReportClearMessage(reportLabel) {
     return `${reportLabel} is already clear in the Reports ticker. This point-in-time report is hidden until the next refresh finds something actionable.`;
   }
@@ -806,6 +930,48 @@ export default function App() {
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (startupSplashCloseTimerRef.current) {
+        window.clearTimeout(startupSplashCloseTimerRef.current);
+        startupSplashCloseTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      if (startupSplashCloseTimerRef.current) {
+        window.clearTimeout(startupSplashCloseTimerRef.current);
+        startupSplashCloseTimerRef.current = null;
+      }
+
+      setStartupSplashVisible(false);
+      setStartupSplashExiting(false);
+      setStartupSplashDismissed(false);
+      return;
+    }
+
+    if (!startupSplashDismissed && !startupSplashVisible && !operationsData && !operationsError) {
+      startupSplashStartedAtRef.current = Date.now();
+      setStartupSplashExiting(false);
+      setStartupSplashVisible(true);
+    }
+  }, [isAuthenticated, startupSplashDismissed, startupSplashVisible, operationsData, operationsError]);
+
+  useEffect(() => {
+    if (!startupSplashVisible || startupSplashExiting || !isAuthenticated) return undefined;
+    if (!operationsData && !operationsError) return undefined;
+
+    const elapsedMs = Date.now() - startupSplashStartedAtRef.current;
+    const closeDelayMs = Math.max(STARTUP_SPLASH_MIN_MS - elapsedMs, 0);
+    const closeTimer = window.setTimeout(() => {
+      beginStartupSplashClose();
+    }, closeDelayMs);
+
+    return () => window.clearTimeout(closeTimer);
+  }, [startupSplashVisible, startupSplashExiting, isAuthenticated, operationsData, operationsError]);
 
   useEffect(() => {
     if (!isAuthenticated) return undefined;
@@ -1067,6 +1233,10 @@ export default function App() {
       }
 
       sessionStorage.setItem('koleLookupToken', token);
+      startupSplashStartedAtRef.current = Date.now();
+      setStartupSplashDismissed(false);
+      setStartupSplashExiting(false);
+      setStartupSplashVisible(true);
       setAccessToken(token);
       setPassword('');
       setLoginStatusMessage('');
@@ -1090,6 +1260,9 @@ export default function App() {
     setAuthError('');
     setLoginStatusMessage('');
     setLoginLoading(false);
+    setStartupSplashVisible(false);
+    setStartupSplashExiting(false);
+    setStartupSplashDismissed(false);
     salesLeadsPrewarmStartedRef.current = false;
     resetAppState();
   }
@@ -2394,7 +2567,22 @@ function getPositionStatusLabel(position) {
   function formatDateOnly(value) {
     if (!value) return '-';
 
-    const date = new Date(value);
+    const raw = String(value).trim();
+    const dateOnlyMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T00:00(?::00(?:\.000)?)?(?:Z|[+-]\d{2}:\d{2})?$)/);
+
+    if (dateOnlyMatch) {
+      const [, year, month, day] = dateOnlyMatch.map(Number);
+      const dateOnly = new Date(Date.UTC(year, month - 1, day));
+
+      return dateOnly.toLocaleDateString('en-US', {
+        timeZone: 'UTC',
+        month: 'numeric',
+        day: 'numeric',
+        year: '2-digit'
+      });
+    }
+
+    const date = new Date(raw);
 
     if (Number.isNaN(date.getTime())) return value;
 
@@ -4865,6 +5053,11 @@ function openReportLoadDetails(load) {
     const trucks = grossRevenueReport.trucks || [];
     const monthlyTotals = grossRevenueReport.totals?.monthlyTotals || {};
     const monthlyLoadCounts = grossRevenueReport.totals?.monthlyLoadCounts || {};
+    const [currentEasternYear, currentEasternMonth] = getEasternDateInputValue().split('-').map(Number);
+    const isCurrentGrossRevenueYear = Number(grossRevenueReport.year) === currentEasternYear;
+    const currentMonth = months.find((month) => Number(month.month) === currentEasternMonth) || null;
+    const currentMonthRevenue = isCurrentGrossRevenueYear ? Number(monthlyTotals[currentEasternMonth] || 0) : 0;
+    const currentMonthLoadCount = isCurrentGrossRevenueYear ? Number(monthlyLoadCounts[currentEasternMonth] || 0) : 0;
     const quarterGroups = [
       { label: 'Q1', months: months.filter((month) => [1, 2, 3].includes(Number(month.month))) },
       { label: 'Q2', months: months.filter((month) => [4, 5, 6].includes(Number(month.month))) },
@@ -4886,7 +5079,14 @@ function openReportLoadDetails(load) {
           Generated: {grossRevenueReport.generatedAt}
         </div>
 
-        <div className="report-kpi-grid gross-revenue-kpi-grid">
+        <div className={`report-kpi-grid gross-revenue-kpi-grid ${isCurrentGrossRevenueYear ? 'has-current-month' : ''}`}>
+          {isCurrentGrossRevenueYear && (
+            <div className="report-kpi-card gross-revenue-current-month-card">
+              <span>Current Month Revenue</span>
+              <strong>{formatReportMoney(currentMonthRevenue)}</strong>
+              <small>{currentMonth?.name || 'Current Month'} · {formatReportNumber(currentMonthLoadCount)} load{currentMonthLoadCount === 1 ? '' : 's'}</small>
+            </div>
+          )}
           <div className="report-kpi-card">
             <span>Gross Revenue</span>
             <strong>{formatReportMoney(grossRevenueReport.totals?.totalGrossRevenue)}</strong>
@@ -4949,9 +5149,19 @@ function openReportLoadDetails(load) {
                           <tr>
                             <th>Truck</th>
                             <th>Operator</th>
-                            {quarter.months.map((month) => (
-                              <th key={month.month}>{month.shortName || month.name}</th>
-                            ))}
+                            {quarter.months.map((month) => {
+                              const isCurrentMonth = isCurrentGrossRevenueYear && Number(month.month) === currentEasternMonth;
+
+                              return (
+                                <th
+                                  key={month.month}
+                                  className={isCurrentMonth ? 'gross-revenue-current-month-cell' : ''}
+                                >
+                                  {month.shortName || month.name}
+                                  {isCurrentMonth && <span className="gross-revenue-current-month-label">Current</span>}
+                                </th>
+                              );
+                            })}
                             <th>{quarter.label} Total</th>
                             <th>Year Total</th>
                           </tr>
@@ -4960,9 +5170,18 @@ function openReportLoadDetails(load) {
                           <tr className="report-total-row">
                             <td></td>
                             <td>Grand Total / Month</td>
-                            {quarter.months.map((month) => (
-                              <td key={month.month}>{formatReportMoney(monthlyTotals[month.month])}</td>
-                            ))}
+                            {quarter.months.map((month) => {
+                              const isCurrentMonth = isCurrentGrossRevenueYear && Number(month.month) === currentEasternMonth;
+
+                              return (
+                                <td
+                                  key={month.month}
+                                  className={isCurrentMonth ? 'gross-revenue-current-month-cell' : ''}
+                                >
+                                  {formatReportMoney(monthlyTotals[month.month])}
+                                </td>
+                              );
+                            })}
                             <td>{formatReportMoney(quarterTotal)}</td>
                             <td>{formatReportMoney(grossRevenueReport.totals?.totalGrossRevenue)}</td>
                           </tr>
@@ -5005,11 +5224,18 @@ function openReportLoadDetails(load) {
                                   </button>
                                   <GrossRevenueDriverPill truck={truck} />
                                 </td>
-                                {quarter.months.map((month) => (
-                                  <td key={`${quarter.label}-${truck.truck}-${month.month}`}>
-                                    {formatReportMoney(truck.monthTotals?.[month.month])}
-                                  </td>
-                                ))}
+                                {quarter.months.map((month) => {
+                                  const isCurrentMonth = isCurrentGrossRevenueYear && Number(month.month) === currentEasternMonth;
+
+                                  return (
+                                    <td
+                                      key={`${quarter.label}-${truck.truck}-${month.month}`}
+                                      className={isCurrentMonth ? 'gross-revenue-current-month-cell' : ''}
+                                    >
+                                      {formatReportMoney(truck.monthTotals?.[month.month])}
+                                    </td>
+                                  );
+                                })}
                                 <td>
                                   {formatReportMoney(truckQuarterTotal)}
                                   <small className="gross-load-count-note">{formatReportNumber(truckQuarterLoads)} load{truckQuarterLoads === 1 ? '' : 's'}</small>
@@ -8356,18 +8582,17 @@ function openReportLoadDetails(load) {
                 ‹
               </button>
 
-              <button
-                className="upload-digest-summary"
-                onClick={() => setUploadDigestOpen((current) => !current)}
-                aria-expanded={uploadDigestOpen}
+              <div
+                className="upload-digest-summary upload-digest-summary-static"
+                aria-label={`Pickup and Delivery Photos for ${dateLabel}`}
               >
                 <span className="upload-digest-title">
                   Pickup and Delivery Photos for {dateLabel}
                 </span>
-                <span className="upload-digest-chevron">
-                  {uploadDigestOpen ? '▲' : '▼'}
+                <span className="upload-digest-count">
+                  {uploadDigestLoading ? 'Loading...' : `${count} logged`}
                 </span>
-              </button>
+              </div>
 
               <button
                 type="button"
@@ -8392,7 +8617,7 @@ function openReportLoadDetails(load) {
               </button>
             </div>
 
-            {uploadDigestOpen && !uploadDigestError && (
+            {!uploadDigestError && (
               <div className="upload-digest-body">
                 {records.length === 0 ? (
                   <div className="msg">No pickup or delivery uploads logged for this date.</div>
@@ -9804,11 +10029,13 @@ function openReportLoadDetails(load) {
             className={`feature-section-status-pill report-alert-status-pill ${
               reportActionAlertCounts.total > 0 ? 'has-alerts' : 'is-zero'
             } ${reportActionAlertsLoading ? 'is-loading' : ''} ${reportActionAlertsError ? 'is-error' : ''}`}
-            title={reportActionAlertsError || 'Action alerts from Orders Due for Settlement, Orders Won and Not Registered, and Permit Governance'}
+            title={reportActionAlertSummary}
           >
             {reportActionAlertsLoading && !reportActionAlerts
-              ? 'Checking...'
-              : `${formatReportNumber(reportActionAlertCounts.total)} ${reportActionAlertCounts.total === 1 ? 'Alert' : 'Alerts'}`}
+              ? 'Checking Operations...'
+              : reportActionAlertCounts.total > 0
+                ? `Operations: ${formatReportNumber(reportActionAlertCounts.total)} ${reportActionAlertCounts.total === 1 ? 'Alert' : 'Alerts'}`
+                : 'Operations: Clear'}
           </span>
           <span className="feature-section-chevron">{reportsSectionOpen ? '▲' : '▼'}</span>
         </button>
@@ -10146,7 +10373,17 @@ function openReportLoadDetails(load) {
                 <strong>Operational Reports</strong>
                 <span>Action items, permit control, daily history, and availability reporting</span>
               </div>
-              <span className="report-accordion-icon">{isOperationalReportsOpen ? '▼' : '▶'}</span>
+              <span className="report-group-button-actions">
+                <span
+                  className={`report-group-alert-pill ${reportActionAlertCounts.total > 0 ? 'has-alerts' : 'is-zero'}`}
+                  title={reportActionAlertSummary}
+                >
+                  {reportActionAlertCounts.total > 0
+                    ? `${formatReportNumber(reportActionAlertCounts.total)} ${reportActionAlertCounts.total === 1 ? 'alert' : 'alerts'}`
+                    : 'clear'}
+                </span>
+                <span className="report-accordion-icon">{isOperationalReportsOpen ? '▼' : '▶'}</span>
+              </span>
             </button>
 
             {isOperationalReportsOpen && (
@@ -11077,8 +11314,22 @@ function openReportLoadDetails(load) {
   }
 
   return (
-    <div className="container">
-      <header className="app-header app-header-branded">
+    <>
+      {startupSplashVisible && (
+        <KoleStartupSplash
+          exiting={startupSplashExiting}
+          operationsData={operationsData}
+          operationsError={operationsError}
+          uploadDigestData={uploadDigestData}
+          uploadDigestError={uploadDigestError}
+          reportActionAlerts={reportActionAlerts}
+          reportActionAlertsError={reportActionAlertsError}
+          onSkip={beginStartupSplashClose}
+        />
+      )}
+
+      <div className="container">
+        <header className="app-header app-header-branded">
   <div className="brand-stack">
     <img
   src={koleLogo}
@@ -12017,6 +12268,7 @@ function openReportLoadDetails(load) {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }
