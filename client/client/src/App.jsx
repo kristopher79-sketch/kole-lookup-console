@@ -66,7 +66,7 @@ function KoleStartupSplash({
         <div className="startup-splash-route" aria-hidden="true">
           <span />
         </div>
-        <h2>Dispatch Console Online</h2>
+        <h2>Kole Connect Online Status</h2>
         <p>Loading Operations Today and staging the dashboard.</p>
 
         <ul className="startup-splash-steps">
