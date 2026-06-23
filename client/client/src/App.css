@@ -8110,3 +8110,297 @@ button.available-truck-distribution-summary-card:disabled {
   color: #111827;
   cursor: wait;
 }
+
+
+/* BRAND REVEAL: plane/cloud refresh animation for Operations Today */
+.kole-brand-title-zone {
+  position: relative;
+  width: min(720px, 92vw);
+  min-height: 82px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+}
+
+.brand-static-copy {
+  display: flex;
+  min-height: 82px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.brand-reveal-active .brand-static-copy {
+  opacity: 0;
+}
+
+.app-header .brand-title-text,
+.brand-roll-back h1 {
+  margin: 0 0 6px;
+  color: #f8fafc;
+  font-size: clamp(28px, 3vw, 42px);
+  line-height: 1.05;
+  letter-spacing: 0.01em;
+  text-shadow: 0 1px 0 #facc15, 0 14px 34px rgba(0, 0, 0, 0.36);
+}
+
+.app-header .brand-subtitle-text,
+.brand-roll-back p {
+  margin: 0;
+  color: #aebdda;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+}
+
+.brand-reveal-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  overflow: visible;
+  --brand-reveal-duration: 2.75s;
+}
+
+.brand-reveal-target {
+  position: absolute;
+  margin: 0;
+  color: #f8fafc;
+  font-size: clamp(28px, 3vw, 42px);
+  line-height: 1.05;
+  letter-spacing: 0.01em;
+  text-shadow: 0 1px 0 #facc15, 0 14px 34px rgba(0, 0, 0, 0.36);
+  animation: brand-title-cloud-burst var(--brand-reveal-duration) ease-out both;
+}
+
+.brand-cloud-field {
+  position: absolute;
+  inset: 0;
+  filter: blur(0.15px);
+}
+
+.brand-cloud {
+  position: absolute;
+  top: 34px;
+  left: 50%;
+  width: 50px;
+  height: 16px;
+  border-radius: 999px;
+  background: rgba(226, 232, 240, 0.82);
+  box-shadow:
+    14px -6px 0 rgba(226, 232, 240, 0.5),
+    27px 3px 0 rgba(226, 232, 240, 0.38),
+    -15px 5px 0 rgba(226, 232, 240, 0.36);
+  opacity: 0;
+  transform: translateX(-50%) scale(0.54);
+}
+
+.brand-cloud-one { top: 28px; animation: brand-cloud-puff-one var(--brand-reveal-duration) ease-out both; }
+.brand-cloud-two { top: 39px; animation: brand-cloud-puff-two var(--brand-reveal-duration) ease-out both; }
+.brand-cloud-three { top: 22px; animation: brand-cloud-puff-three var(--brand-reveal-duration) ease-out both; }
+.brand-cloud-four { top: 48px; animation: brand-cloud-puff-four var(--brand-reveal-duration) ease-out both; }
+.brand-cloud-five { top: 34px; animation: brand-cloud-puff-five var(--brand-reveal-duration) ease-out both; }
+.brand-cloud-six { top: 42px; animation: brand-cloud-puff-six var(--brand-reveal-duration) ease-out both; }
+
+.brand-plane-symbol {
+  position: absolute;
+  left: 50%;
+  top: 12px;
+  z-index: 4;
+  width: 86px;
+  height: 38px;
+  color: #f8fafc;
+  filter: drop-shadow(0 2px 0 rgba(250, 204, 21, 0.85)) drop-shadow(0 10px 16px rgba(0, 0, 0, 0.42));
+  animation: brand-plane-fly-through var(--brand-reveal-duration) linear both;
+  will-change: transform, opacity;
+}
+
+.brand-plane-symbol svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.brand-plane-drawing {
+  transform: translateY(-1px);
+}
+
+.brand-plane-body,
+.brand-plane-tail,
+.brand-plane-wing,
+.brand-plane-nose {
+  fill: #f8fafc;
+  stroke: rgba(250, 204, 21, 0.82);
+  stroke-width: 1.7;
+  stroke-linejoin: round;
+}
+
+.brand-plane-wing {
+  fill: #e2e8f0;
+}
+
+.brand-plane-nose {
+  fill: #ffffff;
+}
+
+.brand-plane-window-line {
+  fill: none;
+  stroke: rgba(15, 23, 42, 0.45);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+
+.brand-plane-window {
+  fill: #0f172a;
+  opacity: 0.7;
+}
+
+.brand-plane-symbol::after {
+  content: '';
+  position: absolute;
+  left: -58px;
+  top: 20px;
+  width: 50px;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(226, 232, 240, 0.72);
+  box-shadow:
+    -20px -7px 0 rgba(226, 232, 240, 0.36),
+    -40px 6px 0 rgba(226, 232, 240, 0.26),
+    -63px 0 0 rgba(226, 232, 240, 0.16);
+  animation: brand-plane-wake var(--brand-reveal-duration) ease-out both;
+}
+
+.brand-roll-back {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  min-height: 82px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: translateY(26px) rotateX(-70deg) scale(0.96);
+  transform-origin: center bottom;
+  animation: brand-title-roll-back var(--brand-reveal-duration) cubic-bezier(0.18, 0.92, 0.22, 1) both;
+}
+
+@keyframes brand-title-cloud-burst {
+  0%, 12% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+    letter-spacing: 0.01em;
+  }
+  25% {
+    opacity: 0.9;
+    transform: translateY(-1px) scale(1.02);
+    filter: blur(0.2px);
+  }
+  43% {
+    opacity: 0.14;
+    transform: translateY(-5px) scale(1.09);
+    letter-spacing: 0.18em;
+    filter: blur(5px);
+  }
+  58%, 100% {
+    opacity: 0;
+    transform: translateY(-7px) scale(1.12);
+    filter: blur(8px);
+  }
+}
+
+@keyframes brand-cloud-puff-one {
+  0%, 16% { opacity: 0; transform: translateX(-170px) scale(0.24); }
+  32% { opacity: 0.84; transform: translateX(-108px) scale(1); }
+  68%, 100% { opacity: 0; transform: translateX(-188px) scale(1.52); }
+}
+
+@keyframes brand-cloud-puff-two {
+  0%, 18% { opacity: 0; transform: translateX(-118px) scale(0.24); }
+  34% { opacity: 0.74; transform: translateX(-22px) scale(0.94); }
+  68%, 100% { opacity: 0; transform: translateX(-68px) scale(1.42); }
+}
+
+@keyframes brand-cloud-puff-three {
+  0%, 19% { opacity: 0; transform: translateX(-54px) scale(0.24); }
+  36% { opacity: 0.64; transform: translateX(58px) scale(0.98); }
+  68%, 100% { opacity: 0; transform: translateX(132px) scale(1.48); }
+}
+
+@keyframes brand-cloud-puff-four {
+  0%, 20% { opacity: 0; transform: translateX(10px) scale(0.22); }
+  37% { opacity: 0.54; transform: translateX(136px) scale(0.88); }
+  68%, 100% { opacity: 0; transform: translateX(235px) scale(1.28); }
+}
+
+@keyframes brand-cloud-puff-five {
+  0%, 17% { opacity: 0; transform: translateX(-92px) scale(0.22); }
+  35% { opacity: 0.6; transform: translateX(8px) scale(0.9); }
+  68%, 100% { opacity: 0; transform: translateX(42px) scale(1.4); }
+}
+
+@keyframes brand-cloud-puff-six {
+  0%, 19% { opacity: 0; transform: translateX(82px) scale(0.2); }
+  38% { opacity: 0.5; transform: translateX(176px) scale(0.78); }
+  68%, 100% { opacity: 0; transform: translateX(286px) scale(1.14); }
+}
+
+@keyframes brand-plane-fly-through {
+  0% {
+    opacity: 1;
+    transform: translateX(-230px) translateY(0);
+  }
+  68% {
+    opacity: 1;
+    transform: translateX(460px) translateY(-2px);
+  }
+  78%, 100% {
+    opacity: 0;
+    transform: translateX(540px) translateY(-2px);
+  }
+}
+
+@keyframes brand-plane-wake {
+  0%, 12% { opacity: 0; transform: scaleX(0.35); }
+  25%, 56% { opacity: 1; transform: scaleX(1); }
+  70%, 100% { opacity: 0; transform: scaleX(0.18); }
+}
+
+@keyframes brand-title-roll-back {
+  0%, 72% {
+    opacity: 0;
+    transform: translateY(28px) rotateX(-72deg) scale(0.96);
+    filter: blur(4px);
+  }
+  83% {
+    opacity: 1;
+    transform: translateY(-3px) rotateX(8deg) scale(1.01);
+    filter: blur(0.2px);
+  }
+  93%, 100% {
+    opacity: 1;
+    transform: translateY(0) rotateX(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@media (max-width: 760px) {
+  .kole-brand-title-zone {
+    width: 100%;
+    min-height: 78px;
+  }
+
+  .brand-static-copy,
+  .brand-roll-back {
+    min-height: 78px;
+  }
+
+  .brand-plane-symbol {
+    width: 58px;
+    height: 31px;
+  }
+}

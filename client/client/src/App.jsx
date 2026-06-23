@@ -109,6 +109,69 @@ function KoleStartupSplash({
   );
 }
 
+function KoleBrandTitle({ animate = false, revealKey = 0, subtitle }) {
+  return (
+    <div className={`kole-brand-title-zone ${animate ? 'brand-reveal-active' : ''}`}>
+      <div className="brand-static-copy" aria-hidden={animate ? 'true' : undefined}>
+        <h1 className="brand-title-text">Kole Connect</h1>
+        {subtitle && <p className="brand-subtitle-text">{subtitle}</p>}
+      </div>
+
+      {animate && (
+        <div key={revealKey} className="brand-reveal-stage" aria-hidden="true">
+          <h1 className="brand-reveal-target">Kole Connect</h1>
+
+          <div className="brand-cloud-field">
+            <span className="brand-cloud brand-cloud-one" />
+            <span className="brand-cloud brand-cloud-two" />
+            <span className="brand-cloud brand-cloud-three" />
+            <span className="brand-cloud brand-cloud-four" />
+            <span className="brand-cloud brand-cloud-five" />
+            <span className="brand-cloud brand-cloud-six" />
+          </div>
+
+          <span className="brand-plane-symbol">
+            <svg viewBox="0 0 128 56" role="img" aria-label="Small airplane flying right">
+              <g className="brand-plane-drawing">
+                <path
+                  className="brand-plane-tail"
+                  d="M20 24L5 10h14l19 14H20Zm0 12L5 48h14l19-12H20Z"
+                />
+                <path
+                  className="brand-plane-body"
+                  d="M18 23h70c15 0 28 6 36 14-8 8-21 13-36 13H18c-7 0-12-6-12-13s5-14 12-14Z"
+                />
+                <path
+                  className="brand-plane-wing"
+                  d="M61 29L39 6h16l31 25-6 5-19-7Zm0 13L42 55h16l28-15-5-5-20 7Z"
+                />
+                <path
+                  className="brand-plane-nose"
+                  d="M92 24c12 2 24 7 32 13-8 7-20 11-32 13 5-7 5-18 0-26Z"
+                />
+                <path
+                  className="brand-plane-window-line"
+                  d="M27 31h49"
+                />
+                <circle className="brand-plane-window" cx="36" cy="31" r="2.2" />
+                <circle className="brand-plane-window" cx="48" cy="31" r="2.2" />
+                <circle className="brand-plane-window" cx="60" cy="31" r="2.2" />
+                <circle className="brand-plane-window" cx="72" cy="31" r="2.2" />
+              </g>
+            </svg>
+          </span>
+
+          <div className="brand-roll-back">
+            <h1>Kole Connect</h1>
+            {subtitle && <p>{subtitle}</p>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function getClientCacheRecord(cache, key, ttlMs) {
   const cached = cache.get(key);
   if (!cached) return null;
@@ -516,6 +579,9 @@ function getDriverHistoryTruckFromCard(card) {
 export default function App() {
   const [accessToken, setAccessToken] = useState(() => sessionStorage.getItem('koleLookupToken') || '');
   const [password, setPassword] = useState('');
+  const [brandRevealActive, setBrandRevealActive] = useState(false);
+  const [brandRevealKey, setBrandRevealKey] = useState(0);
+  const brandRevealTimerRef = useRef(null);
   const isAuthenticated = Boolean(accessToken);
 
   const [query, setQuery] = useState('');
@@ -948,12 +1014,34 @@ export default function App() {
     return `${reportLabel} is already clear in the Reports ticker. This point-in-time report is hidden until the next refresh finds something actionable.`;
   }
 
+  function playBrandReveal() {
+    if (brandRevealTimerRef.current) {
+      window.clearTimeout(brandRevealTimerRef.current);
+    }
+
+    setBrandRevealKey((key) => key + 1);
+    setBrandRevealActive(true);
+
+    brandRevealTimerRef.current = window.setTimeout(() => {
+      setBrandRevealActive(false);
+      brandRevealTimerRef.current = null;
+    }, 2900);
+  }
+
 
   useEffect(() => {
     const runtimeClass = isTauriRuntime ? 'tauri-runtime' : 'web-runtime';
     document.body.classList.add(runtimeClass);
 
     return () => document.body.classList.remove(runtimeClass);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (brandRevealTimerRef.current) {
+        window.clearTimeout(brandRevealTimerRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -1498,12 +1586,15 @@ async function loadOperationsDashboard(options = {}) {
     }
 
     setOperationsData(data);
+    return true;
   } catch (err) {
     setOperationsError(err.message);
 
     if (!silent) {
       setOperationsData(null);
     }
+
+    return false;
   } finally {
     if (!silent) {
       setOperationsLoading(false);
@@ -2275,13 +2366,20 @@ async function openUploadDigestLoadPhotos(record) {
   }
 }
 
-function refreshOperationsAndTracking() {
-  loadOperationsDashboard({ forceRefresh: true });
+async function refreshOperationsAndTracking() {
+  const operationsRefresh = loadOperationsDashboard({ forceRefresh: true });
+
   loadDriverPositions();
   loadUploadDigest(uploadDigestDate);
   loadIntelliTrack();
   loadAvailableTrucks();
   loadAvailableTruckDistributionList({ silent: true });
+
+  const operationsSucceeded = await operationsRefresh;
+
+  if (operationsSucceeded) {
+    playBrandReveal();
+  }
 }
 
 function closeDriverRosterModal() {
@@ -11662,11 +11760,7 @@ function openReportLoadDetails(load) {
   style={{ width: '520px' }}
 />
 
-    <h1>Kole Connect</h1>
-
-    <p>
-      Enter your Kole Connect access token to continue.
-    </p>
+    <KoleBrandTitle subtitle="Enter your Kole Connect access token to continue." />
   </div>
 </header>
 
@@ -11742,11 +11836,11 @@ function openReportLoadDetails(load) {
   style={{ width: '520px' }}
 />
 
-    <h1>Kole Connect</h1>
-    <p>
-      Search orders, BOLs, customers, drivers,
-      and inspect dispatch or billing data.
-    </p>
+    <KoleBrandTitle
+      animate={brandRevealActive}
+      revealKey={brandRevealKey}
+      subtitle="Search orders, BOLs, customers, drivers, and inspect dispatch or billing data."
+    />
   </div>
 
   <button className="close-button header-logoff" onClick={handleLogout}>
