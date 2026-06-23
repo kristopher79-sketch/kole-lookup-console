@@ -1991,12 +1991,6 @@ function getNumberValue(value) {
   return Number.isNaN(number) ? 0 : number;
 }
 
-function getChoiceValue(value) {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'object') return value.Value || value.value || value.Label || '';
-  return value;
-}
-
 function getUtcYearMonth(value) {
   if (!value) return null;
 
@@ -4116,6 +4110,320 @@ async function getDriverRosterItems(token) {
   );
 
   return items.map(cleanDriverRosterItem);
+}
+
+
+
+function normalizeDriverSnapshotTruckKey(value) {
+  const raw = getChoiceValue(value);
+  const cleaned = String(raw || '').trim().toUpperCase();
+
+  if (!cleaned) return '';
+
+  if (/^0*\d+$/.test(cleaned)) {
+    return cleaned.replace(/^0+(?=\d)/, '').padStart(4, '0');
+  }
+
+  return normalizeTruckKey(cleaned);
+}
+
+function createDriverHistoryYearRow(year) {
+  return {
+    year,
+    revenue: 0,
+    orderCount: 0,
+    loadCount: 0,
+    tonuCount: 0,
+    lastLoadDate: '',
+    timeOff: {
+      totalDays: 0,
+      homeTimeDays: 0,
+      repairDays: 0,
+      suspendedDays: 0,
+      otherDays: 0
+    }
+  };
+}
+
+function getDriverHistoryYear(yearMap, year) {
+  const safeYear = Number(year);
+
+  if (!Number.isInteger(safeYear)) return null;
+
+  if (!yearMap.has(safeYear)) {
+    yearMap.set(safeYear, createDriverHistoryYearRow(safeYear));
+  }
+
+  return yearMap.get(safeYear);
+}
+
+function addDriverHistoryLastLoadDate(row, dateValue) {
+  if (!row || !dateValue) return;
+
+  const nextDate = new Date(dateValue);
+  if (Number.isNaN(nextDate.getTime())) return;
+
+  if (!row.lastLoadDate) {
+    row.lastLoadDate = dateValue;
+    return;
+  }
+
+  const currentDate = new Date(row.lastLoadDate);
+  if (Number.isNaN(currentDate.getTime()) || nextDate.getTime() > currentDate.getTime()) {
+    row.lastLoadDate = dateValue;
+  }
+}
+
+function getDriverHistoryDateOverlapDays(startDate, endDate, year) {
+  const start = getDateOnlyTime(startDate);
+  const end = getDateOnlyTime(endDate || startDate);
+
+  if (start === null || end === null || end < start) return 0;
+
+  const yearStart = Date.UTC(Number(year), 0, 1);
+  const yearEnd = Date.UTC(Number(year), 11, 31);
+  const overlapStart = Math.max(start, yearStart);
+  const overlapEnd = Math.min(end, yearEnd);
+
+  if (overlapEnd < overlapStart) return 0;
+
+  return Math.round((overlapEnd - overlapStart) / 86400000) + 1;
+}
+
+function addDriverHistoryTimeOffDays(row, reason, days) {
+  if (!row || !days) return;
+
+  const normalizedReason = normalizeSearchValue(reason);
+
+  row.timeOff.totalDays += days;
+
+  if (normalizedReason.includes('home')) {
+    row.timeOff.homeTimeDays += days;
+    return;
+  }
+
+  if (normalizedReason.includes('repair')) {
+    row.timeOff.repairDays += days;
+    return;
+  }
+
+  if (normalizedReason.includes('suspend')) {
+    row.timeOff.suspendedDays += days;
+    row.timeOff.otherDays += days;
+    return;
+  }
+
+  row.timeOff.otherDays += days;
+}
+
+function getDriverHistoryLoadYear(record, sourceList) {
+  const pickup = getUtcYearMonth(record?.PickupDate);
+  if (pickup?.year) return pickup.year;
+
+  const sourceYear = Number(sourceList?.year);
+  return Number.isInteger(sourceYear) ? sourceYear : null;
+}
+
+async function getDriverHistorySourceContext(token) {
+  const currentEasternYear = getEasternParts().year;
+  const sourceLists = await getSearchableBidLists(token);
+
+  const sourceResults = await Promise.all(sourceLists.map(async (sourceList) => {
+    try {
+      const result = await getAllListItemsWithFieldsResilient(
+        token,
+        sourceList.listId,
+        getDriverSummaryFieldSelect()
+      );
+
+      return {
+        sourceList,
+        items: result.items || [],
+        warning: result.warning || ''
+      };
+    } catch (error) {
+      return {
+        sourceList,
+        items: [],
+        warning: error.message || `Unable to load ${sourceList.label || 'Bid Listing source'}.`
+      };
+    }
+  }));
+
+  let timeOffResult = { rows: [], warning: '' };
+  try {
+    timeOffResult = await getDriverTimeOffRows(token);
+  } catch (error) {
+    timeOffResult = {
+      rows: [],
+      warning: error.message || 'Unable to load Driver Time Off rows.'
+    };
+  }
+
+  return {
+    currentEasternYear,
+    sourceResults,
+    timeOffResult
+  };
+}
+
+function buildDriverHistorySnapshotFromContext(rawTruck, context) {
+  const truckKey = normalizeDriverSnapshotTruckKey(rawTruck);
+
+  if (!truckKey) {
+    const error = new Error('Truck number is required.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const currentEasternYear = context?.currentEasternYear || getEasternParts().year;
+  const sourceResults = context?.sourceResults || [];
+  const timeOffResult = context?.timeOffResult || { rows: [], warning: '' };
+  const yearMap = new Map();
+  const warnings = [];
+
+  for (let year = ARCHIVE_YEAR_MIN; year <= currentEasternYear; year += 1) {
+    getDriverHistoryYear(yearMap, year);
+  }
+
+  sourceResults.forEach(({ sourceList, items, warning }) => {
+    if (warning) {
+      warnings.push({
+        source: sourceList?.label || 'Bid Listing',
+        message: warning
+      });
+    }
+
+    (items || []).forEach((item) => {
+      const record = getDriverSummaryItem(item, sourceList);
+      const recordTruckKey = normalizeDriverSnapshotTruckKey(record.Truck);
+
+      if (!recordTruckKey || recordTruckKey !== truckKey) return;
+
+      const status = normalizeText(record.Status);
+      if (status !== 'won' && status !== 'tonu') return;
+
+      const year = getDriverHistoryLoadYear(record, sourceList);
+      const row = getDriverHistoryYear(yearMap, year);
+      if (!row) return;
+
+      row.revenue += getNumberValue(record.QuotedTotal);
+      row.orderCount += 1;
+
+      if (status === 'won') row.loadCount += 1;
+      if (status === 'tonu') row.tonuCount += 1;
+
+      addDriverHistoryLastLoadDate(row, record.DeliveryDate || record.PickupDate);
+    });
+  });
+
+  if (timeOffResult.warning) {
+    warnings.push({ source: 'Driver Time Off', message: timeOffResult.warning });
+  }
+
+  (timeOffResult.rows || []).forEach((row) => {
+    if (row.isCancelled) return;
+
+    const rowTruckKey = normalizeDriverSnapshotTruckKey(row.truckNumber);
+    if (!rowTruckKey || rowTruckKey !== truckKey) return;
+
+    const startDate = normalizeEasternDateOnly(row.startDate);
+    const endDate = normalizeEasternDateOnly(row.endDate || row.startDate);
+    const startYear = Number((startDate || '').slice(0, 4));
+    const endYear = Number((endDate || startDate || '').slice(0, 4));
+
+    if (!Number.isInteger(startYear) || !Number.isInteger(endYear)) return;
+
+    for (let year = startYear; year <= endYear; year += 1) {
+      const days = getDriverHistoryDateOverlapDays(startDate, endDate, year);
+      if (!days) continue;
+
+      const yearRow = getDriverHistoryYear(yearMap, year);
+      addDriverHistoryTimeOffDays(yearRow, row.reason, days);
+    }
+  });
+
+  const years = Array.from(yearMap.values())
+    .map((row) => ({
+      ...row,
+      revenue: Number(row.revenue.toFixed(2)),
+      timeOff: {
+        totalDays: row.timeOff.totalDays,
+        homeTimeDays: row.timeOff.homeTimeDays,
+        repairDays: row.timeOff.repairDays,
+        suspendedDays: row.timeOff.suspendedDays,
+        otherDays: row.timeOff.otherDays
+      }
+    }))
+    .sort((a, b) => b.year - a.year);
+
+  const summary = years.reduce((totals, row) => ({
+    revenue: totals.revenue + getNumberValue(row.revenue),
+    orderCount: totals.orderCount + Number(row.orderCount || 0),
+    loadCount: totals.loadCount + Number(row.loadCount || 0),
+    tonuCount: totals.tonuCount + Number(row.tonuCount || 0),
+    timeOffDays: totals.timeOffDays + Number(row.timeOff?.totalDays || 0),
+    homeTimeDays: totals.homeTimeDays + Number(row.timeOff?.homeTimeDays || 0),
+    repairDays: totals.repairDays + Number(row.timeOff?.repairDays || 0)
+  }), {
+    revenue: 0,
+    orderCount: 0,
+    loadCount: 0,
+    tonuCount: 0,
+    timeOffDays: 0,
+    homeTimeDays: 0,
+    repairDays: 0
+  });
+
+  summary.revenue = Number(summary.revenue.toFixed(2));
+
+  return {
+    success: true,
+    truck: String(rawTruck || '').trim(),
+    normalizedTruck: truckKey,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    yearRange: {
+      start: ARCHIVE_YEAR_MIN,
+      end: currentEasternYear
+    },
+    summary,
+    years,
+    warnings
+  };
+}
+
+async function buildDriverHistorySnapshot(token, rawTruck) {
+  const context = await getDriverHistorySourceContext(token);
+  return buildDriverHistorySnapshotFromContext(rawTruck, context);
+}
+
+async function buildDriverHistorySnapshotBatch(token, rawTrucks) {
+  const truckMap = new Map();
+
+  (rawTrucks || []).forEach((truck) => {
+    const rawTruck = String(truck || '').trim();
+    const truckKey = normalizeDriverSnapshotTruckKey(rawTruck);
+    if (!truckKey || truckMap.has(truckKey)) return;
+    truckMap.set(truckKey, rawTruck);
+  });
+
+  const trucks = Array.from(truckMap.values()).slice(0, 80);
+
+  if (!trucks.length) {
+    const error = new Error('At least one truck number is required.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const context = await getDriverHistorySourceContext(token);
+  const snapshots = trucks.map((truck) => buildDriverHistorySnapshotFromContext(truck, context));
+
+  return {
+    success: true,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    count: snapshots.length,
+    snapshots
+  };
 }
 
 
@@ -10954,6 +11262,50 @@ async function getSalesLeadsReportData(token, view = 'all', sort = '', forceRefr
     records: sortSalesLeads(filtered, sortMode)
   };
 }
+
+
+app.get('/driver-roster/history-batch', requireLookupAccess, async (req, res) => {
+  try {
+    const trucks = String(req.query.trucks || '')
+      .split(',')
+      .map((truck) => cleanRosterText(truck))
+      .filter(Boolean);
+
+    if (!trucks.length) {
+      return res.status(400).json({ success: false, error: 'At least one truck number is required.' });
+    }
+
+    const token = await getGraphToken();
+    const snapshotBatch = await buildDriverHistorySnapshotBatch(token, trucks);
+    res.json(snapshotBatch);
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to preload driver history snapshots.'
+    });
+  }
+});
+
+app.get('/driver-roster/history', requireLookupAccess, async (req, res) => {
+  try {
+    const truck = cleanRosterText(req.query.truck || '');
+
+    if (!truck) {
+      return res.status(400).json({ success: false, error: 'Truck number is required.' });
+    }
+
+    const token = await getGraphToken();
+    const snapshot = await buildDriverHistorySnapshot(token, truck);
+    res.json(snapshot);
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to load driver history snapshot.'
+    });
+  }
+});
 
 app.get('/reports/active-driver-roster', requireLookupAccess, async (req, res) => {
   try {

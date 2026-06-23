@@ -47,11 +47,13 @@ function KoleStartupSplash({
   uploadDigestError,
   reportActionAlerts,
   reportActionAlertsError,
+  driverHistoryPrewarmSettled = false,
   onSkip
 }) {
   const operationsSettled = Boolean(operationsData || operationsError);
   const uploadsSettled = Boolean(uploadDigestData || uploadDigestError);
   const reportsSettled = Boolean(reportActionAlerts || reportActionAlertsError);
+  const driverSnapshotsSettled = Boolean(driverHistoryPrewarmSettled);
 
   return (
     <div
@@ -90,10 +92,15 @@ function KoleStartupSplash({
             detail={reportsSettled ? 'Report alerts checked' : 'Operational alerts standing by'}
             state={uploadsSettled ? (reportsSettled ? 'complete' : 'active') : 'waiting'}
           />
+          <StartupSplashStep
+            label="Preloading driver cards"
+            detail={driverSnapshotsSettled ? 'Performance snapshots staged' : 'Driver revenue and time-off snapshots'}
+            state={reportsSettled ? (driverSnapshotsSettled ? 'complete' : 'active') : 'waiting'}
+          />
         </ul>
 
         <div className="startup-splash-footer">
-          <span>{operationsSettled ? 'Systems online' : 'Operations Today usually takes a few seconds.'}</span>
+          <span>{driverSnapshotsSettled ? 'Systems online' : 'Staging dashboard data behind the splash screen.'}</span>
           <button type="button" onClick={onSkip}>Skip</button>
         </div>
       </div>
@@ -488,6 +495,23 @@ function sortAvailableTruckDistributionRowsForDisplay(rows, sortField = 'company
 }
 
 
+function normalizeDriverHistoryTruckKey(value) {
+  const cleaned = String(value || '').trim().toUpperCase();
+
+  if (!cleaned) return '';
+
+  if (/^0*\d+$/.test(cleaned)) {
+    return cleaned.replace(/^0+(?=\d)/, '').padStart(4, '0');
+  }
+
+  return cleaned.replace(/[^A-Z0-9]+/g, '');
+}
+
+function getDriverHistoryTruckFromCard(card) {
+  return String(card?.roster?.truck || card?.equipmentId || card?.truck || '').trim();
+}
+
+
 export default function App() {
   const [accessToken, setAccessToken] = useState(() => sessionStorage.getItem('koleLookupToken') || '');
   const [password, setPassword] = useState('');
@@ -513,6 +537,10 @@ export default function App() {
   const [driverPositionsLoading, setDriverPositionsLoading] = useState(false);
   const [driverPositionsError, setDriverPositionsError] = useState('');
   const [selectedDriverRoster, setSelectedDriverRoster] = useState(null);
+  const [driverHistorySnapshot, setDriverHistorySnapshot] = useState(null);
+  const [driverHistoryLoading, setDriverHistoryLoading] = useState(false);
+  const [driverHistoryError, setDriverHistoryError] = useState('');
+  const [driverHistoryPrewarmSettled, setDriverHistoryPrewarmSettled] = useState(false);
   const [sortField, setSortField] = useState('');
   const [sortDirection, setSortDirection] = useState('asc');
   const initialReportDate = useMemo(() => {
@@ -583,7 +611,6 @@ export default function App() {
   const [onThisDayDate, setOnThisDayDate] = useState(getEasternDateInputValue);
   const [onThisDayMode, setOnThisDayMode] = useState('exact');
   const [onThisDayReport, setOnThisDayReport] = useState(null);
-  const [onThisDayCachedReport, setOnThisDayCachedReport] = useState(null);
   const [onThisDayLoading, setOnThisDayLoading] = useState(false);
   const [onThisDayError, setOnThisDayError] = useState(null);
   const [onThisDayModalOpen, setOnThisDayModalOpen] = useState(false);
@@ -661,6 +688,9 @@ export default function App() {
   const searchCacheRef = useRef(new Map());
   const pendingSearchControllerRef = useRef(null);
   const onThisDayReportCacheRef = useRef(new Map());
+  const driverHistoryRequestRef = useRef(0);
+  const driverHistoryCacheRef = useRef(new Map());
+  const driverHistoryPrewarmStartedRef = useRef(false);
   const startupSplashStartedAtRef = useRef(Date.now());
   const startupSplashCloseTimerRef = useRef(null);
 
@@ -733,6 +763,22 @@ export default function App() {
       startupSplashCloseTimerRef.current = null;
     }, STARTUP_SPLASH_EXIT_MS);
   }
+
+  function getCachedDriverHistorySnapshot(truck) {
+    const key = normalizeDriverHistoryTruckKey(truck);
+    return key ? driverHistoryCacheRef.current.get(key) || null : null;
+  }
+
+  function cacheDriverHistorySnapshot(truck, snapshot, error = '') {
+    const key = normalizeDriverHistoryTruckKey(truck || snapshot?.normalizedTruck || snapshot?.truck);
+    if (!key) return;
+
+    driverHistoryCacheRef.current.set(key, {
+      snapshot: snapshot || null,
+      error: error || '',
+      cachedAt: Date.now()
+    });
+  }
   
 
   function isBolLookup(value) {
@@ -747,17 +793,18 @@ export default function App() {
     results.length > 0 &&
     !isBolLookup(query);
 
-  const statusOptions = [
+  const statusOptions = useMemo(() => [
     'All',
     ...Array.from(
       new Set(results.map((r) => r.Status).filter(Boolean))
     ).sort()
-  ];
+  ], [results]);
 
-  const filteredResults =
+  const filteredResults = useMemo(() => (
     statusFilter === 'All'
       ? results
-      : results.filter((r) => r.Status === statusFilter);
+      : results.filter((r) => r.Status === statusFilter)
+  ), [results, statusFilter]);
 
   const sortedResults = useMemo(() => {
     if (!sortField) {
@@ -887,6 +934,47 @@ export default function App() {
     return `Operations Reports: ${formatReportNumber(total)} ${total === 1 ? 'alert' : 'alerts'}${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
   }, [reportActionAlertCounts, reportActionAlertsLoading, reportActionAlerts, reportActionAlertsError]);
 
+  const startupDashboardSettled = useMemo(() => (
+    (operationsData || operationsError) &&
+    (driverPositionsData || driverPositionsError) &&
+    (uploadDigestData || uploadDigestError) &&
+    (intelliTrackData || intelliTrackError) &&
+    (availableTrucksData || availableTrucksError) &&
+    (availableTruckDistributionData || availableTruckDistributionError) &&
+    (reportActionAlerts || reportActionAlertsError) &&
+    driverHistoryPrewarmSettled &&
+    !operationsLoading &&
+    !driverPositionsLoading &&
+    !uploadDigestLoading &&
+    !intelliTrackLoading &&
+    !availableTrucksLoading &&
+    !availableTruckDistributionLoading &&
+    !reportActionAlertsLoading
+  ), [
+    operationsData,
+    operationsError,
+    operationsLoading,
+    driverPositionsData,
+    driverPositionsError,
+    driverPositionsLoading,
+    uploadDigestData,
+    uploadDigestError,
+    uploadDigestLoading,
+    intelliTrackData,
+    intelliTrackError,
+    intelliTrackLoading,
+    availableTrucksData,
+    availableTrucksError,
+    availableTrucksLoading,
+    availableTruckDistributionData,
+    availableTruckDistributionError,
+    availableTruckDistributionLoading,
+    reportActionAlerts,
+    reportActionAlertsError,
+    reportActionAlertsLoading,
+    driverHistoryPrewarmSettled
+  ]);
+
   function getActionReportClearMessage(reportLabel) {
     return `${reportLabel} is already clear in the Reports ticker. This point-in-time report is hidden until the next refresh finds something actionable.`;
   }
@@ -953,16 +1041,16 @@ export default function App() {
       return;
     }
 
-    if (!startupSplashDismissed && !startupSplashVisible && !operationsData && !operationsError) {
+    if (!startupSplashDismissed && !startupSplashVisible && !startupDashboardSettled) {
       startupSplashStartedAtRef.current = Date.now();
       setStartupSplashExiting(false);
       setStartupSplashVisible(true);
     }
-  }, [isAuthenticated, startupSplashDismissed, startupSplashVisible, operationsData, operationsError]);
+  }, [isAuthenticated, startupSplashDismissed, startupSplashVisible, startupDashboardSettled]);
 
   useEffect(() => {
     if (!startupSplashVisible || startupSplashExiting || !isAuthenticated) return undefined;
-    if (!operationsData && !operationsError) return undefined;
+    if (!startupDashboardSettled) return undefined;
 
     const elapsedMs = Date.now() - startupSplashStartedAtRef.current;
     const closeDelayMs = Math.max(STARTUP_SPLASH_MIN_MS - elapsedMs, 0);
@@ -971,14 +1059,13 @@ export default function App() {
     }, closeDelayMs);
 
     return () => window.clearTimeout(closeTimer);
-  }, [startupSplashVisible, startupSplashExiting, isAuthenticated, operationsData, operationsError]);
+  }, [startupSplashVisible, startupSplashExiting, isAuthenticated, startupDashboardSettled]);
 
   useEffect(() => {
     if (!isAuthenticated) return undefined;
 
     loadOperationsDashboard();
     loadDriverPositions();
-    loadUploadDigest(uploadDigestDate);
     loadIntelliTrack();
     loadAvailableTrucks();
     loadAvailableTruckDistributionList({ silent: true });
@@ -987,7 +1074,6 @@ export default function App() {
     const interval = window.setInterval(() => {
       loadOperationsDashboard({ silent: true });
       loadDriverPositions({ silent: true });
-      loadUploadDigest(uploadDigestDate, { silent: true });
       loadIntelliTrack({ silent: true });
       loadAvailableTrucks({ silent: true });
       loadAvailableTruckDistributionList({ silent: true });
@@ -995,7 +1081,168 @@ export default function App() {
     }, 10 * 60 * 1000);
 
     return () => window.clearInterval(interval);
+  }, [isAuthenticated, accessToken]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return undefined;
+
+    loadUploadDigest(uploadDigestDate);
+
+    const interval = window.setInterval(() => {
+      loadUploadDigest(uploadDigestDate, { silent: true });
+    }, 10 * 60 * 1000);
+
+    return () => window.clearInterval(interval);
   }, [isAuthenticated, accessToken, uploadDigestDate]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      driverHistoryPrewarmStartedRef.current = false;
+      driverHistoryCacheRef.current.clear();
+      setDriverHistoryPrewarmSettled(false);
+      return undefined;
+    }
+
+    if (driverHistoryPrewarmStartedRef.current) return undefined;
+
+    if (driverPositionsError && !driverPositionsLoading) {
+      driverHistoryPrewarmStartedRef.current = true;
+      setDriverHistoryPrewarmSettled(true);
+      return undefined;
+    }
+
+    const activePositions = driverPositionsData?.positions || [];
+    if (!driverPositionsData) return undefined;
+
+    if (!activePositions.length) {
+      driverHistoryPrewarmStartedRef.current = true;
+      setDriverHistoryPrewarmSettled(true);
+      return undefined;
+    }
+
+    const trucks = Array.from(new Set(
+      activePositions
+        .filter((position) => position?.hasRosterDetails && position?.roster)
+        .map(getDriverHistoryTruckFromCard)
+        .map(normalizeDriverHistoryTruckKey)
+        .filter(Boolean)
+    ));
+
+    driverHistoryPrewarmStartedRef.current = true;
+
+    if (!trucks.length) {
+      setDriverHistoryPrewarmSettled(true);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function prewarmDriverHistorySnapshots() {
+      try {
+        const res = await authedFetch(`${API}/driver-roster/history-batch?trucks=${encodeURIComponent(trucks.join(','))}`);
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Unable to preload driver snapshots.');
+        }
+
+        if (cancelled) return;
+
+        (data.snapshots || []).forEach((snapshot) => {
+          cacheDriverHistorySnapshot(snapshot.normalizedTruck || snapshot.truck, snapshot);
+        });
+      } catch (err) {
+        // Prewarm is intentionally quiet. If it misses, the driver card can still fetch its own snapshot.
+        console.warn('Driver snapshot prewarm failed.', err);
+      } finally {
+        if (!cancelled) {
+          setDriverHistoryPrewarmSettled(true);
+        }
+      }
+    }
+
+    prewarmDriverHistorySnapshots();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, accessToken, driverPositionsData, driverPositionsError, driverPositionsLoading]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !selectedDriverRoster?.hasRosterDetails || !selectedDriverRoster?.roster) {
+      driverHistoryRequestRef.current += 1;
+      setDriverHistorySnapshot(null);
+      setDriverHistoryLoading(false);
+      setDriverHistoryError('');
+      return undefined;
+    }
+
+    const truck = getDriverHistoryTruckFromCard(selectedDriverRoster);
+
+    if (!truck) {
+      driverHistoryRequestRef.current += 1;
+      setDriverHistorySnapshot(null);
+      setDriverHistoryLoading(false);
+      setDriverHistoryError('No truck number was available for this driver card.');
+      return undefined;
+    }
+
+    const cachedSnapshot = getCachedDriverHistorySnapshot(truck);
+    if (cachedSnapshot) {
+      driverHistoryRequestRef.current += 1;
+      setDriverHistorySnapshot(cachedSnapshot.snapshot || null);
+      setDriverHistoryError(cachedSnapshot.error || '');
+      setDriverHistoryLoading(false);
+      return undefined;
+    }
+
+    const requestId = driverHistoryRequestRef.current + 1;
+    driverHistoryRequestRef.current = requestId;
+    let cancelled = false;
+
+    setDriverHistoryLoading(true);
+    setDriverHistoryError('');
+    setDriverHistorySnapshot(null);
+
+    async function loadDriverHistorySnapshot() {
+      try {
+        const res = await authedFetch(`${API}/driver-roster/history?truck=${encodeURIComponent(truck)}`);
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Unable to load driver performance snapshot.');
+        }
+
+        cacheDriverHistorySnapshot(truck, data);
+
+        if (!cancelled && driverHistoryRequestRef.current === requestId) {
+          setDriverHistorySnapshot(data);
+        }
+      } catch (err) {
+        if (!cancelled && driverHistoryRequestRef.current === requestId) {
+          setDriverHistorySnapshot(null);
+          setDriverHistoryError(err.message || 'Unable to load driver performance snapshot.');
+        }
+      } finally {
+        if (!cancelled && driverHistoryRequestRef.current === requestId) {
+          setDriverHistoryLoading(false);
+        }
+      }
+    }
+
+    loadDriverHistorySnapshot();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isAuthenticated,
+    accessToken,
+    selectedDriverRoster?.id,
+    selectedDriverRoster?.equipmentId,
+    selectedDriverRoster?.hasRosterDetails,
+    selectedDriverRoster?.roster?.truck
+  ]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -1005,24 +1252,7 @@ export default function App() {
 
     if (salesLeadsPrewarmStartedRef.current || salesLeadsReport) return undefined;
 
-    const startupSettled = (
-      (operationsData || operationsError) &&
-      (driverPositionsData || driverPositionsError) &&
-      (uploadDigestData || uploadDigestError) &&
-      (intelliTrackData || intelliTrackError) &&
-      (availableTrucksData || availableTrucksError) &&
-      (availableTruckDistributionData || availableTruckDistributionError) &&
-      (reportActionAlerts || reportActionAlertsError) &&
-      !operationsLoading &&
-      !driverPositionsLoading &&
-      !uploadDigestLoading &&
-      !intelliTrackLoading &&
-      !availableTrucksLoading &&
-      !availableTruckDistributionLoading &&
-      !reportActionAlertsLoading
-    );
-
-    if (!startupSettled) return undefined;
+    if (!startupDashboardSettled) return undefined;
 
     salesLeadsPrewarmStartedRef.current = true;
 
@@ -1047,27 +1277,7 @@ export default function App() {
   }, [
     isAuthenticated,
     salesLeadsReport,
-    operationsData,
-    operationsError,
-    operationsLoading,
-    driverPositionsData,
-    driverPositionsError,
-    driverPositionsLoading,
-    uploadDigestData,
-    uploadDigestError,
-    uploadDigestLoading,
-    intelliTrackData,
-    intelliTrackError,
-    intelliTrackLoading,
-    availableTrucksData,
-    availableTrucksError,
-    availableTrucksLoading,
-    availableTruckDistributionData,
-    availableTruckDistributionError,
-    availableTruckDistributionLoading,
-    reportActionAlerts,
-    reportActionAlertsError,
-    reportActionAlertsLoading
+    startupDashboardSettled
   ]);
 
   useEffect(() => {
@@ -1181,6 +1391,13 @@ export default function App() {
     setDriverTimeOffSubmitting(false);
     setDriverTimeOffActionMessage('');
     setDriverTimeOffActionError('');
+    setSelectedDriverRoster(null);
+    setDriverHistorySnapshot(null);
+    setDriverHistoryLoading(false);
+    setDriverHistoryError('');
+    setDriverHistoryPrewarmSettled(false);
+    driverHistoryPrewarmStartedRef.current = false;
+    driverHistoryCacheRef.current.clear();
     setReportsSectionOpen(false);
     searchCacheRef.current.clear();
     onThisDayReportCacheRef.current.clear();
@@ -1233,6 +1450,9 @@ export default function App() {
       }
 
       sessionStorage.setItem('koleLookupToken', token);
+      driverHistoryPrewarmStartedRef.current = false;
+      driverHistoryCacheRef.current.clear();
+      setDriverHistoryPrewarmSettled(false);
       startupSplashStartedAtRef.current = Date.now();
       setStartupSplashDismissed(false);
       setStartupSplashExiting(false);
@@ -1264,6 +1484,9 @@ export default function App() {
     setStartupSplashExiting(false);
     setStartupSplashDismissed(false);
     salesLeadsPrewarmStartedRef.current = false;
+    driverHistoryPrewarmStartedRef.current = false;
+    driverHistoryCacheRef.current.clear();
+    setDriverHistoryPrewarmSettled(false);
     resetAppState();
   }
 
@@ -2216,6 +2439,9 @@ function refreshOperationsAndTracking() {
 
 function closeDriverRosterModal() {
   setSelectedDriverRoster(null);
+  setDriverHistorySnapshot(null);
+  setDriverHistoryLoading(false);
+  setDriverHistoryError('');
 }
 
 function formatTrackingTimestamp(value) {
@@ -3503,7 +3729,6 @@ function getPositionStatusLabel(position) {
     clearPdfExportNotice('onThisDay');
 
     if (cachedSource) {
-      setOnThisDayCachedReport(cachedSource);
       setOnThisDayReport(buildOnThisDayDisplayReport(cachedSource, normalizedMode));
       setOnThisDayModalOpen(true);
       return;
@@ -3538,7 +3763,6 @@ function getPositionStatusLabel(position) {
         ON_THIS_DAY_CLIENT_CACHE_LIMIT
       );
 
-      setOnThisDayCachedReport(reportSource);
       setOnThisDayReport(buildOnThisDayDisplayReport(reportSource, normalizedMode));
       setOnThisDayModalOpen(true);
     } catch (err) {
@@ -7453,6 +7677,95 @@ function openReportLoadDetails(load) {
   }
 
 
+  function DriverSnapshotSection() {
+    if (driverHistoryLoading && !driverHistorySnapshot) return null;
+
+    const years = driverHistorySnapshot?.years || [];
+    const warnings = driverHistorySnapshot?.warnings || [];
+    const summary = driverHistorySnapshot?.summary || {};
+    const hasSnapshotRows = years.some((row) => (
+      Number(row.revenue || 0) > 0 ||
+      Number(row.loadCount || 0) > 0 ||
+      Number(row.tonuCount || 0) > 0 ||
+      Number(row.timeOff?.totalDays || 0) > 0
+    ));
+
+    return (
+      <>
+        <SectionTitle>Performance Snapshot</SectionTitle>
+        <div className="detail-item full driver-snapshot-panel">
+          {!driverHistoryLoading && driverHistoryError && (
+            <div className="msg error">Driver snapshot unavailable: {driverHistoryError}</div>
+          )}
+
+          {!driverHistoryLoading && !driverHistoryError && !hasSnapshotRows && (
+            <div className="msg">No revenue or time-off history was found for this truck yet.</div>
+          )}
+
+          {!driverHistoryLoading && !driverHistoryError && hasSnapshotRows && (
+            <>
+              <div className="driver-snapshot-summary">
+                <div>
+                  <span>Visible Revenue</span>
+                  <strong>{formatReportMoney(summary.revenue)}</strong>
+                </div>
+                <div>
+                  <span>Won Loads</span>
+                  <strong>{formatReportNumber(summary.loadCount)}</strong>
+                </div>
+                <div>
+                  <span>Time Off Days</span>
+                  <strong>{formatReportNumber(summary.timeOffDays)}</strong>
+                </div>
+              </div>
+
+              <div className="driver-snapshot-table-wrap">
+                <table className="driver-snapshot-table">
+                  <thead>
+                    <tr>
+                      <th>Year</th>
+                      <th>Revenue</th>
+                      <th>Won Loads</th>
+                      <th>TONU</th>
+                      <th>Time Off</th>
+                      <th>Home</th>
+                      <th>Repairs</th>
+                      <th>Last Load</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {years.map((row) => (
+                      <tr key={`driver-snapshot-${row.year}`}>
+                        <td>{row.year}</td>
+                        <td>{formatReportMoney(row.revenue)}</td>
+                        <td>{formatReportNumber(row.loadCount)}</td>
+                        <td>{formatReportNumber(row.tonuCount)}</td>
+                        <td>{formatReportNumber(row.timeOff?.totalDays)}</td>
+                        <td>{formatReportNumber(row.timeOff?.homeTimeDays)}</td>
+                        <td>{formatReportNumber(row.timeOff?.repairDays)}</td>
+                        <td>{formatRosterDate(row.lastLoadDate)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <small className="driver-snapshot-source-note">
+                Source: Bid Listing/archive revenue by pickup year and Driver Time Off Log by inclusive calendar days.
+              </small>
+
+              {warnings.length > 0 && (
+                <div className="driver-snapshot-warning">
+                  Snapshot loaded with {warnings.length} source warning{warnings.length === 1 ? '' : 's'}.
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </>
+    );
+  }
+
   function DriverRosterModal() {
     if (!selectedDriverRoster) return null;
 
@@ -7515,6 +7828,8 @@ function openReportLoadDetails(load) {
                     <DetailItem label="Position Time" value={formatTrackingTimestamp(selectedDriverRoster.positionTimeUtc)} wide />
                   </>
                 )}
+
+                <DriverSnapshotSection />
 
                 <SectionTitle>Tractor</SectionTitle>
                 <DetailItem label="Make" value={roster.tractorMake} />
@@ -10613,7 +10928,6 @@ function openReportLoadDetails(load) {
                           setOnThisDayDate(e.target.value);
                           setOnThisDayMode('exact');
                           setOnThisDayReport(null);
-                          setOnThisDayCachedReport(null);
                           setOnThisDayError(null);
                           setOnThisDayPdfError('');
                           setOnThisDayModalOpen(false);
@@ -11324,6 +11638,7 @@ function openReportLoadDetails(load) {
           uploadDigestError={uploadDigestError}
           reportActionAlerts={reportActionAlerts}
           reportActionAlertsError={reportActionAlertsError}
+          driverHistoryPrewarmSettled={driverHistoryPrewarmSettled}
           onSkip={beginStartupSplashClose}
         />
       )}

@@ -7827,3 +7827,73 @@ button.available-truck-distribution-summary-card:disabled {
     flex-direction: column;
   }
 }
+
+/* DRIVER PERFORMANCE SNAPSHOT */
+.driver-snapshot-panel {
+  grid-column: 1 / -1;
+}
+
+.driver-snapshot-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.driver-snapshot-summary div {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 12px;
+}
+
+.driver-snapshot-summary span {
+  display: block;
+  margin-bottom: 6px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.driver-snapshot-summary strong {
+  color: #f8fafc;
+  font-size: 18px;
+}
+
+.driver-snapshot-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  margin-top: 10px;
+}
+
+.driver-snapshot-table {
+  min-width: 820px;
+}
+
+.driver-snapshot-table th,
+.driver-snapshot-table td {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.driver-snapshot-source-note {
+  display: block;
+  margin-top: 10px;
+  color: #94a3b8;
+  line-height: 1.35;
+}
+
+.driver-snapshot-warning {
+  margin-top: 10px;
+  color: #fde68a;
+  font-size: 12px;
+}
+
+@media (max-width: 800px) {
+  .driver-snapshot-summary {
+    grid-template-columns: 1fr;
+  }
+}
