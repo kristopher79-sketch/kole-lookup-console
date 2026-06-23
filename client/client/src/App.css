@@ -7927,3 +7927,186 @@ button.available-truck-distribution-summary-card:disabled {
 .gross-revenue-quarter-table td:nth-child(7) {
   width: 16%;
 }
+/* DRIVER PERFORMANCE DRILLDOWN MODAL */
+.driver-roster-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.driver-performance-button {
+  background: #facc15;
+  color: #111827;
+}
+
+.driver-performance-button:hover {
+  background: #eab308;
+}
+
+.driver-performance-modal {
+  width: min(1180px, 94vw);
+}
+
+.driver-performance-modal-body {
+  background: radial-gradient(circle at top left, rgba(250, 204, 21, 0.08), transparent 34%), #020617;
+}
+
+.driver-snapshot-summary-wide {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.driver-performance-loading-card {
+  border: 1px solid rgba(250, 204, 21, 0.22);
+  border-radius: 14px;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.driver-performance-loading-copy {
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.driver-performance-analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.driver-performance-analysis-card {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.driver-performance-analysis-card.highlight {
+  border-color: rgba(250, 204, 21, 0.42);
+  background: rgba(250, 204, 21, 0.09);
+}
+
+.driver-performance-analysis-card span {
+  display: block;
+  margin-bottom: 7px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.driver-performance-analysis-card strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 22px;
+  line-height: 1.15;
+}
+
+.driver-performance-analysis-card small {
+  display: block;
+  margin-top: 6px;
+  color: #cbd5e1;
+  line-height: 1.35;
+}
+
+.driver-performance-split-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.95fr);
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.driver-performance-section-card {
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.76);
+  padding: 15px;
+}
+
+.driver-performance-section-card h4 {
+  margin: 0 0 12px;
+  color: #facc15;
+  font-size: 16px;
+}
+
+.driver-performance-bars {
+  display: grid;
+  gap: 12px;
+}
+
+.driver-performance-bar-row {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) 150px;
+  align-items: center;
+  gap: 10px;
+}
+
+.driver-performance-bar-label strong,
+.driver-performance-bar-label span {
+  display: block;
+}
+
+.driver-performance-bar-label strong {
+  color: #f8fafc;
+  font-size: 13px;
+}
+
+.driver-performance-bar-label span,
+.driver-performance-bar-row small {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.driver-performance-bar-track {
+  height: 12px;
+  border-radius: 999px;
+  background: #111827;
+  border: 1px solid #1e293b;
+  overflow: hidden;
+}
+
+.driver-performance-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #facc15, #34d399);
+  box-shadow: 0 0 18px rgba(250, 204, 21, 0.28);
+}
+
+.driver-performance-insight-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #dbe4ef;
+  line-height: 1.5;
+}
+
+.driver-performance-insight-list li + li {
+  margin-top: 8px;
+}
+
+.driver-performance-table-wrap {
+  margin-top: 14px;
+}
+
+@media (max-width: 900px) {
+  .driver-snapshot-summary-wide,
+  .driver-performance-analysis-grid,
+  .driver-performance-split-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .driver-performance-bar-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* POLISH: keep Driver Performance loading tucked into the button instead of opening an empty modal */
+.driver-performance-button.loading,
+.driver-performance-button.loading:hover {
+  background: #d4a017;
+  color: #111827;
+  cursor: wait;
+}

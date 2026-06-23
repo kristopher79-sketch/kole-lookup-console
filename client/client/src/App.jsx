@@ -48,14 +48,13 @@ function KoleStartupSplash({
   uploadDigestError,
   reportActionAlerts,
   reportActionAlertsError,
-  driverHistoryPrewarmSettled = false,
   fakeProgressMs = 0,
   onSkip
 }) {
   const operationsSettled = Boolean(operationsData || operationsError);
   const uploadsSettled = Boolean(uploadDigestData || uploadDigestError || fakeProgressMs >= 1800);
   const reportsSettled = Boolean(reportActionAlerts || reportActionAlertsError || fakeProgressMs >= 3200);
-  const driverSnapshotsSettled = Boolean(driverHistoryPrewarmSettled || fakeProgressMs >= STARTUP_SPLASH_FAKE_LIGHTS_COMPLETE_MS);
+  const driverSnapshotsSettled = fakeProgressMs >= STARTUP_SPLASH_FAKE_LIGHTS_COMPLETE_MS;
 
   return (
     <div
@@ -95,8 +94,8 @@ function KoleStartupSplash({
             state={uploadsSettled ? (reportsSettled ? 'complete' : 'active') : 'waiting'}
           />
           <StartupSplashStep
-            label="Preloading driver cards"
-            detail={driverSnapshotsSettled ? 'Performance snapshots staged' : 'Driver revenue and time-off snapshots'}
+            label="Staging drilldowns"
+            detail={driverSnapshotsSettled ? 'Driver drilldowns staged' : 'Performance tools standing by'}
             state={reportsSettled ? (driverSnapshotsSettled ? 'complete' : 'active') : 'waiting'}
           />
         </ul>
@@ -539,10 +538,10 @@ export default function App() {
   const [driverPositionsLoading, setDriverPositionsLoading] = useState(false);
   const [driverPositionsError, setDriverPositionsError] = useState('');
   const [selectedDriverRoster, setSelectedDriverRoster] = useState(null);
+  const [driverHistoryModalOpen, setDriverHistoryModalOpen] = useState(false);
   const [driverHistorySnapshot, setDriverHistorySnapshot] = useState(null);
   const [driverHistoryLoading, setDriverHistoryLoading] = useState(false);
   const [driverHistoryError, setDriverHistoryError] = useState('');
-  const [driverHistoryPrewarmSettled, setDriverHistoryPrewarmSettled] = useState(false);
   const [sortField, setSortField] = useState('');
   const [sortDirection, setSortDirection] = useState('asc');
   const initialReportDate = useMemo(() => {
@@ -692,7 +691,6 @@ export default function App() {
   const onThisDayReportCacheRef = useRef(new Map());
   const driverHistoryRequestRef = useRef(0);
   const driverHistoryCacheRef = useRef(new Map());
-  const driverHistoryPrewarmStartedRef = useRef(false);
   const startupSplashStartedAtRef = useRef(Date.now());
   const startupSplashCloseTimerRef = useRef(null);
 
@@ -980,6 +978,7 @@ export default function App() {
         setSalesActivityModalOpen(false);
         setCustomerTrendModalOpen(false);
         setSelectedCustomerTrend(null);
+        setDriverHistoryModalOpen(false);
         setSelectedDriverRoster(null);
         setSelectedSalesLead(null);
         setAvailableTruckDrilldown(null);
@@ -1083,148 +1082,12 @@ export default function App() {
   }, [isAuthenticated, accessToken, uploadDigestDate]);
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      driverHistoryPrewarmStartedRef.current = false;
-      driverHistoryCacheRef.current.clear();
-      setDriverHistoryPrewarmSettled(false);
-      return undefined;
-    }
-
-    if (driverHistoryPrewarmStartedRef.current) return undefined;
-
-    if (driverPositionsError && !driverPositionsLoading) {
-      driverHistoryPrewarmStartedRef.current = true;
-      setDriverHistoryPrewarmSettled(true);
-      return undefined;
-    }
-
-    const activePositions = driverPositionsData?.positions || [];
-    if (!driverPositionsData) return undefined;
-
-    if (!activePositions.length) {
-      driverHistoryPrewarmStartedRef.current = true;
-      setDriverHistoryPrewarmSettled(true);
-      return undefined;
-    }
-
-    const trucks = Array.from(new Set(
-      activePositions
-        .filter((position) => position?.hasRosterDetails && position?.roster)
-        .map(getDriverHistoryTruckFromCard)
-        .map(normalizeDriverHistoryTruckKey)
-        .filter(Boolean)
-    ));
-
-    driverHistoryPrewarmStartedRef.current = true;
-
-    if (!trucks.length) {
-      setDriverHistoryPrewarmSettled(true);
-      return undefined;
-    }
-
-    let cancelled = false;
-
-    async function prewarmDriverHistorySnapshots() {
-      try {
-        const res = await authedFetch(`${API}/driver-roster/history-batch?trucks=${encodeURIComponent(trucks.join(','))}`);
-        const data = await res.json().catch(() => ({}));
-
-        if (!res.ok || !data.success) {
-          throw new Error(data.error || 'Unable to preload driver snapshots.');
-        }
-
-        if (cancelled) return;
-
-        (data.snapshots || []).forEach((snapshot) => {
-          cacheDriverHistorySnapshot(snapshot.normalizedTruck || snapshot.truck, snapshot);
-        });
-      } catch (err) {
-        // Prewarm is intentionally quiet. If it misses, the driver card can still fetch its own snapshot.
-        console.warn('Driver snapshot prewarm failed.', err);
-      } finally {
-        if (!cancelled) {
-          setDriverHistoryPrewarmSettled(true);
-        }
-      }
-    }
-
-    prewarmDriverHistorySnapshots();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isAuthenticated, accessToken, driverPositionsData, driverPositionsError, driverPositionsLoading]);
-
-  useEffect(() => {
-    if (!isAuthenticated || !selectedDriverRoster?.hasRosterDetails || !selectedDriverRoster?.roster) {
-      driverHistoryRequestRef.current += 1;
-      setDriverHistorySnapshot(null);
-      setDriverHistoryLoading(false);
-      setDriverHistoryError('');
-      return undefined;
-    }
-
-    const truck = getDriverHistoryTruckFromCard(selectedDriverRoster);
-
-    if (!truck) {
-      driverHistoryRequestRef.current += 1;
-      setDriverHistorySnapshot(null);
-      setDriverHistoryLoading(false);
-      setDriverHistoryError('No truck number was available for this driver card.');
-      return undefined;
-    }
-
-    const cachedSnapshot = getCachedDriverHistorySnapshot(truck);
-    if (cachedSnapshot) {
-      driverHistoryRequestRef.current += 1;
-      setDriverHistorySnapshot(cachedSnapshot.snapshot || null);
-      setDriverHistoryError(cachedSnapshot.error || '');
-      setDriverHistoryLoading(false);
-      return undefined;
-    }
-
-    const requestId = driverHistoryRequestRef.current + 1;
-    driverHistoryRequestRef.current = requestId;
-    let cancelled = false;
-
-    setDriverHistoryLoading(true);
-    setDriverHistoryError('');
+    driverHistoryRequestRef.current += 1;
+    setDriverHistoryModalOpen(false);
     setDriverHistorySnapshot(null);
-
-    async function loadDriverHistorySnapshot() {
-      try {
-        const res = await authedFetch(`${API}/driver-roster/history?truck=${encodeURIComponent(truck)}`);
-        const data = await res.json().catch(() => ({}));
-
-        if (!res.ok || !data.success) {
-          throw new Error(data.error || 'Unable to load driver performance snapshot.');
-        }
-
-        cacheDriverHistorySnapshot(truck, data);
-
-        if (!cancelled && driverHistoryRequestRef.current === requestId) {
-          setDriverHistorySnapshot(data);
-        }
-      } catch (err) {
-        if (!cancelled && driverHistoryRequestRef.current === requestId) {
-          setDriverHistorySnapshot(null);
-          setDriverHistoryError(err.message || 'Unable to load driver performance snapshot.');
-        }
-      } finally {
-        if (!cancelled && driverHistoryRequestRef.current === requestId) {
-          setDriverHistoryLoading(false);
-        }
-      }
-    }
-
-    loadDriverHistorySnapshot();
-
-    return () => {
-      cancelled = true;
-    };
+    setDriverHistoryLoading(false);
+    setDriverHistoryError('');
   }, [
-    isAuthenticated,
-    accessToken,
     selectedDriverRoster?.id,
     selectedDriverRoster?.equipmentId,
     selectedDriverRoster?.hasRosterDetails,
@@ -1379,11 +1242,10 @@ export default function App() {
     setDriverTimeOffActionMessage('');
     setDriverTimeOffActionError('');
     setSelectedDriverRoster(null);
+    setDriverHistoryModalOpen(false);
     setDriverHistorySnapshot(null);
     setDriverHistoryLoading(false);
     setDriverHistoryError('');
-    setDriverHistoryPrewarmSettled(false);
-    driverHistoryPrewarmStartedRef.current = false;
     driverHistoryCacheRef.current.clear();
     setReportsSectionOpen(false);
     searchCacheRef.current.clear();
@@ -1437,9 +1299,7 @@ export default function App() {
       }
 
       sessionStorage.setItem('koleLookupToken', token);
-      driverHistoryPrewarmStartedRef.current = false;
       driverHistoryCacheRef.current.clear();
-      setDriverHistoryPrewarmSettled(false);
       startupSplashStartedAtRef.current = Date.now();
       setStartupSplashElapsedMs(0);
       setStartupSplashDismissed(false);
@@ -1473,9 +1333,7 @@ export default function App() {
     setStartupSplashDismissed(false);
     setStartupSplashElapsedMs(0);
     salesLeadsPrewarmStartedRef.current = false;
-    driverHistoryPrewarmStartedRef.current = false;
     driverHistoryCacheRef.current.clear();
-    setDriverHistoryPrewarmSettled(false);
     resetAppState();
   }
 
@@ -2427,10 +2285,76 @@ function refreshOperationsAndTracking() {
 }
 
 function closeDriverRosterModal() {
+  setDriverHistoryModalOpen(false);
   setSelectedDriverRoster(null);
   setDriverHistorySnapshot(null);
   setDriverHistoryLoading(false);
   setDriverHistoryError('');
+}
+
+function closeDriverPerformanceModal() {
+  setDriverHistoryModalOpen(false);
+}
+
+async function openDriverPerformanceModal() {
+  if (driverHistoryLoading || !selectedDriverRoster?.hasRosterDetails || !selectedDriverRoster?.roster) {
+    return;
+  }
+
+  const truck = getDriverHistoryTruckFromCard(selectedDriverRoster);
+
+  if (!truck) {
+    driverHistoryRequestRef.current += 1;
+    setDriverHistorySnapshot(null);
+    setDriverHistoryLoading(false);
+    setDriverHistoryError('No truck number was available for this driver card.');
+    setDriverHistoryModalOpen(true);
+    return;
+  }
+
+  const cachedSnapshot = getCachedDriverHistorySnapshot(truck);
+  if (cachedSnapshot) {
+    driverHistoryRequestRef.current += 1;
+    setDriverHistorySnapshot(cachedSnapshot.snapshot || null);
+    setDriverHistoryError(cachedSnapshot.error || '');
+    setDriverHistoryLoading(false);
+    setDriverHistoryModalOpen(true);
+    return;
+  }
+
+  const requestId = driverHistoryRequestRef.current + 1;
+  driverHistoryRequestRef.current = requestId;
+
+  setDriverHistoryLoading(true);
+  setDriverHistoryError('');
+  setDriverHistorySnapshot(null);
+
+  try {
+    const res = await authedFetch(`${API}/driver-roster/history?truck=${encodeURIComponent(truck)}`);
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Unable to load driver performance snapshot.');
+    }
+
+    cacheDriverHistorySnapshot(truck, data);
+
+    if (driverHistoryRequestRef.current === requestId) {
+      setDriverHistorySnapshot(data);
+      setDriverHistoryError('');
+      setDriverHistoryModalOpen(true);
+    }
+  } catch (err) {
+    if (driverHistoryRequestRef.current === requestId) {
+      setDriverHistorySnapshot(null);
+      setDriverHistoryError(err.message || 'Unable to load driver performance snapshot.');
+      setDriverHistoryModalOpen(true);
+    }
+  } finally {
+    if (driverHistoryRequestRef.current === requestId) {
+      setDriverHistoryLoading(false);
+    }
+  }
 }
 
 function formatTrackingTimestamp(value) {
@@ -7666,94 +7590,263 @@ function openReportLoadDetails(load) {
   }
 
 
-  function DriverSnapshotSection() {
-    if (driverHistoryLoading && !driverHistorySnapshot) return null;
-
-    const years = driverHistorySnapshot?.years || [];
-    const warnings = driverHistorySnapshot?.warnings || [];
-    const summary = driverHistorySnapshot?.summary || {};
-    const hasSnapshotRows = years.some((row) => (
+  function getDriverPerformanceAnalysis(snapshot) {
+    const years = snapshot?.years || [];
+    const summary = snapshot?.summary || {};
+    const activeYears = years.filter((row) => (
       Number(row.revenue || 0) > 0 ||
       Number(row.loadCount || 0) > 0 ||
       Number(row.tonuCount || 0) > 0 ||
       Number(row.timeOff?.totalDays || 0) > 0
     ));
 
+    const bestRevenueYear = activeYears.reduce((best, row) => (
+      !best || Number(row.revenue || 0) > Number(best.revenue || 0) ? row : best
+    ), null);
+
+    const bestLoadYear = activeYears.reduce((best, row) => (
+      !best || Number(row.loadCount || 0) > Number(best.loadCount || 0) ? row : best
+    ), null);
+
+    const lastLoadRow = activeYears
+      .filter((row) => row.lastLoadDate)
+      .sort((a, b) => String(b.lastLoadDate).localeCompare(String(a.lastLoadDate)))[0] || null;
+
+    const currentYear = years[0] || null;
+    const priorYear = years.find((row) => currentYear && Number(row.year) === Number(currentYear.year) - 1) || activeYears[1] || null;
+    const avgRevenuePerLoad = Number(summary.loadCount || 0) > 0
+      ? Number(summary.revenue || 0) / Number(summary.loadCount || 0)
+      : 0;
+    const timeOffPer100Loads = Number(summary.loadCount || 0) > 0
+      ? (Number(summary.timeOffDays || 0) / Number(summary.loadCount || 0)) * 100
+      : 0;
+    const homeTimeShare = Number(summary.timeOffDays || 0) > 0
+      ? Number(summary.homeTimeDays || 0) / Number(summary.timeOffDays || 0)
+      : 0;
+    const repairShare = Number(summary.timeOffDays || 0) > 0
+      ? Number(summary.repairDays || 0) / Number(summary.timeOffDays || 0)
+      : 0;
+
+    const insights = [];
+
+    if (activeYears.length > 0) {
+      insights.push(`Visible history covers ${formatReportNumber(activeYears.length)} active year${activeYears.length === 1 ? '' : 's'} for this truck.`);
+    }
+
+    if (bestRevenueYear) {
+      insights.push(`${bestRevenueYear.year} is the strongest visible revenue year at ${formatReportMoney(bestRevenueYear.revenue)}.`);
+    }
+
+    if (currentYear && priorYear && Number(priorYear.revenue || 0) > 0) {
+      const diff = Number(currentYear.revenue || 0) - Number(priorYear.revenue || 0);
+      const pct = Math.abs(diff / Number(priorYear.revenue || 0));
+      const direction = diff >= 0 ? 'ahead of' : 'behind';
+      insights.push(`${currentYear.year} is currently ${direction} ${priorYear.year} by ${formatReportMoney(Math.abs(diff))} (${formatPercent(pct)}).`);
+    }
+
+    if (lastLoadRow?.lastLoadDate) {
+      insights.push(`Most recent visible load activity: ${formatRosterDate(lastLoadRow.lastLoadDate)}.`);
+    }
+
+    if (Number(summary.timeOffDays || 0) > 0) {
+      insights.push(`Time off mix: ${formatPercent(homeTimeShare)} home time and ${formatPercent(repairShare)} repairs.`);
+    }
+
+    return {
+      activeYears,
+      bestRevenueYear,
+      bestLoadYear,
+      lastLoadRow,
+      avgRevenuePerLoad,
+      timeOffPer100Loads,
+      insights
+    };
+  }
+
+  function DriverPerformanceSnapshotContent() {
+    const years = driverHistorySnapshot?.years || [];
+    const warnings = driverHistorySnapshot?.warnings || [];
+    const summary = driverHistorySnapshot?.summary || {};
+    const analysis = getDriverPerformanceAnalysis(driverHistorySnapshot);
+    const activeYears = analysis.activeYears || [];
+    const hasSnapshotRows = activeYears.length > 0;
+    const maxRevenue = Math.max(...activeYears.map((row) => Number(row.revenue || 0)), 0);
+
+    if (driverHistoryLoading && !driverHistorySnapshot) {
+      return (
+        <div className="driver-performance-loading-card">
+          <div className="driver-snapshot-summary driver-snapshot-summary-wide">
+            <div><span>Visible Revenue</span><strong>—</strong></div>
+            <div><span>Won Loads</span><strong>—</strong></div>
+            <div><span>Avg Revenue / Load</span><strong>—</strong></div>
+            <div><span>Time Off Days</span><strong>—</strong></div>
+          </div>
+          <div className="driver-performance-loading-copy">
+            Analyzing revenue, load history, TONU, and inclusive time-off days...
+          </div>
+        </div>
+      );
+    }
+
+    if (driverHistoryError) {
+      return <div className="msg error">Driver performance unavailable: {driverHistoryError}</div>;
+    }
+
+    if (!hasSnapshotRows) {
+      return <div className="msg">No revenue or time-off history was found for this truck yet.</div>;
+    }
+
     return (
       <>
-        <SectionTitle>Performance Snapshot</SectionTitle>
-        <div className="detail-item full driver-snapshot-panel">
-          {!driverHistoryLoading && driverHistoryError && (
-            <div className="msg error">Driver snapshot unavailable: {driverHistoryError}</div>
-          )}
-
-          {!driverHistoryLoading && !driverHistoryError && !hasSnapshotRows && (
-            <div className="msg">No revenue or time-off history was found for this truck yet.</div>
-          )}
-
-          {!driverHistoryLoading && !driverHistoryError && hasSnapshotRows && (
-            <>
-              <div className="driver-snapshot-summary">
-                <div>
-                  <span>Visible Revenue</span>
-                  <strong>{formatReportMoney(summary.revenue)}</strong>
-                </div>
-                <div>
-                  <span>Won Loads</span>
-                  <strong>{formatReportNumber(summary.loadCount)}</strong>
-                </div>
-                <div>
-                  <span>Time Off Days</span>
-                  <strong>{formatReportNumber(summary.timeOffDays)}</strong>
-                </div>
-              </div>
-
-              <div className="driver-snapshot-table-wrap">
-                <table className="driver-snapshot-table">
-                  <thead>
-                    <tr>
-                      <th>Year</th>
-                      <th>Revenue</th>
-                      <th>Won Loads</th>
-                      <th>TONU</th>
-                      <th>Time Off</th>
-                      <th>Home</th>
-                      <th>Repairs</th>
-                      <th>Last Load</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {years.map((row) => (
-                      <tr key={`driver-snapshot-${row.year}`}>
-                        <td>{row.year}</td>
-                        <td>{formatReportMoney(row.revenue)}</td>
-                        <td>{formatReportNumber(row.loadCount)}</td>
-                        <td>{formatReportNumber(row.tonuCount)}</td>
-                        <td>{formatReportNumber(row.timeOff?.totalDays)}</td>
-                        <td>{formatReportNumber(row.timeOff?.homeTimeDays)}</td>
-                        <td>{formatReportNumber(row.timeOff?.repairDays)}</td>
-                        <td>{formatRosterDate(row.lastLoadDate)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <small className="driver-snapshot-source-note">
-                Source: Bid Listing/archive revenue by pickup year and Driver Time Off Log by inclusive calendar days.
-              </small>
-
-              {warnings.length > 0 && (
-                <div className="driver-snapshot-warning">
-                  Snapshot loaded with {warnings.length} source warning{warnings.length === 1 ? '' : 's'}.
-                </div>
-              )}
-            </>
-          )}
+        <div className="driver-snapshot-summary driver-snapshot-summary-wide">
+          <div>
+            <span>Visible Revenue</span>
+            <strong>{formatReportMoney(summary.revenue)}</strong>
+          </div>
+          <div>
+            <span>Won Loads</span>
+            <strong>{formatReportNumber(summary.loadCount)}</strong>
+          </div>
+          <div>
+            <span>Avg Revenue / Load</span>
+            <strong>{formatReportMoney(analysis.avgRevenuePerLoad)}</strong>
+          </div>
+          <div>
+            <span>Time Off Days</span>
+            <strong>{formatReportNumber(summary.timeOffDays)}</strong>
+          </div>
         </div>
+
+        <div className="driver-performance-analysis-grid">
+          <div className="driver-performance-analysis-card highlight">
+            <span>Best Revenue Year</span>
+            <strong>{analysis.bestRevenueYear?.year || '-'}</strong>
+            <small>{analysis.bestRevenueYear ? formatReportMoney(analysis.bestRevenueYear.revenue) : 'No revenue yet'}</small>
+          </div>
+          <div className="driver-performance-analysis-card">
+            <span>Best Load Year</span>
+            <strong>{analysis.bestLoadYear?.year || '-'}</strong>
+            <small>{analysis.bestLoadYear ? `${formatReportNumber(analysis.bestLoadYear.loadCount)} won load${Number(analysis.bestLoadYear.loadCount) === 1 ? '' : 's'}` : 'No loads yet'}</small>
+          </div>
+          <div className="driver-performance-analysis-card">
+            <span>Time Off Pressure</span>
+            <strong>{formatReportNumber(analysis.timeOffPer100Loads)}</strong>
+            <small>days per 100 won loads</small>
+          </div>
+          <div className="driver-performance-analysis-card">
+            <span>Last Visible Load</span>
+            <strong>{formatRosterDate(analysis.lastLoadRow?.lastLoadDate)}</strong>
+            <small>{analysis.lastLoadRow ? `from ${analysis.lastLoadRow.year}` : 'No load date found'}</small>
+          </div>
+        </div>
+
+        <div className="driver-performance-split-grid">
+          <div className="driver-performance-section-card">
+            <h4>Revenue Shape</h4>
+            <div className="driver-performance-bars">
+              {activeYears.map((row) => {
+                const revenue = Number(row.revenue || 0);
+                const width = maxRevenue > 0 ? Math.max((revenue / maxRevenue) * 100, revenue > 0 ? 6 : 0) : 0;
+
+                return (
+                  <div key={`driver-performance-bar-${row.year}`} className="driver-performance-bar-row">
+                    <div className="driver-performance-bar-label">
+                      <strong>{row.year}</strong>
+                      <span>{formatReportMoney(revenue)}</span>
+                    </div>
+                    <div className="driver-performance-bar-track" aria-hidden="true">
+                      <div className="driver-performance-bar-fill" style={{ width: `${width}%` }} />
+                    </div>
+                    <small>{formatReportNumber(row.loadCount)} loads · {formatReportNumber(row.timeOff?.totalDays)} off days</small>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="driver-performance-section-card">
+            <h4>30,000' Read</h4>
+            <ul className="driver-performance-insight-list">
+              {analysis.insights.map((insight, index) => (
+                <li key={`driver-performance-insight-${index}`}>{insight}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        <div className="driver-snapshot-table-wrap driver-performance-table-wrap">
+          <table className="driver-snapshot-table">
+            <thead>
+              <tr>
+                <th>Year</th>
+                <th>Revenue</th>
+                <th>Won Loads</th>
+                <th>TONU</th>
+                <th>Time Off</th>
+                <th>Home</th>
+                <th>Repairs</th>
+                <th>Last Load</th>
+              </tr>
+            </thead>
+            <tbody>
+              {years.map((row) => (
+                <tr key={`driver-snapshot-${row.year}`}>
+                  <td>{row.year}</td>
+                  <td>{formatReportMoney(row.revenue)}</td>
+                  <td>{formatReportNumber(row.loadCount)}</td>
+                  <td>{formatReportNumber(row.tonuCount)}</td>
+                  <td>{formatReportNumber(row.timeOff?.totalDays)}</td>
+                  <td>{formatReportNumber(row.timeOff?.homeTimeDays)}</td>
+                  <td>{formatReportNumber(row.timeOff?.repairDays)}</td>
+                  <td>{formatRosterDate(row.lastLoadDate)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <small className="driver-snapshot-source-note">
+          Source: Bid Listing/archive revenue by pickup year and Driver Time Off Log by inclusive calendar days. This is a read-only drilldown; it does not write back to Driver Roster.
+        </small>
+
+        {warnings.length > 0 && (
+          <div className="driver-snapshot-warning">
+            Snapshot loaded with {warnings.length} source warning{warnings.length === 1 ? '' : 's'}.
+          </div>
+        )}
       </>
     );
   }
+
+  function DriverPerformanceModal() {
+    if (!driverHistoryModalOpen || !selectedDriverRoster) return null;
+
+    const roster = selectedDriverRoster.roster || {};
+    const displayName = roster.tmsName || selectedDriverRoster.driverName || 'Driver';
+    const truck = getDriverHistoryTruckFromCard(selectedDriverRoster) || '-';
+
+    return (
+      <div className="modal-overlay report-modal-overlay driver-performance-modal-overlay" onClick={closeDriverPerformanceModal}>
+        <div className="detail-modal driver-performance-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="detail-header">
+            <div>
+              <h2>Driver Performance Snapshot</h2>
+              <p>{displayName} · Truck {truck}</p>
+            </div>
+
+            <button className="close-button" onClick={closeDriverPerformanceModal}>
+              Close
+            </button>
+          </div>
+
+          <div className="modal-body driver-performance-modal-body">
+            <DriverPerformanceSnapshotContent />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
 
   function DriverRosterModal() {
     if (!selectedDriverRoster) return null;
@@ -7775,9 +7868,21 @@ function openReportLoadDetails(load) {
               <p>{modalSubtitle}</p>
             </div>
 
-            <button className="close-button" onClick={closeDriverRosterModal}>
-              Close
-            </button>
+            <div className="driver-roster-header-actions">
+              {hasRoster && (
+                <button
+                  type="button"
+                  className={`view-button driver-performance-button ${driverHistoryLoading ? 'loading' : ''}`}
+                  onClick={openDriverPerformanceModal}
+                  disabled={driverHistoryLoading}
+                >
+                  {driverHistoryLoading ? 'Analyzing...' : 'Performance Snapshot'}
+                </button>
+              )}
+              <button className="close-button" onClick={closeDriverRosterModal}>
+                Close
+              </button>
+            </div>
           </div>
 
           <div className="modal-body">
@@ -7817,8 +7922,6 @@ function openReportLoadDetails(load) {
                     <DetailItem label="Position Time" value={formatTrackingTimestamp(selectedDriverRoster.positionTimeUtc)} wide />
                   </>
                 )}
-
-                <DriverSnapshotSection />
 
                 <SectionTitle>Tractor</SectionTitle>
                 <DetailItem label="Make" value={roster.tractorMake} />
@@ -11624,7 +11727,6 @@ function openReportLoadDetails(load) {
           uploadDigestError={uploadDigestError}
           reportActionAlerts={reportActionAlerts}
           reportActionAlertsError={reportActionAlertsError}
-          driverHistoryPrewarmSettled={driverHistoryPrewarmSettled}
           fakeProgressMs={startupSplashElapsedMs}
           onSkip={beginStartupSplashClose}
         />
@@ -12511,6 +12613,7 @@ function openReportLoadDetails(load) {
 
       {DriverTimeOffFormModal()}
       <DriverRosterModal />
+      <DriverPerformanceModal />
       {SalesLeadProfileModal()}
 
       {selected && (
