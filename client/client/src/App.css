@@ -10132,3 +10132,110 @@ button.available-truck-distribution-summary-card:disabled {
   border-color: #cbd5e1 !important;
   color: #334155 !important;
 }
+
+/* PASS 19.6: On This Day light-mode section cleanup
+   The On This Day modal was still carrying dark report-shell bars inside a light modal.
+   Keep the useful grouping, but make the year container and movement section headers read
+   like clean light report cards instead of black divider bars. */
+:root[data-theme='light'] .on-this-day-year-block {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  box-shadow:
+    0 14px 34px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .on-this-day-year-header {
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.045), transparent 48%),
+    #f8fafc !important;
+  border-bottom: 1px solid #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .on-this-day-year-header h4 {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .on-this-day-section {
+  background: #ffffff !important;
+  border-top: 1px solid #e2e8f0 !important;
+  padding: 14px 16px 10px !important;
+}
+
+:root[data-theme='light'] .on-this-day-section:first-of-type {
+  border-top: none !important;
+}
+
+:root[data-theme='light'] .on-this-day-section h5 {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 40px !important;
+  margin: 0 0 10px !important;
+  padding: 9px 14px !important;
+  border: 1px solid #cbd5e1 !important;
+  border-left: 5px solid #2563eb !important;
+  border-radius: 10px !important;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.06), transparent 58%),
+    #f8fafc !important;
+  color: #0f172a !important;
+  box-shadow: inset 0 1px 0 #ffffff !important;
+  text-shadow: none !important;
+}
+
+:root[data-theme='light'] .on-this-day-section:nth-of-type(2) h5 {
+  border-left-color: #16a34a !important;
+}
+
+:root[data-theme='light'] .on-this-day-section:nth-of-type(3) h5 {
+  border-left-color: #2563eb !important;
+}
+
+:root[data-theme='light'] .on-this-day-section:nth-of-type(4) h5 {
+  border-left-color: #ea580c !important;
+}
+
+:root[data-theme='light'] .on-this-day-section:nth-of-type(5) h5 {
+  border-left-color: #7c3aed !important;
+}
+
+:root[data-theme='light'] .on-this-day-section:nth-of-type(6) h5 {
+  border-left-color: #dc2626 !important;
+}
+
+:root[data-theme='light'] .on-this-day-section:nth-of-type(7) h5 {
+  border-left-color: #0f766e !important;
+}
+
+:root[data-theme='light'] .on-this-day-section:nth-of-type(8) h5 {
+  border-left-color: #0891b2 !important;
+}
+
+:root[data-theme='light'] .on-this-day-table-wrap {
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 11px !important;
+  overflow: hidden !important;
+  background: #ffffff !important;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.045) !important;
+}
+
+:root[data-theme='light'] .on-this-day-table th {
+  background: #e2e8f0 !important;
+  color: #1e293b !important;
+  border-bottom-color: #cbd5e1 !important;
+}
+
+:root[data-theme='light'] .on-this-day-table td {
+  color: #0f172a !important;
+  border-bottom-color: #e2e8f0 !important;
+}
+
+:root[data-theme='light'] .on-this-day-table tbody tr:nth-child(even) {
+  background: #f8fafc !important;
+}
+
+:root[data-theme='light'] .on-this-day-table tbody tr:hover {
+  background: #eff6ff !important;
+}
