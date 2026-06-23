@@ -7897,3 +7897,33 @@ button.available-truck-distribution-summary-card:disabled {
     grid-template-columns: 1fr;
   }
 }
+/* POLISH: tighten Gross Revenue quarter table column spacing */
+.gross-revenue-quarter-table {
+  table-layout: fixed;
+}
+
+.gross-revenue-quarter-table th:nth-child(1),
+.gross-revenue-quarter-table td:nth-child(1) {
+  width: 7%;
+}
+
+.gross-revenue-quarter-table th:nth-child(2),
+.gross-revenue-quarter-table td:nth-child(2) {
+  width: 25%;
+}
+
+.gross-revenue-quarter-table th:nth-child(3),
+.gross-revenue-quarter-table td:nth-child(3),
+.gross-revenue-quarter-table th:nth-child(4),
+.gross-revenue-quarter-table td:nth-child(4),
+.gross-revenue-quarter-table th:nth-child(5),
+.gross-revenue-quarter-table td:nth-child(5) {
+  width: 12%;
+}
+
+.gross-revenue-quarter-table th:nth-child(6),
+.gross-revenue-quarter-table td:nth-child(6),
+.gross-revenue-quarter-table th:nth-child(7),
+.gross-revenue-quarter-table td:nth-child(7) {
+  width: 16%;
+}

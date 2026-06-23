@@ -22,6 +22,7 @@ const ON_THIS_DAY_CLIENT_CACHE_LIMIT = 10;
 
 const STARTUP_SPLASH_MIN_MS = 5000;
 const STARTUP_SPLASH_EXIT_MS = 420;
+const STARTUP_SPLASH_FAKE_LIGHTS_COMPLETE_MS = 4600;
 
 function getStartupStepClass(state) {
   return `startup-splash-step ${state === 'complete' ? 'complete' : ''} ${state === 'active' ? 'active' : ''}`.trim();
@@ -48,12 +49,13 @@ function KoleStartupSplash({
   reportActionAlerts,
   reportActionAlertsError,
   driverHistoryPrewarmSettled = false,
+  fakeProgressMs = 0,
   onSkip
 }) {
   const operationsSettled = Boolean(operationsData || operationsError);
-  const uploadsSettled = Boolean(uploadDigestData || uploadDigestError);
-  const reportsSettled = Boolean(reportActionAlerts || reportActionAlertsError);
-  const driverSnapshotsSettled = Boolean(driverHistoryPrewarmSettled);
+  const uploadsSettled = Boolean(uploadDigestData || uploadDigestError || fakeProgressMs >= 1800);
+  const reportsSettled = Boolean(reportActionAlerts || reportActionAlertsError || fakeProgressMs >= 3200);
+  const driverSnapshotsSettled = Boolean(driverHistoryPrewarmSettled || fakeProgressMs >= STARTUP_SPLASH_FAKE_LIGHTS_COMPLETE_MS);
 
   return (
     <div
@@ -100,7 +102,7 @@ function KoleStartupSplash({
         </ul>
 
         <div className="startup-splash-footer">
-          <span>{driverSnapshotsSettled ? 'Systems online' : 'Staging dashboard data behind the splash screen.'}</span>
+          <span>{operationsSettled ? 'Operations Today is ready. Finishing the light show.' : 'Operations Today usually takes a few seconds.'}</span>
           <button type="button" onClick={onSkip}>Skip</button>
         </div>
       </div>
@@ -700,6 +702,7 @@ export default function App() {
   const [startupSplashVisible, setStartupSplashVisible] = useState(() => Boolean(sessionStorage.getItem('koleLookupToken')));
   const [startupSplashExiting, setStartupSplashExiting] = useState(false);
   const [startupSplashDismissed, setStartupSplashDismissed] = useState(false);
+  const [startupSplashElapsedMs, setStartupSplashElapsedMs] = useState(0);
   const [uploadDigestDate, setUploadDigestDate] = useState(getEasternDateInputValue);
   const [uploadDigestData, setUploadDigestData] = useState(null);
   const [uploadDigestLoading, setUploadDigestLoading] = useState(false);
@@ -935,44 +938,12 @@ export default function App() {
   }, [reportActionAlertCounts, reportActionAlertsLoading, reportActionAlerts, reportActionAlertsError]);
 
   const startupDashboardSettled = useMemo(() => (
-    (operationsData || operationsError) &&
-    (driverPositionsData || driverPositionsError) &&
-    (uploadDigestData || uploadDigestError) &&
-    (intelliTrackData || intelliTrackError) &&
-    (availableTrucksData || availableTrucksError) &&
-    (availableTruckDistributionData || availableTruckDistributionError) &&
-    (reportActionAlerts || reportActionAlertsError) &&
-    driverHistoryPrewarmSettled &&
-    !operationsLoading &&
-    !driverPositionsLoading &&
-    !uploadDigestLoading &&
-    !intelliTrackLoading &&
-    !availableTrucksLoading &&
-    !availableTruckDistributionLoading &&
-    !reportActionAlertsLoading
+    Boolean(operationsData || operationsError) &&
+    !operationsLoading
   ), [
     operationsData,
     operationsError,
-    operationsLoading,
-    driverPositionsData,
-    driverPositionsError,
-    driverPositionsLoading,
-    uploadDigestData,
-    uploadDigestError,
-    uploadDigestLoading,
-    intelliTrackData,
-    intelliTrackError,
-    intelliTrackLoading,
-    availableTrucksData,
-    availableTrucksError,
-    availableTrucksLoading,
-    availableTruckDistributionData,
-    availableTruckDistributionError,
-    availableTruckDistributionLoading,
-    reportActionAlerts,
-    reportActionAlertsError,
-    reportActionAlertsLoading,
-    driverHistoryPrewarmSettled
+    operationsLoading
   ]);
 
   function getActionReportClearMessage(reportLabel) {
@@ -1038,19 +1009,35 @@ export default function App() {
       setStartupSplashVisible(false);
       setStartupSplashExiting(false);
       setStartupSplashDismissed(false);
+      setStartupSplashElapsedMs(0);
       return;
     }
 
     if (!startupSplashDismissed && !startupSplashVisible && !startupDashboardSettled) {
       startupSplashStartedAtRef.current = Date.now();
+      setStartupSplashElapsedMs(0);
       setStartupSplashExiting(false);
       setStartupSplashVisible(true);
     }
   }, [isAuthenticated, startupSplashDismissed, startupSplashVisible, startupDashboardSettled]);
 
   useEffect(() => {
+    if (!startupSplashVisible || !isAuthenticated) return undefined;
+
+    function updateSplashElapsed() {
+      setStartupSplashElapsedMs(Date.now() - startupSplashStartedAtRef.current);
+    }
+
+    updateSplashElapsed();
+    const interval = window.setInterval(updateSplashElapsed, 250);
+
+    return () => window.clearInterval(interval);
+  }, [startupSplashVisible, isAuthenticated]);
+
+  useEffect(() => {
     if (!startupSplashVisible || startupSplashExiting || !isAuthenticated) return undefined;
     if (!startupDashboardSettled) return undefined;
+    if (startupSplashElapsedMs < STARTUP_SPLASH_FAKE_LIGHTS_COMPLETE_MS) return undefined;
 
     const elapsedMs = Date.now() - startupSplashStartedAtRef.current;
     const closeDelayMs = Math.max(STARTUP_SPLASH_MIN_MS - elapsedMs, 0);
@@ -1059,7 +1046,7 @@ export default function App() {
     }, closeDelayMs);
 
     return () => window.clearTimeout(closeTimer);
-  }, [startupSplashVisible, startupSplashExiting, isAuthenticated, startupDashboardSettled]);
+  }, [startupSplashVisible, startupSplashExiting, isAuthenticated, startupDashboardSettled, startupSplashElapsedMs]);
 
   useEffect(() => {
     if (!isAuthenticated) return undefined;
@@ -1454,6 +1441,7 @@ export default function App() {
       driverHistoryCacheRef.current.clear();
       setDriverHistoryPrewarmSettled(false);
       startupSplashStartedAtRef.current = Date.now();
+      setStartupSplashElapsedMs(0);
       setStartupSplashDismissed(false);
       setStartupSplashExiting(false);
       setStartupSplashVisible(true);
@@ -1483,6 +1471,7 @@ export default function App() {
     setStartupSplashVisible(false);
     setStartupSplashExiting(false);
     setStartupSplashDismissed(false);
+    setStartupSplashElapsedMs(0);
     salesLeadsPrewarmStartedRef.current = false;
     driverHistoryPrewarmStartedRef.current = false;
     driverHistoryCacheRef.current.clear();
@@ -8898,16 +8887,13 @@ function openReportLoadDetails(load) {
               </button>
 
               <div
-                className="upload-digest-summary upload-digest-summary-static"
-                aria-label={`Pickup and Delivery Photos for ${dateLabel}`}
-              >
-                <span className="upload-digest-title">
-                  Pickup and Delivery Photos for {dateLabel}
-                </span>
-                <span className="upload-digest-count">
-                  {uploadDigestLoading ? 'Loading...' : `${count} logged`}
-                </span>
-              </div>
+  className="upload-digest-summary upload-digest-summary-static"
+  aria-label={`Pickup and Delivery Photos for ${dateLabel}`}
+>
+  <span className="upload-digest-title">
+    Pickup and Delivery Photos for {dateLabel}
+  </span>
+</div>
 
               <button
                 type="button"
@@ -11639,6 +11625,7 @@ function openReportLoadDetails(load) {
           reportActionAlerts={reportActionAlerts}
           reportActionAlertsError={reportActionAlertsError}
           driverHistoryPrewarmSettled={driverHistoryPrewarmSettled}
+          fakeProgressMs={startupSplashElapsedMs}
           onSkip={beginStartupSplashClose}
         />
       )}
