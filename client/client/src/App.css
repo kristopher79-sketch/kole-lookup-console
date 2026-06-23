@@ -8404,3 +8404,1731 @@ button.available-truck-distribution-summary-card:disabled {
     height: 31px;
   }
 }
+
+/* PASS 19: Alicia light mode toggle
+   Dark remains the default. Light mode swaps the color tokens first, then patches
+   the older hard-coded dark surfaces that predate the token layer. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --kole-page-bg: #eef2f7;
+  --kole-shell: #ffffff;
+  --kole-surface: #f8fafc;
+  --kole-surface-2: #eef2f7;
+  --kole-table-body: #ffffff;
+  --kole-table-row: #ffffff;
+  --kole-table-head: #e2e8f0;
+  --kole-border: #cbd5e1;
+  --kole-border-strong: #94a3b8;
+  --kole-text: #111827;
+  --kole-muted: #475569;
+  --kole-gold: #b9850d;
+  --kole-gold-bright: #946a08;
+  --kole-secondary-rail: #64748b;
+  --kole-secondary-rail-soft: rgba(100, 116, 139, 0.45);
+  --kole-active-slate: rgba(148, 163, 184, 0.18);
+}
+
+.theme-toggle-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 9px 13px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.82);
+  color: #f8fafc;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.theme-toggle-button:hover {
+  background: #1f2937;
+}
+
+.theme-toggle-button.light {
+  background: #ffffff;
+  color: #111827;
+  border-color: #cbd5e1;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+}
+
+.theme-toggle-button.light:hover {
+  background: #f8fafc;
+}
+
+.theme-toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(250, 204, 21, 0.18);
+  color: #facc15;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.theme-toggle-button.light .theme-toggle-icon {
+  background: rgba(180, 83, 9, 0.12);
+  color: #92400e;
+}
+
+.header-actions {
+  position: absolute;
+  top: 12px;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  z-index: 5;
+}
+
+.header-actions .header-logoff {
+  position: static;
+  top: auto;
+  right: auto;
+}
+
+.login-header-actions {
+  right: 0;
+}
+
+:root[data-theme='light'] body {
+  background:
+    radial-gradient(circle at 50% -180px, rgba(148, 163, 184, 0.30), transparent 430px),
+    linear-gradient(180deg, #f8fafc 0%, var(--kole-page-bg) 58%, #e2e8f0 100%) !important;
+  color: var(--kole-text) !important;
+}
+
+:root[data-theme='light'] .app-header h1,
+:root[data-theme='light'] .brand-title-text,
+:root[data-theme='light'] .brand-reveal-target,
+:root[data-theme='light'] .brand-roll-back h1 {
+  color: #111827 !important;
+  text-shadow: none !important;
+}
+
+:root[data-theme='light'] .app-header p,
+:root[data-theme='light'] .brand-subtitle-text,
+:root[data-theme='light'] .brand-roll-back p,
+:root[data-theme='light'] .summary,
+:root[data-theme='light'] .msg,
+:root[data-theme='light'] .muted-table-note,
+:root[data-theme='light'] .login-status-card small {
+  color: var(--kole-muted) !important;
+}
+
+:root[data-theme='light'] .search-card,
+:root[data-theme='light'] .operations-panel,
+:root[data-theme='light'] .reports-panel,
+:root[data-theme='light'] .upload-digest-panel,
+:root[data-theme='light'] .results-panel,
+:root[data-theme='light'] .report-card,
+:root[data-theme='light'] .driver-report-section,
+:root[data-theme='light'] .settlement-report-section,
+:root[data-theme='light'] .gross-revenue-quarter-card,
+:root[data-theme='light'] .sales-lead-card,
+:root[data-theme='light'] .sales-note-card,
+:root[data-theme='light'] .available-truck-form-row-card,
+:root[data-theme='light'] .available-truck-suggestion-box,
+:root[data-theme='light'] .driver-position-panel,
+:root[data-theme='light'] .detail-modal {
+  background: var(--kole-shell) !important;
+  border-color: var(--kole-border) !important;
+  color: var(--kole-text) !important;
+  box-shadow:
+    0 14px 34px rgba(15, 23, 42, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.80) !important;
+}
+
+:root[data-theme='light'] .operations-panel > div:first-child,
+:root[data-theme='light'] .reports-header,
+:root[data-theme='light'] .upload-digest-section-header,
+:root[data-theme='light'] .operations-panel > div > h3,
+:root[data-theme='light'] .driver-position-header,
+:root[data-theme='light'] .driver-report-title,
+:root[data-theme='light'] .driver-report-section-header,
+:root[data-theme='light'] .gross-revenue-quarter-header,
+:root[data-theme='light'] .detail-header {
+  background: linear-gradient(180deg, #ffffff, #f1f5f9) !important;
+  border-color: var(--kole-border) !important;
+  color: var(--kole-text) !important;
+}
+
+:root[data-theme='light'] .operations-panel h2,
+:root[data-theme='light'] .operations-panel h3,
+:root[data-theme='light'] .reports-header h2,
+:root[data-theme='light'] .report-card h3,
+:root[data-theme='light'] .driver-report-title h3,
+:root[data-theme='light'] .driver-position-header h3,
+:root[data-theme='light'] .driver-report-section-header h4,
+:root[data-theme='light'] .gross-revenue-quarter-header h3,
+:root[data-theme='light'] .detail-header h2,
+:root[data-theme='light'] .sales-profile-section h3,
+:root[data-theme='light'] .sales-notes-section h3,
+:root[data-theme='light'] .sales-lead-detail h3 {
+  color: #1e293b !important;
+}
+
+:root[data-theme='light'] table,
+:root[data-theme='light'] .driver-position-table,
+:root[data-theme='light'] .upload-digest-table,
+:root[data-theme='light'] .driver-report-table,
+:root[data-theme='light'] .settlement-report-table,
+:root[data-theme='light'] .gross-revenue-quarter-table,
+:root[data-theme='light'] .gross-revenue-table,
+:root[data-theme='light'] .orders-due-settlement-table,
+:root[data-theme='light'] .inactive-driver-roster-table,
+:root[data-theme='light'] .won-not-registered-table,
+:root[data-theme='light'] .operations-table-wrap,
+:root[data-theme='light'] .report-table-wrap,
+:root[data-theme='light'] .driver-position-table-wrap,
+:root[data-theme='light'] .upload-digest-table-wrap,
+:root[data-theme='light'] .gross-revenue-quarter-table-wrap,
+:root[data-theme='light'] .wide-report-table-wrap {
+  background: var(--kole-table-body) !important;
+  border-color: var(--kole-border) !important;
+  color: var(--kole-text) !important;
+}
+
+:root[data-theme='light'] th,
+:root[data-theme='light'] .report-table-wrap th,
+:root[data-theme='light'] .driver-position-table th,
+:root[data-theme='light'] .upload-digest-table th,
+:root[data-theme='light'] .driver-report-table th,
+:root[data-theme='light'] .settlement-report-table th,
+:root[data-theme='light'] .gross-revenue-quarter-table th,
+:root[data-theme='light'] .gross-revenue-table th {
+  background: #e2e8f0 !important;
+  color: #334155 !important;
+  border-bottom-color: #cbd5e1 !important;
+}
+
+:root[data-theme='light'] td,
+:root[data-theme='light'] .driver-position-table td,
+:root[data-theme='light'] .upload-digest-table td,
+:root[data-theme='light'] .report-table-wrap td,
+:root[data-theme='light'] .driver-report-table td,
+:root[data-theme='light'] .settlement-report-table td,
+:root[data-theme='light'] .gross-revenue-quarter-table td,
+:root[data-theme='light'] .gross-revenue-table td {
+  color: #1f2937 !important;
+  border-bottom-color: #e2e8f0 !important;
+}
+
+:root[data-theme='light'] tbody tr,
+:root[data-theme='light'] .driver-position-table tbody tr,
+:root[data-theme='light'] .upload-digest-table tbody tr,
+:root[data-theme='light'] .report-table-wrap tbody tr {
+  background: #ffffff !important;
+}
+
+:root[data-theme='light'] tbody tr:nth-child(even),
+:root[data-theme='light'] .driver-position-table tbody tr:nth-child(even),
+:root[data-theme='light'] .upload-digest-table tbody tr:nth-child(even),
+:root[data-theme='light'] .report-table-wrap tbody tr:nth-child(even) {
+  background: #f8fafc !important;
+}
+
+:root[data-theme='light'] tbody tr:hover,
+:root[data-theme='light'] .driver-position-table tbody tr:hover,
+:root[data-theme='light'] .upload-digest-table tbody tr:hover,
+:root[data-theme='light'] .report-table-wrap tbody tr:hover,
+:root[data-theme='light'] .sales-year-clickable-row:hover,
+:root[data-theme='light'] .driver-report-table tbody tr.report-clickable-row:hover {
+  background: #eaf2ff !important;
+}
+
+:root[data-theme='light'] .selected-row {
+  background: #dbeafe !important;
+  box-shadow: inset 4px 0 0 #2563eb !important;
+}
+
+:root[data-theme='light'] input,
+:root[data-theme='light'] select,
+:root[data-theme='light'] textarea,
+:root[data-theme='light'] .report-controls select,
+:root[data-theme='light'] .report-controls input[type='date'],
+:root[data-theme='light'] .sales-note-composer textarea {
+  background: #ffffff !important;
+  color: #111827 !important;
+  border-color: #cbd5e1 !important;
+  color-scheme: light !important;
+}
+
+:root[data-theme='light'] input:focus,
+:root[data-theme='light'] select:focus,
+:root[data-theme='light'] textarea:focus,
+:root[data-theme='light'] .report-controls select:focus,
+:root[data-theme='light'] .report-controls input[type='date']:focus,
+:root[data-theme='light'] .sales-note-composer textarea:focus {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16) !important;
+}
+
+:root[data-theme='light'] .report-group-accordion,
+:root[data-theme='light'] .report-accordion,
+:root[data-theme='light'] .report-group-body,
+:root[data-theme='light'] .report-accordion-body,
+:root[data-theme='light'] .upload-digest-body,
+:root[data-theme='light'] .upload-digest-header-row,
+:root[data-theme='light'] .accordion-inner-card,
+:root[data-theme='light'] .report-ready-card,
+:root[data-theme='light'] .settlement-report-card,
+:root[data-theme='light'] .report-kpi-card,
+:root[data-theme='light'] .driver-report-totals-grid div,
+:root[data-theme='light'] .sales-summary-grid div,
+:root[data-theme='light'] .sales-summary-button,
+:root[data-theme='light'] .sales-lead-metrics div,
+:root[data-theme='light'] .sales-profile-headline-grid div,
+:root[data-theme='light'] .settlement-totals-grid div {
+  background: #ffffff !important;
+  border-color: var(--kole-border) !important;
+  color: var(--kole-text) !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='light'] .report-group-button,
+:root[data-theme='light'] .report-accordion-button,
+:root[data-theme='light'] .upload-digest-summary,
+:root[data-theme='light'] .upload-digest-arrow,
+:root[data-theme='light'] .upload-digest-today-button {
+  background: #f8fafc !important;
+  border-color: var(--kole-border) !important;
+  color: #1f2937 !important;
+}
+
+:root[data-theme='light'] .report-group-button:hover,
+:root[data-theme='light'] .report-accordion-button:hover,
+:root[data-theme='light'] .upload-digest-summary:hover,
+:root[data-theme='light'] .upload-digest-arrow:hover,
+:root[data-theme='light'] .upload-digest-today-button:hover {
+  background: #eef2f7 !important;
+}
+
+:root[data-theme='light'] .report-group-accordion.open > .report-group-button,
+:root[data-theme='light'] .report-accordion.open > .report-accordion-button {
+  background: #eef2f7 !important;
+  border-left-color: var(--kole-secondary-rail) !important;
+  border-bottom-color: var(--kole-border) !important;
+}
+
+:root[data-theme='light'] .report-group-button strong,
+:root[data-theme='light'] .report-accordion-button span:first-child,
+:root[data-theme='light'] .report-kpi-card strong,
+:root[data-theme='light'] .driver-report-totals-grid strong,
+:root[data-theme='light'] .sales-summary-grid strong,
+:root[data-theme='light'] .sales-summary-button strong,
+:root[data-theme='light'] .sales-lead-metrics strong,
+:root[data-theme='light'] .sales-profile-headline-grid strong,
+:root[data-theme='light'] .driver-report-section-total {
+  color: #111827 !important;
+}
+
+:root[data-theme='light'] .report-group-button span span,
+:root[data-theme='light'] .report-group-button div span,
+:root[data-theme='light'] .report-accordion-button span:not(:first-child),
+:root[data-theme='light'] .report-kpi-card span,
+:root[data-theme='light'] .driver-report-totals-grid span,
+:root[data-theme='light'] .sales-summary-grid span,
+:root[data-theme='light'] .sales-summary-button span,
+:root[data-theme='light'] .sales-lead-metrics span,
+:root[data-theme='light'] .sales-profile-headline-grid span,
+:root[data-theme='light'] .detail-item span,
+:root[data-theme='light'] .detail-item small {
+  color: var(--kole-muted) !important;
+}
+
+:root[data-theme='light'] .detail-item,
+:root[data-theme='light'] .view-tabs,
+:root[data-theme='light'] .modal-body {
+  background: #ffffff !important;
+  border-color: var(--kole-border) !important;
+  color: var(--kole-text) !important;
+}
+
+:root[data-theme='light'] .detail-item strong {
+  color: #111827 !important;
+}
+
+:root[data-theme='light'] .view-tabs button,
+:root[data-theme='light'] .view-button,
+:root[data-theme='light'] .close-button,
+:root[data-theme='light'] .search-secondary-button,
+:root[data-theme='light'] .compact-action-button {
+  background: #475569;
+  color: #ffffff;
+}
+
+:root[data-theme='light'] .view-tabs button:hover,
+:root[data-theme='light'] .view-button:hover,
+:root[data-theme='light'] .close-button:hover,
+:root[data-theme='light'] .search-secondary-button:hover,
+:root[data-theme='light'] .compact-action-button:hover {
+  background: #334155;
+}
+
+:root[data-theme='light'] .view-tabs .active-tab,
+:root[data-theme='light'] .active-filter {
+  background: #facc15 !important;
+  color: #111827 !important;
+  border-color: #eab308 !important;
+}
+
+:root[data-theme='light'] .modal-overlay {
+  background: rgba(15, 23, 42, 0.32) !important;
+}
+
+:root[data-theme='light'] .operations-card {
+  background: linear-gradient(180deg, #ffffff, #e2e8f0) !important;
+  border-color: #cbd5e1 !important;
+  color: #111827 !important;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12), inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .operations-card:hover {
+  background: #ffffff !important;
+}
+
+:root[data-theme='light'] .operations-card span {
+  color: #475569 !important;
+}
+
+:root[data-theme='light'] .operations-card strong {
+  color: #020617 !important;
+}
+
+:root[data-theme='light'] .login-status-card,
+:root[data-theme='light'] .settlement-date-control,
+:root[data-theme='light'] .settlement-window-note {
+  background: rgba(250, 204, 21, 0.14) !important;
+  border-color: rgba(180, 83, 9, 0.24) !important;
+  color: #78350f !important;
+}
+
+:root[data-theme='light'] .login-status-card strong,
+:root[data-theme='light'] .settlement-window-note strong,
+:root[data-theme='light'] .settlement-date-control small {
+  color: #78350f !important;
+}
+
+:root[data-theme='light'] .report-alert {
+  background: #fef2f2 !important;
+  border-color: #fecaca !important;
+  color: #991b1b !important;
+}
+
+:root[data-theme='light'] .report-alert.locked {
+  background: #fffbeb !important;
+  border-color: #fde68a !important;
+  color: #92400e !important;
+}
+
+:root[data-theme='light'] .report-total-row td {
+  background: #e2e8f0 !important;
+  border-top-color: #cbd5e1 !important;
+}
+
+:root[data-theme='light'] .sales-lead-card:hover {
+  background: #f8fafc !important;
+}
+
+:root[data-theme='light'] .sales-lead-card.follow-up-due {
+  border-color: rgba(180, 83, 9, 0.42) !important;
+  box-shadow: inset 4px 0 0 rgba(217, 119, 6, 0.62) !important;
+}
+
+:root[data-theme='light'] .brand-logo-large {
+  background: #ffffff;
+  border: 1px solid rgba(203, 213, 225, 0.70);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.10);
+}
+
+@media (max-width: 900px) {
+  .header-actions {
+    position: static;
+    justify-content: center;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+}
+
+/* PASS 19.1: Alicia light-mode contrast polish
+   Light mode moves away from mustard as the default accent. Amber is now reserved for
+   warnings only; blue/slate handles section chrome, links, buttons, and note pills. */
+:root[data-theme='light'] {
+  --kole-gold: #2563eb;
+  --kole-gold-bright: #1d4ed8;
+  --kole-secondary-rail: #64748b;
+  --kole-secondary-rail-soft: rgba(100, 116, 139, 0.34);
+}
+
+:root[data-theme='light'] .feature-section-header-button {
+  background: linear-gradient(180deg, #ffffff, #f3f6fb) !important;
+  border-color: #cbd5e1 !important;
+  border-left-color: #2563eb !important;
+  color: #0f172a !important;
+  box-shadow:
+    0 10px 24px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .feature-section-header-button:hover,
+:root[data-theme='light'] .feature-section-header-button[aria-expanded='true'] {
+  background: linear-gradient(180deg, #ffffff, #eaf2ff) !important;
+  border-color: #bfdbfe !important;
+  border-left-color: #1d4ed8 !important;
+}
+
+:root[data-theme='light'] .feature-section-title,
+:root[data-theme='light'] .feature-section-chevron,
+:root[data-theme='light'] .upload-digest-title,
+:root[data-theme='light'] .intellitrack-title,
+:root[data-theme='light'] .available-trucks-title,
+:root[data-theme='light'] .available-trucks-subheader h3,
+:root[data-theme='light'] .available-trucks-section-header h2,
+:root[data-theme='light'] .report-group-button strong,
+:root[data-theme='light'] .report-accordion-button span:first-child {
+  color: #0f172a !important;
+  text-shadow: none !important;
+}
+
+:root[data-theme='light'] .feature-section-subtitle,
+:root[data-theme='light'] .intellitrack-subtitle,
+:root[data-theme='light'] .available-trucks-subtitle,
+:root[data-theme='light'] .upload-digest-footnote,
+:root[data-theme='light'] .pdf-export-guidance,
+:root[data-theme='light'] .sales-summary-helper,
+:root[data-theme='light'] .report-card p,
+:root[data-theme='light'] .driver-report-title p,
+:root[data-theme='light'] .available-trucks-subheader p {
+  color: #475569 !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}
+
+:root[data-theme='light'] .feature-section-status-pill.is-zero {
+  background: #eef2f7 !important;
+  border-color: #cbd5e1 !important;
+  color: #475569 !important;
+}
+
+:root[data-theme='light'] .feature-section-status-pill.has-items,
+:root[data-theme='light'] .report-alert-status-pill.has-alerts,
+:root[data-theme='light'] .upload-digest-count,
+:root[data-theme='light'] .intellitrack-count,
+:root[data-theme='light'] .available-trucks-count {
+  background: linear-gradient(180deg, #14b8a6, #0f766e) !important;
+  border-color: #0f766e !important;
+  color: #ecfeff !important;
+  box-shadow: 0 8px 16px rgba(15, 118, 110, 0.18), inset 0 1px 0 rgba(255,255,255,0.28) !important;
+}
+
+:root[data-theme='light'] .report-group-button,
+:root[data-theme='light'] .report-accordion-button,
+:root[data-theme='light'] .upload-digest-summary,
+:root[data-theme='light'] .intellitrack-summary,
+:root[data-theme='light'] .available-trucks-summary {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06) !important;
+}
+
+:root[data-theme='light'] .report-group-button:hover,
+:root[data-theme='light'] .report-accordion-button:hover,
+:root[data-theme='light'] .upload-digest-summary:hover,
+:root[data-theme='light'] .intellitrack-summary:hover,
+:root[data-theme='light'] .available-trucks-summary:hover,
+:root[data-theme='light'] .upload-digest-summary[aria-expanded='true'],
+:root[data-theme='light'] .intellitrack-summary[aria-expanded='true'],
+:root[data-theme='light'] .available-trucks-summary[aria-expanded='true'] {
+  background: #eef6ff !important;
+  border-color: #bfdbfe !important;
+  border-left-color: #2563eb !important;
+}
+
+:root[data-theme='light'] .upload-digest-chevron,
+:root[data-theme='light'] .intellitrack-chevron,
+:root[data-theme='light'] .available-trucks-chevron {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .table-link-button {
+  border-color: #93c5fd !important;
+  background: #dbeafe !important;
+  color: #1e3a8a !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.8) !important;
+}
+
+:root[data-theme='light'] .table-link-button:hover:not(:disabled) {
+  border-color: #60a5fa !important;
+  background: #bfdbfe !important;
+  color: #172554 !important;
+}
+
+:root[data-theme='light'] .table-link-button:disabled {
+  background: #e5e7eb !important;
+  border-color: #cbd5e1 !important;
+  color: #64748b !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-lead-card h4,
+:root[data-theme='light'] .sales-lead-card-header strong,
+:root[data-theme='light'] .sales-lead-metrics strong,
+:root[data-theme='light'] .sales-lead-footer strong,
+:root[data-theme='light'] .sales-note-card-header strong,
+:root[data-theme='light'] .sales-activity-note-card-header strong {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .sales-lead-card p,
+:root[data-theme='light'] .sales-lead-footer,
+:root[data-theme='light'] .sales-note-card small,
+:root[data-theme='light'] .sales-note-card-header span,
+:root[data-theme='light'] .sales-note-text,
+:root[data-theme='light'] .sales-activity-note-card p,
+:root[data-theme='light'] .sales-activity-note-card-header span {
+  color: #475569 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-lead-footer strong {
+  color: #2563eb !important;
+}
+
+:root[data-theme='light'] .sales-lead-note-count {
+  background: #dbeafe !important;
+  border-color: #93c5fd !important;
+  color: #1e3a8a !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.72) !important;
+}
+
+:root[data-theme='light'] .sales-lead-metrics div {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+}
+
+:root[data-theme='light'] .sales-status.converted {
+  background: #d1fae5 !important;
+  color: #065f46 !important;
+}
+
+:root[data-theme='light'] .sales-status.unconverted {
+  background: #e0f2fe !important;
+  color: #075985 !important;
+}
+
+:root[data-theme='light'] .sales-status.aviation {
+  background: #e0e7ff !important;
+  color: #3730a3 !important;
+}
+
+:root[data-theme='light'] .sales-status.ignored,
+:root[data-theme='light'] .sales-status.inactive {
+  background: #e2e8f0 !important;
+  color: #334155 !important;
+}
+
+:root[data-theme='light'] .available-trucks-current-card,
+:root[data-theme='light'] .available-trucks-action-card,
+:root[data-theme='light'] .intellitrack-current-card,
+:root[data-theme='light'] .intellitrack-search-card,
+:root[data-theme='light'] .intellitrack-order-card {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.08), inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .available-trucks-kpi-grid > div,
+:root[data-theme='light'] .available-trucks-kpi-button,
+:root[data-theme='light'] .available-trucks-insight-card,
+:root[data-theme='light'] .available-trucks-proximity-list > span,
+:root[data-theme='light'] .available-trucks-source-note,
+:root[data-theme='light'] .available-truck-form-row-card,
+:root[data-theme='light'] .available-truck-suggestion-box {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='light'] .available-trucks-kpi-button:hover {
+  background: #eef6ff !important;
+  border-color: #93c5fd !important;
+  transform: translateY(-1px);
+}
+
+:root[data-theme='light'] .available-trucks-kpi-grid span,
+:root[data-theme='light'] .available-trucks-insight-card > span,
+:root[data-theme='light'] .available-trucks-source-note span,
+:root[data-theme='light'] .available-truck-send-grid label span,
+:root[data-theme='light'] .available-truck-main-grid label span,
+:root[data-theme='light'] .available-truck-proximity-pair label span,
+:root[data-theme='light'] .available-truck-field-hint,
+:root[data-theme='light'] .available-trucks-kpi-grid small,
+:root[data-theme='light'] .available-trucks-muted,
+:root[data-theme='light'] .available-trucks-table td small,
+:root[data-theme='light'] .available-trucks-footnote,
+:root[data-theme='light'] .available-trucks-tonu-note,
+:root[data-theme='light'] .available-trucks-source-note small,
+:root[data-theme='light'] .available-truck-form-row-header span,
+:root[data-theme='light'] .available-truck-form-actions span,
+:root[data-theme='light'] .available-truck-suggestion-header span,
+:root[data-theme='light'] .available-truck-suggestion-chip span {
+  color: #475569 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .available-trucks-kpi-grid strong,
+:root[data-theme='light'] .available-trucks-insight-card li,
+:root[data-theme='light'] .available-trucks-insight-card li strong,
+:root[data-theme='light'] .available-trucks-table td strong,
+:root[data-theme='light'] .available-trucks-proximity-list strong,
+:root[data-theme='light'] .available-trucks-source-note strong,
+:root[data-theme='light'] .available-truck-suggestion-header strong,
+:root[data-theme='light'] .available-truck-suggestion-chip strong,
+:root[data-theme='light'] .available-truck-form-row-header strong {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .available-trucks-insight-card li span,
+:root[data-theme='light'] .available-trucks-tonu-marker,
+:root[data-theme='light'] .available-trucks-tonu-note sup {
+  color: #2563eb !important;
+}
+
+:root[data-theme='light'] .available-truck-posting-rules,
+:root[data-theme='light'] .available-truck-roster-warning {
+  background: #eff6ff !important;
+  border-color: #bfdbfe !important;
+  border-left-color: #2563eb !important;
+  color: #1e3a8a !important;
+}
+
+:root[data-theme='light'] .available-truck-posting-rules strong,
+:root[data-theme='light'] .available-truck-roster-warning strong {
+  color: #1e3a8a !important;
+}
+
+:root[data-theme='light'] .available-truck-posting-rules span,
+:root[data-theme='light'] .available-truck-roster-warning span {
+  color: #334155 !important;
+}
+
+:root[data-theme='light'] .available-truck-suggestion-chip {
+  background: #ffffff !important;
+  border-color: #bfdbfe !important;
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .available-truck-suggestion-chip:hover:not(:disabled) {
+  background: #eff6ff !important;
+  border-color: #60a5fa !important;
+}
+
+:root[data-theme='light'] .available-truck-main-grid input[readonly] {
+  background: #eef2f7 !important;
+  border-color: #cbd5e1 !important;
+  color: #334155 !important;
+}
+
+:root[data-theme='light'] .view-tabs .active-tab,
+:root[data-theme='light'] .active-filter {
+  background: #2563eb !important;
+  color: #ffffff !important;
+  border-color: #1d4ed8 !important;
+}
+
+:root[data-theme='light'] .sort-indicator {
+  color: #2563eb !important;
+}
+
+/* PASS 19.2: Detail-card readability + theme-aware modal polish
+   Applies to shared order detail cards, Driver Roster cards, and Driver Performance Snapshot.
+   Goal: make these read like dashboard panels instead of a stack of plain field boxes. */
+.detail-grid {
+  gap: 16px;
+  align-items: stretch;
+}
+
+.section-title {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  margin: 14px 0 2px;
+  padding: 12px 16px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-left: 5px solid rgba(212, 160, 23, 0.82);
+  border-radius: 14px;
+  background:
+    linear-gradient(90deg, rgba(212, 160, 23, 0.18), transparent 28%),
+    linear-gradient(180deg, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.96));
+  color: #f8fafc;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055);
+  text-align: center;
+}
+
+.section-title:first-child {
+  margin-top: 0;
+}
+
+.detail-item {
+  position: relative;
+  display: flex;
+  min-height: 96px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 7px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.055), transparent 36%),
+    linear-gradient(180deg, rgba(24, 32, 51, 0.98), rgba(15, 23, 42, 0.96));
+  box-shadow:
+    0 10px 22px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.045);
+}
+
+.detail-item::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, rgba(250, 204, 21, 0.80), rgba(59, 130, 246, 0.34));
+  opacity: 0.72;
+}
+
+.detail-item:hover {
+  border-color: rgba(203, 213, 225, 0.30);
+  transform: translateY(-1px);
+  box-shadow:
+    0 14px 28px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.detail-item span {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  color: #b7c3d5;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.075em;
+}
+
+.detail-item strong {
+  position: relative;
+  z-index: 1;
+  color: #ffffff;
+  font-size: 17px;
+  font-weight: 850;
+  letter-spacing: -0.01em;
+}
+
+.detail-item small,
+.detail-item button {
+  position: relative;
+  z-index: 1;
+}
+
+.driver-roster-grid .detail-item {
+  align-items: center;
+  text-align: center;
+}
+
+.driver-roster-grid .detail-item strong {
+  font-size: 16px;
+}
+
+.driver-roster-grid .section-title {
+  justify-content: center;
+  color: #f8fafc;
+}
+
+/* Performance snapshot: stronger values, better separation, less washed-out in both modes. */
+.driver-snapshot-summary {
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.driver-snapshot-summary div,
+.driver-performance-analysis-card,
+.driver-performance-section-card {
+  border-color: rgba(148, 163, 184, 0.24);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.07), transparent 42%),
+    rgba(15, 23, 42, 0.84);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.055);
+}
+
+.driver-snapshot-summary div {
+  min-height: 96px;
+  padding: 16px;
+  border-radius: 16px;
+}
+
+.driver-snapshot-summary span,
+.driver-performance-analysis-card span {
+  color: #b7c3d5;
+  font-size: 11px;
+  letter-spacing: 0.075em;
+}
+
+.driver-snapshot-summary strong,
+.driver-performance-analysis-card strong {
+  display: block;
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 900;
+  letter-spacing: -0.025em;
+}
+
+.driver-performance-analysis-card small,
+.driver-performance-bar-label span,
+.driver-performance-bar-row small,
+.driver-snapshot-source-note {
+  color: #b7c3d5;
+}
+
+.driver-performance-section-card {
+  padding: 18px;
+  border-radius: 18px;
+}
+
+.driver-performance-section-card h4 {
+  color: #facc15;
+  text-align: center;
+  letter-spacing: 0.01em;
+}
+
+.driver-performance-insight-list {
+  color: #f1f5f9;
+}
+
+.driver-performance-bar-track {
+  height: 13px;
+}
+
+.driver-performance-modal-body {
+  background:
+    radial-gradient(circle at top left, rgba(250, 204, 21, 0.10), transparent 30%),
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.10), transparent 34%),
+    #020617;
+}
+
+/* Available Equipment/Available Trucks panels that were still clinging to dark-mode furniture. */
+.available-trucks-analysis-card,
+.available-trucks-current-card,
+.available-trucks-action-card,
+.available-trucks-insight-card,
+.available-truck-action-tabs,
+.available-trucks-distribution-summary-button {
+  border-color: var(--kole-border) !important;
+}
+
+/* Light mode: remove mustard from structural chrome and restore value contrast. */
+:root[data-theme='light'] .section-title {
+  border-color: #cbd5e1 !important;
+  border-left-color: #2563eb !important;
+  background:
+    linear-gradient(90deg, rgba(37, 99, 235, 0.14), transparent 34%),
+    linear-gradient(180deg, #f8fafc, #eaf2ff) !important;
+  color: #0f172a !important;
+  box-shadow: inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .detail-item {
+  border-color: #d3dce8 !important;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.055), transparent 38%),
+    #ffffff !important;
+  color: #0f172a !important;
+  box-shadow:
+    0 10px 20px rgba(15, 23, 42, 0.07),
+    inset 0 1px 0 rgba(255, 255, 255, 0.96) !important;
+}
+
+:root[data-theme='light'] .detail-item::before {
+  background: linear-gradient(180deg, #2563eb, #14b8a6) !important;
+  opacity: 0.84;
+}
+
+:root[data-theme='light'] .detail-item:hover {
+  border-color: #93c5fd !important;
+  box-shadow:
+    0 14px 28px rgba(15, 23, 42, 0.10),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .detail-item span,
+:root[data-theme='light'] .driver-snapshot-summary span,
+:root[data-theme='light'] .driver-performance-analysis-card span,
+:root[data-theme='light'] .driver-performance-bar-label span,
+:root[data-theme='light'] .driver-performance-bar-row small,
+:root[data-theme='light'] .driver-snapshot-source-note {
+  color: #52627a !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .detail-item strong,
+:root[data-theme='light'] .driver-snapshot-summary strong,
+:root[data-theme='light'] .driver-performance-analysis-card strong,
+:root[data-theme='light'] .driver-performance-bar-label strong {
+  color: #08111f !important;
+}
+
+:root[data-theme='light'] .driver-performance-modal-body {
+  background:
+    radial-gradient(circle at top left, rgba(37, 99, 235, 0.09), transparent 30%),
+    radial-gradient(circle at top right, rgba(20, 184, 166, 0.08), transparent 34%),
+    #f8fafc !important;
+}
+
+:root[data-theme='light'] .driver-snapshot-summary div,
+:root[data-theme='light'] .driver-performance-analysis-card,
+:root[data-theme='light'] .driver-performance-section-card {
+  border-color: #cbd5e1 !important;
+  background:
+    linear-gradient(135deg, rgba(37,99,235,0.055), transparent 40%),
+    #ffffff !important;
+  color: #0f172a !important;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08), inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .driver-performance-analysis-card.highlight {
+  border-color: #93c5fd !important;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.12), transparent 44%),
+    #ffffff !important;
+}
+
+:root[data-theme='light'] .driver-performance-section-card h4 {
+  color: #1d4ed8 !important;
+}
+
+:root[data-theme='light'] .driver-performance-insight-list {
+  color: #111827 !important;
+}
+
+:root[data-theme='light'] .driver-performance-insight-list li::marker {
+  color: #2563eb !important;
+}
+
+:root[data-theme='light'] .driver-performance-bar-track {
+  background: #e2e8f0 !important;
+  border-color: #cbd5e1 !important;
+}
+
+:root[data-theme='light'] .driver-performance-bar-fill {
+  background: linear-gradient(90deg, #2563eb, #14b8a6) !important;
+  box-shadow: 0 0 18px rgba(37, 99, 235, 0.20) !important;
+}
+
+:root[data-theme='light'] .driver-snapshot-table-wrap,
+:root[data-theme='light'] .driver-performance-table-wrap {
+  border-color: #cbd5e1 !important;
+  background: #ffffff !important;
+}
+
+:root[data-theme='light'] .driver-snapshot-warning {
+  color: #92400e !important;
+}
+
+:root[data-theme='light'] .available-trucks-analysis-card,
+:root[data-theme='light'] .available-trucks-current-card,
+:root[data-theme='light'] .available-trucks-action-card {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.08), inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .available-truck-action-tabs {
+  background: #eef2f7 !important;
+  border-color: #cbd5e1 !important;
+}
+
+:root[data-theme='light'] .available-truck-action-tabs button {
+  color: #334155 !important;
+}
+
+:root[data-theme='light'] .available-truck-action-tabs button:hover,
+:root[data-theme='light'] .available-truck-action-tabs button.active {
+  background: #ffffff !important;
+  border-color: #93c5fd !important;
+  color: #1e3a8a !important;
+}
+
+:root[data-theme='light'] .available-trucks-distribution-summary-button {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+/* Splash screen light-mode memo: same animation, not same cave. */
+:root[data-theme='light'] .startup-splash-overlay {
+  background:
+    radial-gradient(circle at 50% 34%, rgba(37, 99, 235, 0.16), transparent 34%),
+    radial-gradient(circle at 50% 64%, rgba(20, 184, 166, 0.10), transparent 38%),
+    rgba(248, 250, 252, 0.96) !important;
+}
+
+:root[data-theme='light'] .startup-splash-card {
+  border-color: #bfdbfe !important;
+  background: linear-gradient(180deg, #ffffff, #f1f5f9) !important;
+  color: #0f172a !important;
+  box-shadow: 0 34px 100px rgba(15, 23, 42, 0.20) !important;
+}
+
+:root[data-theme='light'] .startup-splash-card::before {
+  background:
+    linear-gradient(90deg, transparent, rgba(37, 99, 235, 0.08), transparent),
+    repeating-linear-gradient(0deg, rgba(15,23,42,0.025) 0, rgba(15,23,42,0.025) 1px, transparent 1px, transparent 7px) !important;
+}
+
+:root[data-theme='light'] .startup-splash-card h2 {
+  color: #1e3a8a !important;
+}
+
+:root[data-theme='light'] .startup-splash-card p,
+:root[data-theme='light'] .startup-splash-footer,
+:root[data-theme='light'] .startup-splash-step small {
+  color: #475569 !important;
+}
+
+:root[data-theme='light'] .startup-splash-step {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  opacity: 0.82;
+}
+
+:root[data-theme='light'] .startup-splash-step strong {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .startup-splash-step.active {
+  background: #eff6ff !important;
+  border-color: #93c5fd !important;
+  opacity: 1;
+}
+
+:root[data-theme='light'] .startup-splash-step.complete {
+  background: #ecfdf5 !important;
+  border-color: #86efac !important;
+  opacity: 1;
+}
+
+:root[data-theme='light'] .startup-splash-step.active .startup-splash-step-dot {
+  background: #2563eb !important;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14), 0 0 22px rgba(37, 99, 235, 0.42) !important;
+}
+
+:root[data-theme='light'] .startup-splash-route {
+  background: #dbeafe !important;
+}
+
+:root[data-theme='light'] .startup-splash-route span {
+  background: linear-gradient(90deg, transparent, #2563eb, transparent) !important;
+}
+
+/* PASS 19.4: Light-mode readability cleanup
+   Fixes low-contrast pills, report chevrons/select arrows, permit governance cards,
+   and washed-out financial/report values after the first light-mode rollout. */
+:root[data-theme='light'] {
+  --kole-light-ink: #0f172a;
+  --kole-light-ink-soft: #334155;
+  --kole-light-muted-strong: #475569;
+  --kole-light-line: #cbd5e1;
+  --kole-light-line-strong: #94a3b8;
+  --kole-light-blue: #2563eb;
+  --kole-light-blue-deep: #1e3a8a;
+  --kole-light-teal: #0f766e;
+}
+
+/* Native select arrows were inheriting dark-mode vibes in a few report controls. */
+:root[data-theme='light'] select,
+:root[data-theme='light'] .report-controls select,
+:root[data-theme='light'] .available-truck-send-grid select,
+:root[data-theme='light'] .available-truck-main-grid select,
+:root[data-theme='light'] .driver-time-off-form-grid select,
+:root[data-theme='light'] .on-this-day-filter-bar select {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  background-color: #ffffff !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M5.5 7.5L10 12l4.5-4.5' stroke='%23111827' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 12px center !important;
+  background-size: 16px 16px !important;
+  color: var(--kole-light-ink) !important;
+  padding-right: 40px !important;
+}
+
+:root[data-theme='light'] .report-accordion-icon,
+:root[data-theme='light'] .report-group-button .report-accordion-icon,
+:root[data-theme='light'] .report-accordion-button .report-accordion-icon,
+:root[data-theme='light'] .report-group-button-actions .report-accordion-icon {
+  color: var(--kole-light-ink) !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}
+
+/* Make report/card values read as values, not disabled placeholder text. */
+:root[data-theme='light'] .report-kpi-card,
+:root[data-theme='light'] .settlement-totals-grid div,
+:root[data-theme='light'] .driver-report-totals-grid div,
+:root[data-theme='light'] .sales-summary-grid div,
+:root[data-theme='light'] .sales-lead-metrics div,
+:root[data-theme='light'] .sales-profile-headline-grid div {
+  border-color: #cbd5e1 !important;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.035), transparent 42%),
+    #ffffff !important;
+  box-shadow:
+    0 10px 22px rgba(15, 23, 42, 0.065),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .report-kpi-card strong,
+:root[data-theme='light'] .settlement-totals-grid strong,
+:root[data-theme='light'] .driver-report-totals-grid strong,
+:root[data-theme='light'] .sales-summary-grid strong,
+:root[data-theme='light'] .sales-summary-button strong,
+:root[data-theme='light'] .sales-lead-metrics strong,
+:root[data-theme='light'] .sales-profile-headline-grid strong,
+:root[data-theme='light'] .report-alert-grid strong,
+:root[data-theme='light'] .gross-revenue-quarter-total strong,
+:root[data-theme='light'] .gross-driver-month-card strong {
+  color: var(--kole-light-ink) !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .report-kpi-card span,
+:root[data-theme='light'] .report-kpi-card small,
+:root[data-theme='light'] .settlement-totals-grid span,
+:root[data-theme='light'] .driver-report-totals-grid span,
+:root[data-theme='light'] .gross-revenue-quarter-total small,
+:root[data-theme='light'] .gross-load-count-note,
+:root[data-theme='light'] .muted-table-note,
+:root[data-theme='light'] .report-card p,
+:root[data-theme='light'] .driver-report-title p,
+:root[data-theme='light'] .gross-driver-month-card span,
+:root[data-theme='light'] .gross-driver-month-card small {
+  color: var(--kole-light-muted-strong) !important;
+  opacity: 1 !important;
+}
+
+/* Current-month yellow was too pale on white. Keep the warning cue, but make it readable. */
+:root[data-theme='light'] .gross-revenue-current-month-card,
+:root[data-theme='light'] .gross-driver-month-card.current-month {
+  border-color: #f59e0b !important;
+  background:
+    linear-gradient(135deg, rgba(245, 158, 11, 0.13), transparent 44%),
+    #fffbeb !important;
+  box-shadow:
+    0 0 0 1px rgba(245, 158, 11, 0.18),
+    0 12px 26px rgba(146, 64, 14, 0.08) !important;
+}
+
+:root[data-theme='light'] .gross-revenue-current-month-card span,
+:root[data-theme='light'] .gross-revenue-current-month-card small,
+:root[data-theme='light'] .gross-driver-month-card.current-month span,
+:root[data-theme='light'] .gross-driver-month-card.current-month em {
+  color: #92400e !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .gross-revenue-quarter-table th.gross-revenue-current-month-cell,
+:root[data-theme='light'] .gross-revenue-quarter-table td.gross-revenue-current-month-cell {
+  background: #fffbeb !important;
+  border-left-color: #fbbf24 !important;
+  border-right-color: #fbbf24 !important;
+}
+
+:root[data-theme='light'] .gross-revenue-quarter-table th.gross-revenue-current-month-cell,
+:root[data-theme='light'] .gross-revenue-current-month-label {
+  color: #92400e !important;
+}
+
+:root[data-theme='light'] .gross-revenue-current-month-label,
+:root[data-theme='light'] .gross-driver-month-card.current-month em {
+  background: #fef3c7 !important;
+  border-color: #f59e0b !important;
+  font-weight: 900 !important;
+}
+
+/* Operational/report pills: stop looking disabled in light mode. */
+:root[data-theme='light'] .operation-status-pill,
+:root[data-theme='light'] .gross-driver-status-pill,
+:root[data-theme='light'] .status,
+:root[data-theme='light'] .sales-status,
+:root[data-theme='light'] .sales-lead-note-count,
+:root[data-theme='light'] .report-group-alert-pill,
+:root[data-theme='light'] .feature-section-status-pill,
+:root[data-theme='light'] .driver-time-off-count-pill,
+:root[data-theme='light'] .driver-position-count-pill,
+:root[data-theme='light'] .on-this-day-summary-pill {
+  opacity: 1 !important;
+  font-weight: 900 !important;
+  text-shadow: none !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.78) !important;
+}
+
+:root[data-theme='light'] .operation-status-pill.open,
+:root[data-theme='light'] .gross-driver-status-pill.active,
+:root[data-theme='light'] .status.won {
+  background: #dcfce7 !important;
+  border-color: #86efac !important;
+  color: #14532d !important;
+}
+
+:root[data-theme='light'] .operation-status-pill.settled,
+:root[data-theme='light'] .gross-driver-status-pill.inactive,
+:root[data-theme='light'] .status.cancelled,
+:root[data-theme='light'] .status.quote {
+  background: #e2e8f0 !important;
+  border-color: #94a3b8 !important;
+  color: #334155 !important;
+}
+
+:root[data-theme='light'] .gross-driver-status-pill.zero,
+:root[data-theme='light'] .status.tonu {
+  background: #fef3c7 !important;
+  border-color: #f59e0b !important;
+  color: #92400e !important;
+}
+
+:root[data-theme='light'] .status.lost {
+  background: #fee2e2 !important;
+  border-color: #fca5a5 !important;
+  color: #991b1b !important;
+}
+
+:root[data-theme='light'] .feature-section-status-pill.is-zero,
+:root[data-theme='light'] .report-alert-status-pill.is-zero,
+:root[data-theme='light'] .report-group-alert-pill.is-zero,
+:root[data-theme='light'] .driver-time-off-count-pill.is-zero,
+:root[data-theme='light'] .driver-position-count-pill.total {
+  background: #f1f5f9 !important;
+  border-color: #94a3b8 !important;
+  color: #334155 !important;
+}
+
+:root[data-theme='light'] .feature-section-status-pill.has-items,
+:root[data-theme='light'] .report-alert-status-pill.has-alerts,
+:root[data-theme='light'] .report-group-alert-pill.has-alerts,
+:root[data-theme='light'] .driver-time-off-count-pill.has-items,
+:root[data-theme='light'] .upload-digest-count,
+:root[data-theme='light'] .intellitrack-count,
+:root[data-theme='light'] .available-trucks-count {
+  background: linear-gradient(180deg, #0f766e, #115e59) !important;
+  border-color: #0f766e !important;
+  color: #ffffff !important;
+}
+
+:root[data-theme='light'] .sales-lead-note-count {
+  background: #dbeafe !important;
+  border-color: #60a5fa !important;
+  color: #1e3a8a !important;
+}
+
+/* On This Day summary chips need light-specific colors, not dark transparent badges. */
+:root[data-theme='light'] .on-this-day-summary-pill {
+  border-color: #cbd5e1 !important;
+  color: var(--kole-light-ink) !important;
+}
+
+:root[data-theme='light'] .on-this-day-summary-pill.pickup {
+  background: #dcfce7 !important;
+  border-color: #86efac !important;
+  color: #14532d !important;
+}
+
+:root[data-theme='light'] .on-this-day-summary-pill.delivery {
+  background: #dbeafe !important;
+  border-color: #93c5fd !important;
+  color: #1e3a8a !important;
+}
+
+:root[data-theme='light'] .on-this-day-summary-pill.bid {
+  background: #ffedd5 !important;
+  border-color: #fdba74 !important;
+  color: #9a3412 !important;
+}
+
+:root[data-theme='light'] .on-this-day-summary-pill.upload {
+  background: #ede9fe !important;
+  border-color: #c4b5fd !important;
+  color: #5b21b6 !important;
+}
+
+:root[data-theme='light'] .on-this-day-summary-pill.off {
+  background: #fee2e2 !important;
+  border-color: #fca5a5 !important;
+  color: #991b1b !important;
+}
+
+/* Permit Governance top cards: modern light dashboard cards instead of dark old-school blocks. */
+:root[data-theme='light'] .permit-governance-card-grid {
+  gap: 14px !important;
+}
+
+:root[data-theme='light'] .permit-governance-filter-card {
+  position: relative;
+  overflow: hidden;
+  min-height: 122px;
+  border-color: #cbd5e1 !important;
+  border-left: 5px solid #64748b !important;
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.09), transparent 36%),
+    linear-gradient(180deg, #ffffff, #f8fafc) !important;
+  color: var(--kole-light-ink) !important;
+  box-shadow:
+    0 14px 28px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .permit-governance-filter-card:hover {
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.12), transparent 36%),
+    linear-gradient(180deg, #ffffff, #eef6ff) !important;
+  border-color: #bfdbfe !important;
+  border-left-color: #2563eb !important;
+  transform: translateY(-1px);
+}
+
+:root[data-theme='light'] .permit-governance-filter-card.active {
+  border-color: #93c5fd !important;
+  border-left-color: #2563eb !important;
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.16), transparent 38%),
+    linear-gradient(180deg, #eff6ff, #ffffff) !important;
+  box-shadow:
+    0 16px 32px rgba(37, 99, 235, 0.13),
+    inset 0 0 0 1px rgba(37, 99, 235, 0.10) !important;
+}
+
+:root[data-theme='light'] .permit-governance-filter-card span {
+  color: #334155 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .permit-governance-filter-card strong {
+  color: #0f172a !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .permit-governance-filter-card.active strong {
+  color: #1d4ed8 !important;
+}
+
+:root[data-theme='light'] .permit-governance-filter-card small,
+:root[data-theme='light'] .permit-governance-warning p,
+:root[data-theme='light'] .permit-governance-table td small {
+  color: #475569 !important;
+  opacity: 1 !important;
+}
+
+/* Button/pill contrast inside light report tables. */
+:root[data-theme='light'] .compact-action-button,
+:root[data-theme='light'] .permit-governance-table td:last-child .compact-action-button,
+:root[data-theme='light'] .gross-driver-link {
+  background: #334155 !important;
+  border: 1px solid #334155 !important;
+  color: #ffffff !important;
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.14) !important;
+}
+
+:root[data-theme='light'] .compact-action-button:hover:not(:disabled),
+:root[data-theme='light'] .permit-governance-table td:last-child .compact-action-button:hover:not(:disabled),
+:root[data-theme='light'] .gross-driver-link:hover:not(:disabled) {
+  background: #1d4ed8 !important;
+  border-color: #1d4ed8 !important;
+  color: #ffffff !important;
+}
+
+/* PASS 19.5: Light-mode report readability polish
+   Targets the remaining report islands Kris flagged: Customer Booking Trends pills/notes,
+   No Availability dark panels, and pale green/red status language on white. */
+:root[data-theme='light'] .customer-trends-meta-card,
+:root[data-theme='light'] .customer-trends-meta-card.warning {
+  border-color: #cbd5e1 !important;
+  border-left-color: #2563eb !important;
+  background:
+    linear-gradient(90deg, rgba(37, 99, 235, 0.10), transparent 34%),
+    linear-gradient(180deg, #f8fafc, #eef6ff) !important;
+  color: #0f172a !important;
+  box-shadow:
+    0 10px 24px rgba(15, 23, 42, 0.07),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .customer-trends-meta-card strong,
+:root[data-theme='light'] .customer-trends-meta-card b {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .customer-trends-meta-card span,
+:root[data-theme='light'] .customer-trends-lock-note,
+:root[data-theme='light'] .customer-trends-preview .driver-report-section-header p,
+:root[data-theme='light'] .customer-trend-detail-modal .driver-report-section-header p {
+  color: #475569 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .customer-trends-summary-grid div,
+:root[data-theme='light'] .customer-trend-detail-grid div,
+:root[data-theme='light'] .customer-trends-filter-grid div {
+  border-color: #cbd5e1 !important;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.035), transparent 44%),
+    #ffffff !important;
+  box-shadow:
+    0 10px 22px rgba(15, 23, 42, 0.055),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .customer-trends-summary-grid span,
+:root[data-theme='light'] .customer-trend-detail-grid span,
+:root[data-theme='light'] .customer-trends-filter-grid span {
+  color: #475569 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .customer-trends-summary-grid strong,
+:root[data-theme='light'] .customer-trend-detail-grid strong,
+:root[data-theme='light'] .customer-trends-filter-grid strong {
+  color: #0f172a !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .customer-trend-change.positive {
+  color: #047857 !important;
+  text-shadow: none !important;
+}
+
+:root[data-theme='light'] .customer-trend-change.negative {
+  color: #b91c1c !important;
+  text-shadow: none !important;
+}
+
+:root[data-theme='light'] .customer-trend-change.neutral {
+  color: #334155 !important;
+}
+
+:root[data-theme='light'] .customer-trend-pill {
+  border: 1px solid transparent !important;
+  opacity: 1 !important;
+  font-weight: 950 !important;
+  letter-spacing: 0.055em !important;
+  text-shadow: none !important;
+  box-shadow:
+    0 5px 12px rgba(15, 23, 42, 0.12),
+    inset 0 1px 0 rgba(255,255,255,0.22) !important;
+}
+
+:root[data-theme='light'] .customer-trend-pill.growing {
+  background: #15803d !important;
+  border-color: #166534 !important;
+  color: #ffffff !important;
+}
+
+:root[data-theme='light'] .customer-trend-pill.newReturning {
+  background: #2563eb !important;
+  border-color: #1d4ed8 !important;
+  color: #ffffff !important;
+}
+
+:root[data-theme='light'] .customer-trend-pill.declining {
+  background: #b91c1c !important;
+  border-color: #991b1b !important;
+  color: #ffffff !important;
+}
+
+:root[data-theme='light'] .customer-trend-pill.dormant {
+  background: #475569 !important;
+  border-color: #334155 !important;
+  color: #ffffff !important;
+}
+
+:root[data-theme='light'] .customer-trend-pill.steady {
+  background: #0f766e !important;
+  border-color: #115e59 !important;
+  color: #ffffff !important;
+}
+
+:root[data-theme='light'] .customer-trend-insights-list {
+  background: #ffffff !important;
+}
+
+:root[data-theme='light'] .customer-trend-insight-card {
+  border-color: #bfdbfe !important;
+  border-left: 4px solid #2563eb !important;
+  background:
+    linear-gradient(90deg, rgba(37, 99, 235, 0.08), transparent 38%),
+    #eff6ff !important;
+  color: #0f172a !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.92) !important;
+}
+
+:root[data-theme='light'] .customer-trend-insight-card strong,
+:root[data-theme='light'] .customer-trend-insight-card b {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .customer-trends-preview .driver-report-section-header,
+:root[data-theme='light'] .customer-trend-detail-modal .driver-report-section-header {
+  border-color: #cbd5e1 !important;
+  background: linear-gradient(180deg, #ffffff, #f8fafc) !important;
+  color: #0f172a !important;
+}
+
+/* No Availability: make the pattern-finder panels true light-mode cards. */
+:root[data-theme='light'] .no-availability-card,
+:root[data-theme='light'] .no-availability-insight-section,
+:root[data-theme='light'] .no-availability-year-section,
+:root[data-theme='light'] .no-availability-log-section {
+  border-color: #cbd5e1 !important;
+  background: #ffffff !important;
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .no-availability-note-card {
+  border-color: #f59e0b !important;
+  border-left-color: #d97706 !important;
+  background:
+    linear-gradient(90deg, rgba(245, 158, 11, 0.12), transparent 38%),
+    #fffbeb !important;
+  color: #7c2d12 !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.86) !important;
+}
+
+:root[data-theme='light'] .no-availability-insight-grid,
+:root[data-theme='light'] .no-availability-year-section .no-availability-year-strip {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+:root[data-theme='light'] .no-availability-insight-card,
+:root[data-theme='light'] .no-availability-year-strip div {
+  border-color: #cbd5e1 !important;
+  border-left-color: #64748b !important;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.035), transparent 42%),
+    #ffffff !important;
+  color: #0f172a !important;
+  box-shadow:
+    0 8px 18px rgba(15, 23, 42, 0.055),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .no-availability-insight-card.warning {
+  border-left-color: #d97706 !important;
+  background:
+    linear-gradient(90deg, rgba(245, 158, 11, 0.12), transparent 40%),
+    #fffbeb !important;
+}
+
+:root[data-theme='light'] .no-availability-insight-card.info {
+  border-left-color: #2563eb !important;
+}
+
+:root[data-theme='light'] .no-availability-insight-card span,
+:root[data-theme='light'] .no-availability-year-strip span,
+:root[data-theme='light'] .no-availability-year-strip small,
+:root[data-theme='light'] .no-availability-pattern-card-header p,
+:root[data-theme='light'] .no-availability-pattern-meta,
+:root[data-theme='light'] .no-availability-empty-pattern {
+  color: #475569 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .no-availability-insight-card strong,
+:root[data-theme='light'] .no-availability-insight-card p,
+:root[data-theme='light'] .no-availability-year-strip strong,
+:root[data-theme='light'] .no-availability-pattern-topline strong,
+:root[data-theme='light'] .no-availability-pattern-topline span {
+  color: #0f172a !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .no-availability-pattern-card {
+  border-color: #cbd5e1 !important;
+  background: #ffffff !important;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.075) !important;
+}
+
+:root[data-theme='light'] .no-availability-pattern-card-header {
+  background: linear-gradient(180deg, #ffffff, #f8fafc) !important;
+  border-bottom-color: #cbd5e1 !important;
+}
+
+:root[data-theme='light'] .no-availability-pattern-card-header h4 {
+  color: #1d4ed8 !important;
+  text-shadow: none !important;
+}
+
+:root[data-theme='light'] .no-availability-pattern-row {
+  border-color: #dbe3ef !important;
+  background: #f8fafc !important;
+}
+
+:root[data-theme='light'] .no-availability-pattern-row:hover {
+  border-color: #93c5fd !important;
+  background: #eff6ff !important;
+}
+
+:root[data-theme='light'] .no-availability-pattern-rank {
+  background: #dbeafe !important;
+  border: 1px solid #93c5fd !important;
+  color: #1e3a8a !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.82) !important;
+}
+
+:root[data-theme='light'] .no-availability-bar-track {
+  background: #e2e8f0 !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+:root[data-theme='light'] .no-availability-bar-fill {
+  background: linear-gradient(90deg, #2563eb, #0f766e) !important;
+}
+
+:root[data-theme='light'] .no-availability-preview .driver-report-section-header,
+:root[data-theme='light'] .no-availability-preview .driver-report-section-header h4,
+:root[data-theme='light'] .no-availability-preview .driver-report-section-header p {
+  color: #0f172a !important;
+  text-shadow: none !important;
+}
+
+:root[data-theme='light'] .no-availability-preview .driver-report-section-header p {
+  color: #475569 !important;
+}
+
+/* A few report notes used slate blocks in dark mode; in light mode they should read like callouts, not disabled panels. */
+:root[data-theme='light'] .trend-note,
+:root[data-theme='light'] .report-note,
+:root[data-theme='light'] .report-callout,
+:root[data-theme='light'] .driver-report-note,
+:root[data-theme='light'] .settlement-window-note {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  color: #334155 !important;
+}

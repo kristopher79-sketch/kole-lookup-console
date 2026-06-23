@@ -23,6 +23,15 @@ const ON_THIS_DAY_CLIENT_CACHE_LIMIT = 10;
 const STARTUP_SPLASH_MIN_MS = 5000;
 const STARTUP_SPLASH_EXIT_MS = 420;
 const STARTUP_SPLASH_FAKE_LIGHTS_COMPLETE_MS = 4600;
+const KOLE_THEME_STORAGE_KEY = 'koleConnectTheme';
+
+function getSavedKoleTheme() {
+  try {
+    return localStorage.getItem(KOLE_THEME_STORAGE_KEY) === 'light' ? 'light' : 'dark';
+  } catch (err) {
+    return 'dark';
+  }
+}
 
 function getStartupStepClass(state) {
   return `startup-splash-step ${state === 'complete' ? 'complete' : ''} ${state === 'active' ? 'active' : ''}`.trim();
@@ -579,6 +588,7 @@ function getDriverHistoryTruckFromCard(card) {
 export default function App() {
   const [accessToken, setAccessToken] = useState(() => sessionStorage.getItem('koleLookupToken') || '');
   const [password, setPassword] = useState('');
+  const [colorTheme, setColorTheme] = useState(getSavedKoleTheme);
   const [brandRevealActive, setBrandRevealActive] = useState(false);
   const [brandRevealKey, setBrandRevealKey] = useState(0);
   const brandRevealTimerRef = useRef(null);
@@ -1028,6 +1038,27 @@ export default function App() {
     }, 2900);
   }
 
+  function toggleColorTheme() {
+    setColorTheme((currentTheme) => currentTheme === 'light' ? 'dark' : 'light');
+  }
+
+  function ThemeToggleButton({ className = '' }) {
+    const isLight = colorTheme === 'light';
+
+    return (
+      <button
+        type="button"
+        className={`theme-toggle-button ${isLight ? 'light' : 'dark'} ${className}`.trim()}
+        onClick={toggleColorTheme}
+        aria-pressed={isLight}
+        title={isLight ? 'Switch to dark mode' : 'Switch to light mode'}
+      >
+        <span className="theme-toggle-icon" aria-hidden="true">{isLight ? '☀' : '☾'}</span>
+        <span>{isLight ? 'Light Mode' : 'Dark Mode'}</span>
+      </button>
+    );
+  }
+
 
   useEffect(() => {
     const runtimeClass = isTauriRuntime ? 'tauri-runtime' : 'web-runtime';
@@ -1035,6 +1066,18 @@ export default function App() {
 
     return () => document.body.classList.remove(runtimeClass);
   }, []);
+
+  useEffect(() => {
+    const normalizedTheme = colorTheme === 'light' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = normalizedTheme;
+    document.body.dataset.theme = normalizedTheme;
+
+    try {
+      localStorage.setItem(KOLE_THEME_STORAGE_KEY, normalizedTheme);
+    } catch (err) {
+      // Local storage may be unavailable in a locked-down webview; the toggle still works for this session.
+    }
+  }, [colorTheme]);
 
   useEffect(() => {
     return () => {
@@ -11762,6 +11805,10 @@ function openReportLoadDetails(load) {
 
     <KoleBrandTitle subtitle="Enter your Kole Connect access token to continue." />
   </div>
+
+  <div className="header-actions login-header-actions">
+    <ThemeToggleButton />
+  </div>
 </header>
 
         <div className="search-card">
@@ -11843,9 +11890,12 @@ function openReportLoadDetails(load) {
     />
   </div>
 
-  <button className="close-button header-logoff" onClick={handleLogout}>
-    Log Off
-  </button>
+  <div className="header-actions">
+    <ThemeToggleButton />
+    <button type="button" className="close-button header-logoff" onClick={handleLogout}>
+      Log Off
+    </button>
+  </div>
 </header>
 
       <div className="search-card">
