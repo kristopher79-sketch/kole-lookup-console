@@ -5188,16 +5188,22 @@ function openReportLoadDetails(load) {
     return <div className="section-title">{children}</div>;
   }
 
-  function DocumentCard({ title, description, buttonText, onClick, disabled, loading }) {
+  function DocumentCard({ badge, title, meta, description, buttonText, onClick, disabled, loading }) {
     return (
-      <div className="detail-item wide">
-        <span>{title}</span>
-        <strong>{description}</strong>
+      <div className={`document-launch-card ${disabled ? 'is-disabled' : ''}`}>
+        <div className="document-launch-copy">
+          <span className="document-launch-badge">{badge}</span>
+          <div>
+            <strong>{title}</strong>
+            {meta && <small>{meta}</small>}
+            {description && <p>{description}</p>}
+          </div>
+        </div>
         <button
-          className="view-button"
+          type="button"
+          className="document-launch-button"
           onClick={onClick}
           disabled={disabled || loading}
-          style={{ marginTop: '10px', width: 'fit-content' }}
         >
           {loading ? 'Opening...' : buttonText}
         </button>
@@ -5424,40 +5430,48 @@ function openReportLoadDetails(load) {
   }
 
   function DocumentsView() {
+    const bolLabel = selected.BOL || 'No BOL number found';
+    const driverLabel = selected.TMSName || selected.Driver || '';
+
     return (
-      <div className="detail-grid">
+      <div className="detail-grid documents-grid">
         <SectionTitle>Order Documents</SectionTitle>
 
+        <div className="documents-intro">
+          <div>
+            <strong>{selected.BOL ? `Quick links for ${selected.BOL}` : 'Quick document links'}</strong>
+            <span>Open the source file or folder in SharePoint / OneDrive.</span>
+          </div>
+        </div>
+
         <DocumentCard
-          title="BOL"
-          description={selected.BOL ? `Open BOL ${selected.BOL}` : 'No BOL number found'}
-          buttonText="Open BOL"
+          badge="BOL"
+          title="Bill of Lading"
+          meta={bolLabel}
+          description={selected.BOL ? 'Saved BOL document.' : 'Missing BOL number.'}
+          buttonText="Open"
           onClick={openBolDocument}
           disabled={!selected.BOL}
           loading={documentLoading === 'bol'}
         />
 
         <DocumentCard
+          badge="DSP"
           title="Dispatch Sheet"
-          description={
-            selected.BOL
-              ? `Open Dispatch Sheet for ${selected.BOL}`
-              : 'No BOL number found'
-          }
-          buttonText="Open Dispatch Sheet"
+          meta={bolLabel}
+          description={selected.BOL ? 'Dispatch packet for this load.' : 'Missing BOL number.'}
+          buttonText="Open"
           onClick={openDispatchSheetDocument}
           disabled={!selected.BOL}
           loading={documentLoading === 'dispatchsheet'}
         />
 
         <DocumentCard
+          badge="IMG"
           title="Load Photos"
-          description={
-            selected.BOL
-              ? `Open Load Photo Folder for ${selected.BOL}`
-              : 'No BOL number found'
-          }
-          buttonText="Open Load Photos"
+          meta={driverLabel ? `${bolLabel} · ${driverLabel}` : bolLabel}
+          description={selected.BOL ? 'Driver upload folder.' : 'Missing BOL number.'}
+          buttonText="Open folder"
           onClick={openLoadPhotosFolder}
           disabled={!selected.BOL}
           loading={documentLoading === 'loadphotos'}
@@ -5465,13 +5479,11 @@ function openReportLoadDetails(load) {
 
         {hasPermitFolder(selected) && (
           <DocumentCard
+            badge="PER"
             title="Permits"
-            description={
-              selected.BOL && selected.Driver
-                ? `Open Permit Folder for ${selected.BOL} (${selected.Driver})`
-                : 'BOL number or Operator/Team value missing'
-            }
-            buttonText="Open Permits"
+            meta={selected.Driver ? `${bolLabel} · ${selected.Driver}` : bolLabel}
+            description={selected.BOL && selected.Driver ? 'Permit request folder.' : 'Missing BOL or Operator/Team value.'}
+            buttonText="Open folder"
             onClick={() => openPermitFolder(selected)}
             disabled={!selected.BOL || !selected.Driver}
             loading={documentLoading === 'permits'}
@@ -5479,13 +5491,11 @@ function openReportLoadDetails(load) {
         )}
 
         <DocumentCard
+          badge="SET"
           title="Final Settle"
-          description={
-            selected.BOL
-              ? `Final Settle Worksheet for ${selected.BOL}`
-              : 'No BOL number found'
-          }
-          buttonText="Open Final Settle"
+          meta={bolLabel}
+          description={selected.BOL ? 'Settlement worksheet.' : 'Missing BOL number.'}
+          buttonText="Open"
           onClick={openFinalSettleDocument}
           disabled={!selected.BOL}
           loading={documentLoading === 'finalsettle'}

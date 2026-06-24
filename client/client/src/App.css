@@ -11619,3 +11619,354 @@ button.available-truck-distribution-summary-card:disabled {
     justify-self: start;
   }
 }
+
+/* PASS 21: Document modal quick-link tiles
+   These are launch actions, not data fields, so remove the repeated label/title/button stack. */
+.documents-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.documents-intro {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 16px;
+  border: 1px solid rgba(148, 163, 184, 0.20);
+  border-radius: 14px;
+  background:
+    linear-gradient(90deg, rgba(59, 130, 246, 0.14), transparent 34%),
+    rgba(15, 23, 42, 0.72);
+  color: #f8fafc;
+  text-align: center;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.documents-intro strong,
+.documents-intro span {
+  display: block;
+}
+
+.documents-intro strong {
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+
+.documents-intro span {
+  margin-top: 3px;
+  color: #b7c3d5;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.document-launch-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 116px;
+  padding: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.065), transparent 40%),
+    linear-gradient(180deg, rgba(24, 32, 51, 0.98), rgba(15, 23, 42, 0.96));
+  box-shadow:
+    0 10px 22px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.document-launch-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.92), rgba(20, 184, 166, 0.48));
+}
+
+.document-launch-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(203, 213, 225, 0.32);
+  box-shadow:
+    0 14px 28px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.document-launch-card.is-disabled {
+  opacity: 0.72;
+}
+
+.document-launch-copy {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.document-launch-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
+  border: 1px solid rgba(96, 165, 250, 0.40);
+  border-radius: 15px;
+  background: rgba(37, 99, 235, 0.16);
+  color: #dbeafe;
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.document-launch-copy strong {
+  display: block;
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.document-launch-copy small {
+  display: block;
+  margin-top: 4px;
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.document-launch-copy p {
+  margin: 5px 0 0;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.document-launch-button {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  min-width: 112px;
+  padding: 10px 14px;
+  border: 1px solid rgba(203, 213, 225, 0.16);
+  border-radius: 12px;
+  background: #334155;
+  color: #ffffff;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.18);
+}
+
+.document-launch-button:hover:not(:disabled) {
+  background: #475569;
+}
+
+:root[data-theme='light'] .documents-intro {
+  border-color: #cbd5e1 !important;
+  background:
+    linear-gradient(90deg, rgba(37, 99, 235, 0.10), transparent 34%),
+    #f8fafc !important;
+  color: #0f172a !important;
+  box-shadow: inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .documents-intro strong {
+  color: #08111f !important;
+}
+
+:root[data-theme='light'] .documents-intro span {
+  color: #52627a !important;
+}
+
+:root[data-theme='light'] .document-launch-card {
+  border-color: #d3dce8 !important;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.055), transparent 38%),
+    #ffffff !important;
+  box-shadow:
+    0 10px 20px rgba(15, 23, 42, 0.07),
+    inset 0 1px 0 rgba(255, 255, 255, 0.96) !important;
+}
+
+:root[data-theme='light'] .document-launch-card::before {
+  background: linear-gradient(180deg, #2563eb, #14b8a6) !important;
+}
+
+:root[data-theme='light'] .document-launch-card:hover {
+  border-color: #93c5fd !important;
+  box-shadow:
+    0 14px 28px rgba(15, 23, 42, 0.10),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .document-launch-badge {
+  border-color: #bfdbfe !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+}
+
+:root[data-theme='light'] .document-launch-copy strong {
+  color: #08111f !important;
+}
+
+:root[data-theme='light'] .document-launch-copy small {
+  color: #334155 !important;
+}
+
+:root[data-theme='light'] .document-launch-copy p {
+  color: #52627a !important;
+}
+
+:root[data-theme='light'] .document-launch-button {
+  border-color: #1d4ed8 !important;
+  background: #2563eb !important;
+  color: #ffffff !important;
+  box-shadow: 0 8px 16px rgba(37, 99, 235, 0.18) !important;
+}
+
+:root[data-theme='light'] .document-launch-button:hover:not(:disabled) {
+  background: #1d4ed8 !important;
+}
+
+@media (max-width: 900px) {
+  .documents-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .document-launch-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .document-launch-button {
+    width: 100%;
+  }
+}
+
+/* PASS 22: Light mode sales notes readability
+   The Sales Notes Log is mostly narrative text, so it needs darker ink than
+   the generic muted report copy used elsewhere in light mode. */
+:root[data-theme='light'] .sales-notes-section {
+  background: #ffffff !important;
+  color: #111827 !important;
+}
+
+:root[data-theme='light'] .sales-note-composer {
+  border-bottom-color: #cbd5e1 !important;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.035), transparent 42%),
+    #f8fafc !important;
+  color: #111827 !important;
+}
+
+:root[data-theme='light'] .sales-note-composer label span {
+  color: #334155 !important;
+  text-shadow: none !important;
+}
+
+:root[data-theme='light'] .sales-note-composer textarea::placeholder {
+  color: #64748b !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-note-composer-footer small,
+:root[data-theme='light'] .sales-note-save-message {
+  color: #334155 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-notes-list {
+  background: #f8fafc !important;
+}
+
+:root[data-theme='light'] .sales-notes-section .sales-note-card {
+  border-color: #cbd5e1 !important;
+  background: #ffffff !important;
+  box-shadow:
+    0 8px 18px rgba(15, 23, 42, 0.055),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .sales-notes-section .sales-note-card-header strong {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .sales-notes-section .sales-note-card p,
+:root[data-theme='light'] .sales-notes-section .sales-note-text {
+  color: #334155 !important;
+  opacity: 1 !important;
+}
+
+/* PASS 23: Light mode follow-up suppression control
+   This card was still using the dark-mode translucent slate background,
+   which made the helper text and footer nearly disappear in light mode. */
+:root[data-theme='light'] .sales-suppression-control-section {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #111827 !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-section .driver-report-section-header {
+  background: linear-gradient(180deg, #ffffff, #f8fafc) !important;
+  border-bottom-color: #cbd5e1 !important;
+  color: #111827 !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-section .driver-report-section-header h4 {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-section .driver-report-section-header p {
+  color: #475569 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-card {
+  border-top-color: #cbd5e1 !important;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.035), transparent 44%),
+    #f8fafc !important;
+  color: #111827 !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-card strong {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-card p,
+:root[data-theme='light'] .sales-suppression-control-card small,
+:root[data-theme='light'] .sales-suppression-control-footer small {
+  color: #475569 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-card label span {
+  color: #334155 !important;
+  text-shadow: none !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-card textarea {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #111827 !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.85) !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-card textarea::placeholder {
+  color: #64748b !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-card textarea:focus {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16) !important;
+}
