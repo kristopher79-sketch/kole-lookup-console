@@ -6863,19 +6863,6 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 
-/* PHASE 1: Reports accordion scroll stability
-   Prevent the browser's scroll anchoring from trying to compensate while nested
-   report drawers open/close. JS also preserves window scroll around report toggles. */
-.reports-panel,
-.reports-panel .feature-section-body,
-.reports-panel .reports-accordion-list,
-.reports-panel .report-group-accordion,
-.reports-panel .report-accordion,
-.reports-panel .report-group-body,
-.reports-panel .report-accordion-body {
-  overflow-anchor: none;
-}
-
 /* ON THIS DAY REPORT */
 .on-this-day-card .report-controls input[type="date"] {
   min-width: 170px;
@@ -10238,4 +10225,648 @@ button.available-truck-distribution-summary-card:disabled {
 
 :root[data-theme='light'] .on-this-day-table tbody tr:hover {
   background: #eff6ff !important;
+}
+
+/* PASS 20: first morning polish + accordion close behavior support
+   Tightens the remaining light-mode/dark-mode misses without changing the data shape. */
+
+/* IntelliTrack order lookup: replace the heavy stacked slabs with readable mini-cards. */
+.intellitrack-order-main > div,
+.intellitrack-dispatch-grid > div {
+  position: relative;
+  display: grid;
+  align-content: center;
+  min-height: 74px;
+  overflow: hidden;
+  border-color: rgba(148, 163, 184, 0.22) !important;
+  background:
+    linear-gradient(135deg, rgba(96, 165, 250, 0.10), transparent 44%),
+    rgba(15, 23, 42, 0.74) !important;
+  box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.055) !important;
+}
+
+.intellitrack-order-main > div::before,
+.intellitrack-dispatch-grid > div::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, #60a5fa, #2dd4bf);
+  opacity: 0.72;
+}
+
+.intellitrack-label,
+.intellitrack-dispatch-grid span {
+  color: #c4d0e3 !important;
+  opacity: 1 !important;
+}
+
+.intellitrack-order-main strong,
+.intellitrack-dispatch-grid strong {
+  color: #ffffff !important;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.intellitrack-empty {
+  border-color: rgba(148, 163, 184, 0.42) !important;
+  background:
+    linear-gradient(135deg, rgba(148, 163, 184, 0.10), transparent 42%),
+    rgba(15, 23, 42, 0.72) !important;
+  color: #dbe5f3 !important;
+  text-align: center;
+}
+
+.intellitrack-empty strong {
+  color: #ffffff !important;
+}
+
+/* Available Equipment analysis/distribution: make stats and recipient rows read as active data. */
+.available-trucks-kpi-grid > div,
+.available-trucks-kpi-button,
+.available-trucks-insight-card,
+.available-truck-distribution-summary > div,
+.available-truck-distribution-summary-card {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(148, 163, 184, 0.22) !important;
+  background:
+    linear-gradient(135deg, rgba(96, 165, 250, 0.08), transparent 44%),
+    rgba(15, 23, 42, 0.66) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05) !important;
+}
+
+.available-trucks-kpi-grid > div::before,
+.available-trucks-kpi-button::before,
+.available-trucks-insight-card::before,
+.available-truck-distribution-summary > div::before,
+.available-truck-distribution-summary-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, rgba(96, 165, 250, 0.82), rgba(45, 212, 191, 0.52));
+}
+
+.available-trucks-kpi-grid span,
+.available-trucks-insight-card > span,
+.available-truck-distribution-summary span,
+.available-truck-distribution-summary-card small,
+.available-truck-distribution-form label span {
+  color: #c4d0e3 !important;
+  opacity: 1 !important;
+}
+
+.available-trucks-kpi-grid strong,
+.available-trucks-insight-card li,
+.available-trucks-insight-card li strong,
+.available-truck-distribution-summary strong,
+.available-truck-distribution-table td strong {
+  color: #ffffff !important;
+  opacity: 1 !important;
+}
+
+.available-trucks-kpi-grid strong,
+.available-truck-distribution-summary strong {
+  font-size: 20px;
+  font-weight: 950;
+}
+
+.available-truck-distribution-table td,
+.available-truck-distribution-table td strong {
+  line-height: 1.42;
+}
+
+/* Financial modal: keep the subtotal band structured without dropping a black bar into light mode. */
+:root[data-theme='light'] .driver-report-totals-grid {
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.04), transparent 48%),
+    #f8fafc !important;
+  border-top: 1px solid #cbd5e1 !important;
+  border-bottom: 1px solid #cbd5e1 !important;
+}
+
+:root[data-theme='light'] .driver-report-section-header {
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.045), transparent 52%),
+    #f8fafc !important;
+  border-left-color: #2563eb !important;
+}
+
+:root[data-theme='light'] .driver-report-section-total {
+  color: #0f172a !important;
+}
+
+/* Light-mode card/readability patches for the specific areas from the screenshots. */
+:root[data-theme='light'] .intellitrack-order-main {
+  border-bottom-color: #cbd5e1 !important;
+}
+
+:root[data-theme='light'] .intellitrack-order-main > div,
+:root[data-theme='light'] .intellitrack-dispatch-grid > div {
+  border-color: #cbd5e1 !important;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.055), transparent 42%),
+    #f8fafc !important;
+  box-shadow:
+    0 8px 16px rgba(15, 23, 42, 0.055),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .intellitrack-order-main > div::before,
+:root[data-theme='light'] .intellitrack-dispatch-grid > div::before {
+  background: linear-gradient(180deg, #2563eb, #0f766e) !important;
+  opacity: 0.88;
+}
+
+:root[data-theme='light'] .intellitrack-label,
+:root[data-theme='light'] .intellitrack-dispatch-grid span {
+  color: #475569 !important;
+}
+
+:root[data-theme='light'] .intellitrack-order-main strong,
+:root[data-theme='light'] .intellitrack-dispatch-grid strong {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .intellitrack-empty {
+  border-color: #94a3b8 !important;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.055), transparent 42%),
+    #f8fafc !important;
+  color: #334155 !important;
+}
+
+:root[data-theme='light'] .intellitrack-empty strong {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .available-trucks-kpi-grid > div,
+:root[data-theme='light'] .available-trucks-kpi-button,
+:root[data-theme='light'] .available-trucks-insight-card,
+:root[data-theme='light'] .available-truck-distribution-summary > div,
+:root[data-theme='light'] .available-truck-distribution-summary-card {
+  border-color: #cbd5e1 !important;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.045), transparent 44%),
+    #ffffff !important;
+  box-shadow:
+    0 8px 18px rgba(15, 23, 42, 0.055),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .available-trucks-kpi-grid > div::before,
+:root[data-theme='light'] .available-trucks-kpi-button::before,
+:root[data-theme='light'] .available-trucks-insight-card::before,
+:root[data-theme='light'] .available-truck-distribution-summary > div::before,
+:root[data-theme='light'] .available-truck-distribution-summary-card::before {
+  background: linear-gradient(90deg, #2563eb, #0f766e) !important;
+  opacity: 0.78;
+}
+
+:root[data-theme='light'] .available-trucks-kpi-grid span,
+:root[data-theme='light'] .available-trucks-insight-card > span,
+:root[data-theme='light'] .available-truck-distribution-summary span,
+:root[data-theme='light'] .available-truck-distribution-summary-card small,
+:root[data-theme='light'] .available-truck-distribution-form label span {
+  color: #475569 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .available-trucks-kpi-grid strong,
+:root[data-theme='light'] .available-trucks-insight-card li,
+:root[data-theme='light'] .available-trucks-insight-card li strong,
+:root[data-theme='light'] .available-truck-distribution-summary strong,
+:root[data-theme='light'] .available-truck-distribution-table td strong,
+:root[data-theme='light'] .available-truck-distribution-table td {
+  color: #0f172a !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .available-truck-distribution-table-wrap {
+  border-color: #cbd5e1 !important;
+  background: #ffffff !important;
+}
+
+:root[data-theme='light'] .available-truck-distribution-table .distribution-sort-header {
+  color: #334155 !important;
+}
+
+:root[data-theme='light'] .available-truck-distribution-table .distribution-sort-header:hover {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .available-truck-distribution-table .distribution-sort-indicator {
+  color: #2563eb !important;
+  opacity: 1 !important;
+}
+
+/* PASS 20.1: Driver Time Off light-mode visibility cleanup
+   The Time Off report/form still had a few dark-mode panels and low-contrast labels
+   after the first light-mode pass. Keep dark mode unchanged and bring the modal
+   analysis cards, edit history card, and log table into the light report language. */
+:root[data-theme='light'] .driver-time-off-form-modal {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+  box-shadow:
+    0 24px 70px rgba(15, 23, 42, 0.20),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .driver-time-off-form-modal .detail-header {
+  background: linear-gradient(180deg, #ffffff, #f8fafc) !important;
+  border-bottom-color: #cbd5e1 !important;
+}
+
+:root[data-theme='light'] .driver-time-off-form-grid label span {
+  color: #475569 !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}
+
+:root[data-theme='light'] .driver-time-off-form-grid input,
+:root[data-theme='light'] .driver-time-off-form-grid select {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+  box-shadow: inset 0 1px 0 rgba(15, 23, 42, 0.025) !important;
+}
+
+:root[data-theme='light'] .driver-time-off-form-grid input[readonly] {
+  background-color: #f8fafc !important;
+  color: #334155 !important;
+}
+
+:root[data-theme='light'] .driver-time-off-history-card {
+  border-color: #cbd5e1 !important;
+  background: #ffffff !important;
+  color: #0f172a !important;
+  box-shadow:
+    0 12px 26px rgba(15, 23, 42, 0.075),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .driver-time-off-history-header {
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.055), transparent 52%),
+    #f8fafc !important;
+  border-bottom-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .driver-time-off-history-header h3 {
+  color: #1d4ed8 !important;
+  text-shadow: none !important;
+}
+
+:root[data-theme='light'] .driver-time-off-history-header p {
+  color: #475569 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .driver-time-off-history-header span {
+  background: #e2e8f0 !important;
+  border-color: #94a3b8 !important;
+  color: #0f172a !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.82) !important;
+}
+
+:root[data-theme='light'] .driver-time-off-history-table-wrap {
+  background: #ffffff !important;
+  border-top: 0 !important;
+}
+
+:root[data-theme='light'] .driver-time-off-history-table th,
+:root[data-theme='light'] .driver-time-off-report-table th {
+  background: #e2e8f0 !important;
+  border-bottom-color: #cbd5e1 !important;
+  color: #334155 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .driver-time-off-history-table td,
+:root[data-theme='light'] .driver-time-off-report-table td {
+  color: #0f172a !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .driver-time-off-history-row.active-history-row,
+:root[data-theme='light'] .driver-time-off-report-table .driver-time-off-clickable-row.active-history-row {
+  background: #eff6ff !important;
+  box-shadow: inset 4px 0 0 #2563eb !important;
+}
+
+:root[data-theme='light'] .driver-time-off-history-table tbody tr:hover,
+:root[data-theme='light'] .driver-time-off-report-table .driver-time-off-clickable-row:hover {
+  background: #eaf2ff !important;
+}
+
+:root[data-theme='light'] .driver-time-off-preview .pdf-export-guidance,
+:root[data-theme='light'] .driver-time-off-log-section .driver-report-section-header p {
+  color: #475569 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .driver-time-off-analysis-grid {
+  align-items: stretch;
+}
+
+:root[data-theme='light'] .driver-time-off-pattern-card {
+  border-color: #cbd5e1 !important;
+  background: #ffffff !important;
+  color: #0f172a !important;
+  box-shadow:
+    0 12px 26px rgba(15, 23, 42, 0.07),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .driver-time-off-pattern-header {
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.055), transparent 52%),
+    #f8fafc !important;
+  border-bottom-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .driver-time-off-pattern-header strong {
+  color: #0f172a !important;
+  text-shadow: none !important;
+}
+
+:root[data-theme='light'] .driver-time-off-pattern-header span {
+  color: #475569 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .driver-time-off-pattern-list {
+  background: #ffffff !important;
+}
+
+:root[data-theme='light'] .driver-time-off-pattern-row {
+  background: #ffffff !important;
+  border-bottom-color: #e2e8f0 !important;
+  color: #0f172a !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .driver-time-off-pattern-row strong {
+  color: #0f172a !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .driver-time-off-pattern-row span {
+  color: #334155 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .driver-time-off-pattern-row.clickable-pattern-row:hover {
+  background: #eff6ff !important;
+}
+
+:root[data-theme='light'] .driver-time-off-pattern-row.active-pattern-row {
+  background: #dbeafe !important;
+  box-shadow: inset 4px 0 0 #2563eb !important;
+}
+
+:root[data-theme='light'] .driver-time-off-filter-banner {
+  background: #eff6ff !important;
+  border-color: #93c5fd !important;
+  color: #1e3a8a !important;
+}
+
+:root[data-theme='light'] .driver-time-off-filter-banner span,
+:root[data-theme='light'] .driver-time-off-filter-banner strong {
+  color: #1e3a8a !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .driver-time-off-log-section {
+  border-color: #cbd5e1 !important;
+  background: #ffffff !important;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.07) !important;
+}
+
+:root[data-theme='light'] .driver-time-off-log-section .driver-report-section-header {
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.045), transparent 52%),
+    #f8fafc !important;
+  border-bottom-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .driver-time-off-log-section .driver-report-section-header h4 {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .driver-time-off-log-section .driver-report-section-total {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+/* PASS 20.2: Sales Activity Snapshot light-mode/readability + row-open behavior
+   The modal no longer needs a heavy Action column. Rows/cards now behave as the card opener,
+   with a lighter visual treatment that matches the newer report language. */
+.sales-activity-table-wrap table {
+  min-width: 930px;
+}
+
+.sales-activity-click-row {
+  cursor: pointer;
+  transition: background 0.14s ease, box-shadow 0.14s ease;
+}
+
+.sales-activity-click-row:hover {
+  background: rgba(37, 99, 235, 0.14) !important;
+}
+
+.sales-activity-click-row:focus-visible {
+  outline: 3px solid rgba(96, 165, 250, 0.55);
+  outline-offset: -3px;
+}
+
+.sales-activity-click-row td:first-child {
+  font-weight: 700;
+}
+
+.sales-activity-click-card {
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease, transform 0.14s ease, box-shadow 0.14s ease;
+}
+
+.sales-activity-click-card:hover {
+  border-color: rgba(96, 165, 250, 0.46);
+  background: rgba(37, 99, 235, 0.13);
+  transform: translateY(-1px);
+}
+
+.sales-activity-click-card:focus-visible {
+  outline: 3px solid rgba(96, 165, 250, 0.55);
+  outline-offset: 2px;
+}
+
+.sales-activity-open-hint {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+:root[data-theme='light'] .sales-activity-modal .detail-header {
+  background: linear-gradient(180deg, #ffffff, #f8fafc) !important;
+  border-bottom-color: #cbd5e1 !important;
+}
+
+:root[data-theme='light'] .sales-activity-modal .detail-header h2 {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .sales-activity-modal .detail-header p {
+  color: #475569 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-activity-summary-grid div {
+  border-color: #cbd5e1 !important;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.045), transparent 46%),
+    #ffffff !important;
+  box-shadow:
+    0 10px 22px rgba(15, 23, 42, 0.065),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .sales-activity-summary-grid span {
+  color: #475569 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-activity-summary-grid strong {
+  color: #0f172a !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-activity-split-label {
+  border-left-color: #2563eb !important;
+  border: 1px solid #bfdbfe !important;
+  border-left-width: 4px !important;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.08), transparent 52%),
+    #eff6ff !important;
+  color: #1e3a8a !important;
+  text-shadow: none !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.78) !important;
+}
+
+:root[data-theme='light'] .sales-activity-section {
+  border-color: #cbd5e1 !important;
+  background: #ffffff !important;
+  box-shadow:
+    0 12px 26px rgba(15, 23, 42, 0.07),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .sales-activity-section .driver-report-section-header {
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.045), transparent 52%),
+    #f8fafc !important;
+  border-bottom-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .sales-activity-section .driver-report-section-header h4 {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .sales-activity-section .driver-report-section-header p,
+:root[data-theme='light'] .sales-activity-empty {
+  color: #475569 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-activity-section .driver-report-section-total {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+:root[data-theme='light'] .sales-activity-table-wrap {
+  background: #ffffff !important;
+}
+
+:root[data-theme='light'] .sales-activity-table-wrap table {
+  background: #ffffff !important;
+}
+
+:root[data-theme='light'] .sales-activity-table-wrap th {
+  background: #e2e8f0 !important;
+  border-bottom-color: #cbd5e1 !important;
+  color: #334155 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-activity-table-wrap td {
+  border-bottom-color: #e2e8f0 !important;
+  color: #0f172a !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-activity-table-wrap tbody tr:nth-child(even) {
+  background: #f8fafc !important;
+}
+
+:root[data-theme='light'] .sales-activity-table-wrap tbody tr.sales-activity-click-row:hover {
+  background: #eff6ff !important;
+  box-shadow: inset 4px 0 0 #2563eb !important;
+}
+
+:root[data-theme='light'] .sales-activity-table-wrap tbody tr.sales-activity-click-row:hover td:first-child {
+  color: #1d4ed8 !important;
+}
+
+:root[data-theme='light'] .sales-activity-click-row:focus-visible {
+  outline-color: rgba(37, 99, 235, 0.42);
+}
+
+:root[data-theme='light'] .sales-activity-note-card {
+  border-color: #cbd5e1 !important;
+  background: #ffffff !important;
+  color: #0f172a !important;
+  box-shadow:
+    0 8px 18px rgba(15, 23, 42, 0.055),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .sales-activity-click-card:hover {
+  border-color: #93c5fd !important;
+  background: #eff6ff !important;
+  box-shadow:
+    0 10px 22px rgba(37, 99, 235, 0.09),
+    inset 4px 0 0 #2563eb !important;
+}
+
+:root[data-theme='light'] .sales-activity-note-card-header strong {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .sales-activity-note-card-header span,
+:root[data-theme='light'] .sales-activity-note-card p {
+  color: #475569 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-activity-open-hint {
+  border-color: #bfdbfe !important;
+  background: #dbeafe !important;
+  color: #1e3a8a !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.82) !important;
 }

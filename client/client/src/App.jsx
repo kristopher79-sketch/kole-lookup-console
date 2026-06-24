@@ -1314,6 +1314,39 @@ export default function App() {
     return sortDirection === 'asc' ? '▲' : '▼';
   }
 
+  function closeIntelliTrackSubsections() {
+    setIntelliTrackOpen(false);
+    setIntelliTrackActionOpen(false);
+  }
+
+  function toggleIntelliTrackSection() {
+    if (intelliTrackSectionOpen) {
+      closeIntelliTrackSubsections();
+    }
+
+    setIntelliTrackSectionOpen((current) => !current);
+  }
+
+  function closeAvailableTruckSubsections() {
+    setAvailableTrucksCurrentOpen(false);
+    setAvailableTrucksOpen(false);
+    setAvailableTrucksActionOpen(false);
+    setAvailableTruckDistributionOpen(false);
+    setAvailableTruckDistributionInactiveModalOpen(false);
+  }
+
+  function toggleAvailableTrucksSection() {
+    if (availableTrucksSectionOpen) {
+      closeAvailableTruckSubsections();
+    }
+
+    setAvailableTrucksSectionOpen((current) => !current);
+  }
+
+  function toggleUploadDigestSection() {
+    setUploadDigestSectionOpen((current) => !current);
+  }
+
   function resetAppState() {
     setQuery('');
     setResults([]);
@@ -1379,6 +1412,9 @@ export default function App() {
     setDriverHistoryError('');
     driverHistoryCacheRef.current.clear();
     setReportsSectionOpen(false);
+    setOpenReportGroups([]);
+    setActiveReportPanel('');
+    setOpenGrossRevenueQuarters([]);
     searchCacheRef.current.clear();
     onThisDayReportCacheRef.current.clear();
 
@@ -4145,36 +4181,42 @@ function getPositionStatusLabel(position) {
     ...leadSuppressionViewOptions
   ];
 
-  function preserveReportScroll(runUpdate) {
-    const scrollPosition = {
-      left: window.scrollX || window.pageXOffset || 0,
-      top: window.scrollY || window.pageYOffset || 0
-    };
+  const reportPanelsByGroup = {
+    financial: ['grossRevenue', 'driverSummary', 'weeklySettlement'],
+    operational: ['ordersDueSettlement', 'wonNotRegistered', 'permitGovernance', 'onThisDay', 'noAvailability'],
+    driverFleet: ['activeDriverRoster', 'inactiveDriverRoster', 'fleetEquipment', 'driverTimeOff'],
+    sales: ['customerBookingTrends', 'salesActivity', 'leadSuppression', 'salesLeads']
+  };
 
-    runUpdate();
-
-    window.requestAnimationFrame(() => {
-      window.scrollTo({ ...scrollPosition, behavior: 'auto' });
-      window.requestAnimationFrame(() => {
-        window.scrollTo({ ...scrollPosition, behavior: 'auto' });
-      });
-    });
+  function closeReportSubsections() {
+    setOpenReportGroups([]);
+    setActiveReportPanel('');
+    setOpenGrossRevenueQuarters([]);
   }
 
   function toggleReportsSection() {
-    preserveReportScroll(() => {
-      setReportsSectionOpen((current) => !current);
-    });
+    if (reportsSectionOpen) {
+      closeReportSubsections();
+    }
+
+    setReportsSectionOpen((current) => !current);
   }
 
   function toggleReportGroup(groupName) {
-    preserveReportScroll(() => {
-      setOpenReportGroups((current) => (
-        current.includes(groupName)
-          ? current.filter((name) => name !== groupName)
-          : [...current, groupName]
-      ));
-    });
+    const isClosingGroup = openReportGroups.includes(groupName);
+
+    if (isClosingGroup && (reportPanelsByGroup[groupName] || []).includes(activeReportPanel)) {
+      setActiveReportPanel('');
+      if (groupName === 'financial') {
+        setOpenGrossRevenueQuarters([]);
+      }
+    }
+
+    setOpenReportGroups((current) => (
+      current.includes(groupName)
+        ? current.filter((name) => name !== groupName)
+        : [...current, groupName]
+    ));
   }
 
   function isReportGroupOpen(groupName) {
@@ -4889,9 +4931,19 @@ function getPositionStatusLabel(position) {
   }
 
   function toggleReportPanel(panelName) {
-    preserveReportScroll(() => {
-      setActiveReportPanel((current) => (current === panelName ? '' : panelName));
-    });
+    setActiveReportPanel((current) => (current === panelName ? '' : panelName));
+  }
+
+  function handleReportGroupClick(event, groupName) {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleReportGroup(groupName);
+  }
+
+  function handleReportPanelClick(event, panelName) {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleReportPanel(panelName);
   }
 
 function openReportLoadDetails(load) {
@@ -8317,7 +8369,7 @@ function openReportLoadDetails(load) {
         <button
           type="button"
           className="feature-section-header-button available-trucks-section-header-button"
-          onClick={() => setAvailableTrucksSectionOpen((current) => !current)}
+          onClick={toggleAvailableTrucksSection}
           aria-expanded={availableTrucksSectionOpen}
         >
           <span className="feature-section-title-block">
@@ -8866,7 +8918,7 @@ function openReportLoadDetails(load) {
         <button
           type="button"
           className="feature-section-header-button intellitrack-section-header-button"
-          onClick={() => setIntelliTrackSectionOpen((current) => !current)}
+          onClick={toggleIntelliTrackSection}
           aria-expanded={intelliTrackSectionOpen}
         >
           <span className="feature-section-title-block">
@@ -9101,7 +9153,7 @@ function openReportLoadDetails(load) {
         <button
           type="button"
           className="feature-section-header-button upload-digest-section-header-button"
-          onClick={() => setUploadDigestSectionOpen((current) => !current)}
+          onClick={toggleUploadDigestSection}
           aria-expanded={uploadDigestSectionOpen}
         >
           <span className="feature-section-title-block">
@@ -9273,6 +9325,17 @@ function openReportLoadDetails(load) {
   function SalesActivityLeadTable({ title, description, rows }) {
     const safeRows = Array.isArray(rows) ? rows : [];
 
+    const handleOpenCustomerCard = (row) => {
+      if (customerLookupLoading) return;
+      openCustomerCardForName(row.CompanyName, row.CustomerCode);
+    };
+
+    const handleOpenCustomerCardKeyDown = (event, row) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      handleOpenCustomerCard(row);
+    };
+
     return (
       <div className="driver-report-section sales-activity-section">
         <div className="driver-report-section-header">
@@ -9299,31 +9362,33 @@ function openReportLoadDetails(load) {
                   <th>First Quote</th>
                   <th>Last Quote</th>
                   <th>Status</th>
-                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {safeRows.map((row) => (
-                  <tr key={`${title}-${row.id || row.CustomerCode || row.CompanyName}`}>
-                    <td>{formatSalesActivityLabel(row.CompanyName)}</td>
-                    <td>{formatSalesActivityLabel(row.CustomerCode)}</td>
-                    <td>{formatSalesActivityDate(row.NextTouchDate)}</td>
-                    <td>{formatReportNumber(row.QuoteCount)}</td>
-                    <td>{formatSalesActivityDate(row.FirstQuoteDate)}</td>
-                    <td>{formatSalesActivityDate(row.LastQuoteDate)}</td>
-                    <td><span className={getSalesLeadStatusClass(row.Status)}>{row.Status || '-'}</span></td>
-                    <td>
-                      <button
-                        type="button"
-                        className="view-button"
-                        onClick={() => openCustomerCardForName(row.CompanyName, row.CustomerCode)}
-                        disabled={customerLookupLoading}
-                      >
-                        Open Card
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {safeRows.map((row, index) => {
+                  const customerLabel = formatSalesActivityLabel(row.CompanyName);
+
+                  return (
+                    <tr
+                      key={`${title}-${row.id || row.CustomerCode || row.CompanyName || index}`}
+                      className="sales-activity-click-row"
+                      onClick={() => handleOpenCustomerCard(row)}
+                      onKeyDown={(event) => handleOpenCustomerCardKeyDown(event, row)}
+                      role="button"
+                      tabIndex={0}
+                      title="Open customer card"
+                      aria-label={`Open customer card for ${customerLabel}`}
+                    >
+                      <td>{customerLabel}</td>
+                      <td>{formatSalesActivityLabel(row.CustomerCode)}</td>
+                      <td>{formatSalesActivityDate(row.NextTouchDate)}</td>
+                      <td>{formatReportNumber(row.QuoteCount)}</td>
+                      <td>{formatSalesActivityDate(row.FirstQuoteDate)}</td>
+                      <td>{formatSalesActivityDate(row.LastQuoteDate)}</td>
+                      <td><span className={getSalesLeadStatusClass(row.Status)}>{row.Status || '-'}</span></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -9334,6 +9399,17 @@ function openReportLoadDetails(load) {
 
   function SalesActivityNoteList({ title, description, rows, dateField = 'ActivityDate' }) {
     const safeRows = Array.isArray(rows) ? rows : [];
+
+    const handleOpenCustomerCard = (row) => {
+      if (customerLookupLoading) return;
+      openCustomerCardForName(row.CompanyName, row.CustomerCode);
+    };
+
+    const handleOpenCustomerCardKeyDown = (event, row) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      handleOpenCustomerCard(row);
+    };
 
     return (
       <div className="driver-report-section sales-activity-section">
@@ -9351,27 +9427,33 @@ function openReportLoadDetails(load) {
           <div className="msg sales-activity-empty">Nothing to show here.</div>
         ) : (
           <div className="sales-activity-note-list">
-            {safeRows.map((row) => (
-              <article key={`${title}-${row.id || row.CustomerCode || row.ActivityDate}`} className="sales-activity-note-card">
-                <div className="sales-activity-note-card-header">
-                  <div>
-                    <strong>{row.CompanyName || 'Unknown Customer'}</strong>
-                    <span>
-                      {[row.CustomerCode, formatSalesActivityDate(row[dateField]), row.Author].filter(Boolean).join(' · ')}
-                    </span>
+            {safeRows.map((row, index) => {
+              const customerLabel = row.CompanyName || 'Unknown Customer';
+
+              return (
+                <article
+                  key={`${title}-${row.id || row.CustomerCode || row.ActivityDate || index}`}
+                  className="sales-activity-note-card sales-activity-click-card"
+                  onClick={() => handleOpenCustomerCard(row)}
+                  onKeyDown={(event) => handleOpenCustomerCardKeyDown(event, row)}
+                  role="button"
+                  tabIndex={0}
+                  title="Open customer card"
+                  aria-label={`Open customer card for ${customerLabel}`}
+                >
+                  <div className="sales-activity-note-card-header">
+                    <div>
+                      <strong>{customerLabel}</strong>
+                      <span>
+                        {[row.CustomerCode, formatSalesActivityDate(row[dateField]), row.Author].filter(Boolean).join(' · ')}
+                      </span>
+                    </div>
+                    <span className="sales-activity-open-hint">Click to open card</span>
                   </div>
-                  <button
-                    type="button"
-                    className="view-button"
-                    onClick={() => openCustomerCardForName(row.CompanyName, row.CustomerCode)}
-                    disabled={customerLookupLoading}
-                  >
-                    Open Card
-                  </button>
-                </div>
-                <p>{truncateSalesText(row.Note || row.Title || '-', 260)}</p>
-              </article>
-            ))}
+                  <p>{truncateSalesText(row.Note || row.Title || '-', 260)}</p>
+                </article>
+              );
+            })}
           </div>
         )}
       </div>
@@ -10591,7 +10673,7 @@ function openReportLoadDetails(load) {
             <button
               type="button"
               className="report-group-button"
-              onClick={() => toggleReportGroup('financial')}
+              onClick={(e) => handleReportGroupClick(e, 'financial')}
             >
               <div>
                 <strong>Financial Reports</strong>
@@ -10606,7 +10688,7 @@ function openReportLoadDetails(load) {
             <button
               type="button"
               className="report-accordion-button"
-              onClick={() => toggleReportPanel('grossRevenue')}
+              onClick={(e) => handleReportPanelClick(e, 'grossRevenue')}
             >
               <span>Gross Revenue Totals</span>
               <span className="report-accordion-icon">{isGrossRevenueOpen ? '▼' : '▶'}</span>
@@ -10673,7 +10755,7 @@ function openReportLoadDetails(load) {
             <button
               type="button"
               className="report-accordion-button"
-              onClick={() => toggleReportPanel('driverSummary')}
+              onClick={(e) => handleReportPanelClick(e, 'driverSummary')}
             >
               <span>Monthly Driver Summary Report</span>
               <span className="report-accordion-icon">{isDriverSummaryOpen ? '▼' : '▶'}</span>
@@ -10813,7 +10895,7 @@ function openReportLoadDetails(load) {
             <button
               type="button"
               className="report-accordion-button"
-              onClick={() => toggleReportPanel('weeklySettlement')}
+              onClick={(e) => handleReportPanelClick(e, 'weeklySettlement')}
             >
               <span>Weekly Settlement Report</span>
               <span className="report-accordion-icon">{isWeeklySettlementOpen ? '▼' : '▶'}</span>
@@ -10912,7 +10994,7 @@ function openReportLoadDetails(load) {
             <button
               type="button"
               className="report-group-button"
-              onClick={() => toggleReportGroup('operational')}
+              onClick={(e) => handleReportGroupClick(e, 'operational')}
             >
               <div>
                 <strong>Operational Reports</strong>
@@ -10937,7 +11019,7 @@ function openReportLoadDetails(load) {
             <button
               type="button"
               className="report-accordion-button"
-              onClick={() => toggleReportPanel('ordersDueSettlement')}
+              onClick={(e) => handleReportPanelClick(e, 'ordersDueSettlement')}
             >
               <span>
                 Orders Due for Settlement
@@ -11003,7 +11085,7 @@ function openReportLoadDetails(load) {
             <button
               type="button"
               className="report-accordion-button"
-              onClick={() => toggleReportPanel('wonNotRegistered')}
+              onClick={(e) => handleReportPanelClick(e, 'wonNotRegistered')}
             >
               <span>
                 Orders Won and Not Registered
@@ -11070,7 +11152,7 @@ function openReportLoadDetails(load) {
             <button
               type="button"
               className="report-accordion-button"
-              onClick={() => toggleReportPanel('permitGovernance')}
+              onClick={(e) => handleReportPanelClick(e, 'permitGovernance')}
             >
               <span>
                 Permit Governance
@@ -11132,7 +11214,7 @@ function openReportLoadDetails(load) {
             <button
               type="button"
               className="report-accordion-button"
-              onClick={() => toggleReportPanel('onThisDay')}
+              onClick={(e) => handleReportPanelClick(e, 'onThisDay')}
             >
               <span>On This Day</span>
               <span className="report-accordion-icon">{isOnThisDayOpen ? '▼' : '▶'}</span>
@@ -11237,7 +11319,7 @@ function openReportLoadDetails(load) {
             <button
               type="button"
               className="report-accordion-button"
-              onClick={() => toggleReportPanel('noAvailability')}
+              onClick={(e) => handleReportPanelClick(e, 'noAvailability')}
             >
               <span>No Availability</span>
               <span className="report-accordion-icon">{isNoAvailabilityOpen ? '▼' : '▶'}</span>
@@ -11328,7 +11410,7 @@ function openReportLoadDetails(load) {
             <button
               type="button"
               className="report-group-button"
-              onClick={() => toggleReportGroup('driverFleet')}
+              onClick={(e) => handleReportGroupClick(e, 'driverFleet')}
             >
               <div>
                 <strong>Driver / Fleet Reports</strong>
@@ -11344,7 +11426,7 @@ function openReportLoadDetails(load) {
                   <button
                     type="button"
                     className="report-accordion-button"
-                    onClick={() => toggleReportPanel('activeDriverRoster')}
+                    onClick={(e) => handleReportPanelClick(e, 'activeDriverRoster')}
                   >
                     <span>Active Driver Roster</span>
                     <span className="report-accordion-icon">{isActiveDriverRosterOpen ? '▼' : '▶'}</span>
@@ -11422,7 +11504,7 @@ function openReportLoadDetails(load) {
                   <button
                     type="button"
                     className="report-accordion-button"
-                    onClick={() => toggleReportPanel('inactiveDriverRoster')}
+                    onClick={(e) => handleReportPanelClick(e, 'inactiveDriverRoster')}
                   >
                     <span>Inactive Driver Roster</span>
                     <span className="report-accordion-icon">{isInactiveDriverRosterOpen ? '▼' : '▶'}</span>
@@ -11500,7 +11582,7 @@ function openReportLoadDetails(load) {
                   <button
                     type="button"
                     className="report-accordion-button"
-                    onClick={() => toggleReportPanel('fleetEquipment')}
+                    onClick={(e) => handleReportPanelClick(e, 'fleetEquipment')}
                   >
                     <span>Fleet Equipment</span>
                     <span className="report-accordion-icon">{isFleetEquipmentOpen ? '▼' : '▶'}</span>
@@ -11598,7 +11680,7 @@ function openReportLoadDetails(load) {
                   <button
                     type="button"
                     className="report-accordion-button"
-                    onClick={() => toggleReportPanel('driverTimeOff')}
+                    onClick={(e) => handleReportPanelClick(e, 'driverTimeOff')}
                   >
                     <span>Driver Time Off</span>
                     <span className="report-accordion-icon">{isDriverTimeOffOpen ? '▼' : '▶'}</span>
@@ -11703,7 +11785,7 @@ function openReportLoadDetails(load) {
             <button
               type="button"
               className="report-group-button"
-              onClick={() => toggleReportGroup('sales')}
+              onClick={(e) => handleReportGroupClick(e, 'sales')}
             >
               <div>
                 <strong>Sales Reports</strong>
@@ -11718,7 +11800,7 @@ function openReportLoadDetails(load) {
                   <button
                     type="button"
                     className="report-accordion-button"
-                    onClick={() => toggleReportPanel('customerBookingTrends')}
+                    onClick={(e) => handleReportPanelClick(e, 'customerBookingTrends')}
                   >
                     <span>Customer Booking Trends</span>
                     <span className="report-accordion-icon">{isCustomerTrendsOpen ? '▼' : '▶'}</span>
@@ -11735,7 +11817,7 @@ function openReportLoadDetails(load) {
                   <button
                     type="button"
                     className="report-accordion-button"
-                    onClick={() => toggleReportPanel('salesActivity')}
+                    onClick={(e) => handleReportPanelClick(e, 'salesActivity')}
                   >
                     <span>Sales Activity Snapshot</span>
                     <span className="report-accordion-icon">{isSalesActivityOpen ? '▼' : '▶'}</span>
@@ -11753,7 +11835,7 @@ function openReportLoadDetails(load) {
                   <button
                     type="button"
                     className="report-accordion-button"
-                    onClick={() => toggleReportPanel('leadSuppression')}
+                    onClick={(e) => handleReportPanelClick(e, 'leadSuppression')}
                   >
                     <span>Follow-Up Suppression</span>
                     <span className="report-accordion-icon">{isLeadSuppressionOpen ? '▼' : '▶'}</span>
@@ -11770,7 +11852,7 @@ function openReportLoadDetails(load) {
                   <button
                     type="button"
                     className="report-accordion-button"
-                    onClick={() => toggleReportPanel('salesLeads')}
+                    onClick={(e) => handleReportPanelClick(e, 'salesLeads')}
                   >
                     <span>Customer Cards</span>
                     <span className="report-accordion-icon">{isSalesLeadsOpen ? '▼' : '▶'}</span>
