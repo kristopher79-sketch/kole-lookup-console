@@ -4536,17 +4536,38 @@ async function getDriverTimeOffRows(token) {
 
 function buildDriverTimeOffCurrentResponse(rows, options = {}) {
   const targetDate = options.targetDate || formatEasternDate();
-  const currentRows = rows
+  const recentDays = Number(options.recentDays || 7);
+  const recentStartDate = addDaysToDateInput(targetDate, -Math.max(recentDays, 1));
+  const enrichedRows = rows
     .map((row) => enrichDriverTimeOffRow(row, targetDate))
+    .filter((row) => !row.isCancelled);
+  const currentRows = enrichedRows
     .filter((row) => row.isCurrent)
     .sort(sortDriverTimeOffRows);
+  const recentlyEndedRows = enrichedRows
+    .filter((row) => {
+      const endDate = row.endDate || row.startDate;
+      return Boolean(endDate && endDate < targetDate && endDate >= recentStartDate);
+    })
+    .map((row) => ({
+      ...row,
+      daysSinceEnded: Math.max(0, Math.round(((getDateOnlyTime(targetDate) || 0) - (getDateOnlyTime(row.endDate || row.startDate) || 0)) / 86400000))
+    }))
+    .sort((a, b) => {
+      const endDiff = String(b.endDate || b.startDate || '').localeCompare(String(a.endDate || a.startDate || ''));
+      if (endDiff !== 0) return endDiff;
+      return sortDriverTimeOffRows(a, b);
+    });
 
   return {
     success: true,
     targetDate,
     generatedAt: `${formatEasternTimestamp()} Eastern`,
     count: currentRows.length,
-    records: currentRows
+    recentDays,
+    recentlyEndedCount: recentlyEndedRows.length,
+    records: currentRows,
+    recentlyEndedRecords: recentlyEndedRows
   };
 }
 
@@ -8147,6 +8168,86 @@ function getTimeOfDaySortValue(value) {
   return 0;
 }
 
+function getEasternClockParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(date);
+
+  const hour = Number(parts.find((part) => part.type === 'hour')?.value || 0);
+  const minute = Number(parts.find((part) => part.type === 'minute')?.value || 0);
+
+  return {
+    hour: hour === 24 ? 0 : hour,
+    minute
+  };
+}
+
+function getAvailableTruckRepublishSlot(now = new Date()) {
+  const { hour, minute } = getEasternClockParts(now);
+  const minutesAfterMidnight = (hour * 60) + minute;
+  const dateSent = formatEasternDate(now);
+
+  if (minutesAfterMidnight <= (11 * 60 + 30)) {
+    return {
+      dateSent,
+      timeOfDay: 'AM',
+      duplicateMessage: 'AM availability has already been posted for this driver today. PM republish opens at 11:31 AM Eastern.'
+    };
+  }
+
+  if (minutesAfterMidnight <= (17 * 60 + 30)) {
+    return {
+      dateSent,
+      timeOfDay: 'PM',
+      duplicateMessage: 'PM availability has already been posted for this driver today. Evening republish opens at 5:31 PM Eastern.'
+    };
+  }
+
+  return {
+    dateSent,
+    timeOfDay: 'Evening',
+    duplicateMessage: 'Evening availability has already been posted for this driver today. Republish opens again tomorrow for the next AM posting.'
+  };
+}
+
+function isSameAvailableTruckIdentity(a, b) {
+  const aTruckKey = normalizeTruckKey(a?.unitNo);
+  const bTruckKey = normalizeTruckKey(b?.unitNo);
+
+  if (aTruckKey && bTruckKey) return aTruckKey === bTruckKey;
+
+  const aDriverKey = normalizeSearchValue(a?.driverName);
+  const bDriverKey = normalizeSearchValue(b?.driverName);
+
+  return Boolean(aDriverKey && bDriverKey && aDriverKey === bDriverKey);
+}
+
+function formatAvailableTruckIdentityLabel(record) {
+  const driverName = cleanAvailableTruckText(record?.driverName);
+  const unitNo = cleanAvailableTruckText(record?.unitNo);
+
+  if (driverName && unitNo) return `${driverName} / ${unitNo}`;
+  return driverName || unitNo || 'This driver';
+}
+
+function getAvailableTruckRepublishDriver(record) {
+  const stops = Array.isArray(record?.proximityStops) ? record.proximityStops : [];
+
+  return {
+    driverName: cleanAvailableTruckText(record?.driverName),
+    unitNo: cleanAvailableTruckText(record?.unitNo),
+    equipmentType: cleanAvailableTruckText(record?.equipmentType),
+    currentLocation: cleanAvailableTruckText(record?.currentLocation),
+    proximityStops: [0, 1, 2, 3].map((index) => ({
+      location: cleanAvailableTruckText(stops[index]?.location),
+      timeLabel: cleanAvailableTruckText(stops[index]?.timeLabel)
+    }))
+  };
+}
+
 function getAvailableTruckDateSortValue(value) {
   const normalized = normalizeEasternDateOnly(value) || String(value || '').trim();
   const parsed = new Date(`${normalized}T00:00:00Z`);
@@ -9286,6 +9387,113 @@ app.post('/available-trucks/distribution-list', requireLookupAccess, async (req,
   }
 });
 
+
+
+app.post('/available-trucks/republish', requireLookupAccess, async (req, res) => {
+  try {
+    const singleLineListId = getAvailableTrucksSingleLineListId();
+    const sourceListId = getAvailableEquipmentSourceListId();
+
+    if (!singleLineListId) {
+      return res.status(500).json({
+        success: false,
+        error: 'AVAILABLE_TRUCKS_SINGLE_LINE_LIST_ID is not configured on the server.'
+      });
+    }
+
+    if (!sourceListId) {
+      return res.status(500).json({
+        success: false,
+        error: 'AVAILABLE_EQUIPMENT_SOURCE_LIST_ID is not configured on the server.'
+      });
+    }
+
+    const recordId = String(req.body?.recordId || '').trim();
+
+    if (!recordId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Choose an available-equipment row to republish.'
+      });
+    }
+
+    const token = await getGraphToken();
+    const currentList = await getCurrentBidListingSource(token);
+    const [items, assignmentItems] = await Promise.all([
+      getAllListItemsWithFields(token, singleLineListId, getAvailableTruckFieldSelect()),
+      currentList
+        ? getAllListItemsWithFields(token, currentList.listId, getAvailableTruckAssignmentFieldSelect())
+        : Promise.resolve([])
+    ]);
+
+    const allRecords = items
+      .map(cleanAvailableTruckRecord)
+      .filter((record) => record.driverName || record.unitNo || record.currentLocation);
+    const assignmentIndex = buildActiveFutureAssignmentIndex(assignmentItems, currentList);
+    const currentAvailability = buildAvailableTrucksResponse(items, {
+      assignmentIndex,
+      activeDriverOptions: [],
+      activeDriverOptionsWarning: ''
+    });
+    const sourceRecord = (currentAvailability.records || []).find((record) => String(record.id || '') === recordId);
+
+    if (!sourceRecord) {
+      return res.status(409).json({
+        success: false,
+        error: 'That available-equipment row is no longer current. Refresh the Available Equipment panel before republishing.'
+      });
+    }
+
+    const republishSlot = getAvailableTruckRepublishSlot();
+    const duplicate = allRecords.find((record) =>
+      String(record.dateSent || '') === republishSlot.dateSent &&
+      getTimeOfDaySortValue(record.timeOfDay) === getTimeOfDaySortValue(republishSlot.timeOfDay) &&
+      isSameAvailableTruckIdentity(record, sourceRecord)
+    );
+
+    if (duplicate) {
+      return res.status(409).json({
+        success: false,
+        error: `${formatAvailableTruckIdentityLabel(sourceRecord)} already has a ${republishSlot.timeOfDay} available-equipment posting for today. ${republishSlot.duplicateMessage}`
+      });
+    }
+
+    const driver = getAvailableTruckRepublishDriver(sourceRecord);
+    validateAvailableTruckSubmissionDriver(driver, 1);
+
+    const submission = {
+      dateSent: republishSlot.dateSent,
+      timeOfDay: republishSlot.timeOfDay,
+      drivers: [driver]
+    };
+
+    const columnLookup = await getListColumnLookup(token, sourceListId);
+    const fields = buildAvailableTruckSourceFields(columnLookup, submission);
+
+    const createdItem = await graphPost(
+      token,
+      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${sourceListId}/items`,
+      { fields }
+    );
+
+    res.status(201).json({
+      success: true,
+      sourceListId,
+      itemId: createdItem.id || '',
+      driverCount: 1,
+      dateSent: republishSlot.dateSent,
+      timeOfDay: republishSlot.timeOfDay,
+      message: `${formatAvailableTruckIdentityLabel(sourceRecord)} queued for ${republishSlot.timeOfDay} republish today. Power Automate will send and dissect the source row shortly.`
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to republish available trucks.'
+    });
+  }
+});
 
 app.post('/available-trucks', requireLookupAccess, async (req, res) => {
   try {

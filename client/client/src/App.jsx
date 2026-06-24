@@ -711,6 +711,7 @@ export default function App() {
   const [driverTimeOffSubmitting, setDriverTimeOffSubmitting] = useState(false);
   const [driverTimeOffActionMessage, setDriverTimeOffActionMessage] = useState('');
   const [driverTimeOffActionError, setDriverTimeOffActionError] = useState('');
+  const [showRecentlyEndedTimeOff, setShowRecentlyEndedTimeOff] = useState(false);
   const [driverTimeOffDraft, setDriverTimeOffDraft] = useState(() => ({
     rosterDriverKey: '',
     operatorName: '',
@@ -820,6 +821,7 @@ export default function App() {
   const [availableTruckTimeOfDay, setAvailableTruckTimeOfDay] = useState(getDefaultAvailableTruckTimeOfDay);
   const [availableTruckRows, setAvailableTruckRows] = useState(() => [createAvailableTruckDraftRow('initial')]);
   const [availableTruckSubmitting, setAvailableTruckSubmitting] = useState(false);
+  const [availableTruckRepublishingId, setAvailableTruckRepublishingId] = useState('');
   const [availableTruckActionMessage, setAvailableTruckActionMessage] = useState('');
   const [availableTruckActionError, setAvailableTruckActionError] = useState('');
   const [availableTruckDrilldown, setAvailableTruckDrilldown] = useState(null);
@@ -1391,6 +1393,7 @@ export default function App() {
     setAvailableTruckTimeOfDay(getDefaultAvailableTruckTimeOfDay());
     setAvailableTruckRows([createAvailableTruckDraftRow('reset')]);
     setAvailableTruckSubmitting(false);
+    setAvailableTruckRepublishingId('');
     setAvailableTruckActionMessage('');
     setAvailableTruckActionError('');
     setAvailableTruckDrilldown(null);
@@ -2198,6 +2201,43 @@ async function submitAvailableTruckForm(e) {
     setAvailableTruckActionError(err.message || 'Unable to submit available equipment.');
   } finally {
     setAvailableTruckSubmitting(false);
+  }
+}
+
+async function republishAvailableTruck(record) {
+  const recordId = String(record?.id || '').trim();
+  const republishKey = recordId || `${record?.driverName || ''}-${record?.unitNo || ''}`;
+
+  if (!recordId) {
+    setAvailableTruckActionError('This available-equipment row is missing its source ID, so it cannot be republished from the dashboard.');
+    return;
+  }
+
+  setAvailableTruckRepublishingId(republishKey);
+  setAvailableTruckActionError('');
+  setAvailableTruckActionMessage('');
+
+  try {
+    const res = await authedFetch(`${API}/available-trucks/republish`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ recordId })
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Unable to republish available equipment.');
+    }
+
+    setAvailableTruckActionMessage(data.message || `${record?.driverName || 'Available equipment'} queued for republish.`);
+    await loadAvailableTrucks({ silent: true });
+  } catch (err) {
+    setAvailableTruckActionError(err.message || 'Unable to republish available equipment.');
+  } finally {
+    setAvailableTruckRepublishingId('');
   }
 }
 
@@ -3885,6 +3925,45 @@ function getPositionStatusLabel(position) {
     return operationsData?.driverTimeOff?.records || [];
   }
 
+  function getDriverTimeOffRecentlyEndedRecords() {
+    return operationsData?.driverTimeOff?.recentlyEndedRecords || [];
+  }
+
+  function getDriverTimeOffPanelRows() {
+    const currentRows = getDriverTimeOffCurrentRecords().map((record) => ({
+      ...record,
+      displayBucket: 'current'
+    }));
+
+    if (!showRecentlyEndedTimeOff) return currentRows;
+
+    const seen = new Set(currentRows.map((record) => record.id || `${record.operatorName}-${record.truckNumber}-${record.startDate}-${record.endDate}`));
+    const recentlyEndedRows = getDriverTimeOffRecentlyEndedRecords()
+      .filter((record) => {
+        const key = record.id || `${record.operatorName}-${record.truckNumber}-${record.startDate}-${record.endDate}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((record) => ({
+        ...record,
+        displayBucket: 'recently-ended'
+      }));
+
+    return [...currentRows, ...recentlyEndedRows];
+  }
+
+  function getDriverTimeOffEndedLabel(record = {}) {
+    if (record.displayBucket !== 'recently-ended') return 'Current';
+
+    const daysAgo = Number(record.daysSinceEnded);
+    if (daysAgo === 0) return 'Ended today';
+    if (daysAgo === 1) return 'Ended yesterday';
+    if (Number.isFinite(daysAgo) && daysAgo > 1) return `Ended ${daysAgo} days ago`;
+
+    return 'Recently ended';
+  }
+
   function getDriverTimeOffHistoryRows(record = null) {
     if (!record) return [];
 
@@ -4151,7 +4230,7 @@ function getPositionStatusLabel(position) {
       setDriverTimeOffActionMessage(data.message || (isEditing ? 'Driver time off updated.' : 'Driver time off added.'));
       setDriverTimeOffFormOpen(false);
       setDriverTimeOffEditingRecord(null);
-      await loadOperationsDashboard({ silent: true });
+      await loadOperationsDashboard({ silent: true, forceRefresh: true });
       if (driverTimeOffReport) {
         await loadDriverTimeOffReport();
       }
@@ -7310,25 +7389,41 @@ function openReportLoadDetails(load) {
 
 
   function DriverTimeOffCurrentPanel() {
-    const records = getDriverTimeOffCurrentRecords();
+    const currentRecords = getDriverTimeOffCurrentRecords();
+    const recentlyEndedRecords = getDriverTimeOffRecentlyEndedRecords();
+    const records = getDriverTimeOffPanelRows();
     const warning = operationsData?.driverTimeOff?.warning || '';
+    const hasRecentlyEnded = recentlyEndedRecords.length > 0;
 
     return (
       <div className="driver-time-off-panel">
         <div className="driver-position-header driver-time-off-header">
           <div className="driver-time-off-title-block">
             <h3>Current Driver Time Off</h3>
-          </div>
+              </div>
           <div className="driver-time-off-actions">
+            <label className={`driver-time-off-recent-toggle ${showRecentlyEndedTimeOff ? 'is-on' : ''}`}>
+              <input
+                type="checkbox"
+                checked={showRecentlyEndedTimeOff}
+                onChange={(event) => setShowRecentlyEndedTimeOff(event.target.checked)}
+                disabled={!hasRecentlyEnded}
+              />
+              <span>Show recently ended</span>
+            </label>
             <button type="button" className="view-button driver-time-off-main-add-button" onClick={() => openDriverTimeOffForm()}>
               Add Time Off
             </button>
-            <span className={`driver-time-off-count-pill ${records.length > 0 ? 'has-items' : 'is-zero'}`}>{formatReportNumber(records.length)} current</span>
+            <span className={`driver-time-off-count-pill ${currentRecords.length > 0 ? 'has-items' : 'is-zero'}`}>{formatReportNumber(currentRecords.length)} current</span>
+            {hasRecentlyEnded && (
+              <span className="driver-time-off-recent-count-pill">{formatReportNumber(recentlyEndedRecords.length)} ended 7d</span>
+            )}
           </div>
         </div>
 
         {warning && <div className="msg error">{warning}</div>}
         {driverTimeOffActionMessage && <div className="msg success-message">{driverTimeOffActionMessage}</div>}
+        {driverTimeOffActionError && <div className="msg error">{driverTimeOffActionError}</div>}
 
         {records.length === 0 ? (
           <div className="msg">No drivers are currently marked off.</div>
@@ -7343,31 +7438,40 @@ function openReportLoadDetails(load) {
                   <th>Return / End</th>
                   <th>Reason</th>
                   <th>Days</th>
+                  <th>Status</th>
                 </tr>
               </thead>
               <tbody>
-                {records.map((record) => (
-                  <tr
-                    key={record.id || `${record.operatorName}-${record.startDate}`}
-                    className="driver-time-off-clickable-row"
-                    onClick={() => openDriverTimeOffForm(record)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        openDriverTimeOffForm(record);
-                      }
-                    }}
-                    tabIndex={0}
-                    title="Click to view or edit this time-off record"
-                  >
-                    <td><strong>{record.operatorName || '-'}</strong></td>
-                    <td>{record.truckNumber || '-'}</td>
-                    <td>{formatDateOnly(record.startDate)}</td>
-                    <td>{formatDateOnly(record.endDate)}</td>
-                    <td>{record.reason || '-'}</td>
-                    <td>{formatReportNumber(record.days)}</td>
-                  </tr>
-                ))}
+                {records.map((record) => {
+                  const recentlyEnded = record.displayBucket === 'recently-ended';
+                  return (
+                    <tr
+                      key={record.id || `${record.operatorName}-${record.startDate}`}
+                      className={`driver-time-off-clickable-row ${recentlyEnded ? 'recently-ended-time-off-row' : ''}`}
+                      onClick={() => openDriverTimeOffForm(record)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          openDriverTimeOffForm(record);
+                        }
+                      }}
+                      tabIndex={0}
+                      title="Click to view or edit this time-off record"
+                    >
+                      <td><strong>{record.operatorName || '-'}</strong></td>
+                      <td>{record.truckNumber || '-'}</td>
+                      <td>{formatDateOnly(record.startDate)}</td>
+                      <td>{formatDateOnly(record.endDate)}</td>
+                      <td>{record.reason || '-'}</td>
+                      <td>{formatReportNumber(record.days)}</td>
+                      <td>
+                        <span className={`driver-time-off-row-status ${recentlyEnded ? 'recent' : 'current'}`}>
+                          {getDriverTimeOffEndedLabel(record)}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -8168,6 +8272,12 @@ function openReportLoadDetails(load) {
     return buckets.map((bucket) => `${bucket.label} (${bucket.count})`).join(', ');
   }
 
+  function formatAvailableTruckLastPosting(record) {
+    return [formatDateInputLabel(record?.dateSent), record?.timeOfDay]
+      .filter(Boolean)
+      .join(' · ') || '-';
+  }
+
   function formatAvailableTruckPosted(record) {
     const timestamp = record?.postedAt || record?.createdAt || record?.modifiedAt || '';
 
@@ -8186,9 +8296,7 @@ function openReportLoadDetails(load) {
       }
     }
 
-    return [formatDateInputLabel(record?.dateSent), record?.timeOfDay]
-      .filter(Boolean)
-      .join(' · ') || '-';
+    return formatAvailableTruckLastPosting(record);
   }
 
   function formatAvailableTruckNextPickup(record) {
@@ -8407,9 +8515,9 @@ function openReportLoadDetails(load) {
               <div className="available-trucks-current-card">
                 <div className="available-trucks-subheader">
                   <div>
-                    <h3>{batchLabel}</h3>
+                    <h3>Last posting: {batchLabel}</h3>
                     <p>
-                      Current window: last {availableTrucksData?.currentWindowHours || 24} hours · {excludedCount} hidden by active/future assignment
+                      The date shown is the latest posting date from the availability list · Current window: last {availableTrucksData?.currentWindowHours || 24} hours · {excludedCount} hidden by active/future assignment
                     </p>
                   </div>
 
@@ -8443,6 +8551,8 @@ function openReportLoadDetails(load) {
                               <th>Equipment</th>
                               <th>Current Location</th>
                               <th>Advertised Proximity</th>
+                              <th>Last Posting</th>
+                              <th>Actions</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -8459,6 +8569,21 @@ function openReportLoadDetails(load) {
                                 </td>
                                 <td>{record.currentLocation || '-'}</td>
                                 <td><AvailableTruckProximityList stops={record.proximityStops} /></td>
+                                <td>
+                                  <strong>{formatAvailableTruckLastPosting(record)}</strong>
+                                  <small>Last posting date</small>
+                                </td>
+                                <td className="available-trucks-republish-cell">
+                                  <button
+                                    type="button"
+                                    className="secondary-button compact-action-button available-trucks-republish-button"
+                                    onClick={() => republishAvailableTruck(record)}
+                                    disabled={availableTruckSubmitting || Boolean(availableTruckRepublishingId)}
+                                  >
+                                    {availableTruckRepublishingId === (record.id || `${record.driverName || ''}-${record.unitNo || ''}`) ? 'Republishing...' : 'Republish'}
+                                  </button>
+                                  <small>Queues the next allowed posting window.</small>
+                                </td>
                               </tr>
                             ))}
                           </tbody>

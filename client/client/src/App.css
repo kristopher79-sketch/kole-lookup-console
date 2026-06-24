@@ -5214,7 +5214,7 @@ input:focus,
 }
 
 .available-trucks-table {
-  min-width: 1000px;
+  min-width: 1280px;
 }
 
 .available-trucks-table th:nth-child(1),
@@ -5222,9 +5222,15 @@ input:focus,
 .available-trucks-table th:nth-child(2),
 .available-trucks-table td:nth-child(2) { width: 90px; }
 .available-trucks-table th:nth-child(3),
-.available-trucks-table td:nth-child(3) { width: 230px; }
+.available-trucks-table td:nth-child(3) { width: 210px; }
 .available-trucks-table th:nth-child(4),
-.available-trucks-table td:nth-child(4) { width: 180px; }
+.available-trucks-table td:nth-child(4) { width: 170px; }
+.available-trucks-table th:nth-child(5),
+.available-trucks-table td:nth-child(5) { width: 260px; }
+.available-trucks-table th:nth-child(6),
+.available-trucks-table td:nth-child(6) { width: 170px; }
+.available-trucks-table th:nth-child(7),
+.available-trucks-table td:nth-child(7) { width: 180px; }
 
 .available-trucks-table td strong,
 .available-trucks-table td small {
@@ -5236,6 +5242,23 @@ input:focus,
   margin-top: 4px;
   color: #94a3b8;
   font-size: 12px;
+}
+
+.available-trucks-republish-cell {
+  vertical-align: top;
+}
+
+.available-trucks-republish-button {
+  white-space: nowrap;
+  padding: 7px 10px;
+}
+
+.available-trucks-republish-cell small {
+  display: block;
+  margin-top: 7px;
+  max-width: 150px;
+  color: #94a3b8;
+  line-height: 1.35;
 }
 
 .available-trucks-proximity-list {
@@ -9069,6 +9092,7 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .available-trucks-kpi-grid small,
 :root[data-theme='light'] .available-trucks-muted,
 :root[data-theme='light'] .available-trucks-table td small,
+:root[data-theme='light'] .available-trucks-republish-cell small,
 :root[data-theme='light'] .available-trucks-footnote,
 :root[data-theme='light'] .available-trucks-tonu-note,
 :root[data-theme='light'] .available-trucks-source-note small,
@@ -10869,4 +10893,144 @@ button.available-truck-distribution-summary-card:disabled {
   background: #dbeafe !important;
   color: #1e3a8a !important;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.82) !important;
+}
+
+/* PASS 21: Operations Today Time Off quick extension helpers */
+.driver-time-off-title-block p {
+  margin: 4px 0 0;
+  color: var(--kole-muted, #94a3b8);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.driver-time-off-recent-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 4px 9px 4px 5px;
+  border: 1px solid rgba(203, 213, 225, 0.18);
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.10);
+  color: var(--kole-text, #e5e7eb);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  user-select: none;
+}
+
+.driver-time-off-recent-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.driver-time-off-recent-toggle input:disabled,
+.driver-time-off-recent-toggle:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.driver-time-off-recent-toggle span {
+  min-height: auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: inherit !important;
+  box-shadow: none !important;
+}
+
+.driver-time-off-recent-toggle.is-on {
+  border-color: rgba(96, 165, 250, 0.55);
+  background: rgba(37, 99, 235, 0.16);
+  color: #dbeafe;
+}
+
+.driver-time-off-actions .driver-time-off-recent-count-pill {
+  border-color: rgba(96, 165, 250, 0.28);
+  background: rgba(37, 99, 235, 0.14);
+  color: #bfdbfe;
+}
+
+.recently-ended-time-off-row {
+  background: rgba(59, 130, 246, 0.055) !important;
+}
+
+.recently-ended-time-off-row td:first-child {
+  box-shadow: inset 4px 0 0 rgba(96, 165, 250, 0.72);
+}
+
+.driver-time-off-row-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.driver-time-off-row-status.current {
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  background: rgba(16, 185, 129, 0.13);
+  color: #a7f3d0;
+}
+
+.driver-time-off-row-status.recent {
+  border: 1px solid rgba(96, 165, 250, 0.38);
+  background: rgba(37, 99, 235, 0.14);
+  color: #bfdbfe;
+}
+
+
+:root[data-theme='light'] .driver-time-off-title-block p {
+  color: #475569 !important;
+}
+
+:root[data-theme='light'] .driver-time-off-recent-toggle {
+  border-color: #cbd5e1 !important;
+  background: #ffffff !important;
+  color: #334155 !important;
+  box-shadow: inset 0 1px 0 #ffffff;
+}
+
+:root[data-theme='light'] .driver-time-off-recent-toggle.is-on {
+  border-color: #93c5fd !important;
+  background: #eff6ff !important;
+  color: #1e3a8a !important;
+}
+
+:root[data-theme='light'] .driver-time-off-actions .driver-time-off-recent-count-pill {
+  border-color: #93c5fd !important;
+  background: #eff6ff !important;
+  color: #1e3a8a !important;
+}
+
+:root[data-theme='light'] .recently-ended-time-off-row {
+  background: #f8fbff !important;
+}
+
+:root[data-theme='light'] .recently-ended-time-off-row td:first-child {
+  box-shadow: inset 4px 0 0 #60a5fa;
+}
+
+:root[data-theme='light'] .driver-time-off-row-status.current {
+  border-color: #86efac !important;
+  background: #dcfce7 !important;
+  color: #14532d !important;
+}
+
+:root[data-theme='light'] .driver-time-off-row-status.recent {
+  border-color: #93c5fd !important;
+  background: #dbeafe !important;
+  color: #1e3a8a !important;
+}
+
+
+.driver-time-off-table {
+  min-width: 760px !important;
 }
