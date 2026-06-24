@@ -11034,3 +11034,588 @@ button.available-truck-distribution-summary-card:disabled {
 .driver-time-off-table {
   min-width: 760px !important;
 }
+
+/* PASS 16: Monthly Operations Summary */
+.monthly-ops-card {
+  border-color: rgba(250, 204, 21, 0.22);
+}
+
+.monthly-ops-modal {
+  width: min(1750px, 97vw);
+}
+
+.monthly-ops-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 4px;
+  margin-bottom: 18px;
+}
+
+.monthly-ops-summary-grid div {
+  border-color: rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.58);
+}
+
+.monthly-ops-summary-grid span {
+  color: var(--kole-muted, #94a3b8);
+}
+
+.monthly-ops-summary-grid strong {
+  color: var(--kole-text, #f8fafc);
+  line-height: 1.15;
+}
+
+.monthly-ops-brief-card span {
+  margin-top: 7px;
+}
+
+.monthly-ops-section .driver-report-section-header,
+.monthly-ops-section .driver-report-section-header h4,
+.monthly-ops-section .driver-report-section-header p {
+  text-align: left !important;
+}
+
+.monthly-ops-table-wrap table {
+  min-width: 980px;
+}
+
+.monthly-ops-table-wrap th:nth-child(n+2),
+.monthly-ops-table-wrap td:nth-child(n+2) {
+  text-align: right;
+}
+
+.monthly-ops-table-wrap th:first-child,
+.monthly-ops-table-wrap td:first-child {
+  text-align: left;
+}
+
+.monthly-ops-split-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.monthly-ops-split-grid .driver-report-section {
+  min-width: 0;
+}
+
+.monthly-ops-split-grid .monthly-ops-table-wrap table {
+  min-width: 520px;
+}
+
+@media (max-width: 1200px) {
+  .monthly-ops-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .monthly-ops-split-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .monthly-ops-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+:root[data-theme='light'] .monthly-ops-summary-grid div {
+  background: #ffffff;
+  border-color: #d1d5db;
+}
+
+:root[data-theme='light'] .monthly-ops-summary-grid span {
+  color: #475569;
+}
+
+:root[data-theme='light'] .monthly-ops-summary-grid strong {
+  color: #111827;
+}
+
+/* PASS 16.1: Monthly Ops readability / duplicate export cleanup */
+.pdf-export-success {
+  border-color: rgba(45, 212, 191, 0.62) !important;
+  background:
+    linear-gradient(135deg, rgba(20, 184, 166, 0.24), rgba(15, 23, 42, 0.66)) !important;
+  color: #ecfeff !important;
+  box-shadow:
+    0 10px 24px rgba(20, 184, 166, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+:root[data-theme='light'] .pdf-export-success {
+  border-color: #14b8a6 !important;
+  background:
+    linear-gradient(135deg, rgba(20, 184, 166, 0.18), rgba(240, 253, 250, 0.98)) !important;
+  color: #064e3b !important;
+  text-shadow: none !important;
+  box-shadow:
+    0 10px 22px rgba(15, 118, 110, 0.10),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .report-ready-card span,
+:root[data-theme='light'] .pdf-export-guidance {
+  color: #475569 !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}
+
+.monthly-ops-card {
+  border-left: 4px solid #6366f1 !important;
+  background:
+    radial-gradient(circle at top left, rgba(99, 102, 241, 0.22), transparent 34%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.82)) !important;
+  box-shadow:
+    0 18px 38px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+.monthly-ops-card .report-card-header h3 {
+  color: #f8fafc !important;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+
+.monthly-ops-card .report-card-header p,
+.monthly-ops-card .customer-trends-lock-note {
+  color: #cbd5e1 !important;
+  opacity: 1 !important;
+}
+
+.monthly-ops-modal .report-modal-body {
+  background:
+    radial-gradient(circle at top left, rgba(99, 102, 241, 0.16), transparent 32%),
+    radial-gradient(circle at top right, rgba(20, 184, 166, 0.10), transparent 26%),
+    #020617 !important;
+}
+
+.monthly-ops-summary-grid div {
+  position: relative;
+  overflow: hidden;
+  padding: 15px 14px;
+  border-color: rgba(129, 140, 248, 0.30) !important;
+  background:
+    linear-gradient(135deg, rgba(99, 102, 241, 0.16), rgba(15, 23, 42, 0.72)) !important;
+  box-shadow:
+    0 12px 24px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07) !important;
+}
+
+.monthly-ops-summary-grid div::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, #6366f1, #14b8a6);
+  opacity: 0.88;
+}
+
+.monthly-ops-summary-grid span {
+  color: #cbd5e1 !important;
+  font-weight: 850;
+}
+
+.monthly-ops-summary-grid strong {
+  color: #ffffff !important;
+  font-size: 19px;
+  letter-spacing: -0.015em;
+}
+
+.monthly-ops-brief-card {
+  padding: 18px 20px;
+  border-left-color: #6366f1 !important;
+  background:
+    linear-gradient(90deg, rgba(99, 102, 241, 0.18), transparent 38%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.78), rgba(15, 23, 42, 0.56)) !important;
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, 0.20),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07) !important;
+}
+
+.monthly-ops-brief-card strong {
+  color: #f8fafc !important;
+  font-size: 16px;
+}
+
+.monthly-ops-brief-card span {
+  color: #dbeafe !important;
+}
+
+.monthly-ops-section {
+  border-color: rgba(129, 140, 248, 0.24) !important;
+  background: rgba(15, 23, 42, 0.72) !important;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.18) !important;
+}
+
+.monthly-ops-section .driver-report-section-header {
+  background:
+    linear-gradient(90deg, rgba(99, 102, 241, 0.18), rgba(15, 23, 42, 0.92)) !important;
+  border-bottom-color: rgba(129, 140, 248, 0.22) !important;
+}
+
+.monthly-ops-section .driver-report-section-header h4 {
+  color: #facc15 !important;
+}
+
+.monthly-ops-section .driver-report-section-header p {
+  color: #cbd5e1 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .monthly-ops-card {
+  border-left-color: #4f46e5 !important;
+  background:
+    radial-gradient(circle at top left, rgba(79, 70, 229, 0.10), transparent 34%),
+    linear-gradient(180deg, #ffffff, #f8fbff) !important;
+  box-shadow:
+    0 16px 34px rgba(15, 23, 42, 0.09),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .monthly-ops-card .report-card-header h3 {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .monthly-ops-card .report-card-header p,
+:root[data-theme='light'] .monthly-ops-card .customer-trends-lock-note {
+  color: #475569 !important;
+}
+
+:root[data-theme='light'] .monthly-ops-modal .report-modal-body {
+  background:
+    radial-gradient(circle at top left, rgba(79, 70, 229, 0.08), transparent 34%),
+    radial-gradient(circle at top right, rgba(20, 184, 166, 0.08), transparent 28%),
+    #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .monthly-ops-summary-grid div {
+  border-color: #c7d2fe !important;
+  background:
+    linear-gradient(135deg, rgba(79, 70, 229, 0.08), rgba(255, 255, 255, 0.98)) !important;
+  box-shadow:
+    0 12px 24px rgba(15, 23, 42, 0.07),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .monthly-ops-summary-grid span {
+  color: #475569 !important;
+}
+
+:root[data-theme='light'] .monthly-ops-summary-grid strong {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .monthly-ops-brief-card {
+  border-color: #c7d2fe !important;
+  border-left-color: #4f46e5 !important;
+  background:
+    linear-gradient(90deg, rgba(79, 70, 229, 0.10), transparent 38%),
+    linear-gradient(180deg, #ffffff, #eef6ff) !important;
+  color: #0f172a !important;
+  box-shadow:
+    0 14px 28px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .monthly-ops-brief-card strong {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .monthly-ops-brief-card span {
+  color: #334155 !important;
+}
+
+:root[data-theme='light'] .monthly-ops-section {
+  border-color: #cbd5e1 !important;
+  background: #ffffff !important;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.07) !important;
+}
+
+:root[data-theme='light'] .monthly-ops-section .driver-report-section-header {
+  background:
+    linear-gradient(90deg, rgba(79, 70, 229, 0.08), #ffffff 42%, #f8fafc) !important;
+  border-bottom-color: #cbd5e1 !important;
+}
+
+:root[data-theme='light'] .monthly-ops-section .driver-report-section-header h4 {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .monthly-ops-section .driver-report-section-header p {
+  color: #475569 !important;
+}
+
+/* Sales and Leads is its own top-level workbench now, not a Reports subgroup. */
+.sales-and-leads-panel .reports-accordion-list {
+  margin-top: 12px;
+}
+
+.sales-and-leads-status-pill {
+  background: linear-gradient(180deg, #475569, #334155) !important;
+  border-color: rgba(148, 163, 184, 0.42) !important;
+  color: #f8fafc !important;
+}
+
+:root[data-theme='light'] .sales-and-leads-status-pill {
+  background: linear-gradient(180deg, #e2e8f0, #cbd5e1) !important;
+  border-color: #94a3b8 !important;
+  color: #0f172a !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.72) !important;
+}
+
+/* Keep the last Available Equipment drawer from drifting into a different color family. */
+.available-trucks-distribution-summary-button {
+  background: var(--kole-surface) !important;
+  color: var(--kole-text) !important;
+}
+
+.available-trucks-distribution-summary-button:hover,
+.available-trucks-distribution-summary-button[aria-expanded='true'] {
+  background: var(--kole-surface-2) !important;
+  border-left-color: var(--kole-secondary-rail) !important;
+}
+
+:root[data-theme='light'] .available-trucks-distribution-summary-button {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .available-trucks-distribution-summary-button:hover,
+:root[data-theme='light'] .available-trucks-distribution-summary-button[aria-expanded='true'] {
+  background: #eef6ff !important;
+  border-color: #bfdbfe !important;
+  border-left-color: #2563eb !important;
+}
+
+/* PASS 17: Sales/Leads banner cleanup and report generator glow-up */
+.sales-and-leads-panel .feature-section-header-button {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.sales-and-leads-panel .feature-section-chevron {
+  justify-self: end;
+}
+
+.sales-and-leads-status-pill.has-items {
+  border-color: rgba(251, 191, 36, 0.68) !important;
+  background: linear-gradient(180deg, rgba(217, 119, 6, 0.96), rgba(180, 83, 9, 0.92)) !important;
+  color: #fff7ed !important;
+  box-shadow:
+    0 8px 18px rgba(0,0,0,0.20),
+    inset 0 1px 0 rgba(255,255,255,0.22) !important;
+}
+
+.sales-and-leads-panel .report-accordion,
+.sales-and-leads-panel .report-accordion.open {
+  background: var(--kole-table-body) !important;
+  border-color: var(--kole-border) !important;
+}
+
+.sales-and-leads-panel .report-accordion > .report-accordion-button,
+.sales-and-leads-panel .report-accordion.open > .report-accordion-button {
+  background: var(--kole-surface) !important;
+  border-bottom-color: var(--kole-border) !important;
+}
+
+.sales-and-leads-panel .report-accordion > .report-accordion-button:hover {
+  background: var(--kole-surface-2) !important;
+}
+
+.sales-and-leads-panel .report-accordion.open > .report-accordion-button {
+  border-left-color: var(--kole-secondary-rail) !important;
+}
+
+.sales-and-leads-panel .report-accordion-body {
+  background: var(--kole-table-body) !important;
+}
+
+.sales-and-leads-panel .sales-report-card,
+.sales-and-leads-panel .lead-suppression-report-card {
+  background: var(--kole-shell) !important;
+  border-color: var(--kole-border) !important;
+}
+
+.briefing-report-card {
+  position: relative;
+  overflow: hidden;
+  border-left: 4px solid #6366f1 !important;
+  background:
+    radial-gradient(circle at top left, rgba(99, 102, 241, 0.18), transparent 34%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.94), rgba(15, 23, 42, 0.78)) !important;
+  border-color: rgba(129, 140, 248, 0.26) !important;
+  box-shadow:
+    0 18px 38px rgba(0, 0, 0, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07) !important;
+}
+
+.briefing-report-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, #6366f1, #14b8a6);
+  opacity: 0.86;
+  pointer-events: none;
+}
+
+.briefing-report-card .report-card-header h3 {
+  color: #f8fafc !important;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+
+.briefing-report-card .report-card-header p,
+.briefing-report-card .customer-trends-lock-note,
+.briefing-report-card .pdf-export-guidance,
+.briefing-report-card .sales-summary-helper,
+.briefing-report-card small {
+  color: #cbd5e1 !important;
+  opacity: 1 !important;
+}
+
+.briefing-report-card .report-controls {
+  padding: 14px;
+  border: 1px solid rgba(129, 140, 248, 0.18);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.36);
+}
+
+.briefing-report-card .sales-report-start,
+.briefing-report-card .sales-report-loading {
+  border-color: rgba(129, 140, 248, 0.24) !important;
+  background: rgba(15, 23, 42, 0.42) !important;
+}
+
+.briefing-report-card .report-ready-card {
+  border-color: rgba(45, 212, 191, 0.40) !important;
+  background:
+    linear-gradient(135deg, rgba(20, 184, 166, 0.14), rgba(15, 23, 42, 0.58)) !important;
+}
+
+.briefing-report-card.monthly-ops-card {
+  border-color: rgba(129, 140, 248, 0.30) !important;
+}
+
+.available-trucks-summary.available-trucks-distribution-summary-button {
+  background: var(--kole-surface) !important;
+  border-color: var(--kole-border) !important;
+  border-left-color: transparent !important;
+  color: var(--kole-text) !important;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.18) !important;
+}
+
+.available-trucks-summary.available-trucks-distribution-summary-button:hover,
+.available-trucks-summary.available-trucks-distribution-summary-button[aria-expanded='true'] {
+  background: var(--kole-surface-2) !important;
+  border-color: var(--kole-border) !important;
+  border-left-color: var(--kole-secondary-rail) !important;
+  color: var(--kole-text) !important;
+}
+
+:root[data-theme='light'] .sales-and-leads-status-pill.has-items {
+  border-color: #d97706 !important;
+  background: linear-gradient(180deg, #f59e0b, #d97706) !important;
+  color: #111827 !important;
+  box-shadow: 0 8px 16px rgba(217, 119, 6, 0.16), inset 0 1px 0 rgba(255,255,255,0.35) !important;
+}
+
+:root[data-theme='light'] .sales-and-leads-panel .report-accordion,
+:root[data-theme='light'] .sales-and-leads-panel .report-accordion.open,
+:root[data-theme='light'] .sales-and-leads-panel .report-accordion-body,
+:root[data-theme='light'] .sales-and-leads-panel .sales-report-card,
+:root[data-theme='light'] .sales-and-leads-panel .lead-suppression-report-card {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .sales-and-leads-panel .report-accordion > .report-accordion-button,
+:root[data-theme='light'] .sales-and-leads-panel .report-accordion.open > .report-accordion-button {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .sales-and-leads-panel .report-accordion > .report-accordion-button:hover {
+  background: #eef6ff !important;
+}
+
+:root[data-theme='light'] .sales-and-leads-panel .report-accordion.open > .report-accordion-button {
+  border-left-color: #2563eb !important;
+}
+
+:root[data-theme='light'] .briefing-report-card {
+  border-left-color: #4f46e5 !important;
+  border-color: #c7d2fe !important;
+  background:
+    radial-gradient(circle at top left, rgba(79, 70, 229, 0.10), transparent 34%),
+    linear-gradient(180deg, #ffffff, #f8fbff) !important;
+  color: #0f172a !important;
+  box-shadow:
+    0 16px 34px rgba(15, 23, 42, 0.09),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .briefing-report-card .report-card-header h3 {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .briefing-report-card .report-card-header p,
+:root[data-theme='light'] .briefing-report-card .customer-trends-lock-note,
+:root[data-theme='light'] .briefing-report-card .pdf-export-guidance,
+:root[data-theme='light'] .briefing-report-card .sales-summary-helper,
+:root[data-theme='light'] .briefing-report-card small {
+  color: #475569 !important;
+}
+
+:root[data-theme='light'] .briefing-report-card .report-controls {
+  border-color: #c7d2fe;
+  background:
+    linear-gradient(135deg, rgba(79, 70, 229, 0.055), transparent 48%),
+    #ffffff !important;
+}
+
+:root[data-theme='light'] .briefing-report-card .sales-report-start,
+:root[data-theme='light'] .briefing-report-card .sales-report-loading {
+  border-color: #cbd5e1 !important;
+  background: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .briefing-report-card .report-ready-card {
+  border-color: #99f6e4 !important;
+  background:
+    linear-gradient(135deg, rgba(20, 184, 166, 0.12), rgba(255, 255, 255, 0.98)) !important;
+}
+
+:root[data-theme='light'] .available-trucks-summary.available-trucks-distribution-summary-button {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  border-left-color: transparent !important;
+  color: #0f172a !important;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06) !important;
+}
+
+:root[data-theme='light'] .available-trucks-summary.available-trucks-distribution-summary-button:hover,
+:root[data-theme='light'] .available-trucks-summary.available-trucks-distribution-summary-button[aria-expanded='true'] {
+  background: #eef6ff !important;
+  border-color: #bfdbfe !important;
+  border-left-color: #2563eb !important;
+  color: #0f172a !important;
+}
+
+@media (max-width: 700px) {
+  .sales-and-leads-panel .feature-section-header-button {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-and-leads-panel .feature-section-chevron,
+  .sales-and-leads-panel .sales-and-leads-status-pill {
+    justify-self: start;
+  }
+}

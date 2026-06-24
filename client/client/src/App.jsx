@@ -640,6 +640,14 @@ export default function App() {
   const [driverSummaryModalOpen, setDriverSummaryModalOpen] = useState(false);
   const [driverSummaryPdfLoading, setDriverSummaryPdfLoading] = useState(false);
   const [driverSummaryPdfError, setDriverSummaryPdfError] = useState('');
+  const [monthlyOpsMonth, setMonthlyOpsMonth] = useState(() => initialReportDate.getMonth() + 1);
+  const [monthlyOpsYear, setMonthlyOpsYear] = useState(() => initialReportDate.getFullYear());
+  const [monthlyOpsReport, setMonthlyOpsReport] = useState(null);
+  const [monthlyOpsLoading, setMonthlyOpsLoading] = useState(false);
+  const [monthlyOpsError, setMonthlyOpsError] = useState(null);
+  const [monthlyOpsModalOpen, setMonthlyOpsModalOpen] = useState(false);
+  const [monthlyOpsPdfLoading, setMonthlyOpsPdfLoading] = useState(false);
+  const [monthlyOpsPdfError, setMonthlyOpsPdfError] = useState('');
   const [pdfExportNotice, setPdfExportNotice] = useState(null);
   const [settlementCutoffDate, setSettlementCutoffDate] = useState(getDefaultSettlementCutoffDate);
   const [ordersDueSettlementReport, setOrdersDueSettlementReport] = useState(null);
@@ -826,6 +834,7 @@ export default function App() {
   const [availableTruckActionError, setAvailableTruckActionError] = useState('');
   const [availableTruckDrilldown, setAvailableTruckDrilldown] = useState(null);
   const [reportsSectionOpen, setReportsSectionOpen] = useState(false);
+  const [salesAndLeadsSectionOpen, setSalesAndLeadsSectionOpen] = useState(false);
 
   function beginStartupSplashClose() {
     if (startupSplashCloseTimerRef.current) {
@@ -1415,6 +1424,7 @@ export default function App() {
     setDriverHistoryError('');
     driverHistoryCacheRef.current.clear();
     setReportsSectionOpen(false);
+    setSalesAndLeadsSectionOpen(false);
     setOpenReportGroups([]);
     setActiveReportPanel('');
     setOpenGrossRevenueQuarters([]);
@@ -3110,6 +3120,51 @@ function getPositionStatusLabel(position) {
     setDriverSummaryModalOpen(false);
   }
 
+  async function loadMonthlyOperationsSummaryReport() {
+    const selectedMonth = Number(monthlyOpsMonth);
+    const selectedYear = Number(monthlyOpsYear);
+    const selectedReportLabel = `${getReportMonthName(selectedMonth)} ${selectedYear}`;
+
+    setMonthlyOpsLoading(true);
+    setMonthlyOpsError(null);
+    setMonthlyOpsReport(null);
+    setMonthlyOpsModalOpen(false);
+
+    try {
+      const res = await authedFetch(
+        `${API}/reports/monthly-operations-summary?month=${encodeURIComponent(selectedMonth)}&year=${encodeURIComponent(selectedYear)}`
+      );
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        setMonthlyOpsError({
+          code: data.error || 'REPORT_ERROR',
+          message: data.message || data.error || 'Unable to load Monthly Operations Summary.',
+          reportLabel: data.reportLabel || selectedReportLabel,
+          unlockLabel: data.unlockLabel || '',
+          lockReason: data.lockReason || ''
+        });
+        return;
+      }
+
+      setMonthlyOpsReport(data);
+      setMonthlyOpsModalOpen(true);
+    } catch (err) {
+      setMonthlyOpsError({
+        code: 'REPORT_ERROR',
+        message: err.message || 'Unable to load Monthly Operations Summary.',
+        reportLabel: selectedReportLabel
+      });
+    } finally {
+      setMonthlyOpsLoading(false);
+    }
+  }
+
+  function closeMonthlyOperationsSummaryModal() {
+    setMonthlyOpsModalOpen(false);
+  }
+
 
   function updateReportActionAlertCount(alertKey, count) {
     const cleanCount = Math.max(0, Number(count) || 0);
@@ -3380,6 +3435,22 @@ function getPositionStatusLabel(position) {
       fallbackName: `Kole_Driver_Summary_${reportYear}_${String(reportMonth).padStart(2, '0')}.pdf`,
       setLoading: setDriverSummaryPdfLoading,
       setError: setDriverSummaryPdfError
+    });
+  }
+
+  async function downloadMonthlyOperationsSummaryPdf() {
+    if (!monthlyOpsMonth || !monthlyOpsYear) {
+      setMonthlyOpsPdfError('Choose a month and year before exporting the Monthly Operations Summary PDF.');
+      return;
+    }
+
+    await downloadReportPdf({
+      reportKey: 'monthlyOperations',
+      reportName: 'Monthly Operations Summary',
+      endpoint: `${API}/reports/monthly-operations-summary/pdf?month=${encodeURIComponent(monthlyOpsMonth)}&year=${encodeURIComponent(monthlyOpsYear)}`,
+      fallbackName: `Kole_Monthly_Operations_Summary_${monthlyOpsYear}_${String(monthlyOpsMonth).padStart(2, '0')}.pdf`,
+      setLoading: setMonthlyOpsPdfLoading,
+      setError: setMonthlyOpsPdfError
     });
   }
 
@@ -4262,15 +4333,25 @@ function getPositionStatusLabel(position) {
 
   const reportPanelsByGroup = {
     financial: ['grossRevenue', 'driverSummary', 'weeklySettlement'],
-    operational: ['ordersDueSettlement', 'wonNotRegistered', 'permitGovernance', 'onThisDay', 'noAvailability'],
+    operational: ['monthlyOperations', 'ordersDueSettlement', 'wonNotRegistered', 'permitGovernance', 'onThisDay', 'noAvailability'],
     driverFleet: ['activeDriverRoster', 'inactiveDriverRoster', 'fleetEquipment', 'driverTimeOff'],
     sales: ['customerBookingTrends', 'salesActivity', 'leadSuppression', 'salesLeads']
   };
 
   function closeReportSubsections() {
     setOpenReportGroups([]);
-    setActiveReportPanel('');
+
+    if (!reportPanelsByGroup.sales.includes(activeReportPanel)) {
+      setActiveReportPanel('');
+    }
+
     setOpenGrossRevenueQuarters([]);
+  }
+
+  function closeSalesAndLeadsSubsections() {
+    if (reportPanelsByGroup.sales.includes(activeReportPanel)) {
+      setActiveReportPanel('');
+    }
   }
 
   function toggleReportsSection() {
@@ -4279,6 +4360,14 @@ function getPositionStatusLabel(position) {
     }
 
     setReportsSectionOpen((current) => !current);
+  }
+
+  function toggleSalesAndLeadsSection() {
+    if (salesAndLeadsSectionOpen) {
+      closeSalesAndLeadsSubsections();
+    }
+
+    setSalesAndLeadsSectionOpen((current) => !current);
   }
 
   function toggleReportGroup(groupName) {
@@ -7400,7 +7489,8 @@ function openReportLoadDetails(load) {
         <div className="driver-position-header driver-time-off-header">
           <div className="driver-time-off-title-block">
             <h3>Current Driver Time Off</h3>
-              </div>
+            <p>Current records by default. Toggle recently ended records for recent edit access.</p>
+          </div>
           <div className="driver-time-off-actions">
             <label className={`driver-time-off-recent-toggle ${showRecentlyEndedTimeOff ? 'is-on' : ''}`}>
               <input
@@ -9659,7 +9749,7 @@ function openReportLoadDetails(load) {
     const hasReport = Boolean(report);
 
     return (
-      <div className="report-card compact-report-card accordion-inner-card sales-report-card sales-activity-card">
+      <div className="report-card compact-report-card accordion-inner-card sales-report-card sales-activity-card briefing-report-card">
         <div className="report-card-header centered-report-header">
           <div>
             <h3>Sales Activity Snapshot</h3>
@@ -9700,14 +9790,16 @@ function openReportLoadDetails(load) {
             {salesActivityLoading ? 'Loading Snapshot...' : 'Preview Snapshot'}
           </button>
 
-          <button
-            type="button"
-            className="pdf-export-button"
-            onClick={downloadSalesActivityPdf}
-            disabled={salesActivityPdfLoading || salesActivityLoading}
-          >
-            {salesActivityPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
-          </button>
+          {!salesActivityReport && (
+            <button
+              type="button"
+              className="pdf-export-button"
+              onClick={downloadSalesActivityPdf}
+              disabled={salesActivityPdfLoading || salesActivityLoading}
+            >
+              {salesActivityPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+            </button>
+          )}
         </div>
 
         <div className="pdf-export-guidance">PDF exports download to your default Downloads folder. If your browser asks, use the folder you choose.</div>
@@ -9750,6 +9842,366 @@ function openReportLoadDetails(load) {
                 disabled={salesActivityPdfLoading}
               >
                 {salesActivityPdfLoading ? 'Exporting...' : 'Export PDF'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function MonthlyOperationsTable({ title, subtitle, rows = [], columns = [], emptyMessage = 'No rows found.' }) {
+    return (
+      <div className="driver-report-section monthly-ops-section">
+        <div className="driver-report-section-header">
+          <div>
+            <h4>{title}</h4>
+            {subtitle && <p>{subtitle}</p>}
+          </div>
+          <div className="driver-report-section-total">
+            {formatReportNumber(rows.length)} shown
+          </div>
+        </div>
+
+        {rows.length === 0 ? (
+          <div className="msg sales-activity-empty">{emptyMessage}</div>
+        ) : (
+          <div className="report-table-wrap monthly-ops-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  {columns.map((column) => (
+                    <th key={column.key}>{column.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, rowIndex) => (
+                  <tr key={row.key || row.id || `${title}-${rowIndex}`}>
+                    {columns.map((column) => (
+                      <td key={column.key}>{column.render ? column.render(row) : row[column.key]}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function MonthlyOperationsSummaryPreview() {
+    const report = monthlyOpsReport;
+    if (!report) return null;
+
+    const summary = report.summary || {};
+    const sections = report.sections || {};
+    const availability = sections.availability || {};
+    const noAvailability = sections.noAvailability || {};
+
+    return (
+      <div className="modal-report-preview monthly-ops-preview">
+        <div className="sales-summary-grid monthly-ops-summary-grid">
+          <div>
+            <span>Total Offers</span>
+            <strong>{formatReportNumber(summary.totalOffers)}</strong>
+          </div>
+          <div>
+            <span>Bookings</span>
+            <strong>{formatReportNumber(summary.totalBookings)}</strong>
+          </div>
+          <div>
+            <span>Win %</span>
+            <strong>{formatPercent(summary.winRate)}</strong>
+          </div>
+          <div>
+            <span>Gross Revenue</span>
+            <strong>{formatReportMoney(summary.grossRevenue)}</strong>
+          </div>
+          <div>
+            <span>$ / Loaded Mile</span>
+            <strong>{formatReportMoney(summary.avgLoadedMile)}</strong>
+          </div>
+          <div>
+            <span>$ / All Miles</span>
+            <strong>{formatReportMoney(summary.avgAllMile)}</strong>
+          </div>
+          <div>
+            <span>Empty Mile %</span>
+            <strong>{formatPercent(summary.emptyMilePercent)}</strong>
+          </div>
+          <div>
+            <span>No Availability</span>
+            <strong>{formatReportNumber(summary.noAvailabilityCount)}</strong>
+          </div>
+          <div>
+            <span>Driver-Days Listed</span>
+            <strong>{formatReportNumber(summary.driverDaysListed)}</strong>
+          </div>
+          <div>
+            <span>Top Customer</span>
+            <strong>{summary.topCustomer || '-'}</strong>
+          </div>
+          <div>
+            <span>Top Route</span>
+            <strong>{summary.topRoute || '-'}</strong>
+          </div>
+          <div>
+            <span>Top Empty City</span>
+            <strong>{summary.topEmptyCity || '-'}</strong>
+          </div>
+        </div>
+
+        <div className="customer-trends-meta-card monthly-ops-brief-card">
+          <strong>Month story</strong>
+          {(report.story || []).map((line, index) => (
+            <span key={`story-${index}`}>{line}</span>
+          ))}
+        </div>
+
+        {(report.sourceWarnings?.length > 0 || report.failedLists?.length > 0) && (
+          <div className="customer-trends-meta-card warning">
+            <strong>Source health notes</strong>
+            {report.sourceWarnings?.map((entry, index) => (
+              <span key={`source-warning-${index}`}>{entry.SourceList}: {entry.warning || entry.detail}</span>
+            ))}
+            {report.failedLists?.map((entry, index) => (
+              <span key={`source-failed-${index}`}>{entry.SourceList}: {entry.error}</span>
+            ))}
+          </div>
+        )}
+
+        <MonthlyOperationsTable
+          title="Bookings by Customer"
+          subtitle="Jobs, revenue, rate, and revenue share for the selected month."
+          rows={sections.customers || []}
+          columns={[
+            { key: 'customer', label: 'Customer' },
+            { key: 'jobs', label: 'Jobs', render: (row) => formatReportNumber(row.jobs) },
+            { key: 'revenue', label: 'Revenue', render: (row) => formatReportMoney(row.revenue) },
+            { key: 'avgLoadedMile', label: '$ / Loaded Mile', render: (row) => formatReportMoney(row.avgLoadedMile) },
+            { key: 'revenueShare', label: '% Revenue', render: (row) => formatPercent(row.revenueShare) }
+          ]}
+          emptyMessage="No customer bookings found for this month."
+        />
+
+        <MonthlyOperationsTable
+          title="Driver Statistics"
+          subtitle="Grouped by operator/team, matching the legacy monthly operations summary behavior."
+          rows={sections.drivers || []}
+          columns={[
+            { key: 'driver', label: 'Driver' },
+            { key: 'trucks', label: 'Truck(s)', render: (row) => row.trucks || '-' },
+            { key: 'jobs', label: 'Jobs', render: (row) => formatReportNumber(row.jobs) },
+            { key: 'emptyMiles', label: 'Empty Miles', render: (row) => formatReportNumber(row.emptyMiles) },
+            { key: 'loadedMiles', label: 'Loaded Miles', render: (row) => formatReportNumber(row.loadedMiles) },
+            { key: 'revenue', label: 'Gross Revenue', render: (row) => formatReportMoney(row.revenue) },
+            { key: 'driverPay', label: 'Net Pay', render: (row) => row.driverPay ? formatReportMoney(row.driverPay) : '-' },
+            { key: 'avgAllMile', label: '$ / All Miles', render: (row) => formatReportMoney(row.avgAllMile) }
+          ]}
+          emptyMessage="No driver statistics found for this month."
+        />
+
+        <MonthlyOperationsTable
+          title="Top Routes"
+          subtitle="Revenue-ranked lanes from Won/TONU booked loads."
+          rows={sections.routes || []}
+          columns={[
+            { key: 'route', label: 'Route' },
+            { key: 'jobs', label: 'Jobs', render: (row) => formatReportNumber(row.jobs) },
+            { key: 'revenue', label: 'Revenue', render: (row) => formatReportMoney(row.revenue) },
+            { key: 'avgAllMile', label: '$ / All Mile', render: (row) => formatReportMoney(row.avgAllMile) },
+            { key: 'loadedMiles', label: 'Loaded Miles', render: (row) => formatReportNumber(row.loadedMiles) },
+            { key: 'emptyMiles', label: 'Empty Miles', render: (row) => formatReportNumber(row.emptyMiles) }
+          ]}
+          emptyMessage="No routes found for this month."
+        />
+
+        <div className="monthly-ops-split-grid">
+          <MonthlyOperationsTable
+            title="Top Available Empty Cities"
+            subtitle={`${formatReportNumber(availability.driverDayCityCount || 0)} distinct driver-day-city row(s).`}
+            rows={availability.topEmptyCities || []}
+            columns={[
+              { key: 'city', label: 'City' },
+              { key: 'driverDays', label: 'Driver-Days Listed', render: (row) => formatReportNumber(row.driverDays) }
+            ]}
+            emptyMessage="No available-empty city rows found for this month."
+          />
+
+          <MonthlyOperationsTable
+            title="Days Empty / Listed Available"
+            subtitle={`${formatReportNumber(availability.totalPostings || 0)} available-truck posting(s) scanned for the month.`}
+            rows={availability.driverDays || []}
+            columns={[
+              { key: 'driver', label: 'Driver' },
+              { key: 'days', label: 'Days Empty / Listed', render: (row) => formatReportNumber(row.days) }
+            ]}
+            emptyMessage="No driver-days listed rows found for this month."
+          />
+        </div>
+
+        <MonthlyOperationsTable
+          title="No Availability — Key Customers"
+          subtitle={`${formatReportNumber(noAvailability.totalNoAvailability || 0)} request(s), ${formatReportNumber(noAvailability.uniqueCustomers || 0)} customer(s).`}
+          rows={noAvailability.keyCustomers || []}
+          columns={[
+            { key: 'company', label: 'Customer' },
+            { key: 'daysNoAvail', label: 'No Availability Days', render: (row) => formatReportNumber(row.daysNoAvail) },
+            { key: 'requests', label: 'Requests', render: (row) => formatReportNumber(row.requests) },
+            { key: 'miles', label: 'Missed Miles', render: (row) => formatReportNumber(row.miles) }
+          ]}
+          emptyMessage="No No Availability rows found for this month."
+        />
+
+        <div className="customer-trends-meta-card">
+          <strong>Data notes</strong>
+          <span>{report.anchorDate || 'Offers by Date Solicited; bookings by Pickup Offer Date'}.</span>
+          <span>Bid Listing rows scanned: {formatReportNumber(report.sourceRecordsScanned?.bidListing)} · Available Trucks rows scanned: {formatReportNumber(report.sourceRecordsScanned?.availableTrucks)} · No Availability rows scanned: {formatReportNumber(report.sourceRecordsScanned?.noAvailability)}</span>
+        </div>
+      </div>
+    );
+  }
+
+  function MonthlyOperationsSummaryPanel() {
+    const hasReport = Boolean(monthlyOpsReport);
+
+    return (
+      <div className="report-card compact-report-card accordion-inner-card monthly-ops-card briefing-report-card">
+        <div className="report-card-header centered-report-header">
+          <div>
+            <h3>Monthly Operations Summary</h3>
+            {hasReport ? (
+              <p>{monthlyOpsReport.reportLabel} · Generated {monthlyOpsReport.generatedAt || ''}</p>
+            ) : (
+              <p>Month-end debrief for bookings, revenue, driver utilization, availability pressure, top lanes, and no-availability demand.</p>
+            )}
+          </div>
+        </div>
+
+        <div className="report-controls centered-report-controls customer-trends-controls">
+          <label>
+            <span>Month</span>
+            <select
+              value={monthlyOpsMonth}
+              onChange={(e) => {
+                setMonthlyOpsMonth(Number(e.target.value));
+                setMonthlyOpsReport(null);
+                setMonthlyOpsError(null);
+                setMonthlyOpsModalOpen(false);
+                setMonthlyOpsPdfError('');
+                clearPdfExportNotice('monthlyOperations');
+              }}
+              disabled={monthlyOpsLoading}
+            >
+              {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
+                <option key={month} value={month}>{getReportMonthName(month)}</option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span>Year</span>
+            <select
+              value={monthlyOpsYear}
+              onChange={(e) => {
+                setMonthlyOpsYear(Number(e.target.value));
+                setMonthlyOpsReport(null);
+                setMonthlyOpsError(null);
+                setMonthlyOpsModalOpen(false);
+                setMonthlyOpsPdfError('');
+                clearPdfExportNotice('monthlyOperations');
+              }}
+              disabled={monthlyOpsLoading}
+            >
+              {getReportYears().map((year) => (
+                <option key={year} value={year}>{year}</option>
+              ))}
+            </select>
+          </label>
+
+          <button onClick={loadMonthlyOperationsSummaryReport} disabled={monthlyOpsLoading}>
+            {monthlyOpsLoading ? 'Loading Summary...' : 'Preview Summary'}
+          </button>
+
+          {!hasReport && (
+            <button
+              type="button"
+              className="pdf-export-button"
+              onClick={downloadMonthlyOperationsSummaryPdf}
+              disabled={monthlyOpsPdfLoading || monthlyOpsLoading}
+            >
+              {monthlyOpsPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+            </button>
+          )}
+        </div>
+
+        <p className="customer-trends-lock-note">
+          Monthly operations summaries unlock at 8:00 AM Eastern on the 5th of the following month.
+        </p>
+
+        <div className="pdf-export-guidance">PDF exports download to your default Downloads folder. If your browser asks, use the folder you choose.</div>
+
+        {getPdfExportNotice('monthlyOperations') && (
+          <div className="pdf-export-success">{getPdfExportNotice('monthlyOperations')}</div>
+        )}
+
+        {monthlyOpsPdfError && (
+          <div className="msg error pdf-export-error">{monthlyOpsPdfError}</div>
+        )}
+
+        {monthlyOpsLoading && (
+          <div className="sales-report-loading">
+            Building the month-end operations picture...
+          </div>
+        )}
+
+        {monthlyOpsError && (
+          <div className={`report-alert ${monthlyOpsError.code === 'REPORT_LOCKED' ? 'locked' : 'error'}`}>
+            <h4>
+              {monthlyOpsError.code === 'REPORT_LOCKED'
+                ? 'This report is not available yet.'
+                : 'Monthly Operations Summary could not be loaded.'}
+            </h4>
+            <p>{monthlyOpsError.message}</p>
+
+            {monthlyOpsError.code === 'REPORT_LOCKED' && (
+              <>
+                <div className="report-alert-grid">
+                  <div>
+                    <span>Selected report</span>
+                    <strong>{monthlyOpsError.reportLabel}</strong>
+                  </div>
+                  <div>
+                    <span>Available starting</span>
+                    <strong>{monthlyOpsError.unlockLabel || '-'}</strong>
+                  </div>
+                </div>
+
+                {monthlyOpsError.lockReason && <p>{monthlyOpsError.lockReason}</p>}
+              </>
+            )}
+          </div>
+        )}
+
+        {hasReport && !monthlyOpsModalOpen && (
+          <div className="report-ready-card">
+            <div>
+              <strong>{monthlyOpsReport.reportLabel || 'Monthly Operations Summary'} is ready.</strong>
+              <span> The preview opens in a report window.</span>
+            </div>
+            <div className="report-ready-actions">
+              <button className="view-button" onClick={() => setMonthlyOpsModalOpen(true)}>
+                Reopen Preview
+              </button>
+              <button
+                type="button"
+                className="pdf-export-button compact"
+                onClick={downloadMonthlyOperationsSummaryPdf}
+                disabled={monthlyOpsPdfLoading}
+              >
+                {monthlyOpsPdfLoading ? 'Exporting...' : 'Export PDF'}
               </button>
             </div>
           </div>
@@ -9916,7 +10368,7 @@ function openReportLoadDetails(load) {
     const hasReport = Boolean(customerTrendReport);
 
     return (
-      <div className="report-card compact-report-card accordion-inner-card sales-report-card customer-trends-card">
+      <div className="report-card compact-report-card accordion-inner-card sales-report-card customer-trends-card briefing-report-card">
         <div className="report-card-header centered-report-header">
           <div>
             <h3>Customer Booking Trends</h3>
@@ -10222,7 +10674,7 @@ function openReportLoadDetails(load) {
     }
 
     return (
-      <div className="report-card compact-report-card accordion-inner-card sales-report-card">
+      <div className="report-card compact-report-card accordion-inner-card sales-report-card briefing-report-card">
         <div className="report-card-header centered-report-header">
           <div>
             <h3>{hasSalesLeadsReport ? activeViewLabel : 'Customer Cards'}</h3>
@@ -10365,7 +10817,7 @@ function openReportLoadDetails(load) {
     }
 
     return (
-      <div className="report-card compact-report-card accordion-inner-card sales-report-card lead-suppression-report-card">
+      <div className="report-card compact-report-card accordion-inner-card sales-report-card lead-suppression-report-card briefing-report-card">
         <div className="report-card-header centered-report-header">
           <div>
             <h3>Follow-Up Suppression</h3>
@@ -10742,10 +11194,118 @@ function openReportLoadDetails(load) {
     );
   }
 
+  function SalesAndLeadsPanel() {
+    const isCustomerTrendsOpen = activeReportPanel === 'customerBookingTrends';
+    const isSalesActivityOpen = activeReportPanel === 'salesActivity';
+    const isLeadSuppressionOpen = activeReportPanel === 'leadSuppression';
+    const isSalesLeadsOpen = activeReportPanel === 'salesLeads';
+
+    const overdueFollowUps = Number(
+      salesActivityReport?.summary?.overdueFollowUps
+      || salesLeadsReport?.summary?.overdueFollowUps
+      || 0
+    );
+
+    return (
+      <div className="search-card feature-accordion-panel sales-and-leads-panel">
+        <button
+          type="button"
+          className="feature-section-header-button sales-and-leads-section-header-button"
+          onClick={toggleSalesAndLeadsSection}
+          aria-expanded={salesAndLeadsSectionOpen}
+        >
+          <span className="feature-section-title-block">
+            <span className="feature-section-title">Sales and Leads</span>
+            <span className="feature-section-subtitle">Customers, leads, follow-ups, aviation prospects, and customer cards.</span>
+          </span>
+          {overdueFollowUps > 0 && (
+            <span className="feature-section-status-pill sales-and-leads-status-pill has-items">
+              {formatReportNumber(overdueFollowUps)} overdue
+            </span>
+          )}
+          <span className="feature-section-chevron">{salesAndLeadsSectionOpen ? '▲' : '▼'}</span>
+        </button>
+
+        {salesAndLeadsSectionOpen && (
+          <div className="feature-section-body sales-and-leads-body reports-accordion-list">
+            <div className={`report-accordion ${isCustomerTrendsOpen ? 'open' : ''}`}>
+              <button
+                type="button"
+                className="report-accordion-button"
+                onClick={(e) => handleReportPanelClick(e, 'customerBookingTrends')}
+              >
+                <span>Customer Booking Trends</span>
+                <span className="report-accordion-icon">{isCustomerTrendsOpen ? '▼' : '▶'}</span>
+              </button>
+
+              {isCustomerTrendsOpen && (
+                <div className="report-accordion-body">
+                  <CustomerBookingTrendsPanel />
+                </div>
+              )}
+            </div>
+
+            <div className={`report-accordion ${isSalesActivityOpen ? 'open' : ''}`}>
+              <button
+                type="button"
+                className="report-accordion-button"
+                onClick={(e) => handleReportPanelClick(e, 'salesActivity')}
+              >
+                <span>Sales Activity Snapshot</span>
+                <span className="report-accordion-icon">{isSalesActivityOpen ? '▼' : '▶'}</span>
+              </button>
+
+              {isSalesActivityOpen && (
+                <div className="report-accordion-body">
+                  <SalesActivitySnapshotPanel />
+                </div>
+              )}
+            </div>
+
+            <div className={`report-accordion ${isLeadSuppressionOpen ? 'open' : ''}`}>
+              <button
+                type="button"
+                className="report-accordion-button"
+                onClick={(e) => handleReportPanelClick(e, 'leadSuppression')}
+              >
+                <span>Follow-Up Suppression</span>
+                <span className="report-accordion-icon">{isLeadSuppressionOpen ? '▼' : '▶'}</span>
+              </button>
+
+              {isLeadSuppressionOpen && (
+                <div className="report-accordion-body">
+                  <LeadSuppressionReportPanel />
+                </div>
+              )}
+            </div>
+
+            <div className={`report-accordion ${isSalesLeadsOpen ? 'open' : ''}`}>
+              <button
+                type="button"
+                className="report-accordion-button"
+                onClick={(e) => handleReportPanelClick(e, 'salesLeads')}
+              >
+                <span>Customer Cards</span>
+                <span className="report-accordion-icon">{isSalesLeadsOpen ? '▼' : '▶'}</span>
+              </button>
+
+              {isSalesLeadsOpen && (
+                <div className="report-accordion-body">
+                  <SalesLeadsReportPanel />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function DriverSummaryReport() {
     const monthOptions = Array.from({ length: 12 }, (_, index) => index + 1);
     const isGrossRevenueOpen = activeReportPanel === 'grossRevenue';
     const isDriverSummaryOpen = activeReportPanel === 'driverSummary';
+    const isMonthlyOperationsOpen = activeReportPanel === 'monthlyOperations';
     const isOrdersDueSettlementOpen = activeReportPanel === 'ordersDueSettlement';
     const isWeeklySettlementOpen = activeReportPanel === 'weeklySettlement';
     const isWonNotRegisteredOpen = activeReportPanel === 'wonNotRegistered';
@@ -10763,7 +11323,6 @@ function openReportLoadDetails(load) {
     const isFinancialReportsOpen = isReportGroupOpen('financial');
     const isOperationalReportsOpen = isReportGroupOpen('operational');
     const isDriverFleetReportsOpen = isReportGroupOpen('driverFleet');
-    const isSalesReportsOpen = isReportGroupOpen('sales');
 
     return (
       <div className="search-card feature-accordion-panel reports-panel">
@@ -10775,7 +11334,7 @@ function openReportLoadDetails(load) {
         >
           <span className="feature-section-title-block">
             <span className="feature-section-title">Reports</span>
-            <span className="feature-section-subtitle">Financial, operational, driver/fleet, and sales reporting.</span>
+            <span className="feature-section-subtitle">Financial, operational, and driver/fleet reporting.</span>
           </span>
           <span
             className={`feature-section-status-pill report-alert-status-pill ${
@@ -10784,10 +11343,10 @@ function openReportLoadDetails(load) {
             title={reportActionAlertSummary}
           >
             {reportActionAlertsLoading && !reportActionAlerts
-              ? 'Checking Operations...'
+              ? 'Checking...'
               : reportActionAlertCounts.total > 0
-                ? `Operations: ${formatReportNumber(reportActionAlertCounts.total)} ${reportActionAlertCounts.total === 1 ? 'Alert' : 'Alerts'}`
-                : 'Operations: Clear'}
+                ? `${formatReportNumber(reportActionAlertCounts.total)} ${reportActionAlertCounts.total === 1 ? 'Alert' : 'Alerts'}`
+                : 'Clear'}
           </span>
           <span className="feature-section-chevron">{reportsSectionOpen ? '▲' : '▼'}</span>
         </button>
@@ -10821,7 +11380,7 @@ function openReportLoadDetails(load) {
 
             {isGrossRevenueOpen && (
               <div className="report-accordion-body">
-                <div className="report-card compact-report-card accordion-inner-card">
+                <div className="report-card compact-report-card accordion-inner-card briefing-report-card">
                   <div className="report-card-header centered-report-header">
                     <div>
                       <h3>Gross Revenue Totals</h3>
@@ -10888,7 +11447,7 @@ function openReportLoadDetails(load) {
 
             {isDriverSummaryOpen && (
               <div className="report-accordion-body">
-                <div className="report-card compact-report-card accordion-inner-card">
+                <div className="report-card compact-report-card accordion-inner-card briefing-report-card">
                   <div className="report-card-header centered-report-header">
                     <div>
                       <h3>Monthly Driver Summary Report</h3>
@@ -10942,14 +11501,16 @@ function openReportLoadDetails(load) {
                       {driverSummaryLoading ? 'Loading Report...' : 'Preview Report'}
                     </button>
 
-                    <button
-                      type="button"
-                      className="pdf-export-button"
-                      onClick={downloadDriverSummaryPdf}
-                      disabled={driverSummaryPdfLoading || driverSummaryLoading}
-                    >
-                      {driverSummaryPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
-                    </button>
+                    {!driverSummaryReport && (
+                      <button
+                        type="button"
+                        className="pdf-export-button"
+                        onClick={downloadDriverSummaryPdf}
+                        disabled={driverSummaryPdfLoading || driverSummaryLoading}
+                      >
+                        {driverSummaryPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                      </button>
+                    )}
                   </div>
 
                   <div className="pdf-export-guidance">PDF exports download to your default Downloads folder. If your browser asks, use the folder you choose.</div>
@@ -11028,7 +11589,7 @@ function openReportLoadDetails(load) {
 
             {isWeeklySettlementOpen && (
               <div className="report-accordion-body">
-                <div className="report-card compact-report-card settlement-report-card accordion-inner-card">
+                <div className="report-card compact-report-card settlement-report-card accordion-inner-card briefing-report-card">
                   <div className="report-card-header centered-report-header">
                     <div>
                       <h3>Weekly Settlement Report</h3>
@@ -11058,14 +11619,16 @@ function openReportLoadDetails(load) {
                       {weeklySettlementLoading ? 'Loading Report...' : 'Preview Report'}
                     </button>
 
-                    <button
-                      type="button"
-                      className="pdf-export-button"
-                      onClick={downloadWeeklySettlementPdf}
-                      disabled={weeklySettlementPdfLoading || weeklySettlementLoading}
-                    >
-                      {weeklySettlementPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
-                    </button>
+                    {!weeklySettlementReport && (
+                      <button
+                        type="button"
+                        className="pdf-export-button"
+                        onClick={downloadWeeklySettlementPdf}
+                        disabled={weeklySettlementPdfLoading || weeklySettlementLoading}
+                      >
+                        {weeklySettlementPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                      </button>
+                    )}
                   </div>
 
                   <div className="pdf-export-guidance">PDF exports download to your default Downloads folder. If your browser asks, use the folder you choose.</div>
@@ -11140,6 +11703,23 @@ function openReportLoadDetails(load) {
 
             {isOperationalReportsOpen && (
               <div className="report-group-body">
+          <div className={`report-accordion ${isMonthlyOperationsOpen ? 'open' : ''}`}>
+            <button
+              type="button"
+              className="report-accordion-button"
+              onClick={(e) => handleReportPanelClick(e, 'monthlyOperations')}
+            >
+              <span>Monthly Operations Summary</span>
+              <span className="report-accordion-icon">{isMonthlyOperationsOpen ? '▼' : '▶'}</span>
+            </button>
+
+            {isMonthlyOperationsOpen && (
+              <div className="report-accordion-body">
+                <MonthlyOperationsSummaryPanel />
+              </div>
+            )}
+          </div>
+
           <div className={`report-accordion ${isOrdersDueSettlementOpen ? 'open' : ''}`}>
             <button
               type="button"
@@ -11163,10 +11743,11 @@ function openReportLoadDetails(load) {
 
             {isOrdersDueSettlementOpen && (
               <div className="report-accordion-body">
-                <div className="report-card compact-report-card accordion-inner-card">
+                <div className="report-card compact-report-card accordion-inner-card briefing-report-card">
                   <div className="report-card-header centered-report-header">
                     <div>
                       <h3>Orders Due for Settlement</h3>
+                      <p>Completed or ready-to-close orders that still need settlement review.</p>
                     </div>
                   </div>
 
@@ -11229,10 +11810,11 @@ function openReportLoadDetails(load) {
 
             {isWonNotRegisteredOpen && (
               <div className="report-accordion-body">
-                <div className="report-card compact-report-card accordion-inner-card">
+                <div className="report-card compact-report-card accordion-inner-card briefing-report-card">
                   <div className="report-card-header centered-report-header">
                     <div>
                       <h3>Orders Won and Not Registered</h3>
+                      <p>Won loads that still need TMS registration or follow-through.</p>
                     </div>
                   </div>
 
@@ -11296,7 +11878,7 @@ function openReportLoadDetails(load) {
 
             {isPermitGovernanceOpen && (
               <div className="report-accordion-body">
-                <div className="report-card compact-report-card accordion-inner-card permit-governance-card">
+                <div className="report-card compact-report-card accordion-inner-card permit-governance-card briefing-report-card">
                   <div className="report-card-header centered-report-header">
                     <div>
                       <h3>Permit Governance</h3>
@@ -11347,7 +11929,7 @@ function openReportLoadDetails(load) {
 
             {isOnThisDayOpen && (
               <div className="report-accordion-body">
-                <div className="report-card compact-report-card accordion-inner-card on-this-day-card">
+                <div className="report-card compact-report-card accordion-inner-card on-this-day-card briefing-report-card">
                   <div className="report-card-header centered-report-header">
                     <div>
                       <h3>On This Day</h3>
@@ -11377,14 +11959,16 @@ function openReportLoadDetails(load) {
                     <button onClick={() => loadOnThisDayReport('exact')} disabled={onThisDayLoading}>
                       {onThisDayLoading ? 'Loading Report...' : 'Preview Report'}
                     </button>
-                    <button
-                      type="button"
-                      className="pdf-export-button compact"
-                      onClick={downloadOnThisDayPdf}
-                      disabled={onThisDayPdfLoading || onThisDayLoading}
-                    >
-                      {onThisDayPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
-                    </button>
+                    {!onThisDayReport && (
+                      <button
+                        type="button"
+                        className="pdf-export-button compact"
+                        onClick={downloadOnThisDayPdf}
+                        disabled={onThisDayPdfLoading || onThisDayLoading}
+                      >
+                        {onThisDayPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                      </button>
+                    )}
                   </div>
 
                   <p className="on-this-day-run-hint">
@@ -11452,7 +12036,7 @@ function openReportLoadDetails(load) {
 
             {isNoAvailabilityOpen && (
               <div className="report-accordion-body">
-                <div className="report-card compact-report-card accordion-inner-card no-availability-card">
+                <div className="report-card compact-report-card accordion-inner-card no-availability-card briefing-report-card">
                   <div className="report-card-header centered-report-header">
                     <div>
                       <h3>No Availability</h3>
@@ -11559,7 +12143,7 @@ function openReportLoadDetails(load) {
 
                   {isActiveDriverRosterOpen && (
                     <div className="report-accordion-body">
-                      <div className="report-card compact-report-card accordion-inner-card">
+                      <div className="report-card compact-report-card accordion-inner-card briefing-report-card">
                         <div className="report-card-header centered-report-header">
                           <div>
                             <h3>Active Driver Roster</h3>
@@ -11571,14 +12155,16 @@ function openReportLoadDetails(load) {
                           <button onClick={loadActiveDriverRosterReport} disabled={activeDriverRosterLoading}>
                             {activeDriverRosterLoading ? 'Loading Report...' : 'Preview Report'}
                           </button>
-                          <button
-                            type="button"
-                            className="pdf-export-button"
-                            onClick={downloadActiveDriverRosterPdf}
-                            disabled={activeDriverRosterPdfLoading || activeDriverRosterLoading}
-                          >
-                            {activeDriverRosterPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
-                          </button>
+                          {!activeDriverRosterReport && (
+                            <button
+                              type="button"
+                              className="pdf-export-button"
+                              onClick={downloadActiveDriverRosterPdf}
+                              disabled={activeDriverRosterPdfLoading || activeDriverRosterLoading}
+                            >
+                              {activeDriverRosterPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                            </button>
+                          )}
                         </div>
 
                         <div className="pdf-export-guidance">PDF exports download to your default Downloads folder. If your browser asks, use the folder you choose.</div>
@@ -11637,7 +12223,7 @@ function openReportLoadDetails(load) {
 
                   {isInactiveDriverRosterOpen && (
                     <div className="report-accordion-body">
-                      <div className="report-card compact-report-card accordion-inner-card">
+                      <div className="report-card compact-report-card accordion-inner-card briefing-report-card">
                         <div className="report-card-header centered-report-header">
                           <div>
                             <h3>Inactive Driver Roster</h3>
@@ -11649,14 +12235,16 @@ function openReportLoadDetails(load) {
                           <button onClick={loadInactiveDriverRosterReport} disabled={inactiveDriverRosterLoading}>
                             {inactiveDriverRosterLoading ? 'Loading Report...' : 'Preview Report'}
                           </button>
-                          <button
-                            type="button"
-                            className="pdf-export-button"
-                            onClick={downloadInactiveDriverRosterPdf}
-                            disabled={inactiveDriverRosterPdfLoading || inactiveDriverRosterLoading}
-                          >
-                            {inactiveDriverRosterPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
-                          </button>
+                          {!inactiveDriverRosterReport && (
+                            <button
+                              type="button"
+                              className="pdf-export-button"
+                              onClick={downloadInactiveDriverRosterPdf}
+                              disabled={inactiveDriverRosterPdfLoading || inactiveDriverRosterLoading}
+                            >
+                              {inactiveDriverRosterPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                            </button>
+                          )}
                         </div>
 
                         <div className="pdf-export-guidance">PDF exports download to your default Downloads folder. If your browser asks, use the folder you choose.</div>
@@ -11715,7 +12303,7 @@ function openReportLoadDetails(load) {
 
                   {isFleetEquipmentOpen && (
                     <div className="report-accordion-body">
-                      <div className="report-card compact-report-card accordion-inner-card">
+                      <div className="report-card compact-report-card accordion-inner-card briefing-report-card">
                         <div className="report-card-header centered-report-header">
                           <div>
                             <h3>Fleet Equipment</h3>
@@ -11747,14 +12335,16 @@ function openReportLoadDetails(load) {
                           <button onClick={loadFleetEquipmentReport} disabled={fleetEquipmentLoading}>
                             {fleetEquipmentLoading ? 'Loading Report...' : 'Preview Report'}
                           </button>
-                          <button
-                            type="button"
-                            className="pdf-export-button"
-                            onClick={downloadFleetEquipmentPdf}
-                            disabled={fleetEquipmentPdfLoading || fleetEquipmentLoading}
-                          >
-                            {fleetEquipmentPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
-                          </button>
+                          {!fleetEquipmentReport && (
+                            <button
+                              type="button"
+                              className="pdf-export-button"
+                              onClick={downloadFleetEquipmentPdf}
+                              disabled={fleetEquipmentPdfLoading || fleetEquipmentLoading}
+                            >
+                              {fleetEquipmentPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                            </button>
+                          )}
                         </div>
 
                         <div className="pdf-export-guidance">PDF exports download to your default Downloads folder. If your browser asks, use the folder you choose.</div>
@@ -11813,7 +12403,7 @@ function openReportLoadDetails(load) {
 
                   {isDriverTimeOffOpen && (
                     <div className="report-accordion-body">
-                      <div className="report-card compact-report-card accordion-inner-card driver-time-off-card">
+                      <div className="report-card compact-report-card accordion-inner-card driver-time-off-card briefing-report-card">
                         <div className="report-card-header centered-report-header">
                           <div>
                             <h3>Driver Time Off</h3>
@@ -11845,14 +12435,16 @@ function openReportLoadDetails(load) {
                           <button onClick={loadDriverTimeOffReport} disabled={driverTimeOffLoading}>
                             {driverTimeOffLoading ? 'Loading Report...' : 'Preview Report'}
                           </button>
-                          <button
-                            type="button"
-                            className="pdf-export-button"
-                            onClick={downloadDriverTimeOffPdf}
-                            disabled={driverTimeOffPdfLoading || driverTimeOffLoading}
-                          >
-                            {driverTimeOffPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
-                          </button>
+                          {!driverTimeOffReport && (
+                            <button
+                              type="button"
+                              className="pdf-export-button"
+                              onClick={downloadDriverTimeOffPdf}
+                              disabled={driverTimeOffPdfLoading || driverTimeOffLoading}
+                            >
+                              {driverTimeOffPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                            </button>
+                          )}
                           <button type="button" className="view-button" onClick={() => openDriverTimeOffForm()}>
                             Add Time Off
                           </button>
@@ -11903,92 +12495,6 @@ function openReportLoadDetails(load) {
                   )}
                 </div>
 
-              </div>
-            )}
-          </div>
-          <div className={`report-group-accordion ${isSalesReportsOpen ? 'open' : ''}`}>
-            <button
-              type="button"
-              className="report-group-button"
-              onClick={(e) => handleReportGroupClick(e, 'sales')}
-            >
-              <div>
-                <strong>Sales Reports</strong>
-                <span>Customers, leads, follow-ups, aviation prospects</span>
-              </div>
-              <span className="report-accordion-icon">{isSalesReportsOpen ? '▼' : '▶'}</span>
-            </button>
-
-            {isSalesReportsOpen && (
-              <div className="report-group-body">
-                <div className={`report-accordion ${isCustomerTrendsOpen ? 'open' : ''}`}>
-                  <button
-                    type="button"
-                    className="report-accordion-button"
-                    onClick={(e) => handleReportPanelClick(e, 'customerBookingTrends')}
-                  >
-                    <span>Customer Booking Trends</span>
-                    <span className="report-accordion-icon">{isCustomerTrendsOpen ? '▼' : '▶'}</span>
-                  </button>
-
-                  {isCustomerTrendsOpen && (
-                    <div className="report-accordion-body">
-                      <CustomerBookingTrendsPanel />
-                    </div>
-                  )}
-                </div>
-
-                <div className={`report-accordion ${isSalesActivityOpen ? 'open' : ''}`}>
-                  <button
-                    type="button"
-                    className="report-accordion-button"
-                    onClick={(e) => handleReportPanelClick(e, 'salesActivity')}
-                  >
-                    <span>Sales Activity Snapshot</span>
-                    <span className="report-accordion-icon">{isSalesActivityOpen ? '▼' : '▶'}</span>
-                  </button>
-
-                  {isSalesActivityOpen && (
-                    <div className="report-accordion-body">
-                      <SalesActivitySnapshotPanel />
-                    </div>
-                  )}
-                </div>
-
-
-                <div className={`report-accordion ${isLeadSuppressionOpen ? 'open' : ''}`}>
-                  <button
-                    type="button"
-                    className="report-accordion-button"
-                    onClick={(e) => handleReportPanelClick(e, 'leadSuppression')}
-                  >
-                    <span>Follow-Up Suppression</span>
-                    <span className="report-accordion-icon">{isLeadSuppressionOpen ? '▼' : '▶'}</span>
-                  </button>
-
-                  {isLeadSuppressionOpen && (
-                    <div className="report-accordion-body">
-                      <LeadSuppressionReportPanel />
-                    </div>
-                  )}
-                </div>
-
-                <div className={`report-accordion ${isSalesLeadsOpen ? 'open' : ''}`}>
-                  <button
-                    type="button"
-                    className="report-accordion-button"
-                    onClick={(e) => handleReportPanelClick(e, 'salesLeads')}
-                  >
-                    <span>Customer Cards</span>
-                    <span className="report-accordion-icon">{isSalesLeadsOpen ? '▼' : '▶'}</span>
-                  </button>
-
-                  {isSalesLeadsOpen && (
-                    <div className="report-accordion-body">
-                      <SalesLeadsReportPanel />
-                    </div>
-                  )}
-                </div>
               </div>
             )}
           </div>
@@ -12412,6 +12918,8 @@ function openReportLoadDetails(load) {
 
   {AvailableTrucksPanel()}
 
+  <SalesAndLeadsPanel />
+
   <DriverSummaryReport />
   </>
 )}
@@ -12543,6 +13051,43 @@ function openReportLoadDetails(load) {
       )}
 
       <GrossRevenueDriverDetailModal />
+
+      {monthlyOpsModalOpen && monthlyOpsReport && (
+        <div className="modal-overlay report-modal-overlay" onClick={closeMonthlyOperationsSummaryModal}>
+          <div className="detail-modal report-modal wide-report-modal monthly-ops-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="detail-header report-modal-header">
+              <div>
+                <h2>{monthlyOpsReport.reportLabel || 'Monthly Operations Summary'}</h2>
+                <p>{monthlyOpsReport.anchorDate || ''} · Generated {monthlyOpsReport.generatedAt || ''}</p>
+              </div>
+
+              <div className="report-modal-actions">
+                <button
+                  type="button"
+                  className="pdf-export-button"
+                  onClick={downloadMonthlyOperationsSummaryPdf}
+                  disabled={monthlyOpsPdfLoading}
+                >
+                  {monthlyOpsPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
+                </button>
+                <button className="close-button" onClick={closeMonthlyOperationsSummaryModal}>
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="modal-body report-modal-body">
+              {getPdfExportNotice('monthlyOperations') && (
+                <div className="pdf-export-success">{getPdfExportNotice('monthlyOperations')}</div>
+              )}
+              {monthlyOpsPdfError && (
+                <div className="msg error pdf-export-error">{monthlyOpsPdfError}</div>
+              )}
+              <MonthlyOperationsSummaryPreview />
+            </div>
+          </div>
+        </div>
+      )}
 
       {driverSummaryModalOpen && driverSummaryReport && (
         <div className="modal-overlay report-modal-overlay" onClick={closeDriverSummaryModal}>

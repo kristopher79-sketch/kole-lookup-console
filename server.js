@@ -2607,6 +2607,664 @@ function buildCustomerBookingTrendsResponse(items, throughYear, throughMonth) {
 }
 
 
+function getReportMonthWindow(yearValue, monthValue) {
+  const year = Number(yearValue);
+  const month = Number(monthValue);
+  const startKey = `${year}-${String(month).padStart(2, '0')}-01`;
+  const nextYear = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const endKey = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
+
+  return {
+    year,
+    month,
+    startKey,
+    endKey,
+    monthKey: `${year}-${String(month).padStart(2, '0')}`,
+    reportLabel: getReportMonthLabel(year, month)
+  };
+}
+
+function isDateKeyInReportWindow(value, window) {
+  const dateKey = normalizeEasternDateOnly(value) || String(value || '').slice(0, 10);
+  return Boolean(dateKey && dateKey >= window.startKey && dateKey < window.endKey);
+}
+
+function getMonthlyOperationsBidFieldSelect() {
+  return [
+    'BOLNumber_x0028_Won_x0029_',
+    'BidID',
+    'Date_x0020_Solicited',
+    'Company',
+    'CustomerCode',
+    'Pickup_x0020_Offer_x0020_Date',
+    'Expected_x0020_Delivery_x0020_Da',
+    'Shipment_x0020_Origin',
+    'Shipment_x0020_Destination',
+    'Route',
+    'Status',
+    'Truck_x0020_Number',
+    'Operator_x002f_Team',
+    'TMSName',
+    'FinalBillableTotal',
+    'Quoted_x0020_Total',
+    'Loaded_x0020_Miles',
+    'Empty_x0020__x0028_Deadhead_x002',
+    'Empty_x0020__x0028_Deadhead_x0029__x0020_Miles',
+    'NetPayabletoDriver',
+    'Created',
+    'Modified'
+  ].join(',');
+}
+
+function getMonthlyOperationsAvailableFieldSelect() {
+  return [
+    'DateSent',
+    'TimeofDay',
+    'DriverName',
+    'UnitNo',
+    'EquipmentType',
+    'CurrentLocation',
+    'Proximity1',
+    'Proximity1Time',
+    'Proximity2',
+    'Proximity2Time',
+    'Proximity3',
+    'Proximity3Time',
+    'Proximity4',
+    'Proximity4Time',
+    'Created',
+    'Modified'
+  ].join(',');
+}
+
+function getDateFromBidId(value) {
+  const match = String(value || '').match(/Q-(\d{4})(\d{2})(\d{2})/i);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : '';
+}
+
+function cleanMonthlyOperationsBidItem(item, sourceList) {
+  const f = item.fields || {};
+  const status = getChoiceValue(f.Status || f['Status/Value'] || '');
+  const customer = getChoiceValue(f.Company || f['Company/Value'] || '');
+  const driver = getChoiceValue(f.Operator_x002f_Team || f['Operator_x002f_Team/Value'] || '') || getChoiceValue(f.TMSName || '');
+  const truck = getChoiceValue(f.Truck_x0020_Number || f['Truck_x0020_Number/Value'] || '');
+  const finalBillableTotal = getNumberValue(f.FinalBillableTotal);
+  const quotedTotal = getNumberValue(f.Quoted_x0020_Total);
+  const revenue = finalBillableTotal > 0 ? finalBillableTotal : quotedTotal;
+  const loadedMiles = getNumberValue(f.Loaded_x0020_Miles);
+  const emptyMiles = getNumberValue(
+    f.Empty_x0020__x0028_Deadhead_x0029__x0020_Miles ??
+    f.Empty_x0020__x0028_Deadhead_x002
+  );
+  const totalMiles = loadedMiles + emptyMiles;
+  const solicitDate = normalizeEasternDateOnly(f.Date_x0020_Solicited) || getDateFromBidId(f.BidID) || normalizeEasternDateOnly(f.Created || item.createdDateTime);
+  const pickupDate = normalizeEasternDateOnly(f.Pickup_x0020_Offer_x0020_Date);
+  const origin = getChoiceValue(f.Shipment_x0020_Origin || f['Shipment_x0020_Origin/Value'] || '');
+  const destination = getChoiceValue(f.Shipment_x0020_Destination || f['Shipment_x0020_Destination/Value'] || '');
+  const route = String(f.Route || '').trim() || [origin, destination].filter(Boolean).join(' → ');
+
+  return {
+    id: item.id || '',
+    SourceListId: sourceList?.listId || '',
+    SourceList: sourceList?.label || '',
+    SourceYear: sourceList?.year || '',
+    BOL: f.BOLNumber_x0028_Won_x0029_ || '',
+    BidID: f.BidID || '',
+    Customer: customer || 'Unknown Customer',
+    CustomerCode: f.CustomerCode || '',
+    Driver: driver || 'Unassigned',
+    Truck: truck || '',
+    Status: status || '',
+    StatusKey: normalizeText(status),
+    SolicitDate: solicitDate,
+    PickupDate: pickupDate,
+    PickupDateDisplay: formatShortDate(pickupDate),
+    DeliveryDate: normalizeEasternDateOnly(f.Expected_x0020_Delivery_x0020_Da),
+    Origin: origin,
+    Destination: destination,
+    Route: route || 'Unknown Route',
+    Revenue: revenue,
+    LoadedMiles: loadedMiles,
+    EmptyMiles: emptyMiles,
+    TotalMiles: totalMiles,
+    DriverPay: getNumberValue(f.NetPayabletoDriver),
+    RatePerLoadedMile: loadedMiles > 0 ? revenue / loadedMiles : 0,
+    RatePerAllMiles: totalMiles > 0 ? revenue / totalMiles : 0
+  };
+}
+
+function makeMonthlyOpsAggregate(label, extra = {}) {
+  return {
+    label,
+    jobs: 0,
+    revenue: 0,
+    loadedMiles: 0,
+    emptyMiles: 0,
+    totalMiles: 0,
+    driverPay: 0,
+    ...extra
+  };
+}
+
+function finalizeMonthlyOpsAggregate(row, totalRevenue = 0) {
+  return {
+    ...row,
+    avgLoadedMile: row.loadedMiles > 0 ? row.revenue / row.loadedMiles : 0,
+    avgAllMile: row.totalMiles > 0 ? row.revenue / row.totalMiles : 0,
+    revenueShare: totalRevenue > 0 ? row.revenue / totalRevenue : 0
+  };
+}
+
+function addMonthlyOpsLoadToAggregate(target, load) {
+  target.jobs += 1;
+  target.revenue += Number(load.Revenue || 0);
+  target.loadedMiles += Number(load.LoadedMiles || 0);
+  target.emptyMiles += Number(load.EmptyMiles || 0);
+  target.totalMiles += Number(load.TotalMiles || 0);
+  target.driverPay += Number(load.DriverPay || 0);
+}
+
+function sortMonthlyOpsRows(rows, primary = 'revenue', labelKey = 'label') {
+  return [...rows].sort((a, b) => {
+    const diff = Number(b?.[primary] || 0) - Number(a?.[primary] || 0);
+    if (diff !== 0) return diff;
+    return String(a?.[labelKey] || '').localeCompare(String(b?.[labelKey] || ''), undefined, { numeric: true, sensitivity: 'base' });
+  });
+}
+
+function buildMonthlyOpsBidSections(bookedLoads, totalRevenue) {
+  const customerMap = new Map();
+  const driverMap = new Map();
+  const routeMap = new Map();
+
+  bookedLoads.forEach((load) => {
+    const customerKey = normalizeSearchValue(load.Customer || 'Unknown Customer') || 'unknown-customer';
+    if (!customerMap.has(customerKey)) {
+      customerMap.set(customerKey, makeMonthlyOpsAggregate(load.Customer || 'Unknown Customer', {
+        customer: load.Customer || 'Unknown Customer',
+        loads: []
+      }));
+    }
+    addMonthlyOpsLoadToAggregate(customerMap.get(customerKey), load);
+    customerMap.get(customerKey).loads.push(load);
+
+    const driverKey = normalizeSearchValue(load.Driver || 'Unassigned') || 'unassigned';
+    if (!driverMap.has(driverKey)) {
+      driverMap.set(driverKey, makeMonthlyOpsAggregate(load.Driver || 'Unassigned', {
+        driver: load.Driver || 'Unassigned',
+        trucks: new Set(),
+        loads: []
+      }));
+    }
+    const driver = driverMap.get(driverKey);
+    addMonthlyOpsLoadToAggregate(driver, load);
+    if (load.Truck) driver.trucks.add(load.Truck);
+    driver.loads.push(load);
+
+    const routeLabel = load.Route || [load.Origin, load.Destination].filter(Boolean).join(' → ') || 'Unknown Route';
+    const routeKey = normalizeSearchValue(routeLabel) || 'unknown-route';
+    if (!routeMap.has(routeKey)) {
+      routeMap.set(routeKey, makeMonthlyOpsAggregate(routeLabel, {
+        route: routeLabel,
+        origin: load.Origin || '',
+        destination: load.Destination || '',
+        loads: []
+      }));
+    }
+    addMonthlyOpsLoadToAggregate(routeMap.get(routeKey), load);
+    routeMap.get(routeKey).loads.push(load);
+  });
+
+  const customers = sortMonthlyOpsRows(
+    Array.from(customerMap.values()).map((row) => finalizeMonthlyOpsAggregate(row, totalRevenue)),
+    'revenue',
+    'customer'
+  );
+
+  const drivers = sortMonthlyOpsRows(
+    Array.from(driverMap.values()).map((row) => finalizeMonthlyOpsAggregate({
+      ...row,
+      trucks: Array.from(row.trucks).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true })).join(', '),
+      netRateAllMile: row.totalMiles > 0 ? row.driverPay / row.totalMiles : 0
+    }, totalRevenue)),
+    'revenue',
+    'driver'
+  );
+
+  const routes = sortMonthlyOpsRows(
+    Array.from(routeMap.values()).map((row) => finalizeMonthlyOpsAggregate(row, totalRevenue)),
+    'revenue',
+    'route'
+  );
+
+  return { customers, drivers, routes };
+}
+
+function buildMonthlyOpsAvailabilitySections(availableItems, window) {
+  const records = availableItems
+    .map(cleanAvailableTruckRecord)
+    .filter((record) => isDateKeyInReportWindow(record.dateSent || record.createdAt, window));
+
+  const driverDayCityKeys = new Map();
+  const driverDayKeys = new Map();
+
+  records.forEach((record) => {
+    const city = String(record.currentLocation || '').trim();
+    const driver = String(record.driverName || record.unitNo || 'Unassigned').trim();
+    const dateOnly = normalizeEasternDateOnly(record.dateSent || record.createdAt);
+
+    if (!dateOnly || !driver) return;
+
+    const driverDayKey = `${normalizeSearchValue(driver)}|${dateOnly}`;
+    if (!driverDayKeys.has(driverDayKey)) {
+      driverDayKeys.set(driverDayKey, {
+        driver,
+        dateOnly
+      });
+    }
+
+    if (!city) return;
+
+    const cityKey = `${normalizeSearchValue(city)}|${normalizeSearchValue(driver)}|${dateOnly}`;
+    if (!driverDayCityKeys.has(cityKey)) {
+      driverDayCityKeys.set(cityKey, {
+        city,
+        driver,
+        dateOnly
+      });
+    }
+  });
+
+  const cityMap = new Map();
+  Array.from(driverDayCityKeys.values()).forEach((row) => {
+    const key = normalizeSearchValue(row.city);
+    if (!key) return;
+    const current = cityMap.get(key) || { city: row.city, driverDays: 0 };
+    current.driverDays += 1;
+    cityMap.set(key, current);
+  });
+
+  const driverMap = new Map();
+  Array.from(driverDayKeys.values()).forEach((row) => {
+    const key = normalizeSearchValue(row.driver);
+    if (!key) return;
+    const current = driverMap.get(key) || { driver: row.driver, days: 0 };
+    current.days += 1;
+    driverMap.set(key, current);
+  });
+
+  const topEmptyCities = Array.from(cityMap.values())
+    .sort((a, b) => b.driverDays - a.driverDays || String(a.city).localeCompare(String(b.city)))
+    .slice(0, 10);
+
+  const driverDays = Array.from(driverMap.values())
+    .sort((a, b) => b.days - a.days || String(a.driver).localeCompare(String(b.driver)))
+    .slice(0, 25);
+
+  return {
+    totalPostings: records.length,
+    driverDayCityCount: driverDayCityKeys.size,
+    driverDayCount: driverDayKeys.size,
+    topEmptyCities,
+    driverDays
+  };
+}
+
+function buildMonthlyOpsNoAvailabilitySections(noAvailabilityRows, window) {
+  const monthlyRows = dedupeNoAvailabilityRows(noAvailabilityRows)
+    .rows
+    .filter((row) => isDateKeyInReportWindow(row.solicitDateKey || row.solicitDate, window));
+
+  const companyDateMap = new Map();
+  monthlyRows.forEach((row) => {
+    const company = row.company || 'Unknown';
+    const dateOnly = normalizeEasternDateOnly(row.solicitDateKey || row.solicitDate);
+    if (!dateOnly) return;
+    const key = `${normalizeSearchValue(company)}|${dateOnly}`;
+    if (!companyDateMap.has(key)) {
+      companyDateMap.set(key, {
+        company,
+        dateOnly,
+        count: 0,
+        miles: 0
+      });
+    }
+    const current = companyDateMap.get(key);
+    current.count += 1;
+    current.miles += Number(row.totalMiles || 0);
+  });
+
+  const customerMap = new Map();
+  Array.from(companyDateMap.values()).forEach((row) => {
+    const key = normalizeSearchValue(row.company);
+    if (!key) return;
+    const current = customerMap.get(key) || { company: row.company, daysNoAvail: 0, requests: 0, miles: 0 };
+    current.daysNoAvail += 1;
+    current.requests += row.count;
+    current.miles += row.miles;
+    customerMap.set(key, current);
+  });
+
+  const keyCustomers = Array.from(customerMap.values())
+    .sort((a, b) => b.daysNoAvail - a.daysNoAvail || b.requests - a.requests || String(a.company).localeCompare(String(b.company)))
+    .slice(0, 25);
+
+  return {
+    totalNoAvailability: monthlyRows.length,
+    uniqueCustomers: customerMap.size,
+    keyCustomers
+  };
+}
+
+function buildMonthlyOperationsStory(summary, sections = {}) {
+  const topCustomer = summary.topCustomer || '';
+  const topRoute = summary.topRoute || '';
+  const topEmptyCity = summary.topEmptyCity || '';
+  const topNoAvailCustomer = summary.topNoAvailabilityCustomer || '';
+  const story = [];
+
+  story.push(`${summary.reportLabel} closed with ${summary.totalBookings.toLocaleString('en-US')} booking${summary.totalBookings === 1 ? '' : 's'} on ${summary.totalOffers.toLocaleString('en-US')} offer${summary.totalOffers === 1 ? '' : 's'}, for a ${Math.round((summary.winRate || 0) * 1000) / 10}% win rate.`);
+
+  if (summary.grossRevenue > 0) {
+    story.push(`Gross revenue landed at ${formatCurrencyValue(summary.grossRevenue)}, averaging ${formatCurrencyValue(summary.avgLoadedMile)} per loaded mile and ${formatCurrencyValue(summary.avgAllMile)} across all miles.`);
+  }
+
+  if (topCustomer || topRoute) {
+    story.push([topCustomer ? `Top customer: ${topCustomer}` : '', topRoute ? `top route: ${topRoute}` : ''].filter(Boolean).join('; ') + '.');
+  }
+
+  if (topEmptyCity || topNoAvailCustomer) {
+    story.push([topEmptyCity ? `Availability pressure showed up most often around ${topEmptyCity}` : '', topNoAvailCustomer ? `No-availability misses were led by ${topNoAvailCustomer}` : ''].filter(Boolean).join('; ') + '.');
+  }
+
+  if ((sections.noAvailability?.totalNoAvailability || 0) === 0 && (sections.availability?.driverDayCount || 0) === 0) {
+    story.push('Availability and no-availability source sections came back quiet for this month. That can be good news, or it can mean source activity was sparse.');
+  }
+
+  return story;
+}
+
+function buildMonthlyOperationsSummaryResponse({ bidItems, availableItems, noAvailabilityRows, sourceList, year, month, sourceWarnings = [], failedLists = [] }) {
+  const window = getReportMonthWindow(year, month);
+  const bidRecords = bidItems.map((item) => cleanMonthlyOperationsBidItem(item, sourceList));
+  const offerRows = bidRecords.filter((record) => isDateKeyInReportWindow(record.SolicitDate, window));
+  const bookedLoads = bidRecords
+    .filter((record) => isDateKeyInReportWindow(record.PickupDate, window))
+    .filter((record) => record.StatusKey === 'won' || record.StatusKey === 'tonu');
+
+  const totals = bookedLoads.reduce((acc, load) => {
+    acc.grossRevenue += Number(load.Revenue || 0);
+    acc.loadedMiles += Number(load.LoadedMiles || 0);
+    acc.emptyMiles += Number(load.EmptyMiles || 0);
+    acc.totalMiles += Number(load.TotalMiles || 0);
+    acc.driverPay += Number(load.DriverPay || 0);
+    return acc;
+  }, {
+    grossRevenue: 0,
+    loadedMiles: 0,
+    emptyMiles: 0,
+    totalMiles: 0,
+    driverPay: 0
+  });
+
+  const bidSections = buildMonthlyOpsBidSections(bookedLoads, totals.grossRevenue);
+  const availability = buildMonthlyOpsAvailabilitySections(availableItems, window);
+  const noAvailability = buildMonthlyOpsNoAvailabilitySections(noAvailabilityRows, window);
+  const topCustomer = bidSections.customers[0] || null;
+  const topRoute = bidSections.routes[0] || null;
+  const topEmptyCity = availability.topEmptyCities[0] || null;
+  const topNoAvailabilityCustomer = noAvailability.keyCustomers[0] || null;
+
+  const summary = {
+    reportLabel: window.reportLabel,
+    totalOffers: offerRows.length,
+    totalBookings: bookedLoads.length,
+    winRate: offerRows.length > 0 ? bookedLoads.length / offerRows.length : 0,
+    grossRevenue: totals.grossRevenue,
+    loadedMiles: totals.loadedMiles,
+    emptyMiles: totals.emptyMiles,
+    totalMiles: totals.totalMiles,
+    driverPay: totals.driverPay,
+    avgLoadedMile: totals.loadedMiles > 0 ? totals.grossRevenue / totals.loadedMiles : 0,
+    avgAllMile: totals.totalMiles > 0 ? totals.grossRevenue / totals.totalMiles : 0,
+    emptyMilePercent: totals.totalMiles > 0 ? totals.emptyMiles / totals.totalMiles : 0,
+    noAvailabilityCount: noAvailability.totalNoAvailability,
+    driverDaysListed: availability.driverDayCount,
+    topCustomer: topCustomer?.customer || '',
+    topCustomerRevenue: topCustomer?.revenue || 0,
+    topRoute: topRoute?.route || '',
+    topRouteRevenue: topRoute?.revenue || 0,
+    topEmptyCity: topEmptyCity?.city || '',
+    topEmptyCityDriverDays: topEmptyCity?.driverDays || 0,
+    topNoAvailabilityCustomer: topNoAvailabilityCustomer?.company || '',
+    topNoAvailabilityCustomerDays: topNoAvailabilityCustomer?.daysNoAvail || 0
+  };
+
+  const sections = {
+    customers: bidSections.customers,
+    drivers: bidSections.drivers,
+    routes: bidSections.routes.slice(0, 25),
+    availability,
+    noAvailability
+  };
+
+  return {
+    success: true,
+    reportType: 'monthlyOperationsSummary',
+    reportLabel: `${window.reportLabel} Monthly Operations Summary`,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    status: 'available',
+    anchorDate: 'Offers by Date Solicited; bookings by Pickup Offer Date',
+    year,
+    month,
+    monthKey: window.monthKey,
+    includedStatuses: ['Won', 'TONU'],
+    summary,
+    story: buildMonthlyOperationsStory(summary, sections),
+    sections,
+    source: 'Bid Listing + Available Trucks Single Line + No Availability',
+    sourceList: sourceList ? { label: sourceList.label, year: sourceList.year, listId: sourceList.listId } : null,
+    sourceRecordsScanned: {
+      bidListing: bidItems.length,
+      availableTrucks: availableItems.length,
+      noAvailability: noAvailabilityRows.length
+    },
+    sourceWarnings,
+    failedLists
+  };
+}
+
+async function getMonthlyOperationsSummaryPayload(monthValue, yearValue) {
+  const month = parseReportInteger(monthValue, 'month', 1, 12);
+  const year = parseReportInteger(yearValue, 'year', ARCHIVE_YEAR_MIN, ARCHIVE_YEAR_MAX);
+  const lockStatus = getDriverSummaryLockStatus(year, month);
+
+  if (!lockStatus.isUnlocked) {
+    const lockedError = new Error(`${lockStatus.reportLabel} Monthly Operations Summary is not available yet.`);
+    lockedError.statusCode = 423;
+    lockedError.payload = {
+      success: false,
+      error: 'REPORT_LOCKED',
+      message: `${lockStatus.reportLabel} Monthly Operations Summary is not available yet.`,
+      reportLabel: lockStatus.reportLabel,
+      unlockLabel: lockStatus.unlockLabel,
+      lockReason:
+        'Monthly Operations Summary unlocks at 8:00 AM Eastern on the 5th day of the following month, matching Customer Booking Trends and Monthly Driver Summary timing.'
+    };
+    throw lockedError;
+  }
+
+  const token = await getGraphToken();
+  const sourceList = await getDriverSummarySourceList(token, year);
+
+  if (!sourceList) {
+    const notFoundError = new Error(`No Bid Listing source list was found for ${year}.`);
+    notFoundError.statusCode = 404;
+    throw notFoundError;
+  }
+
+  const sourceWarnings = [];
+  const failedLists = [];
+
+  const [bidBundle, availableResult, noAvailabilityResult] = await Promise.allSettled([
+    getAllListItemsWithFieldsResilient(token, sourceList.listId, getMonthlyOperationsBidFieldSelect()),
+    getAllListItemsWithFieldsResilient(token, getAvailableTrucksSingleLineListId(), getMonthlyOperationsAvailableFieldSelect()),
+    Promise.allSettled(
+      getNoAvailabilitySources().map(async (source) => {
+        const items = await getAllListItemsWithFields(token, source.listId, getNoAvailabilityFieldSelect());
+        return items.map((item) => cleanNoAvailabilityItem(item, source));
+      })
+    )
+  ]);
+
+  if (bidBundle.status === 'rejected') {
+    const error = new Error(bidBundle.reason?.message || 'Unable to load Bid Listing source for Monthly Operations Summary.');
+    error.statusCode = 500;
+    throw error;
+  }
+
+  if (bidBundle.value.usedFallback) {
+    sourceWarnings.push({
+      SourceList: sourceList.label,
+      warning: 'Selected field fetch failed for Bid Listing, so the server retried with full fields.',
+      detail: bidBundle.value.warning
+    });
+  }
+
+  let availableItems = [];
+  if (availableResult.status === 'fulfilled') {
+    availableItems = availableResult.value.items || [];
+    if (availableResult.value.usedFallback) {
+      sourceWarnings.push({
+        SourceList: 'Available Trucks Single Line',
+        warning: 'Selected field fetch failed for Available Trucks, so the server retried with full fields.',
+        detail: availableResult.value.warning
+      });
+    }
+  } else {
+    failedLists.push({
+      SourceList: 'Available Trucks Single Line',
+      error: availableResult.reason?.message || 'Unknown Available Trucks failure'
+    });
+  }
+
+  let noAvailabilityRows = [];
+  if (noAvailabilityResult.status === 'fulfilled') {
+    noAvailabilityRows = noAvailabilityResult.value
+      .filter((result) => result.status === 'fulfilled')
+      .flatMap((result) => result.value);
+
+    noAvailabilityResult.value
+      .map((result, index) => ({ result, source: getNoAvailabilitySources()[index] }))
+      .filter((entry) => entry.result.status === 'rejected')
+      .forEach((entry) => {
+        failedLists.push({
+          SourceList: entry.source?.label || 'No Availability',
+          error: entry.result.reason?.message || 'Unknown No Availability failure'
+        });
+      });
+  } else {
+    failedLists.push({
+      SourceList: 'No Availability',
+      error: noAvailabilityResult.reason?.message || 'Unknown No Availability failure'
+    });
+  }
+
+  return buildMonthlyOperationsSummaryResponse({
+    bidItems: bidBundle.value.items || [],
+    availableItems,
+    noAvailabilityRows,
+    sourceList,
+    year,
+    month,
+    sourceWarnings,
+    failedLists
+  });
+}
+
+function createMonthlyOperationsSummaryPdfBuffer(report) {
+  const writer = createPdfReportWriter({
+    title: report.reportLabel || 'Monthly Operations Summary',
+    subtitle: `Generated: ${report.generatedAt || '-'}    Anchor: ${report.anchorDate || '-'}`
+  });
+  const summary = report.summary || {};
+  const sections = report.sections || {};
+
+  writer.addSectionTitle('Monthly Brief');
+  (report.story || []).forEach((line) => writer.addTextLine(line));
+  writer.addTextLine([
+    `Offers ${formatPdfNumber(summary.totalOffers)}`,
+    `Bookings ${formatPdfNumber(summary.totalBookings)}`,
+    `Win ${formatPdfNumber((summary.winRate || 0) * 100)}%`,
+    `Gross ${formatPdfMoney(summary.grossRevenue)}`,
+    `$/Loaded ${formatPdfMoney(summary.avgLoadedMile)}`,
+    `$/All ${formatPdfMoney(summary.avgAllMile)}`,
+    `Empty ${formatPdfNumber((summary.emptyMilePercent || 0) * 100)}%`
+  ].join('   |   '), { font: 'F2' });
+
+  writer.addSectionTitle('Bookings by Customer', `${formatPdfNumber((sections.customers || []).length)} customer(s)`);
+  writer.addTable([
+    { label: 'Customer', width: 190, value: (row) => row.customer || '-' },
+    { label: 'Jobs', width: 52, value: (row) => formatPdfNumber(row.jobs) },
+    { label: 'Revenue', width: 95, value: (row) => formatPdfMoney(row.revenue) },
+    { label: '$/Loaded', width: 80, value: (row) => formatPdfMoney(row.avgLoadedMile) },
+    { label: '% Rev', width: 62, value: (row) => `${formatPdfNumber((row.revenueShare || 0) * 100)}%` },
+    { label: 'Loaded Mi', width: 76, value: (row) => formatPdfNumber(row.loadedMiles) },
+    { label: 'Empty Mi', width: 70, value: (row) => formatPdfNumber(row.emptyMiles) }
+  ], (sections.customers || []).slice(0, 25), 'No customer bookings found for this month.');
+
+  writer.addSectionTitle('Driver Statistics', `${formatPdfNumber((sections.drivers || []).length)} driver(s)`);
+  writer.addTable([
+    { label: 'Driver', width: 132, value: (row) => row.driver || '-' },
+    { label: 'Truck(s)', width: 70, mono: true, value: (row) => row.trucks || '-' },
+    { label: 'Jobs', width: 42, value: (row) => formatPdfNumber(row.jobs) },
+    { label: 'Revenue', width: 90, value: (row) => formatPdfMoney(row.revenue) },
+    { label: 'Driver Pay', width: 90, value: (row) => formatPdfMoney(row.driverPay) },
+    { label: 'Loaded', width: 62, value: (row) => formatPdfNumber(row.loadedMiles) },
+    { label: 'Empty', width: 58, value: (row) => formatPdfNumber(row.emptyMiles) },
+    { label: '$/All', width: 62, value: (row) => formatPdfMoney(row.avgAllMile) },
+    { label: 'Net $/All', width: 78, value: (row) => formatPdfMoney(row.netRateAllMile) }
+  ], (sections.drivers || []).slice(0, 25), 'No driver activity found for this month.');
+
+  writer.addSectionTitle('Top Routes', `${formatPdfNumber((sections.routes || []).length)} route(s)`);
+  writer.addTable([
+    { label: 'Route', width: 315, value: (row) => row.route || '-' },
+    { label: 'Jobs', width: 48, value: (row) => formatPdfNumber(row.jobs) },
+    { label: 'Revenue', width: 95, value: (row) => formatPdfMoney(row.revenue) },
+    { label: '$/All', width: 75, value: (row) => formatPdfMoney(row.avgAllMile) },
+    { label: 'Loaded Mi', width: 78, value: (row) => formatPdfNumber(row.loadedMiles) },
+    { label: 'Empty Mi', width: 74, value: (row) => formatPdfNumber(row.emptyMiles) }
+  ], (sections.routes || []).slice(0, 15), 'No route activity found for this month.');
+
+  writer.addSectionTitle('Availability Pressure');
+  writer.addTable([
+    { label: 'Available Empty City', width: 240, value: (row) => row.city || '-' },
+    { label: 'Driver-Days Listed', width: 120, value: (row) => formatPdfNumber(row.driverDays) }
+  ], sections.availability?.topEmptyCities || [], 'No monthly available-empty city rows found.');
+  writer.addTable([
+    { label: 'Driver', width: 240, value: (row) => row.driver || '-' },
+    { label: 'Days Empty / Listed', width: 120, value: (row) => formatPdfNumber(row.days) }
+  ], sections.availability?.driverDays || [], 'No monthly driver-days listed rows found.');
+
+  writer.addSectionTitle('No Availability - Key Customers', `${formatPdfNumber(sections.noAvailability?.totalNoAvailability || 0)} request(s)`);
+  writer.addTable([
+    { label: 'Customer', width: 260, value: (row) => row.company || '-' },
+    { label: 'Days No Avail', width: 110, value: (row) => formatPdfNumber(row.daysNoAvail) },
+    { label: 'Requests', width: 90, value: (row) => formatPdfNumber(row.requests) },
+    { label: 'Missed Miles', width: 110, value: (row) => formatPdfNumber(row.miles) }
+  ], sections.noAvailability?.keyCustomers || [], 'No No Availability rows found for this month.');
+
+  if ((report.failedLists || []).length > 0 || (report.sourceWarnings || []).length > 0) {
+    writer.addSectionTitle('Source Notes');
+    (report.sourceWarnings || []).forEach((entry) => writer.addTextLine(`${entry.SourceList}: ${entry.warning || entry.detail || '-'}`));
+    (report.failedLists || []).forEach((entry) => writer.addTextLine(`${entry.SourceList}: ${entry.error || '-'}`));
+  }
+
+  return writer.finish();
+}
+
+
 function getNoAvailabilitySources() {
   return [
     {
@@ -7540,6 +8198,41 @@ app.get('/reports/driver-summary', requireLookupAccess, async (req, res) => {
     res.status(error.statusCode || 500).json(error.payload || {
       success: false,
       error: error.message
+    });
+  }
+});
+
+app.get('/reports/monthly-operations-summary', requireLookupAccess, async (req, res) => {
+  try {
+    const report = await getMonthlyOperationsSummaryPayload(req.query.month, req.query.year);
+    res.json(report);
+  } catch (error) {
+    console.error(error);
+
+    res.status(error.statusCode || 500).json(error.payload || {
+      success: false,
+      error: error.message || 'Unable to load Monthly Operations Summary.'
+    });
+  }
+});
+
+app.get('/reports/monthly-operations-summary/pdf', requireLookupAccess, async (req, res) => {
+  try {
+    const report = await getMonthlyOperationsSummaryPayload(req.query.month, req.query.year);
+    const pdfBuffer = createMonthlyOperationsSummaryPdfBuffer(report);
+    const safeLabel = `${report.year || 'year'}-${String(report.month || '').padStart(2, '0')}`.replace(/[^0-9A-Za-z_-]+/g, '-');
+    const fileName = `Kole_Monthly_Operations_Summary_${safeLabel}.pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.end(pdfBuffer);
+  } catch (error) {
+    console.error(error);
+
+    res.status(error.statusCode || 500).json(error.payload || {
+      success: false,
+      error: error.message || 'Unable to export Monthly Operations Summary PDF.'
     });
   }
 });
