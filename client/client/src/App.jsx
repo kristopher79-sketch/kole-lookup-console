@@ -11210,11 +11210,12 @@ function openReportLoadDetails(load) {
     const isLeadSuppressionOpen = activeReportPanel === 'leadSuppression';
     const isSalesLeadsOpen = activeReportPanel === 'salesLeads';
 
-    const overdueFollowUps = Number(
-      salesActivityReport?.summary?.overdueFollowUps
-      || salesLeadsReport?.summary?.overdueFollowUps
-      || 0
-    );
+    const salesLeadsFollowUpDueCount = Number(salesLeadsReport?.summary?.followUpDue || 0);
+    const salesActivityOverdueFollowUpsCount = Number(salesActivityReport?.summary?.overdueFollowUps || 0);
+    const salesAndLeadsPillCount = salesLeadsFollowUpDueCount || salesActivityOverdueFollowUpsCount;
+    const salesAndLeadsPillLabel = salesLeadsFollowUpDueCount
+      ? `follow-up${salesLeadsFollowUpDueCount === 1 ? '' : 's'} due`
+      : 'overdue';
 
     return (
       <div className="search-card feature-accordion-panel sales-and-leads-panel">
@@ -11228,9 +11229,9 @@ function openReportLoadDetails(load) {
             <span className="feature-section-title">Sales and Leads</span>
             <span className="feature-section-subtitle">Customers, leads, follow-ups, aviation prospects, and customer cards.</span>
           </span>
-          {overdueFollowUps > 0 && (
+          {salesAndLeadsPillCount > 0 && (
             <span className="feature-section-status-pill sales-and-leads-status-pill has-items">
-              {formatReportNumber(overdueFollowUps)} overdue
+              {formatReportNumber(salesAndLeadsPillCount)} {salesAndLeadsPillLabel}
             </span>
           )}
           <span className="feature-section-chevron">{salesAndLeadsSectionOpen ? '▲' : '▼'}</span>
