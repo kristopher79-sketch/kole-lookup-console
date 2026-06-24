@@ -11851,3 +11851,114 @@ button.available-truck-distribution-summary-card:disabled {
     width: 100%;
   }
 }
+
+/* PASS 22: Light mode Sales Notes + Follow-up Suppression contrast restore
+   Keep the dark-mode slate treatment, but prevent those dark translucent panels
+   from washing out text inside the light-mode sales customer modal. */
+:root[data-theme='light'] .sales-suppression-control-section,
+:root[data-theme='light'] .sales-notes-section {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-section .driver-report-section-header,
+:root[data-theme='light'] .sales-notes-section .driver-report-section-header {
+  background: linear-gradient(180deg, #ffffff, #f8fafc) !important;
+  border-bottom-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-section .driver-report-section-header h4,
+:root[data-theme='light'] .sales-notes-section .driver-report-section-header h4,
+:root[data-theme='light'] .sales-notes-section .driver-report-section-total {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-section .driver-report-section-header p,
+:root[data-theme='light'] .sales-notes-section .driver-report-section-header p {
+  color: #475569 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-card,
+:root[data-theme='light'] .sales-note-composer {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86) !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-card strong,
+:root[data-theme='light'] .sales-note-composer label span {
+  color: #0f172a !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-card label span {
+  color: #1e3a8a !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-card p,
+:root[data-theme='light'] .sales-suppression-control-card small,
+:root[data-theme='light'] .sales-suppression-control-footer small,
+:root[data-theme='light'] .sales-note-composer-footer small {
+  color: #475569 !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-card textarea,
+:root[data-theme='light'] .sales-note-composer textarea {
+  background: #ffffff !important;
+  color: #111827 !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-card textarea::placeholder,
+:root[data-theme='light'] .sales-note-composer textarea::placeholder {
+  color: #64748b !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-suppression-control-card textarea:focus,
+:root[data-theme='light'] .sales-note-composer textarea:focus {
+  border-color: #2563eb !important;
+  box-shadow:
+    0 0 0 3px rgba(37, 99, 235, 0.16),
+    inset 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+}
+
+:root[data-theme='light'] .sales-notes-list {
+  background: #ffffff !important;
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .sales-note-card {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+  box-shadow:
+    0 8px 18px rgba(15, 23, 42, 0.055),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .sales-note-card-header strong,
+:root[data-theme='light'] .sales-note-card strong {
+  color: #0f172a !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-note-card-header span,
+:root[data-theme='light'] .sales-note-card small {
+  color: #64748b !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .sales-note-card p,
+:root[data-theme='light'] .sales-note-text {
+  color: #334155 !important;
+  opacity: 1 !important;
+}
+
