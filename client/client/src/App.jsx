@@ -761,6 +761,8 @@ export default function App() {
   const [selectedSalesLead, setSelectedSalesLead] = useState(null);
   const [customerLookupLoading, setCustomerLookupLoading] = useState(false);
   const [customerLookupError, setCustomerLookupError] = useState('');
+  const [driverLookupLoading, setDriverLookupLoading] = useState(false);
+  const [driverLookupError, setDriverLookupError] = useState('');
   const [salesSearchReturnLead, setSalesSearchReturnLead] = useState(null);
   const [salesNoteDraft, setSalesNoteDraft] = useState('');
   const [salesNoteSaving, setSalesNoteSaving] = useState(false);
@@ -778,6 +780,10 @@ export default function App() {
   const driverHistoryCacheRef = useRef(new Map());
   const startupSplashStartedAtRef = useRef(Date.now());
   const startupSplashCloseTimerRef = useRef(null);
+  const operationsActiveTodayRef = useRef(null);
+  const operationsLoadingTodayRef = useRef(null);
+  const operationsDeliveringTodayRef = useRef(null);
+  const operationsLoadingNext7Ref = useRef(null);
 
   const [authError, setAuthError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
@@ -835,6 +841,35 @@ export default function App() {
   const [availableTruckDrilldown, setAvailableTruckDrilldown] = useState(null);
   const [reportsSectionOpen, setReportsSectionOpen] = useState(false);
   const [salesAndLeadsSectionOpen, setSalesAndLeadsSectionOpen] = useState(false);
+
+  const isAnyModalOpen = Boolean(
+    selected ||
+    selectedDriverRoster ||
+    driverHistoryModalOpen ||
+    grossRevenueModalOpen ||
+    selectedGrossRevenueTruck ||
+    driverSummaryModalOpen ||
+    monthlyOpsModalOpen ||
+    ordersDueSettlementModalOpen ||
+    weeklySettlementModalOpen ||
+    wonNotRegisteredModalOpen ||
+    permitGovernanceModalOpen ||
+    selectedPermitHistoryLoad ||
+    activeDriverRosterModalOpen ||
+    inactiveDriverRosterModalOpen ||
+    fleetEquipmentModalOpen ||
+    onThisDayModalOpen ||
+    noAvailabilityModalOpen ||
+    driverTimeOffModalOpen ||
+    driverTimeOffFormOpen ||
+    salesActivityModalOpen ||
+    customerTrendModalOpen ||
+    selectedCustomerTrend ||
+    selectedSalesLead ||
+    availableTruckDistributionInactiveModalOpen ||
+    availableTruckDrilldown ||
+    startupSplashVisible
+  );
 
   function beginStartupSplashClose() {
     if (startupSplashCloseTimerRef.current) {
@@ -1091,6 +1126,23 @@ export default function App() {
   }, [colorTheme]);
 
   useEffect(() => {
+    const body = document.body;
+    const root = document.documentElement;
+    const previousBodyOverflow = body.style.overflow;
+    const previousRootOverflow = root.style.overflow;
+
+    if (isAnyModalOpen) {
+      body.style.overflow = 'hidden';
+      root.style.overflow = 'hidden';
+    }
+
+    return () => {
+      body.style.overflow = previousBodyOverflow;
+      root.style.overflow = previousRootOverflow;
+    };
+  }, [isAnyModalOpen]);
+
+  useEffect(() => {
     return () => {
       if (brandRevealTimerRef.current) {
         window.clearTimeout(brandRevealTimerRef.current);
@@ -1317,6 +1369,7 @@ export default function App() {
     setSortDirection('asc');
     setSelectedSalesLead(null);
     setCustomerLookupError('');
+    setDriverLookupError('');
   }
 
   function getSortIndicator(field) {
@@ -1367,6 +1420,8 @@ export default function App() {
     setError('');
     setAuthError('');
     setDocumentError('');
+    setDriverLookupLoading(false);
+    setDriverLookupError('');
     setSortField('');
     setSortDirection('asc');
     setSalesSearchReturnLead(null);
@@ -1549,6 +1604,7 @@ export default function App() {
     setSortField('');
     setSortDirection('asc');
     setSalesSearchReturnLead(null);
+    setDriverLookupError('');
   }
 
   function clearOrderSearch() {
@@ -1563,6 +1619,7 @@ export default function App() {
     setSortField('');
     setSortDirection('asc');
     setSalesSearchReturnLead(null);
+    setDriverLookupError('');
   }
 
   function returnToCustomerCard() {
@@ -1583,6 +1640,7 @@ export default function App() {
     setSalesSearchReturnLead(null);
     setSelectedSalesLead(customerToRestore);
     setCustomerLookupError('');
+    setDriverLookupError('');
   }
 
   async function handleSearch() {
@@ -1601,6 +1659,7 @@ export default function App() {
     setSortField('');
     setSortDirection('asc');
     setSalesSearchReturnLead(null);
+    setDriverLookupError('');
 
     if (cachedSearch) {
       if (pendingSearchControllerRef.current) {
@@ -2872,6 +2931,7 @@ function getPositionStatusLabel(position) {
   function closeModal() {
     setSelected(null);
     setDocumentError('');
+    setDriverLookupError('');
 
     if (permitHistoryOrderReturnLoad) {
       setSelectedPermitHistoryLoad(permitHistoryOrderReturnLoad);
@@ -4000,6 +4060,10 @@ function getPositionStatusLabel(position) {
     return operationsData?.driverTimeOff?.recentlyEndedRecords || [];
   }
 
+  function getDriverTimeOffUpcomingRecords() {
+    return operationsData?.driverTimeOff?.upcomingRecords || [];
+  }
+
   function getDriverTimeOffPanelRows() {
     const currentRows = getDriverTimeOffCurrentRecords().map((record) => ({
       ...record,
@@ -4033,6 +4097,14 @@ function getPositionStatusLabel(position) {
     if (Number.isFinite(daysAgo) && daysAgo > 1) return `Ended ${daysAgo} days ago`;
 
     return 'Recently ended';
+  }
+
+  function getDriverTimeOffStartsLabel(record = {}) {
+    const daysUntilStart = Number(record.daysUntilStart);
+    if (daysUntilStart === 0) return 'starts today';
+    if (daysUntilStart === 1) return 'starts tomorrow';
+    if (Number.isFinite(daysUntilStart) && daysUntilStart > 1) return `starts in ${daysUntilStart} days`;
+    return 'starts soon';
   }
 
   function getDriverTimeOffHistoryRows(record = null) {
@@ -5098,6 +5170,126 @@ function getPositionStatusLabel(position) {
     });
   }
 
+  function getDriverRosterModalTitle(status) {
+    const normalizedStatus = String(status || '').trim();
+    if (!normalizedStatus) return 'Driver Roster';
+    return `${normalizedStatus} Driver Roster`;
+  }
+
+  function buildDriverRosterModalPayload(roster, options = {}) {
+    if (!roster) return null;
+
+    const displayName = roster.tmsName || roster.operatorTeamName || options.driverName || 'Driver';
+    const truck = roster.truck || options.truck || '-';
+    const statusLabel = roster.status || options.statusLabel || 'Driver Roster';
+
+    return {
+      id: roster.id || '',
+      equipmentId: truck,
+      driverName: displayName,
+      currentCityState: options.currentCityState || statusLabel,
+      positionTimeUtc: options.positionTimeUtc || '',
+      speed: Number(options.speed || 0),
+      isMoving: Boolean(options.isMoving),
+      isStale: Boolean(options.isStale),
+      hasRosterDetails: true,
+      rosterModalTitle: options.rosterModalTitle || 'Driver Roster',
+      rosterModalSubtitle: options.rosterModalSubtitle || `${displayName} · Truck ${truck}`,
+      roster
+    };
+  }
+
+  function findLocalDriverRosterMatch(truck) {
+    const truckKey = normalizeDriverHistoryTruckKey(truck);
+    if (!truckKey) return null;
+
+    const positions = driverPositionsData?.positions || [];
+    const positionMatch = positions.find((position) => (
+      normalizeDriverHistoryTruckKey(position.equipmentId || position.roster?.truck) === truckKey
+    ));
+
+    if (positionMatch?.hasRosterDetails && positionMatch.roster) {
+      return positionMatch;
+    }
+
+    const reportRows = [
+      ...(activeDriverRosterReport?.rows || []),
+      ...(inactiveDriverRosterReport?.rows || []),
+      ...(fleetEquipmentReport?.rows || [])
+    ];
+
+    const rosterMatch = reportRows.find((row) => normalizeDriverHistoryTruckKey(row.truck) === truckKey);
+    if (!rosterMatch) return null;
+
+    return buildDriverRosterModalPayload(rosterMatch, {
+      truck: rosterMatch.truck,
+      statusLabel: rosterMatch.status || 'Driver Roster',
+      rosterModalTitle: getDriverRosterModalTitle(rosterMatch.status),
+      rosterModalSubtitle: `${rosterMatch.tmsName || rosterMatch.operatorTeamName || 'Driver'} · Truck ${rosterMatch.truck || '-'}`
+    });
+  }
+
+  async function openDriverRosterFromOrder(record = selected) {
+    const truck = String(record?.Truck || record?.truck || '').trim();
+
+    if (!truck) {
+      setDriverLookupError('This order does not have a truck number to match.');
+      return;
+    }
+
+    const localMatch = findLocalDriverRosterMatch(truck);
+    if (localMatch) {
+      setDriverLookupError('');
+      setSelected(null);
+      setSelectedDriverRoster(localMatch);
+      return;
+    }
+
+    setDriverLookupLoading(true);
+    setDriverLookupError('');
+
+    try {
+      const res = await authedFetch(`${API}/driver-roster/lookup?truck=${encodeURIComponent(truck)}`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to find a Driver Roster match.');
+      }
+
+      if (!data.roster) {
+        throw new Error(`No Driver Roster record matched truck ${truck}.`);
+      }
+
+      const payload = buildDriverRosterModalPayload(data.roster, {
+        truck,
+        statusLabel: data.roster.status || 'Driver Roster',
+        rosterModalTitle: getDriverRosterModalTitle(data.roster.status),
+        rosterModalSubtitle: `${data.roster.tmsName || data.roster.operatorTeamName || 'Driver'} · Truck ${data.roster.truck || truck}`
+      });
+
+      setSelected(null);
+      setSelectedDriverRoster(payload);
+    } catch (err) {
+      setDriverLookupError(err.message || 'Unable to open Driver Roster.');
+    } finally {
+      setDriverLookupLoading(false);
+    }
+  }
+
+  function scrollToOperationsSection(sectionKey) {
+    const sectionRefs = {
+      activeToday: operationsActiveTodayRef,
+      loadingToday: operationsLoadingTodayRef,
+      deliveringToday: operationsDeliveringTodayRef,
+      loadingNext7: operationsLoadingNext7Ref
+    };
+
+    const target = sectionRefs[sectionKey]?.current;
+    if (!target) return;
+
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   function toggleReportPanel(panelName) {
     setActiveReportPanel((current) => (current === panelName ? '' : panelName));
   }
@@ -5282,7 +5474,17 @@ function openReportLoadDetails(load) {
 
         <SectionTitle>Truck, Driver & Freight</SectionTitle>
 
-        <DetailItem label="Driver" value={selected.Driver} />
+        <DetailItem label="Driver" value={selected.Driver}>
+          <button
+            type="button"
+            className="view-button driver-card-button"
+            onClick={() => openDriverRosterFromOrder(selected)}
+            disabled={!selected.Truck || driverLookupLoading}
+          >
+            {driverLookupLoading ? 'Looking up...' : 'View Driver Card'}
+          </button>
+          {driverLookupError && <small className="inline-error">{driverLookupError}</small>}
+        </DetailItem>
         <DetailItem label="Truck" value={selected.Truck} />
         <DetailItem label="Team Required" value={selected.TeamRequired} />
         <DetailItem label="Aircraft Related" value={selected.AircraftRelated} />
@@ -7490,9 +7692,12 @@ function openReportLoadDetails(load) {
   function DriverTimeOffCurrentPanel() {
     const currentRecords = getDriverTimeOffCurrentRecords();
     const recentlyEndedRecords = getDriverTimeOffRecentlyEndedRecords();
+    const upcomingRecords = getDriverTimeOffUpcomingRecords();
     const records = getDriverTimeOffPanelRows();
     const warning = operationsData?.driverTimeOff?.warning || '';
     const hasRecentlyEnded = recentlyEndedRecords.length > 0;
+    const hasUpcoming = upcomingRecords.length > 0;
+    const upcomingPreview = upcomingRecords.slice(0, 4);
 
     return (
       <div className="driver-time-off-panel">
@@ -7522,6 +7727,19 @@ function openReportLoadDetails(load) {
         </div>
 
         {warning && <div className="msg error">{warning}</div>}
+        {hasUpcoming && (
+          <div className="driver-time-off-upcoming-alert">
+            <div>
+              <strong>{formatReportNumber(upcomingRecords.length)} time-off request{upcomingRecords.length === 1 ? '' : 's'} starting in the next 7 days</strong>
+              <span>
+                {upcomingPreview.map((record) => (
+                  `${record.operatorName || 'Unknown driver'} (${formatDateOnly(record.startDate)}, ${getDriverTimeOffStartsLabel(record)})`
+                )).join(' · ')}
+                {upcomingRecords.length > upcomingPreview.length ? ` · +${upcomingRecords.length - upcomingPreview.length} more` : ''}
+              </span>
+            </div>
+          </div>
+        )}
         {driverTimeOffActionMessage && <div className="msg success-message">{driverTimeOffActionMessage}</div>}
         {driverTimeOffActionError && <div className="msg error">{driverTimeOffActionError}</div>}
 
@@ -12733,33 +12951,33 @@ function openReportLoadDetails(load) {
     {operationsData && (
       <>
         <div className="operations-grid">
-          <div className="operations-card">
+          <button type="button" className="operations-card operations-card-button" onClick={() => scrollToOperationsSection('activeToday')}>
             <span>Active Today</span>
             <strong>{operationsData.counts.activeToday}</strong>
-          </div>
+          </button>
 
-          <div className="operations-card">
+          <button type="button" className="operations-card operations-card-button" onClick={() => scrollToOperationsSection('loadingToday')}>
             <span>Loading Today</span>
             <strong>{operationsData.counts.loadingToday}</strong>
-          </div>
+          </button>
 
-          <div className="operations-card">
+          <button type="button" className="operations-card operations-card-button" onClick={() => scrollToOperationsSection('deliveringToday')}>
             <span>Delivering Today</span>
             <strong>{operationsData.counts.deliveringToday}</strong>
-          </div>
+          </button>
 
-          <div className="operations-card">
+          <button type="button" className="operations-card operations-card-button" onClick={() => scrollToOperationsSection('loadingNext7')}>
             <span>Loading Next 7 Days</span>
             <strong>{operationsData.counts.loadingNext7}</strong>
-          </div>
+          </button>
         </div>
 
         <DriverTimeOffCurrentPanel />
 
         <DriverPositionTrackingPanel />
 
-        <div style={{ marginTop: '24px' }}>
-          <h3 style={{ marginBottom: '12px' }}>Active Today</h3>
+        <div id="operations-active-today" ref={operationsActiveTodayRef} className="operations-detail-section">
+          <h3>Active Today</h3>
 
           {operationsData.activeToday.length === 0 ? (
             <div className="msg">No active shipments today.</div>
@@ -12796,8 +13014,8 @@ function openReportLoadDetails(load) {
           )}
         </div>
 
-        <div style={{ marginTop: '32px' }}>
-          <h3 style={{ marginBottom: '12px' }}>Loading Today</h3>
+        <div id="operations-loading-today" ref={operationsLoadingTodayRef} className="operations-detail-section">
+          <h3>Loading Today</h3>
 
           {operationsData.loadingToday.length === 0 ? (
             <div className="msg">No loads scheduled to load today.</div>
@@ -12838,8 +13056,8 @@ function openReportLoadDetails(load) {
           )}
         </div>
 
-        <div style={{ marginTop: '32px' }}>
-          <h3 style={{ marginBottom: '12px' }}>Delivering Today</h3>
+        <div id="operations-delivering-today" ref={operationsDeliveringTodayRef} className="operations-detail-section">
+          <h3>Delivering Today</h3>
 
           {operationsData.deliveringToday.length === 0 ? (
             <div className="msg">No deliveries scheduled today.</div>
@@ -12882,8 +13100,8 @@ function openReportLoadDetails(load) {
           )}
         </div>
 
-        <div style={{ marginTop: '32px' }}>
-          <h3 style={{ marginBottom: '12px' }}>Loading Next 7 Days</h3>
+        <div id="operations-loading-next-7" ref={operationsLoadingNext7Ref} className="operations-detail-section">
+          <h3>Loading Next 7 Days</h3>
 
           {operationsData.loadingNext7.length === 0 ? (
             <div className="msg">No upcoming loads in the next 7 days.</div>

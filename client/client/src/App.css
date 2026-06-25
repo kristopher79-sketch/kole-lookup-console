@@ -11962,3 +11962,98 @@ button.available-truck-distribution-summary-card:disabled {
   opacity: 1 !important;
 }
 
+
+/* POLISH PASS: modal/body scroll lock + operation anchors + order-to-driver drillthrough */
+.modal-overlay,
+.detail-modal,
+.modal-body {
+  overscroll-behavior: contain;
+}
+
+.operations-card-button {
+  width: 100%;
+  font: inherit;
+  appearance: none;
+  cursor: pointer;
+}
+
+.operations-card-button:focus-visible {
+  outline: 3px solid rgba(250, 204, 21, 0.85);
+  outline-offset: 3px;
+}
+
+.operations-detail-section {
+  margin-top: 32px;
+  scroll-margin-top: 22px;
+}
+
+.operations-detail-section:first-of-type {
+  margin-top: 24px;
+}
+
+.operations-detail-section h3 {
+  display: block;
+  margin: 0 0 12px !important;
+  padding: 10px 14px;
+  border: 1px solid var(--kole-border, #1e293b);
+  border-left: 4px solid var(--kole-gold, #facc15);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.68);
+  color: var(--kole-gold-bright, #facc15) !important;
+}
+
+.driver-card-button {
+  margin-top: 10px;
+  width: fit-content;
+}
+
+.driver-time-off-upcoming-alert {
+  margin: 14px 16px 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(250, 204, 21, 0.32);
+  border-radius: 12px;
+  background: rgba(250, 204, 21, 0.10);
+  color: #fde68a;
+}
+
+.driver-time-off-upcoming-alert strong,
+.driver-time-off-upcoming-alert span {
+  display: block;
+}
+
+.driver-time-off-upcoming-alert strong {
+  color: #f8fafc;
+  font-size: 13px;
+}
+
+.driver-time-off-upcoming-alert span {
+  margin-top: 4px;
+  color: #fef3c7;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+:root[data-theme='light'] .operations-detail-section h3 {
+  border-color: #cbd5e1 !important;
+  border-left-color: #d97706 !important;
+  background: #f8fafc !important;
+  color: #92400e !important;
+}
+
+:root[data-theme='light'] .driver-time-off-upcoming-alert {
+  border-color: #f59e0b !important;
+  background: #fffbeb !important;
+  color: #92400e !important;
+}
+
+:root[data-theme='light'] .driver-time-off-upcoming-alert strong {
+  color: #78350f !important;
+}
+
+:root[data-theme='light'] .driver-time-off-upcoming-alert span {
+  color: #92400e !important;
+}
+
+#operations-active-today {
+  margin-top: 24px;
+}
