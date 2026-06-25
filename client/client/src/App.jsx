@@ -1383,14 +1383,6 @@ export default function App() {
     setIntelliTrackActionOpen(false);
   }
 
-  function toggleIntelliTrackSection() {
-    if (intelliTrackSectionOpen) {
-      closeIntelliTrackSubsections();
-    }
-
-    setIntelliTrackSectionOpen((current) => !current);
-  }
-
   function closeAvailableTruckSubsections() {
     setAvailableTrucksCurrentOpen(false);
     setAvailableTrucksOpen(false);
@@ -1399,16 +1391,64 @@ export default function App() {
     setAvailableTruckDistributionInactiveModalOpen(false);
   }
 
-  function toggleAvailableTrucksSection() {
-    if (availableTrucksSectionOpen) {
+  function closeMainFeatureSections(except = '') {
+    if (except !== 'uploadDigest') {
+      setUploadDigestSectionOpen(false);
+    }
+
+    if (except !== 'intelliTrack') {
+      setIntelliTrackSectionOpen(false);
+      closeIntelliTrackSubsections();
+    }
+
+    if (except !== 'availableTrucks') {
+      setAvailableTrucksSectionOpen(false);
       closeAvailableTruckSubsections();
     }
 
-    setAvailableTrucksSectionOpen((current) => !current);
+    if (except !== 'salesAndLeads') {
+      setSalesAndLeadsSectionOpen(false);
+      closeSalesAndLeadsSubsections();
+    }
+
+    if (except !== 'reports') {
+      setReportsSectionOpen(false);
+      closeReportSubsections();
+    }
+  }
+
+  function toggleIntelliTrackSection() {
+    const willOpen = !intelliTrackSectionOpen;
+
+    if (willOpen) {
+      closeMainFeatureSections('intelliTrack');
+    } else {
+      closeIntelliTrackSubsections();
+    }
+
+    setIntelliTrackSectionOpen(willOpen);
+  }
+
+  function toggleAvailableTrucksSection() {
+    const willOpen = !availableTrucksSectionOpen;
+
+    if (willOpen) {
+      closeMainFeatureSections('availableTrucks');
+    } else {
+      closeAvailableTruckSubsections();
+    }
+
+    setAvailableTrucksSectionOpen(willOpen);
   }
 
   function toggleUploadDigestSection() {
-    setUploadDigestSectionOpen((current) => !current);
+    const willOpen = !uploadDigestSectionOpen;
+
+    if (willOpen) {
+      closeMainFeatureSections('uploadDigest');
+    }
+
+    setUploadDigestSectionOpen(willOpen);
   }
 
   function resetAppState() {
@@ -4427,19 +4467,27 @@ function getPositionStatusLabel(position) {
   }
 
   function toggleReportsSection() {
-    if (reportsSectionOpen) {
+    const willOpen = !reportsSectionOpen;
+
+    if (willOpen) {
+      closeMainFeatureSections('reports');
+    } else {
       closeReportSubsections();
     }
 
-    setReportsSectionOpen((current) => !current);
+    setReportsSectionOpen(willOpen);
   }
 
   function toggleSalesAndLeadsSection() {
-    if (salesAndLeadsSectionOpen) {
+    const willOpen = !salesAndLeadsSectionOpen;
+
+    if (willOpen) {
+      closeMainFeatureSections('salesAndLeads');
+    } else {
       closeSalesAndLeadsSubsections();
     }
 
-    setSalesAndLeadsSectionOpen((current) => !current);
+    setSalesAndLeadsSectionOpen(willOpen);
   }
 
   function toggleReportGroup(groupName) {
