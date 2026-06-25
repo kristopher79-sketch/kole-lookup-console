@@ -12140,3 +12140,305 @@ button.available-truck-distribution-summary-card:disabled {
   background: #99f6e4 !important;
   color: #115e59 !important;
 }
+
+/* YEARLY REVENUE PROJECTION */
+.yearly-projection-modal {
+  width: min(1500px, 96vw);
+}
+
+.yearly-projection-preview {
+  max-width: 1320px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.yearly-projection-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.6fr);
+  gap: 14px;
+  margin: 0 auto 18px;
+}
+
+.yearly-projection-hero > div,
+.yearly-projection-card {
+  border: 1px solid rgba(250, 204, 21, 0.2);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.72));
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
+}
+
+.yearly-projection-hero > div {
+  padding: 18px 20px;
+}
+
+.yearly-projection-hero span,
+.yearly-projection-card h3 {
+  display: block;
+  margin: 0 0 8px;
+  color: #facc15;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.yearly-projection-hero strong {
+  display: block;
+  color: #f8fafc;
+  font-size: clamp(28px, 4vw, 46px);
+  line-height: 1.05;
+}
+
+.yearly-projection-hero small {
+  display: block;
+  margin-top: 10px;
+  color: #cbd5e1;
+  line-height: 1.45;
+}
+
+.yearly-projection-kpi-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.yearly-projection-note {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(250, 204, 21, 0.28);
+  border-radius: 12px;
+  background: rgba(250, 204, 21, 0.08);
+  color: #fde68a;
+  line-height: 1.45;
+}
+
+.yearly-projection-note strong {
+  color: #fef3c7;
+}
+
+.yearly-projection-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+  gap: 16px;
+  margin: 18px 0;
+}
+
+.yearly-projection-card {
+  padding: 16px;
+  overflow: hidden;
+}
+
+.yearly-projection-card h3 {
+  font-size: 14px;
+}
+
+.yearly-projection-card table {
+  min-width: 620px;
+}
+
+.yearly-projection-card td strong,
+.yearly-projection-card td small {
+  display: block;
+}
+
+.yearly-projection-card td small {
+  margin-top: 4px;
+  color: #94a3b8;
+  line-height: 1.35;
+}
+
+.yearly-projection-monthly-card {
+  margin-bottom: 18px;
+}
+
+.yearly-projection-month-strip {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(88px, 1fr));
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.yearly-projection-month-card {
+  min-width: 88px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(15, 23, 42, 0.7);
+}
+
+.yearly-projection-month-card.basis {
+  border-color: rgba(34, 197, 94, 0.42);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.yearly-projection-month-card.current {
+  border-color: rgba(250, 204, 21, 0.42);
+  background: rgba(250, 204, 21, 0.08);
+}
+
+.yearly-projection-month-card span,
+.yearly-projection-month-card em,
+.yearly-projection-month-card small,
+.yearly-projection-month-card strong {
+  display: block;
+}
+
+.yearly-projection-month-card span {
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.yearly-projection-month-card em {
+  margin-top: 4px;
+  color: #facc15;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.yearly-projection-month-card strong {
+  margin-top: 8px;
+  color: #f8fafc;
+  font-size: 14px;
+}
+
+.yearly-projection-month-card small {
+  margin-top: 4px;
+  color: #94a3b8;
+}
+
+.yearly-projection-driver-table-wrap table {
+  min-width: 980px;
+}
+
+:root[data-theme='light'] .yearly-projection-hero > div,
+:root[data-theme='light'] .yearly-projection-card {
+  border-color: rgba(202, 138, 4, 0.26);
+  background: linear-gradient(135deg, #ffffff, #f8fafc);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+}
+
+:root[data-theme='light'] .yearly-projection-hero span,
+:root[data-theme='light'] .yearly-projection-card h3 {
+  color: #92400e;
+}
+
+:root[data-theme='light'] .yearly-projection-hero strong,
+:root[data-theme='light'] .yearly-projection-month-card strong {
+  color: #111827;
+}
+
+:root[data-theme='light'] .yearly-projection-hero small,
+:root[data-theme='light'] .yearly-projection-card td small,
+:root[data-theme='light'] .yearly-projection-month-card small {
+  color: #475569;
+}
+
+:root[data-theme='light'] .yearly-projection-note {
+  border-color: #facc15;
+  background: #fffbeb;
+  color: #374151;
+}
+
+:root[data-theme='light'] .yearly-projection-note strong {
+  color: #111827;
+}
+
+:root[data-theme='light'] .yearly-projection-month-card {
+  border-color: #cbd5e1;
+  background: #ffffff;
+}
+
+:root[data-theme='light'] .yearly-projection-month-card.basis {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+:root[data-theme='light'] .yearly-projection-month-card.current {
+  border-color: #facc15;
+  background: #fffbeb;
+}
+
+:root[data-theme='light'] .yearly-projection-month-card span {
+  color: #334155;
+}
+
+:root[data-theme='light'] .yearly-projection-card .report-table-wrap,
+:root[data-theme='light'] .yearly-projection-card table {
+  background: #ffffff;
+}
+
+:root[data-theme='light'] .yearly-projection-card th {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+:root[data-theme='light'] .yearly-projection-card td {
+  color: #111827;
+  border-bottom-color: #dbe3ef;
+}
+
+:root[data-theme='light'] .yearly-projection-card tbody tr:nth-child(even) {
+  background: #f8fafc;
+}
+
+
+@media (max-width: 1100px) {
+  .yearly-projection-hero,
+  .yearly-projection-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .yearly-projection-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .yearly-projection-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Yearly projection: compact sensitivity table so it fits the card without a horizontal scrollbar */
+.yearly-projection-sensitivity-table {
+  width: 100% !important;
+  min-width: 0 !important;
+  table-layout: fixed;
+}
+
+.yearly-projection-sensitivity-table th,
+.yearly-projection-sensitivity-table td {
+  padding: 10px 8px;
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.yearly-projection-sensitivity-table th:nth-child(1),
+.yearly-projection-sensitivity-table td:nth-child(1) {
+  width: 26%;
+  text-align: left;
+}
+
+.yearly-projection-sensitivity-table th:nth-child(2),
+.yearly-projection-sensitivity-table td:nth-child(2) {
+  width: 38%;
+  text-align: right;
+}
+
+.yearly-projection-sensitivity-table th:nth-child(3),
+.yearly-projection-sensitivity-table td:nth-child(3) {
+  width: 36%;
+  text-align: right;
+}
+
+@media (max-width: 900px) {
+  .yearly-projection-sensitivity-table th,
+  .yearly-projection-sensitivity-table td {
+    padding: 9px 6px;
+    font-size: 11px;
+  }
+}

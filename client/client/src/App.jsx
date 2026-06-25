@@ -632,6 +632,11 @@ export default function App() {
   const [grossRevenueLoading, setGrossRevenueLoading] = useState(false);
   const [grossRevenueError, setGrossRevenueError] = useState(null);
   const [grossRevenueModalOpen, setGrossRevenueModalOpen] = useState(false);
+  const [yearlyProjectionYear, setYearlyProjectionYear] = useState(() => new Date().getFullYear());
+  const [yearlyProjectionReport, setYearlyProjectionReport] = useState(null);
+  const [yearlyProjectionLoading, setYearlyProjectionLoading] = useState(false);
+  const [yearlyProjectionError, setYearlyProjectionError] = useState(null);
+  const [yearlyProjectionModalOpen, setYearlyProjectionModalOpen] = useState(false);
   const [openGrossRevenueQuarters, setOpenGrossRevenueQuarters] = useState([]);
   const [selectedGrossRevenueTruck, setSelectedGrossRevenueTruck] = useState(null);
   const [driverSummaryReport, setDriverSummaryReport] = useState(null);
@@ -847,6 +852,7 @@ export default function App() {
     selectedDriverRoster ||
     driverHistoryModalOpen ||
     grossRevenueModalOpen ||
+    yearlyProjectionModalOpen ||
     selectedGrossRevenueTruck ||
     driverSummaryModalOpen ||
     monthlyOpsModalOpen ||
@@ -1391,6 +1397,41 @@ export default function App() {
     setAvailableTruckDistributionInactiveModalOpen(false);
   }
 
+  function toggleIntelliTrackSubsection(sectionName) {
+    const sectionMap = {
+      current: { isOpen: intelliTrackOpen, setter: setIntelliTrackOpen },
+      action: { isOpen: intelliTrackActionOpen, setter: setIntelliTrackActionOpen }
+    };
+    const target = sectionMap[sectionName];
+    if (!target) return;
+
+    const willOpen = !target.isOpen;
+    closeIntelliTrackSubsections();
+    if (willOpen) target.setter(true);
+  }
+
+  function toggleAvailableTruckSubsection(sectionName) {
+    const sectionMap = {
+      current: { isOpen: availableTrucksCurrentOpen, setter: setAvailableTrucksCurrentOpen },
+      analysis: { isOpen: availableTrucksOpen, setter: setAvailableTrucksOpen },
+      action: { isOpen: availableTrucksActionOpen, setter: setAvailableTrucksActionOpen },
+      distribution: { isOpen: availableTruckDistributionOpen, setter: setAvailableTruckDistributionOpen }
+    };
+    const target = sectionMap[sectionName];
+    if (!target) return;
+
+    const willOpen = !target.isOpen;
+    closeAvailableTruckSubsections();
+
+    if (willOpen) {
+      target.setter(true);
+
+      if (sectionName === 'distribution' && !availableTruckDistributionData && !availableTruckDistributionLoading) {
+        loadAvailableTruckDistributionList();
+      }
+    }
+  }
+
   function closeMainFeatureSections(except = '') {
     if (except !== 'uploadDigest') {
       setUploadDigestSectionOpen(false);
@@ -1523,6 +1564,10 @@ export default function App() {
     setOpenReportGroups([]);
     setActiveReportPanel('');
     setOpenGrossRevenueQuarters([]);
+    setYearlyProjectionReport(null);
+    setYearlyProjectionLoading(false);
+    setYearlyProjectionError(null);
+    setYearlyProjectionModalOpen(false);
     searchCacheRef.current.clear();
     onThisDayReportCacheRef.current.clear();
 
@@ -3121,9 +3166,7 @@ function getPositionStatusLabel(position) {
 
   function toggleGrossRevenueQuarter(quarterLabel) {
     setOpenGrossRevenueQuarters((current) => (
-      current.includes(quarterLabel)
-        ? current.filter((label) => label !== quarterLabel)
-        : [...current, quarterLabel]
+      current.includes(quarterLabel) ? [] : [quarterLabel]
     ));
   }
 
@@ -3168,6 +3211,41 @@ function getPositionStatusLabel(position) {
 
   function closeGrossRevenueTruckModal() {
     setSelectedGrossRevenueTruck(null);
+  }
+
+  async function loadYearlyRevenueProjectionReport() {
+    const selectedYear = Number(yearlyProjectionYear);
+
+    setYearlyProjectionLoading(true);
+    setYearlyProjectionError(null);
+    setYearlyProjectionReport(null);
+    setYearlyProjectionModalOpen(false);
+
+    try {
+      const res = await authedFetch(
+        `${API}/reports/yearly-revenue-projection?year=${encodeURIComponent(selectedYear)}`
+      );
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to load Yearly Revenue Projection.');
+      }
+
+      setYearlyProjectionReport(data);
+      setYearlyProjectionModalOpen(true);
+    } catch (err) {
+      setYearlyProjectionError({
+        code: 'REPORT_ERROR',
+        message: err.message || 'Unable to load Yearly Revenue Projection.'
+      });
+    } finally {
+      setYearlyProjectionLoading(false);
+    }
+  }
+
+  function closeYearlyRevenueProjectionModal() {
+    setYearlyProjectionModalOpen(false);
   }
 
   async function loadDriverSummaryReport() {
@@ -4444,7 +4522,7 @@ function getPositionStatusLabel(position) {
   ];
 
   const reportPanelsByGroup = {
-    financial: ['grossRevenue', 'driverSummary', 'weeklySettlement'],
+    financial: ['grossRevenue', 'yearlyProjection', 'driverSummary', 'weeklySettlement'],
     operational: ['monthlyOperations', 'ordersDueSettlement', 'wonNotRegistered', 'permitGovernance', 'onThisDay', 'noAvailability'],
     driverFleet: ['activeDriverRoster', 'inactiveDriverRoster', 'fleetEquipment', 'driverTimeOff'],
     sales: ['customerBookingTrends', 'salesActivity', 'leadSuppression', 'salesLeads']
@@ -4493,18 +4571,28 @@ function getPositionStatusLabel(position) {
   function toggleReportGroup(groupName) {
     const isClosingGroup = openReportGroups.includes(groupName);
 
-    if (isClosingGroup && (reportPanelsByGroup[groupName] || []).includes(activeReportPanel)) {
-      setActiveReportPanel('');
+    if (isClosingGroup) {
+      if ((reportPanelsByGroup[groupName] || []).includes(activeReportPanel)) {
+        setActiveReportPanel('');
+      }
+
       if (groupName === 'financial') {
         setOpenGrossRevenueQuarters([]);
       }
+
+      setOpenReportGroups([]);
+      return;
     }
 
-    setOpenReportGroups((current) => (
-      current.includes(groupName)
-        ? current.filter((name) => name !== groupName)
-        : [...current, groupName]
-    ));
+    if (!(reportPanelsByGroup[groupName] || []).includes(activeReportPanel)) {
+      setActiveReportPanel('');
+    }
+
+    if (groupName !== 'financial') {
+      setOpenGrossRevenueQuarters([]);
+    }
+
+    setOpenReportGroups([groupName]);
   }
 
   function isReportGroupOpen(groupName) {
@@ -6102,6 +6190,191 @@ function openReportLoadDetails(load) {
             </div>
           </div>
         </div>
+      </div>
+    );
+  }
+
+  function YearlyRevenueProjectionPreview() {
+    if (!yearlyProjectionReport) return null;
+
+    const summary = yearlyProjectionReport.summary || {};
+    const scenarios = yearlyProjectionReport.scenarios || [];
+    const driverRows = yearlyProjectionReport.driverRows || [];
+    const monthlyTotals = yearlyProjectionReport.monthlyTotals || [];
+    const sensitivityRows = yearlyProjectionReport.driverCountSensitivity || [];
+
+    return (
+      <div className="driver-report-preview modal-report-preview yearly-projection-preview">
+        <div className="yearly-projection-hero">
+          <div>
+            <span>Projected Annual Revenue</span>
+            <strong>{formatReportMoney(summary.projectedAnnualRevenue)}</strong>
+            <small>{formatReportMoney(summary.averageMonthlyRevenuePerActiveDriver)} average monthly revenue per active driver × {formatReportNumber(summary.activeDriverCount)} active driver{Number(summary.activeDriverCount) === 1 ? '' : 's'} × 12</small>
+          </div>
+          <div>
+            <span>Basis</span>
+            <strong>{formatReportNumber(summary.basisMonthCount)} month{Number(summary.basisMonthCount) === 1 ? '' : 's'}</strong>
+            <small>{yearlyProjectionReport.basisLabel || 'Completed months are used when available.'}</small>
+          </div>
+        </div>
+
+        <div className="report-kpi-grid yearly-projection-kpi-grid">
+          <div className="report-kpi-card">
+            <span>Active Drivers</span>
+            <strong>{formatReportNumber(summary.activeDriverCount)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Basis Revenue (YTD Gross)</span>
+            <strong>{formatReportMoney(summary.basisRevenue)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Avg Monthly Revenue</span>
+            <strong>{formatReportMoney(summary.averageMonthlyRevenue)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Avg / Driver / Month</span>
+            <strong>{formatReportMoney(summary.averageMonthlyRevenuePerActiveDriver)}</strong>
+          </div>
+          <div className="report-kpi-card">
+            <span>Annualized / Driver</span>
+            <strong>{formatReportMoney(summary.annualizedRevenuePerActiveDriver)}</strong>
+          </div>
+        </div>
+
+        {summary.currentMonthIsBasis && summary.currentMonthRevenue > 0 && (
+          <div className="yearly-projection-note">
+            <strong>Current month included:</strong> {formatReportMoney(summary.currentMonthRevenue)} from {summary.currentMonthName || 'the current month'} is included in the projection basis. This will move as more current-month loads are logged.
+          </div>
+        )}
+
+        {!summary.currentMonthIsBasis && summary.currentPartialMonthRevenue > 0 && (
+          <div className="yearly-projection-note">
+            <strong>Current month watch:</strong> {formatReportMoney(summary.currentPartialMonthRevenue)} is logged in {summary.currentPartialMonthName || 'the current month'} so far, but it is not part of the projection basis.
+          </div>
+        )}
+
+        <div className="yearly-projection-grid">
+          <section className="yearly-projection-card">
+            <h3>Run-rate scenarios</h3>
+            <div className="report-table-wrap">
+              <table className="driver-report-table yearly-projection-scenario-table">
+                <thead>
+                  <tr>
+                    <th>Scenario</th>
+                    <th>Monthly / Driver</th>
+                    <th>Projected Annual</th>
+                    <th>Annual / Driver</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scenarios.map((scenario) => (
+                    <tr key={scenario.key || scenario.label}>
+                      <td>
+                        <strong>{scenario.label}</strong>
+                        <small>{scenario.note}</small>
+                      </td>
+                      <td>{formatReportMoney(scenario.averageMonthlyRevenuePerDriver)}</td>
+                      <td>{formatReportMoney(scenario.projectedAnnualRevenue)}</td>
+                      <td>{formatReportMoney(scenario.annualizedRevenuePerDriver)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="yearly-projection-card">
+            <h3>Driver count sensitivity</h3>
+            <div className="report-table-wrap">
+              <table className="driver-report-table yearly-projection-sensitivity-table">
+                <thead>
+                  <tr>
+                    <th>Active Drivers</th>
+                    <th>Projected Annual</th>
+                    <th>Difference</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sensitivityRows.map((row) => (
+                    <tr key={row.driverCount}>
+                      <td>{formatReportNumber(row.driverCount)}</td>
+                      <td>{formatReportMoney(row.projectedAnnualRevenue)}</td>
+                      <td>{formatReportMoney(row.differenceFromCurrent)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <section className="yearly-projection-card yearly-projection-monthly-card">
+          <h3>Monthly revenue basis</h3>
+          <div className="yearly-projection-month-strip">
+            {monthlyTotals.map((month) => (
+              <div
+                key={month.month}
+                className={`yearly-projection-month-card ${month.isBasisMonth ? 'basis' : ''} ${month.isCurrentMonth ? 'current' : ''}`}
+              >
+                <span>{month.shortName || month.name}</span>
+                {month.isBasisMonth && <em>Basis</em>}
+                {month.isCurrentMonth && !month.isBasisMonth && <em>Current</em>}
+                <strong>{formatReportMoney(month.revenue)}</strong>
+                <small>{formatReportNumber(month.loadCount)} load{Number(month.loadCount) === 1 ? '' : 's'}</small>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="yearly-projection-card">
+          <h3>Active driver pace</h3>
+          <div className="report-table-wrap yearly-projection-driver-table-wrap">
+            <table className="driver-report-table yearly-projection-driver-table">
+              <thead>
+                <tr>
+                  <th>Truck</th>
+                  <th>Driver</th>
+                  <th>YTD Revenue</th>
+                  <th>Basis Revenue</th>
+                  <th>Avg / Pace Month</th>
+                  <th>Projected Annual</th>
+                  <th>Loads</th>
+                  <th>Pace</th>
+                </tr>
+              </thead>
+              <tbody>
+                {driverRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={8}>No active drivers were found for this projection.</td>
+                  </tr>
+                ) : driverRows.map((row) => (
+                  <tr key={row.truck || row.operator}>
+                    <td>{row.truck || '-'}</td>
+                    <td>
+                      <strong>{row.operator || '-'}</strong>
+                      {row.hasNoRevenue && <small>No revenue in projection year</small>}
+                    </td>
+                    <td>{formatReportMoney(row.ytdRevenue)}</td>
+                    <td>{formatReportMoney(row.basisRevenue)}</td>
+                    <td>
+                      {formatReportMoney(row.averageMonthlyRevenue)}
+                      {row.paceBasisLabel && <small>{row.paceBasisLabel}</small>}
+                    </td>
+                    <td>{formatReportMoney(row.projectedAnnualRevenue)}</td>
+                    <td>
+                      {formatReportNumber(row.loadCount)}
+                      {Number(row.paceLoadCount || 0) !== Number(row.loadCount || 0) && <small>{formatReportNumber(row.paceLoadCount)} in pace</small>}
+                    </td>
+                    <td>
+                      {row.paceLabel || '-'}
+                      {row.hasLimitedPaceHistory && <small>Limited history</small>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
     );
   }
@@ -8884,7 +9157,7 @@ function openReportLoadDetails(load) {
             <button
               type="button"
               className="available-trucks-summary available-trucks-current-summary"
-              onClick={() => setAvailableTrucksCurrentOpen((current) => !current)}
+              onClick={() => toggleAvailableTruckSubsection('current')}
               aria-expanded={availableTrucksCurrentOpen}
             >
               <span className="available-trucks-title-block">
@@ -8994,7 +9267,7 @@ function openReportLoadDetails(load) {
             <button
               type="button"
               className="available-trucks-summary"
-              onClick={() => setAvailableTrucksOpen((current) => !current)}
+              onClick={() => toggleAvailableTruckSubsection('analysis')}
               aria-expanded={availableTrucksOpen}
             >
               <span className="available-trucks-title-block">
@@ -9087,7 +9360,7 @@ function openReportLoadDetails(load) {
             <button
               type="button"
               className="available-trucks-summary available-trucks-action-summary"
-              onClick={() => setAvailableTrucksActionOpen((current) => !current)}
+              onClick={() => toggleAvailableTruckSubsection('action')}
               aria-expanded={availableTrucksActionOpen}
             >
               <span className="available-trucks-title-block">
@@ -9201,13 +9474,9 @@ function openReportLoadDetails(load) {
               type="button"
               className="available-trucks-summary available-trucks-distribution-summary-button"
               onClick={() => {
-                const nextOpen = !availableTruckDistributionOpen;
-                setAvailableTruckDistributionOpen(nextOpen);
                 setAvailableTruckDistributionError('');
                 setAvailableTruckDistributionMessage('');
-                if (nextOpen && !availableTruckDistributionData && !availableTruckDistributionLoading) {
-                  loadAvailableTruckDistributionList();
-                }
+                toggleAvailableTruckSubsection('distribution');
               }}
               aria-expanded={availableTruckDistributionOpen}
             >
@@ -9465,7 +9734,7 @@ function openReportLoadDetails(load) {
             <button
               type="button"
               className="intellitrack-summary"
-              onClick={() => setIntelliTrackOpen((current) => !current)}
+              onClick={() => toggleIntelliTrackSubsection('current')}
               aria-expanded={intelliTrackOpen}
             >
               <span className="intellitrack-title-block">
@@ -9562,7 +9831,7 @@ function openReportLoadDetails(load) {
             <button
               type="button"
               className="intellitrack-summary intellitrack-action-summary"
-              onClick={() => setIntelliTrackActionOpen((current) => !current)}
+              onClick={() => toggleIntelliTrackSubsection('action')}
               aria-expanded={intelliTrackActionOpen}
             >
               <span className="intellitrack-title-block">
@@ -11642,6 +11911,7 @@ function openReportLoadDetails(load) {
   function DriverSummaryReport() {
     const monthOptions = Array.from({ length: 12 }, (_, index) => index + 1);
     const isGrossRevenueOpen = activeReportPanel === 'grossRevenue';
+    const isYearlyProjectionOpen = activeReportPanel === 'yearlyProjection';
     const isDriverSummaryOpen = activeReportPanel === 'driverSummary';
     const isMonthlyOperationsOpen = activeReportPanel === 'monthlyOperations';
     const isOrdersDueSettlementOpen = activeReportPanel === 'ordersDueSettlement';
@@ -11701,7 +11971,7 @@ function openReportLoadDetails(load) {
             >
               <div>
                 <strong>Financial Reports</strong>
-                <span>Revenue totals, monthly driver summaries, and weekly settlements</span>
+                <span>Revenue totals, yearly projections, monthly driver summaries, and weekly settlements</span>
               </div>
               <span className="report-accordion-icon">{isFinancialReportsOpen ? '▼' : '▶'}</span>
             </button>
@@ -11768,6 +12038,74 @@ function openReportLoadDetails(load) {
                     <div className="report-alert error">
                       <h4>Report could not be loaded.</h4>
                       <p>{grossRevenueError.message}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className={`report-accordion ${isYearlyProjectionOpen ? 'open' : ''}`}>
+            <button
+              type="button"
+              className="report-accordion-button"
+              onClick={(e) => handleReportPanelClick(e, 'yearlyProjection')}
+            >
+              <span>Yearly Revenue Projection</span>
+              <span className="report-accordion-icon">{isYearlyProjectionOpen ? '▼' : '▶'}</span>
+            </button>
+
+            {isYearlyProjectionOpen && (
+              <div className="report-accordion-body">
+                <div className="report-card compact-report-card accordion-inner-card briefing-report-card">
+                  <div className="report-card-header centered-report-header">
+                    <div>
+                      <h3>Yearly Revenue Projection</h3>
+                      <p>Uses active driver count and average monthly revenue per active driver to estimate annual run rate.</p>
+                    </div>
+                  </div>
+
+                  <div className="report-controls centered-report-controls">
+                    <label>
+                      <span>Year</span>
+                      <select
+                        value={yearlyProjectionYear}
+                        onChange={(e) => {
+                          setYearlyProjectionYear(Number(e.target.value));
+                          setYearlyProjectionReport(null);
+                          setYearlyProjectionError(null);
+                          setYearlyProjectionModalOpen(false);
+                        }}
+                      >
+                        {getReportYears().map((year) => (
+                          <option key={year} value={year}>
+                            {year}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <button onClick={loadYearlyRevenueProjectionReport} disabled={yearlyProjectionLoading}>
+                      {yearlyProjectionLoading ? 'Loading Projection...' : 'Preview Report'}
+                    </button>
+                  </div>
+
+                  {yearlyProjectionReport && !yearlyProjectionModalOpen && (
+                    <div className="report-ready-card">
+                      <div>
+                        <strong>{yearlyProjectionReport.reportLabel} is ready.</strong>
+                        <span> The preview opens in a report window.</span>
+                      </div>
+                      <button className="view-button" onClick={() => setYearlyProjectionModalOpen(true)}>
+                        Reopen Preview
+                      </button>
+                    </div>
+                  )}
+
+                  {yearlyProjectionError && (
+                    <div className="report-alert error">
+                      <h4>Projection could not be loaded.</h4>
+                      <p>{yearlyProjectionError.message}</p>
                     </div>
                   )}
                 </div>
@@ -13393,6 +13731,27 @@ function openReportLoadDetails(load) {
       )}
 
       <GrossRevenueDriverDetailModal />
+
+      {yearlyProjectionModalOpen && yearlyProjectionReport && (
+        <div className="modal-overlay report-modal-overlay" onClick={closeYearlyRevenueProjectionModal}>
+          <div className="detail-modal report-modal wide-report-modal yearly-projection-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="detail-header report-modal-header">
+              <div>
+                <h2>{yearlyProjectionReport.reportLabel || 'Yearly Revenue Projection'}</h2>
+                <p>{yearlyProjectionReport.anchorDate || ''} · Generated {yearlyProjectionReport.generatedAt || ''}</p>
+              </div>
+
+              <button className="close-button" onClick={closeYearlyRevenueProjectionModal}>
+                Close
+              </button>
+            </div>
+
+            <div className="modal-body report-modal-body">
+              <YearlyRevenueProjectionPreview />
+            </div>
+          </div>
+        </div>
+      )}
 
       {monthlyOpsModalOpen && monthlyOpsReport && (
         <div className="modal-overlay report-modal-overlay" onClick={closeMonthlyOperationsSummaryModal}>

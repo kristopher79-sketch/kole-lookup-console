@@ -4013,6 +4013,243 @@ function buildGrossRevenueTotalsResponse(items, sourceList, year, rosterByTruck 
   };
 }
 
+function isExcludedRevenueProjectionRosterRow(roster = {}) {
+  const truckKey = normalizeTruckKey(roster?.truck);
+  const tmsNameKey = normalizeSearchValue(roster?.tmsName || '');
+  const operatorTeamKey = normalizeSearchValue(roster?.operatorTeamName || '');
+
+  return (
+    truckKey === '5550' ||
+    tmsNameKey.includes('new vision') ||
+    operatorTeamKey.includes('new vision')
+  );
+}
+
+function getRevenueProjectionBasisInfo(year, monthKeys = []) {
+  const current = getEasternParts();
+  const selectedYear = Number(year);
+
+  if (selectedYear < current.year) {
+    return {
+      basisMonths: monthKeys,
+      includesPartialMonth: false,
+      basisLabel: 'Full completed year basis'
+    };
+  }
+
+  if (selectedYear > current.year) {
+    return {
+      basisMonths: [],
+      includesPartialMonth: false,
+      basisLabel: 'Future year basis unavailable until revenue exists'
+    };
+  }
+
+  const ytdMonths = monthKeys.filter((month) => Number(month.month) <= Number(current.month));
+
+  return {
+    basisMonths: ytdMonths,
+    includesPartialMonth: true,
+    currentMonth: Number(current.month),
+    basisLabel: ytdMonths.length > 0
+      ? `YTD months including current month (${ytdMonths.map((month) => month.shortName || month.name).join(' / ')})`
+      : 'Current year basis unavailable until revenue exists'
+  };
+}
+
+function getRevenueProjectionPaceLabel(averageMonthlyRevenue, fleetAverageMonthlyRevenuePerDriver) {
+  const driverAverage = Number(averageMonthlyRevenue || 0);
+  const fleetAverage = Number(fleetAverageMonthlyRevenuePerDriver || 0);
+
+  if (driverAverage <= 0) return 'No revenue';
+  if (fleetAverage <= 0) return 'No fleet average';
+
+  const ratio = driverAverage / fleetAverage;
+
+  if (ratio >= 1.15) return 'Ahead';
+  if (ratio <= 0.85) return 'Behind';
+  return 'On pace';
+}
+
+function buildYearlyRevenueProjectionResponse(items, sourceList, year, rosterItems = []) {
+  const rosterByTruck = new Map();
+
+  rosterItems.forEach((roster) => {
+    const truckKey = normalizeTruckKey(roster.truck);
+    if (!truckKey) return;
+    if (!rosterByTruck.has(truckKey) || normalizeText(roster.status) === 'active') {
+      rosterByTruck.set(truckKey, roster);
+    }
+  });
+
+  const grossReport = buildGrossRevenueTotalsResponse(items, sourceList, year, rosterByTruck);
+  const months = grossReport.months || [];
+  const monthlyTotalsByNumber = grossReport.totals?.monthlyTotals || {};
+  const monthlyLoadCountsByNumber = grossReport.totals?.monthlyLoadCounts || {};
+  const basisInfo = getRevenueProjectionBasisInfo(year, months);
+  const basisMonthNumbers = new Set((basisInfo.basisMonths || []).map((month) => Number(month.month)));
+  const currentMonthNumber = Number(basisInfo.currentMonth || getEasternParts().month);
+  const currentMonthMeta = months.find((month) => Number(month.month) === currentMonthNumber) || null;
+
+  const monthlyTotals = months.map((month) => {
+    const monthNumber = Number(month.month);
+
+    return {
+      ...month,
+      revenue: Number(monthlyTotalsByNumber[month.month] || 0),
+      loadCount: Number(monthlyLoadCountsByNumber[month.month] || 0),
+      isBasisMonth: basisMonthNumbers.has(monthNumber),
+      isCurrentMonth: Number(year) === getEasternParts().year && monthNumber === currentMonthNumber
+    };
+  });
+
+  const basisRevenue = monthlyTotals
+    .filter((month) => month.isBasisMonth)
+    .reduce((sum, month) => sum + Number(month.revenue || 0), 0);
+  const basisLoadCount = monthlyTotals
+    .filter((month) => month.isBasisMonth)
+    .reduce((sum, month) => sum + Number(month.loadCount || 0), 0);
+  const currentMonthRevenue = monthlyTotals
+    .filter((month) => month.isCurrentMonth)
+    .reduce((sum, month) => sum + Number(month.revenue || 0), 0);
+  const currentMonthLoadCount = monthlyTotals
+    .filter((month) => month.isCurrentMonth)
+    .reduce((sum, month) => sum + Number(month.loadCount || 0), 0);
+  const currentMonthIsBasis = monthlyTotals.some((month) => month.isCurrentMonth && month.isBasisMonth);
+  const currentPartialMonthRevenue = currentMonthIsBasis ? 0 : currentMonthRevenue;
+  const currentPartialMonthLoadCount = currentMonthIsBasis ? 0 : currentMonthLoadCount;
+
+  const activeDrivers = rosterItems
+    .filter((roster) => normalizeText(roster.status) === 'active')
+    .filter((roster) => !isExcludedRevenueProjectionRosterRow(roster))
+    .sort(sortDriverRosterRecords);
+  const activeDriverCount = activeDrivers.length;
+  const basisMonthCount = basisInfo.basisMonths.length;
+  const averageMonthlyRevenue = safeAverage(basisRevenue, basisMonthCount);
+  const averageMonthlyRevenuePerActiveDriver = safeAverage(averageMonthlyRevenue, activeDriverCount);
+  const annualizedRevenuePerActiveDriver = averageMonthlyRevenuePerActiveDriver * 12;
+  const projectedAnnualRevenue = averageMonthlyRevenuePerActiveDriver * activeDriverCount * 12;
+  const ytdGrossRevenue = grossReport.totals?.totalGrossRevenue || 0;
+
+  const grossTruckByKey = new Map((grossReport.trucks || []).map((truck) => [normalizeTruckKey(truck.truck), truck]));
+
+  const driverRows = activeDrivers.map((roster) => {
+    const truckKey = normalizeTruckKey(roster.truck);
+    const truckRevenue = grossTruckByKey.get(truckKey) || null;
+    const basisMonthsForDriver = basisInfo.basisMonths || [];
+    const driverBasisRevenue = basisMonthsForDriver
+      .reduce((sum, month) => sum + Number(truckRevenue?.monthTotals?.[month.month] || 0), 0);
+    const driverBasisLoadCount = basisMonthsForDriver
+      .reduce((sum, month) => sum + Number(truckRevenue?.monthLoadCounts?.[month.month] || 0), 0);
+    const firstRevenueMonthIndex = basisMonthsForDriver.findIndex((month) => (
+      Number(truckRevenue?.monthTotals?.[month.month] || 0) > 0 ||
+      Number(truckRevenue?.monthLoadCounts?.[month.month] || 0) > 0
+    ));
+    const driverPaceMonths = firstRevenueMonthIndex >= 0
+      ? basisMonthsForDriver.slice(firstRevenueMonthIndex)
+      : basisMonthsForDriver;
+    const driverPaceRevenue = driverPaceMonths
+      .reduce((sum, month) => sum + Number(truckRevenue?.monthTotals?.[month.month] || 0), 0);
+    const driverPaceLoadCount = driverPaceMonths
+      .reduce((sum, month) => sum + Number(truckRevenue?.monthLoadCounts?.[month.month] || 0), 0);
+    const driverPaceMonthCount = driverPaceMonths.length || basisMonthCount;
+    const averageDriverMonthlyRevenue = safeAverage(driverPaceRevenue, driverPaceMonthCount);
+    const paceBasisLabel = driverPaceMonths.length > 0
+      ? `${driverPaceMonths.map((month) => month.shortName || month.name).join(' / ')} pace`
+      : 'No pace months';
+
+    return {
+      truck: roster.truck || truckRevenue?.truck || '',
+      operator: getRosterReportDisplayName(roster) || truckRevenue?.operator || 'Unknown Operator',
+      rosterStatus: roster.status || '',
+      ytdRevenue: Number(truckRevenue?.totalGrossRevenue || 0),
+      basisRevenue: driverBasisRevenue,
+      basisLoadCount: driverBasisLoadCount,
+      paceRevenue: driverPaceRevenue,
+      paceLoadCount: driverPaceLoadCount,
+      paceMonthCount: driverPaceMonthCount,
+      paceBasisLabel,
+      averageMonthlyRevenue: averageDriverMonthlyRevenue,
+      projectedAnnualRevenue: averageDriverMonthlyRevenue * 12,
+      loadCount: Number(truckRevenue?.loadCount || 0),
+      paceLabel: getRevenueProjectionPaceLabel(averageDriverMonthlyRevenue, averageMonthlyRevenuePerActiveDriver),
+      hasNoRevenue: Number(truckRevenue?.totalGrossRevenue || 0) <= 0,
+      hasLimitedPaceHistory: driverPaceMonthCount > 0 && driverPaceMonthCount < Math.min(3, basisMonthCount)
+    };
+  }).sort((a, b) => b.projectedAnnualRevenue - a.projectedAnnualRevenue || String(a.operator || '').localeCompare(String(b.operator || ''), undefined, { numeric: true }));
+
+  const scenarios = [
+    { key: 'conservative', label: 'Conservative', multiplier: 0.9, note: '10% below current per-driver run rate' },
+    { key: 'base', label: 'Base Run Rate', multiplier: 1, note: 'Current average monthly revenue per active driver' },
+    { key: 'stretch', label: 'Stretch', multiplier: 1.1, note: '10% above current per-driver run rate' }
+  ].map((scenario) => {
+    const scenarioMonthlyPerDriver = averageMonthlyRevenuePerActiveDriver * scenario.multiplier;
+
+    return {
+      ...scenario,
+      averageMonthlyRevenuePerDriver: scenarioMonthlyPerDriver,
+      annualizedRevenuePerDriver: scenarioMonthlyPerDriver * 12,
+      projectedAnnualRevenue: scenarioMonthlyPerDriver * activeDriverCount * 12
+    };
+  });
+
+  const sensitivityDriverCounts = uniqueNonEmpty([
+    Math.max(0, activeDriverCount - 1),
+    activeDriverCount,
+    activeDriverCount + 1,
+    activeDriverCount + 2
+  ]).map((value) => Number(value)).filter((value) => value > 0);
+
+  const driverCountSensitivity = sensitivityDriverCounts.map((driverCount) => {
+    const projected = averageMonthlyRevenuePerActiveDriver * driverCount * 12;
+
+    return {
+      driverCount,
+      projectedAnnualRevenue: projected,
+      differenceFromCurrent: projected - projectedAnnualRevenue
+    };
+  });
+
+  return {
+    success: true,
+    reportType: 'yearlyRevenueProjection',
+    reportLabel: `${year} Yearly Revenue Projection`,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    dataSource: sourceList?.label || 'Bid Listing',
+    sourceListId: sourceList?.listId || '',
+    year: Number(year),
+    anchorDate: 'Pickup Offer Date',
+    revenueBasis: grossReport.revenueBasis,
+    includedStatuses: grossReport.includedStatuses,
+    basisLabel: basisInfo.basisLabel,
+    basisIncludesPartialMonth: basisInfo.includesPartialMonth,
+    summary: {
+      activeDriverCount,
+      basisMonthCount,
+      basisRevenue,
+      basisLoadCount,
+      averageMonthlyRevenue,
+      averageMonthlyRevenuePerActiveDriver,
+      annualizedRevenuePerActiveDriver,
+      projectedAnnualRevenue,
+      ytdGrossRevenue,
+      ytdLoadCount: grossReport.totals?.loadCount || 0,
+      currentPartialMonthRevenue,
+      currentPartialMonthLoadCount,
+      currentMonthRevenue,
+      currentMonthLoadCount,
+      currentMonthIsBasis,
+      currentPartialMonthName: currentMonthMeta?.name || '',
+      currentMonthName: currentMonthMeta?.name || ''
+    },
+    monthlyTotals,
+    scenarios,
+    driverCountSensitivity,
+    driverRows,
+    grossRevenueTotals: grossReport.totals
+  };
+}
+
 function getOrdersDueForSettlementFieldSelect() {
   return [
     'BOLNumber_x0028_Won_x0029_',
@@ -7140,6 +7377,36 @@ app.get('/reports/won-not-registered', requireLookupAccess, async (req, res) => 
     res.status(500).json({
       success: false,
       error: error.message
+    });
+  }
+});
+
+
+app.get('/reports/yearly-revenue-projection', requireLookupAccess, async (req, res) => {
+  try {
+    const year = parseReportInteger(req.query.year || getEasternParts().year, 'year', 2024, 2030);
+    const token = await getGraphToken();
+    const sourceList = await getDriverSummarySourceList(token, year);
+
+    if (!sourceList) {
+      return res.status(404).json({
+        success: false,
+        error: `No Bid Listing source list was found for ${year}.`
+      });
+    }
+
+    const [items, rosterItems] = await Promise.all([
+      getAllListItemsWithFields(token, sourceList.listId, getGrossRevenueFieldSelect()),
+      getDriverRosterItems(token)
+    ]);
+
+    res.json(buildYearlyRevenueProjectionResponse(items, sourceList, year, rosterItems));
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to load Yearly Revenue Projection.'
     });
   }
 });
