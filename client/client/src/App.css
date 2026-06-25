@@ -12057,3 +12057,86 @@ button.available-truck-distribution-summary-card:disabled {
 #operations-active-today {
   margin-top: 24px;
 }
+
+
+/* POLISH PASS: accordion alert breadcrumbs + Available Equipment light-mode contrast */
+.sales-follow-up-alert-marker {
+  background: rgba(217, 119, 6, 0.22) !important;
+  color: #fbbf24 !important;
+}
+
+.report-accordion-button:hover .sales-follow-up-alert-marker {
+  background: rgba(217, 119, 6, 0.32) !important;
+  color: #fde68a !important;
+}
+
+:root[data-theme='light'] .sales-follow-up-alert-marker {
+  background: #fef3c7 !important;
+  border: 1px solid #f59e0b !important;
+  color: #92400e !important;
+}
+
+:root[data-theme='light'] .report-accordion-button:hover .sales-follow-up-alert-marker {
+  background: #fde68a !important;
+  color: #78350f !important;
+}
+
+.available-trucks-attention span {
+  color: #e2e8f0 !important;
+  font-weight: 750;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .available-trucks-attention {
+  background: #fffbeb !important;
+  border-color: #f59e0b !important;
+  color: #78350f !important;
+}
+
+:root[data-theme='light'] .available-trucks-attention.warning {
+  background: #fef2f2 !important;
+  border-color: #fca5a5 !important;
+  color: #7f1d1d !important;
+}
+
+:root[data-theme='light'] .available-trucks-attention strong {
+  color: #78350f !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .available-trucks-attention.warning strong {
+  color: #7f1d1d !important;
+}
+
+:root[data-theme='light'] .available-trucks-attention span {
+  color: #92400e !important;
+  font-weight: 800;
+  opacity: 1 !important;
+}
+
+:root[data-theme='light'] .available-trucks-attention.warning span {
+  color: #991b1b !important;
+}
+
+/* POLISH PASS: section alert breadcrumbs for Job Photo Uploads / IntelliTrack / Available Equipment */
+.feature-child-alert-marker {
+  flex: 0 0 auto;
+}
+
+.intellitrack-summary:hover .feature-child-alert-marker,
+.available-trucks-summary:hover .feature-child-alert-marker {
+  background: rgba(20, 184, 166, 0.30);
+  color: #99f6e4 !important;
+}
+
+:root[data-theme='light'] .feature-child-alert-marker {
+  background: #ccfbf1 !important;
+  border: 1px solid #14b8a6 !important;
+  color: #0f766e !important;
+}
+
+:root[data-theme='light'] .intellitrack-summary:hover .feature-child-alert-marker,
+:root[data-theme='light'] .available-trucks-summary:hover .feature-child-alert-marker {
+  background: #99f6e4 !important;
+  color: #115e59 !important;
+}

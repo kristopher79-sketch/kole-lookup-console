@@ -4479,6 +4479,15 @@ function getPositionStatusLabel(position) {
     return leadSuppressionViewOptions.some((option) => option.value === view);
   }
 
+  function primeSalesLeadsFollowUpDueView() {
+    const followUpView = 'followUpDue';
+
+    setSalesLeadsView(followUpView);
+    setSalesLeadsSort(getDefaultSalesLeadSort(followUpView));
+    setSelectedSalesLead(null);
+    setSalesLeadsError(null);
+  }
+
   function normalizeSalesLeadDate(value) {
     if (!value) return '';
     const date = new Date(value);
@@ -5291,6 +5300,12 @@ function getPositionStatusLabel(position) {
   }
 
   function toggleReportPanel(panelName) {
+    const isOpeningPanel = activeReportPanel !== panelName;
+
+    if (isOpeningPanel && panelName === 'salesLeads') {
+      primeSalesLeadsFollowUpDueView();
+    }
+
     setActiveReportPanel((current) => (current === panelName ? '' : panelName));
   }
 
@@ -8789,6 +8804,8 @@ function openReportLoadDetails(load) {
           String(row?.email || '').trim().toLowerCase() === distributionEmailDraftKey
         )
       : null;
+    const showAvailableTrucksStatusPill = !availableTrucksSectionOpen || availableTrucksLoading;
+    const showCurrentAvailableEquipmentMarker = availableTrucksSectionOpen && !availableTrucksCurrentOpen && currentCount > 0;
 
     return (
       <div className="search-card feature-accordion-panel available-trucks-panel">
@@ -8802,9 +8819,11 @@ function openReportLoadDetails(load) {
             <span className="feature-section-title">Available Equipment</span>
             <span className="feature-section-subtitle">Current advertised availability, recent location patterns, advertise new availability, view email blast list.</span>
           </span>
-          <span className={`feature-section-status-pill ${currentCount > 0 ? 'has-items' : 'is-zero'} ${availableTrucksLoading ? 'is-loading' : ''}`}>
-            {availableTrucksLoading ? 'Loading...' : `${currentCount} current`}
-          </span>
+          {showAvailableTrucksStatusPill && (
+            <span className={`feature-section-status-pill ${currentCount > 0 ? 'has-items' : 'is-zero'} ${availableTrucksLoading ? 'is-loading' : ''}`}>
+              {availableTrucksLoading ? 'Loading...' : `${currentCount} current`}
+            </span>
+          )}
           <span className="feature-section-chevron">{availableTrucksSectionOpen ? '▲' : '▼'}</span>
         </button>
 
@@ -8821,7 +8840,18 @@ function openReportLoadDetails(load) {
               aria-expanded={availableTrucksCurrentOpen}
             >
               <span className="available-trucks-title-block">
-                <span className="available-trucks-title">Currently Available Equipment</span>
+                <span className="available-trucks-title">
+                  Currently Available Equipment
+                  {showCurrentAvailableEquipmentMarker && (
+                    <span
+                      className="report-action-alert-marker feature-child-alert-marker"
+                      title={`${formatReportNumber(currentCount)} currently available equipment row${currentCount === 1 ? '' : 's'}`}
+                      aria-label={`${formatReportNumber(currentCount)} currently available equipment row${currentCount === 1 ? '' : 's'}`}
+                    >
+                      *
+                    </span>
+                  )}
+                </span>
                 <span className="available-trucks-subtitle">Current advertised trucks that are not hidden by active or future assignment.</span>
               </span>
               <span className="available-trucks-chevron">
@@ -9355,6 +9385,8 @@ function openReportLoadDetails(load) {
     const order = intelliTrackSearchResult;
     const buttonState = getIntelliTrackButtonState(order);
     const orderLoadingKey = order?.id ? `${order.id}-${buttonState.enabled ? 'on' : 'off'}` : '';
+    const showIntelliTrackStatusPill = !intelliTrackSectionOpen || intelliTrackLoading;
+    const showActiveIntelliTrackMarker = intelliTrackSectionOpen && !intelliTrackOpen && count > 0;
 
     return (
       <div className="search-card feature-accordion-panel intellitrack-panel">
@@ -9368,9 +9400,11 @@ function openReportLoadDetails(load) {
             <span className="feature-section-title">IntelliTrack</span>
             <span className="feature-section-subtitle">Automatic tracking visibility and start/stop controls.</span>
           </span>
-          <span className={`feature-section-status-pill ${count > 0 ? 'has-items' : 'is-zero'} ${intelliTrackLoading ? 'is-loading' : ''}`}>
-            {intelliTrackLoading ? 'Loading...' : `${count} tracking`}
-          </span>
+          {showIntelliTrackStatusPill && (
+            <span className={`feature-section-status-pill ${count > 0 ? 'has-items' : 'is-zero'} ${intelliTrackLoading ? 'is-loading' : ''}`}>
+              {intelliTrackLoading ? 'Loading...' : `${count} tracking`}
+            </span>
+          )}
           <span className="feature-section-chevron">{intelliTrackSectionOpen ? '▲' : '▼'}</span>
         </button>
 
@@ -9387,7 +9421,18 @@ function openReportLoadDetails(load) {
               aria-expanded={intelliTrackOpen}
             >
               <span className="intellitrack-title-block">
-                <span className="intellitrack-title">Active automatic tracking</span>
+                <span className="intellitrack-title">
+                  Active automatic tracking
+                  {showActiveIntelliTrackMarker && (
+                    <span
+                      className="report-action-alert-marker feature-child-alert-marker"
+                      title={`${formatReportNumber(count)} active IntelliTrack order${count === 1 ? '' : 's'}`}
+                      aria-label={`${formatReportNumber(count)} active IntelliTrack order${count === 1 ? '' : 's'}`}
+                    >
+                      *
+                    </span>
+                  )}
+                </span>
                 <span className="intellitrack-subtitle">Show orders currently enrolled in IntelliTrack.</span>
               </span>
               <span className="intellitrack-chevron">
@@ -9590,6 +9635,7 @@ function openReportLoadDetails(load) {
     const activeDigestDate = uploadDigestData?.targetDate || uploadDigestDate;
     const dateLabel = formatDateInputLabel(activeDigestDate);
     const isUploadDigestToday = isTodayOrFutureDateInput(activeDigestDate);
+    const showUploadDigestStatusPill = !uploadDigestSectionOpen || uploadDigestLoading;
 
     return (
       <div className="search-card feature-accordion-panel upload-digest-panel">
@@ -9603,9 +9649,11 @@ function openReportLoadDetails(load) {
             <span className="feature-section-title">Job Photo Uploads</span>
             <span className="feature-section-subtitle">Pickup and delivery photo log for {dateLabel}.</span>
           </span>
-          <span className={`feature-section-status-pill ${count > 0 ? 'has-items' : 'is-zero'} ${uploadDigestLoading ? 'is-loading' : ''}`}>
-            {uploadDigestLoading ? 'Loading...' : `${count} logged`}
-          </span>
+          {showUploadDigestStatusPill && (
+            <span className={`feature-section-status-pill ${count > 0 ? 'has-items' : 'is-zero'} ${uploadDigestLoading ? 'is-loading' : ''}`}>
+              {uploadDigestLoading ? 'Loading...' : `${count} logged`}
+            </span>
+          )}
           <span className="feature-section-chevron">{uploadDigestSectionOpen ? '▲' : '▼'}</span>
         </button>
 
@@ -10878,7 +10926,7 @@ function openReportLoadDetails(load) {
     }));
 
     function loadInitialSalesCards() {
-      const initialView = 'all';
+      const initialView = 'followUpDue';
       const initialSort = getDefaultSalesLeadSort(initialView);
 
       setSalesLeadsView(initialView);
@@ -11434,6 +11482,8 @@ function openReportLoadDetails(load) {
     const salesAndLeadsPillLabel = salesLeadsFollowUpDueCount
       ? `follow-up${salesLeadsFollowUpDueCount === 1 ? '' : 's'} due`
       : 'overdue';
+    const showSalesAndLeadsPill = !salesAndLeadsSectionOpen && salesAndLeadsPillCount > 0;
+    const showCustomerCardsFollowUpMarker = salesAndLeadsSectionOpen && !isSalesLeadsOpen && salesLeadsFollowUpDueCount > 0;
 
     return (
       <div className="search-card feature-accordion-panel sales-and-leads-panel">
@@ -11447,7 +11497,7 @@ function openReportLoadDetails(load) {
             <span className="feature-section-title">Sales and Leads</span>
             <span className="feature-section-subtitle">Customers, leads, follow-ups, aviation prospects, and customer cards.</span>
           </span>
-          {salesAndLeadsPillCount > 0 && (
+          {showSalesAndLeadsPill && (
             <span className="feature-section-status-pill sales-and-leads-status-pill has-items">
               {formatReportNumber(salesAndLeadsPillCount)} {salesAndLeadsPillLabel}
             </span>
@@ -11514,7 +11564,18 @@ function openReportLoadDetails(load) {
                 className="report-accordion-button"
                 onClick={(e) => handleReportPanelClick(e, 'salesLeads')}
               >
-                <span>Customer Cards</span>
+                <span>
+                  Customer Cards
+                  {showCustomerCardsFollowUpMarker && (
+                    <span
+                      className="report-action-alert-marker sales-follow-up-alert-marker"
+                      title={`${formatReportNumber(salesLeadsFollowUpDueCount)} customer${salesLeadsFollowUpDueCount === 1 ? '' : 's'} with follow-ups due`}
+                      aria-label={`${formatReportNumber(salesLeadsFollowUpDueCount)} customer${salesLeadsFollowUpDueCount === 1 ? '' : 's'} with follow-ups due`}
+                    >
+                      *
+                    </span>
+                  )}
+                </span>
                 <span className="report-accordion-icon">{isSalesLeadsOpen ? '▼' : '▶'}</span>
               </button>
 
@@ -11565,18 +11626,20 @@ function openReportLoadDetails(load) {
             <span className="feature-section-title">Reports</span>
             <span className="feature-section-subtitle">Financial, operational, and driver/fleet reporting.</span>
           </span>
-          <span
-            className={`feature-section-status-pill report-alert-status-pill ${
-              reportActionAlertCounts.total > 0 ? 'has-alerts' : 'is-zero'
-            } ${reportActionAlertsLoading ? 'is-loading' : ''} ${reportActionAlertsError ? 'is-error' : ''}`}
-            title={reportActionAlertSummary}
-          >
-            {reportActionAlertsLoading && !reportActionAlerts
-              ? 'Checking...'
-              : reportActionAlertCounts.total > 0
-                ? `${formatReportNumber(reportActionAlertCounts.total)} ${reportActionAlertCounts.total === 1 ? 'Alert' : 'Alerts'}`
-                : 'Clear'}
-          </span>
+          {!reportsSectionOpen && (
+            <span
+              className={`feature-section-status-pill report-alert-status-pill ${
+                reportActionAlertCounts.total > 0 ? 'has-alerts' : 'is-zero'
+              } ${reportActionAlertsLoading ? 'is-loading' : ''} ${reportActionAlertsError ? 'is-error' : ''}`}
+              title={reportActionAlertSummary}
+            >
+              {reportActionAlertsLoading && !reportActionAlerts
+                ? 'Checking...'
+                : reportActionAlertCounts.total > 0
+                  ? `${formatReportNumber(reportActionAlertCounts.total)} ${reportActionAlertCounts.total === 1 ? 'Alert' : 'Alerts'}`
+                  : 'Clear'}
+            </span>
+          )}
           <span className="feature-section-chevron">{reportsSectionOpen ? '▲' : '▼'}</span>
         </button>
 
@@ -11918,14 +11981,16 @@ function openReportLoadDetails(load) {
                 <span>Action items, permit control, daily history, and availability reporting</span>
               </div>
               <span className="report-group-button-actions">
-                <span
-                  className={`report-group-alert-pill ${reportActionAlertCounts.total > 0 ? 'has-alerts' : 'is-zero'}`}
-                  title={reportActionAlertSummary}
-                >
-                  {reportActionAlertCounts.total > 0
-                    ? `${formatReportNumber(reportActionAlertCounts.total)} ${reportActionAlertCounts.total === 1 ? 'alert' : 'alerts'}`
-                    : 'clear'}
-                </span>
+                {!isOperationalReportsOpen && (
+                  <span
+                    className={`report-group-alert-pill ${reportActionAlertCounts.total > 0 ? 'has-alerts' : 'is-zero'}`}
+                    title={reportActionAlertSummary}
+                  >
+                    {reportActionAlertCounts.total > 0
+                      ? `${formatReportNumber(reportActionAlertCounts.total)} ${reportActionAlertCounts.total === 1 ? 'alert' : 'alerts'}`
+                      : 'clear'}
+                  </span>
+                )}
                 <span className="report-accordion-icon">{isOperationalReportsOpen ? '▼' : '▶'}</span>
               </span>
             </button>
@@ -11957,7 +12022,7 @@ function openReportLoadDetails(load) {
             >
               <span>
                 Orders Due for Settlement
-                {reportActionAlertCounts.ordersDueSettlement > 0 && (
+                {!isOrdersDueSettlementOpen && reportActionAlertCounts.ordersDueSettlement > 0 && (
                   <span
                     className="report-action-alert-marker"
                     title={`${formatReportNumber(reportActionAlertCounts.ordersDueSettlement)} order${reportActionAlertCounts.ordersDueSettlement === 1 ? '' : 's'} due for settlement`}
@@ -12024,7 +12089,7 @@ function openReportLoadDetails(load) {
             >
               <span>
                 Orders Won and Not Registered
-                {reportActionAlertCounts.wonNotRegistered > 0 && (
+                {!isWonNotRegisteredOpen && reportActionAlertCounts.wonNotRegistered > 0 && (
                   <span
                     className="report-action-alert-marker"
                     title={`${formatReportNumber(reportActionAlertCounts.wonNotRegistered)} won order${reportActionAlertCounts.wonNotRegistered === 1 ? '' : 's'} not registered`}
@@ -12092,7 +12157,7 @@ function openReportLoadDetails(load) {
             >
               <span>
                 Permit Governance
-                {reportActionAlertCounts.permitGovernance > 0 && (
+                {!isPermitGovernanceOpen && reportActionAlertCounts.permitGovernance > 0 && (
                   <span
                     className="report-action-alert-marker"
                     title={`${formatReportNumber(reportActionAlertCounts.permitGovernance)} order${reportActionAlertCounts.permitGovernance === 1 ? '' : 's'} needing permit requests`}

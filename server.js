@@ -4696,7 +4696,15 @@ function cleanRosterText(value) {
 }
 
 function normalizeTruckKey(value) {
-  return String(value || '').trim().toUpperCase();
+  const cleaned = String(value || '').trim().toUpperCase();
+
+  if (!cleaned) return '';
+
+  if (/^0*\d+$/.test(cleaned)) {
+    return cleaned.replace(/^0+(?=\d)/, '').padStart(4, '0');
+  }
+
+  return cleaned.replace(/[^A-Z0-9]+/g, '');
 }
 
 function cleanDriverRosterItem(item) {
@@ -5195,7 +5203,9 @@ async function getDriverTimeOffRows(token) {
 function buildDriverTimeOffCurrentResponse(rows, options = {}) {
   const targetDate = options.targetDate || formatEasternDate();
   const recentDays = Number(options.recentDays || 7);
+  const upcomingDays = Number(options.upcomingDays || 7);
   const recentStartDate = addDaysToDateInput(targetDate, -Math.max(recentDays, 1));
+  const upcomingEndDate = addDaysToDateInput(targetDate, Math.max(upcomingDays, 1));
   const enrichedRows = rows
     .map((row) => enrichDriverTimeOffRow(row, targetDate))
     .filter((row) => !row.isCancelled);
@@ -5216,6 +5226,13 @@ function buildDriverTimeOffCurrentResponse(rows, options = {}) {
       if (endDiff !== 0) return endDiff;
       return sortDriverTimeOffRows(a, b);
     });
+  const upcomingRows = enrichedRows
+    .filter((row) => Boolean(row.startDate && row.startDate > targetDate && row.startDate <= upcomingEndDate))
+    .map((row) => ({
+      ...row,
+      daysUntilStart: Math.max(0, Math.round(((getDateOnlyTime(row.startDate) || 0) - (getDateOnlyTime(targetDate) || 0)) / 86400000))
+    }))
+    .sort(sortDriverTimeOffRows);
 
   return {
     success: true,
@@ -5223,9 +5240,12 @@ function buildDriverTimeOffCurrentResponse(rows, options = {}) {
     generatedAt: `${formatEasternTimestamp()} Eastern`,
     count: currentRows.length,
     recentDays,
+    upcomingDays,
     recentlyEndedCount: recentlyEndedRows.length,
+    upcomingCount: upcomingRows.length,
     records: currentRows,
-    recentlyEndedRecords: recentlyEndedRows
+    recentlyEndedRecords: recentlyEndedRows,
+    upcomingRecords: upcomingRows
   };
 }
 
@@ -12164,6 +12184,40 @@ async function getSalesLeadsReportData(token, view = 'all', sort = '', forceRefr
   };
 }
 
+
+app.get('/driver-roster/lookup', requireLookupAccess, async (req, res) => {
+  try {
+    const truck = cleanRosterText(req.query.truck || '');
+
+    if (!truck) {
+      return res.status(400).json({ success: false, error: 'Truck number is required.' });
+    }
+
+    const token = await getGraphToken();
+    const rosterByTruck = await getDriverRosterByTruck(token);
+    const roster = rosterByTruck.get(normalizeTruckKey(truck)) || null;
+
+    if (!roster) {
+      return res.status(404).json({
+        success: false,
+        error: `No Driver Roster record matched truck ${truck}.`
+      });
+    }
+
+    res.json({
+      success: true,
+      truck,
+      generatedAt: `${formatEasternTimestamp()} Eastern`,
+      roster
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to lookup Driver Roster record.'
+    });
+  }
+});
 
 app.get('/driver-roster/history-batch', requireLookupAccess, async (req, res) => {
   try {
