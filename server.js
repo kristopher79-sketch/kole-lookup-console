@@ -871,6 +871,22 @@ function formatEasternTimestampText(date = new Date()) {
   return `${byType.year}-${byType.month}-${byType.day} ${byType.hour}:${byType.minute}:${byType.second}`;
 }
 
+function formatEasternListTimestampText(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(date);
+
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${byType.month}/${byType.day}/${byType.year} ${byType.hour}:${byType.minute}:${byType.second}`;
+}
+
 function isValidDateInput(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim());
 }
@@ -1407,7 +1423,7 @@ async function createOrderNote(token, input = {}) {
   const truckNumber = cleanOrderNoteInput(input.truckNumber || input.TruckNumber || input.truck);
   const operatorTeam = cleanOrderNoteInput(input.operatorTeam || input.OperatorTeam || input.driver || input.operator);
   const createdBy = cleanOrderNoteInput(input.createdBy || input.CreatedBy || 'Kole Connect') || 'Kole Connect';
-  const createdAtLocal = formatEasternTimestampText();
+  const createdAtLocal = formatEasternListTimestampText();
 
   if (!bol && !bidId) {
     const error = new Error('Missing BOL number or Bid ID.');
