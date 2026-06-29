@@ -15,6 +15,8 @@ const DEFAULT_UPLOAD_DIGEST_LIST_ID = 'c9e907f9-cdac-4657-9da6-cc6ecfaa19a8';
 const DEFAULT_KOLE_AUTO_UPDATER_LIST_ID = 'fd5b0d2f-b0e7-4445-a36d-af753825a3ea';
 const DEFAULT_SALES_LEADS_LIST_ID = '86cc3352-fb75-421d-a5e4-4b16d011fd1e';
 const DEFAULT_SALES_LEADS_NOTES_LIST_NAME = 'Sales Leads Notes Log';
+const ORDER_NOTES_DEFAULT_CACHE_MS = 60 * 1000;
+const ORDER_NOTE_MAX_LENGTH = 20000;
 const DEFAULT_CUSTOMER_BOOKING_TRENDS_LIST_ID = 'f899ef92-6489-43b1-9a9f-19c5f0ee83b9';
 const DEFAULT_NO_AVAILABILITY_MAIN_LIST_ID = '38f3bf2a-30d2-48eb-8b6f-8f5c05e5f1d7';
 const DEFAULT_NO_AVAILABILITY_2025_LIST_ID = '138431f5-a32d-452d-abf4-05adbd0ab50d';
@@ -49,6 +51,7 @@ let cachedOperationsTodayAt = 0;
 const cachedBidItemsByList = new Map();
 const cachedOnThisDayItemsBySource = new Map();
 const cachedOnThisDayReports = new Map();
+const cachedOrderNotesByOrder = new Map();
 const BID_LIST_CACHE_MS = 5 * 60 * 1000;
 const BID_ITEM_CACHE_MS = Number(process.env.BID_ITEM_CACHE_MS || 2 * 60 * 1000);
 const OPERATIONS_TODAY_CACHE_MS = Number(process.env.OPERATIONS_TODAY_CACHE_MS || 60 * 1000);
@@ -852,6 +855,22 @@ function formatEasternTimestamp(date = new Date()) {
   }).format(date);
 }
 
+function formatEasternTimestampText(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).formatToParts(date);
+
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${byType.year}-${byType.month}-${byType.day} ${byType.hour}:${byType.minute}:${byType.second}`;
+}
+
 function isValidDateInput(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim());
 }
@@ -1221,6 +1240,292 @@ function stripHtml(value) {
     .replace(/&#39;/g, "'")
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+function decodePossiblyEncodedText(value) {
+  const stripped = stripHtml(value);
+
+  if (!stripped || !stripped.includes('%')) return stripped;
+
+  try {
+    return decodeURIComponent(stripped).trim();
+  } catch (error) {
+    return stripped
+      .replace(/%20/g, ' ')
+      .replace(/%2F/gi, '/')
+      .replace(/%3A/gi, ':')
+      .replace(/%2D/gi, '-')
+      .replace(/%5F/gi, '_')
+      .trim();
+  }
+}
+
+function getOrderNotesListId() {
+  return String(process.env.ORDER_NOTES_LIST_ID || '').trim();
+}
+
+function getOrderNotesCacheMs() {
+  const configured = Number(process.env.ORDER_NOTES_CACHE_MS || ORDER_NOTES_DEFAULT_CACHE_MS);
+  return Number.isFinite(configured) && configured >= 0 ? configured : ORDER_NOTES_DEFAULT_CACHE_MS;
+}
+
+function getOrderNoteFieldSelect() {
+  return [
+    'Title',
+    'BidID',
+    'BOLNumber',
+    'CustomerName',
+    'CustomerNumber',
+    'TruckNumber',
+    'OperatorTeam',
+    'NoteType',
+    'NoteBody',
+    'CreatedBy',
+    'KernelID',
+    'CreatedAtLocal'
+  ].join(',');
+}
+
+function parseOrderNoteTimestamp(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return 0;
+
+  const isoLike = raw.replace(' ', 'T');
+  const parsed = new Date(isoLike);
+  if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
+
+  const usMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (usMatch) {
+    const [, month, day, year, hour, minute, second = '0'] = usMatch;
+    const fullYear = Number(year) < 100 ? 2000 + Number(year) : Number(year);
+    const date = new Date(fullYear, Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+    return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+  }
+
+  return 0;
+}
+
+function formatOrderNoteDateDisplay(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  if (!raw.includes('T')) return raw;
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+
+  return parsed.toLocaleString('en-US', {
+    timeZone: 'America/New_York',
+    month: 'numeric',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+}
+
+function cleanOrderNoteItem(item) {
+  const f = item.fields || {};
+  const createdAtLocal = getFlexibleField(f, ['CreatedAtLocal', 'Created_x0020_At_x0020_Local']) || '';
+  const createdDate = item.createdDateTime || getFlexibleField(f, ['Created', 'CreatedDate']) || '';
+  const noteBody = decodePossiblyEncodedText(getFlexibleField(f, [
+    'NoteBody',
+    'Note_x0020_Body',
+    'Body',
+    'Note',
+    'Notes',
+    'Description'
+  ]));
+
+  return {
+    id: item.id || '',
+    Title: getFlexibleField(f, ['Title']) || '',
+    BidID: getFlexibleField(f, ['BidID', 'Bid_x0020_ID']) || '',
+    BOLNumber: getFlexibleField(f, ['BOLNumber', 'BOL_x0020_Number']) || '',
+    CustomerName: getFlexibleField(f, ['CustomerName', 'Customer_x0020_Name']) || '',
+    CustomerNumber: getFlexibleField(f, ['CustomerNumber', 'Customer_x0020_Number']) || '',
+    TruckNumber: getFlexibleField(f, ['TruckNumber', 'Truck_x0020_Number']) || '',
+    OperatorTeam: getFlexibleField(f, ['OperatorTeam', 'Operator_x0020_Team']) || '',
+    NoteType: getFlexibleField(f, ['NoteType', 'Note_x0020_Type', 'Type']) || '',
+    NoteBody: noteBody,
+    CreatedBy: getFlexibleField(f, ['CreatedBy', 'Created_x0020_By', 'Source', 'Author']) || item.createdBy?.user?.displayName || '',
+    KernelID: getFlexibleField(f, ['KernelID', 'Kernel_x0020_ID']) || '',
+    CreatedAtLocal: createdAtLocal,
+    CreatedAtDisplay: formatOrderNoteDateDisplay(createdAtLocal || createdDate),
+    CreatedDate: createdDate,
+    CreatedDateDisplay: formatOrderNoteDateDisplay(createdDate),
+    ModifiedDate: item.lastModifiedDateTime || '',
+    webUrl: item.webUrl || '',
+    SortTime: parseOrderNoteTimestamp(createdAtLocal || createdDate || item.lastModifiedDateTime)
+  };
+}
+
+function getOrderNotesCacheKey(bol, bidId) {
+  return [normalizeBolKey(bol), normalizeText(bidId)].filter(Boolean).join('|');
+}
+
+function clearOrderNotesCacheForOrder(bol, bidId) {
+  const cacheKeys = [
+    getOrderNotesCacheKey(bol, bidId),
+    getOrderNotesCacheKey(bol, ''),
+    getOrderNotesCacheKey('', bidId)
+  ].filter(Boolean);
+
+  cacheKeys.forEach((key) => cachedOrderNotesByOrder.delete(key));
+}
+
+function cleanOrderNoteInput(value) {
+  return String(value || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+}
+function getOrderNoteTitle(bol, noteType) {
+  const cleanBol = String(bol || 'Order').trim() || 'Order';
+  const cleanType = String(noteType || 'Note').trim() || 'Note';
+  return `${cleanBol} - ${cleanType}`.slice(0, 255);
+}
+
+function getOrderNoteKernelId(bol, bidId, date = new Date()) {
+  const base = String(bol || bidId || 'ORDER').trim().replace(/[^A-Za-z0-9-]+/g, '-').slice(0, 48) || 'ORDER';
+  const stamp = formatEasternTimestampText(date).replace(/[^0-9]/g, '');
+  return `${base}-KOLECONNECT-${stamp}`;
+}
+
+async function createOrderNote(token, input = {}) {
+  const listId = getOrderNotesListId();
+
+  if (!listId) {
+    const error = new Error('ORDER_NOTES_LIST_ID is not configured on the server.');
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const bidId = cleanOrderNoteInput(input.bidId || input.BidID);
+  const bol = cleanOrderNoteInput(input.bol || input.BOL || input.BOLNumber);
+  const noteType = cleanOrderNoteInput(input.noteType || input.NoteType || 'Operations') || 'Operations';
+  const noteBody = cleanOrderNoteInput(input.noteBody || input.NoteBody || input.body || input.note);
+  const customerName = cleanOrderNoteInput(input.customerName || input.CustomerName || input.customer);
+  const customerNumber = cleanOrderNoteInput(input.customerNumber || input.CustomerNumber || input.customerCode);
+  const truckNumber = cleanOrderNoteInput(input.truckNumber || input.TruckNumber || input.truck);
+  const operatorTeam = cleanOrderNoteInput(input.operatorTeam || input.OperatorTeam || input.driver || input.operator);
+  const createdBy = cleanOrderNoteInput(input.createdBy || input.CreatedBy || 'Kole Connect') || 'Kole Connect';
+  const createdAtLocal = formatEasternTimestampText();
+
+  if (!bol && !bidId) {
+    const error = new Error('Missing BOL number or Bid ID.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!noteBody) {
+    const error = new Error('Enter a note before saving.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (noteBody.length > ORDER_NOTE_MAX_LENGTH) {
+    const error = new Error(`Order note is too long. Limit notes to ${ORDER_NOTE_MAX_LENGTH.toLocaleString('en-US')} characters.`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const item = await graphPost(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/items`,
+    {
+      fields: {
+        Title: getOrderNoteTitle(bol, noteType),
+        BidID: bidId,
+        BOLNumber: bol,
+        CustomerName: customerName,
+        CustomerNumber: customerNumber,
+        TruckNumber: truckNumber,
+        OperatorTeam: operatorTeam,
+        NoteType: noteType,
+        NoteBody: noteBody,
+        CreatedBy: createdBy,
+        KernelID: getOrderNoteKernelId(bol, bidId),
+        CreatedAtLocal: createdAtLocal
+      }
+    }
+  );
+
+  clearOrderNotesCacheForOrder(bol, bidId);
+  return cleanOrderNoteItem(item);
+}
+
+function getOrderNotesSummary(notes) {
+  const byType = {};
+
+  notes.forEach((note) => {
+    const type = String(note.NoteType || 'Uncategorized').trim() || 'Uncategorized';
+    byType[type] = (byType[type] || 0) + 1;
+  });
+
+  return {
+    total: notes.length,
+    byType
+  };
+}
+
+async function getOrderNotesForOrder(token, { bol = '', bidId = '', forceRefresh = false } = {}) {
+  const listId = getOrderNotesListId();
+
+  if (!listId) {
+    const error = new Error('ORDER_NOTES_LIST_ID is not configured on the server.');
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const cleanBol = normalizeBolKey(bol);
+  const cleanBidId = normalizeText(bidId);
+
+  if (!cleanBol && !cleanBidId) {
+    const error = new Error('Missing BOL number or Bid ID.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const cacheKey = getOrderNotesCacheKey(cleanBol, cleanBidId);
+  const cacheMs = getOrderNotesCacheMs();
+  const cached = !forceRefresh && cacheMs > 0 ? getCacheRecord(cachedOrderNotesByOrder, cacheKey, cacheMs) : null;
+
+  if (cached) return cached;
+
+  const bundle = await getAllListItemsWithFieldsResilient(token, listId, getOrderNoteFieldSelect());
+  const notes = (bundle.items || [])
+    .map(cleanOrderNoteItem)
+    .filter((note) => {
+      const noteBol = normalizeBolKey(note.BOLNumber);
+      const noteBidId = normalizeText(note.BidID);
+
+      return Boolean(
+        (cleanBol && noteBol === cleanBol) ||
+        (cleanBidId && noteBidId === cleanBidId)
+      );
+    })
+    .sort((a, b) => {
+      const timeDiff = (b.SortTime || 0) - (a.SortTime || 0);
+      if (timeDiff !== 0) return timeDiff;
+      return Number(b.id || 0) - Number(a.id || 0);
+    })
+    .map(({ SortTime, ...note }) => note);
+
+  const response = {
+    success: true,
+    order: {
+      BOL: cleanBol || bol || '',
+      BidID: bidId || ''
+    },
+    notes,
+    counts: getOrderNotesSummary(notes),
+    sourceListId: listId,
+    recordsScanned: (bundle.items || []).length,
+    usedFallback: bundle.usedFallback,
+    warning: bundle.warning || '',
+    generatedAt: `${formatEasternTimestamp()} Eastern`
+  };
+
+  setCacheRecord(cachedOrderNotesByOrder, cacheKey, response, 80);
+  return response;
 }
 function cleanSalesLeadNoteItem(item) {
   const f = item.fields || {};
@@ -6879,6 +7184,44 @@ app.get('/documents/permits', requireLookupAccess, async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+
+app.get('/order-notes', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const bol = (req.query.bol || '').toString().trim();
+    const bidId = (req.query.bidId || '').toString().trim();
+    const forceRefresh = String(req.query.refresh || '').toLowerCase() === 'true';
+
+    const data = await getOrderNotesForOrder(token, { bol, bidId, forceRefresh });
+    res.json(data);
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to load order notes.'
+    });
+  }
+});
+
+
+app.post('/order-notes', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const note = await createOrderNote(token, req.body || {});
+
+    res.status(201).json({
+      success: true,
+      note
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to add order note.'
+    });
   }
 });
 

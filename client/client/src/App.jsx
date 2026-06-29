@@ -19,6 +19,9 @@ const AVAILABLE_TRUCK_MAX_ROWS = 8;
 const SEARCH_RESULT_CACHE_MS = 2 * 60 * 1000;
 const ON_THIS_DAY_CLIENT_CACHE_MS = 5 * 60 * 1000;
 const ON_THIS_DAY_CLIENT_CACHE_LIMIT = 10;
+const ORDER_NOTES_CLIENT_CACHE_MS = 60 * 1000;
+const ORDER_NOTE_MAX_LENGTH = 20000;
+const ORDER_NOTE_TYPE_OPTIONS = ['Dispatch', 'Paperwork', 'Permits', 'Billing', 'Operations'];
 
 const STARTUP_SPLASH_MIN_MS = 5000;
 const STARTUP_SPLASH_EXIT_MS = 420;
@@ -607,6 +610,16 @@ export default function App() {
   const [includeArchives, setIncludeArchives] = useState(false);
   const [documentLoading, setDocumentLoading] = useState('');
   const [documentError, setDocumentError] = useState('');
+  const [orderNotesData, setOrderNotesData] = useState(null);
+  const [orderNotesLoading, setOrderNotesLoading] = useState(false);
+  const [orderNotesError, setOrderNotesError] = useState('');
+  const [orderNotesTypeFilter, setOrderNotesTypeFilter] = useState('All');
+  const [orderNoteComposerOpen, setOrderNoteComposerOpen] = useState(false);
+  const [orderNoteDraftType, setOrderNoteDraftType] = useState('Dispatch');
+  const [orderNoteDraftBody, setOrderNoteDraftBody] = useState('');
+  const [orderNoteSaving, setOrderNoteSaving] = useState(false);
+  const [orderNoteSaveMessage, setOrderNoteSaveMessage] = useState('');
+  const [orderNoteSaveError, setOrderNoteSaveError] = useState('');
   const [operationsData, setOperationsData] = useState(null);
   const [operationsLoading, setOperationsLoading] = useState(false);
   const [operationsError, setOperationsError] = useState('');
@@ -783,6 +796,8 @@ export default function App() {
   const onThisDayReportCacheRef = useRef(new Map());
   const driverHistoryRequestRef = useRef(0);
   const driverHistoryCacheRef = useRef(new Map());
+  const orderNotesCacheRef = useRef(new Map());
+  const orderNotesRequestRef = useRef(0);
   const startupSplashStartedAtRef = useRef(Date.now());
   const startupSplashCloseTimerRef = useRef(null);
   const operationsActiveTodayRef = useRef(null);
@@ -1160,6 +1175,12 @@ export default function App() {
     function handleEsc(e) {
       if (e.key === 'Escape') {
         setSelected(null);
+        setOrderNotesData(null);
+        setOrderNotesLoading(false);
+        setOrderNotesError('');
+        setOrderNotesTypeFilter('All');
+        resetOrderNoteComposer();
+        orderNotesRequestRef.current += 1;
         setGrossRevenueModalOpen(false);
         setSelectedGrossRevenueTruck(null);
         setDriverSummaryModalOpen(false);
@@ -1497,6 +1518,12 @@ export default function App() {
     setResults([]);
     setSearchedRecords(0);
     setSelected(null);
+    setOrderNotesData(null);
+    setOrderNotesLoading(false);
+    setOrderNotesError('');
+    setOrderNotesTypeFilter('All');
+    resetOrderNoteComposer();
+    orderNotesRequestRef.current += 1;
     setHasSearched(false);
     setError('');
     setAuthError('');
@@ -1559,6 +1586,8 @@ export default function App() {
     setDriverHistoryLoading(false);
     setDriverHistoryError('');
     driverHistoryCacheRef.current.clear();
+    orderNotesCacheRef.current.clear();
+    orderNotesRequestRef.current += 1;
     setReportsSectionOpen(false);
     setSalesAndLeadsSectionOpen(false);
     setOpenReportGroups([]);
@@ -1654,6 +1683,8 @@ export default function App() {
     setStartupSplashElapsedMs(0);
     salesLeadsPrewarmStartedRef.current = false;
     driverHistoryCacheRef.current.clear();
+    orderNotesCacheRef.current.clear();
+    orderNotesRequestRef.current += 1;
     resetAppState();
   }
 
@@ -2814,6 +2845,12 @@ function getPositionStatusLabel(position) {
     }
 
     setSelectedView(view);
+    setOrderNotesData(null);
+    setOrderNotesLoading(false);
+    setOrderNotesError('');
+    setOrderNotesTypeFilter('All');
+    resetOrderNoteComposer();
+    orderNotesRequestRef.current += 1;
     setLoadingDetail(true);
     setError('');
     setDocumentError('');
@@ -3016,6 +3053,12 @@ function getPositionStatusLabel(position) {
   function closeModal() {
     setSelected(null);
     setDocumentError('');
+    setOrderNotesData(null);
+    setOrderNotesLoading(false);
+    setOrderNotesError('');
+    setOrderNotesTypeFilter('All');
+    resetOrderNoteComposer();
+    orderNotesRequestRef.current += 1;
     setDriverLookupError('');
 
     if (permitHistoryOrderReturnLoad) {
@@ -5514,6 +5557,7 @@ function openReportLoadDetails(load) {
     if (selectedView === 'dispatch') return 'Dispatch Info';
     if (selectedView === 'billing') return 'Billing Info';
     if (selectedView === 'documents') return 'Documents';
+    if (selectedView === 'notes') return 'Order Notes';
     return 'Basic Load Info';
   }
 
@@ -5550,6 +5594,362 @@ function openReportLoadDetails(load) {
         >
           {loading ? 'Opening...' : buttonText}
         </button>
+      </div>
+    );
+  }
+
+
+  function getOrderNotesCacheKey(record) {
+    const bol = String(record?.BOL || '').trim().toUpperCase();
+    const bidId = String(record?.BidID || '').trim().toLowerCase();
+    return [bol, bidId].filter(Boolean).join('|');
+  }
+
+  function getOrderNoteTypeClass(noteType) {
+    const normalized = String(noteType || 'uncategorized')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-');
+
+    return `order-note-type-pill ${normalized || 'uncategorized'}`;
+  }
+
+  function getOrderNoteTimestamp(note) {
+    return note?.CreatedAtDisplay || note?.CreatedAtLocal || note?.CreatedDateDisplay || note?.CreatedDate || '-';
+  }
+
+  function getOrderNoteFilterKey(value) {
+    const clean = String(value || 'Uncategorized').trim();
+    return clean || 'Uncategorized';
+  }
+
+  function getSortedOrderNoteTypeEntries(countsByType = {}) {
+    return Object.entries(countsByType)
+      .filter(([type, count]) => getOrderNoteFilterKey(type) && Number(count || 0) > 0)
+      .sort(([typeA], [typeB]) => String(typeA).localeCompare(String(typeB), undefined, { sensitivity: 'base' }));
+  }
+
+  async function loadOrderNotes(record = selected, options = {}) {
+    const { forceRefresh = false } = options;
+
+    if (!record?.BOL && !record?.BidID) {
+      setOrderNotesData({ success: true, notes: [], counts: { total: 0, byType: {} } });
+      setOrderNotesError('This order does not have a BOL number or Bid ID to match notes against.');
+      setOrderNotesLoading(false);
+      setOrderNotesTypeFilter('All');
+      return;
+    }
+
+    const cacheKey = getOrderNotesCacheKey(record);
+    const cached = !forceRefresh ? getClientCacheRecord(orderNotesCacheRef.current, cacheKey, ORDER_NOTES_CLIENT_CACHE_MS) : null;
+
+    orderNotesRequestRef.current += 1;
+    const requestId = orderNotesRequestRef.current;
+
+    if (cached) {
+      setOrderNotesData(cached);
+      setOrderNotesError('');
+      setOrderNotesLoading(false);
+      return;
+    }
+
+    setOrderNotesLoading(true);
+    setOrderNotesError('');
+
+    try {
+      const params = new URLSearchParams();
+      if (record.BOL) params.set('bol', record.BOL);
+      if (record.BidID) params.set('bidId', record.BidID);
+      if (forceRefresh) params.set('refresh', 'true');
+
+      const res = await authedFetch(`${API}/order-notes?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Unable to load order notes.');
+      }
+
+      setLimitedClientCacheRecord(orderNotesCacheRef.current, cacheKey, data, 60);
+
+      if (orderNotesRequestRef.current === requestId) {
+        setOrderNotesData(data);
+        setOrderNotesError('');
+      }
+    } catch (err) {
+      if (orderNotesRequestRef.current === requestId) {
+        setOrderNotesData(null);
+        setOrderNotesError(err.message || 'Unable to load order notes.');
+      }
+    } finally {
+      if (orderNotesRequestRef.current === requestId) {
+        setOrderNotesLoading(false);
+      }
+    }
+  }
+
+  function openOrderNotesTab() {
+    setSelectedView('notes');
+    loadOrderNotes(selected);
+  }
+
+  function resetOrderNoteComposer() {
+    setOrderNoteComposerOpen(false);
+    setOrderNoteDraftType('Dispatch');
+    setOrderNoteDraftBody('');
+    setOrderNoteSaving(false);
+    setOrderNoteSaveMessage('');
+    setOrderNoteSaveError('');
+  }
+
+  function toggleOrderNoteComposer() {
+    setOrderNoteSaveMessage('');
+    setOrderNoteSaveError('');
+    setOrderNoteComposerOpen((open) => !open);
+  }
+
+  async function saveOrderNote() {
+    const record = selected;
+    const noteBody = String(orderNoteDraftBody || '').trim();
+
+    setOrderNoteSaveMessage('');
+    setOrderNoteSaveError('');
+
+    if (!record?.BOL && !record?.BidID) {
+      setOrderNoteSaveError('This order does not have a BOL number or Bid ID to attach the note to.');
+      return;
+    }
+
+    if (!noteBody) {
+      setOrderNoteSaveError('Enter a note before saving.');
+      return;
+    }
+
+    if (noteBody.length > ORDER_NOTE_MAX_LENGTH) {
+      setOrderNoteSaveError(`Order note is too long. Limit notes to ${ORDER_NOTE_MAX_LENGTH.toLocaleString('en-US')} characters.`);
+      return;
+    }
+
+    setOrderNoteSaving(true);
+
+    try {
+      const res = await authedFetch(`${API}/order-notes`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          bol: record.BOL || '',
+          bidId: record.BidID || '',
+          customerName: record.Customer || '',
+          customerNumber: record.CustomerCode || '',
+          truckNumber: record.Truck || '',
+          operatorTeam: record.TMSName || record.Driver || '',
+          noteType: orderNoteDraftType || 'Dispatch',
+          noteBody,
+          createdBy: 'Kole Connect'
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Unable to save order note.');
+      }
+
+      const cacheKey = getOrderNotesCacheKey(record);
+      orderNotesCacheRef.current.delete(cacheKey);
+      setOrderNoteDraftBody('');
+      setOrderNoteComposerOpen(false);
+      setOrderNoteSaveMessage('Note added.');
+      setOrderNotesTypeFilter(getOrderNoteFilterKey(data.note?.NoteType || orderNoteDraftType));
+      await loadOrderNotes(record, { forceRefresh: true });
+    } catch (err) {
+      setOrderNoteSaveError(err.message || 'Unable to save order note.');
+    } finally {
+      setOrderNoteSaving(false);
+    }
+  }
+
+  function renderOrderNoteComposer() {
+    const noteLength = String(orderNoteDraftBody || '').length;
+
+    return (
+      <div className="order-note-composer">
+        <div className="order-note-composer-header">
+          <div>
+            <strong>Add order note</strong>
+            <span>Saved to the Order Notes list for this BOL / Bid ID.</span>
+          </div>
+        </div>
+
+        <div className="order-note-composer-grid">
+          <label>
+            <span>Note Type</span>
+            <select
+              value={orderNoteDraftType}
+              onChange={(e) => setOrderNoteDraftType(e.target.value)}
+              disabled={orderNoteSaving}
+            >
+              {ORDER_NOTE_TYPE_OPTIONS.map((type) => (
+                <option key={type} value={type}>{type}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="order-note-composer-body-field">
+            <span>Note Body</span>
+            <textarea
+              value={orderNoteDraftBody}
+              onChange={(e) => setOrderNoteDraftBody(e.target.value)}
+              placeholder="Add dispatch, paperwork, permits, billing, or operational context for this order."
+              maxLength={ORDER_NOTE_MAX_LENGTH}
+              rows={5}
+              disabled={orderNoteSaving}
+            />
+          </label>
+        </div>
+
+        <div className="order-note-composer-footer">
+          <small>{noteLength.toLocaleString('en-US')} / {ORDER_NOTE_MAX_LENGTH.toLocaleString('en-US')}</small>
+          <div>
+            <button
+              type="button"
+              className="view-button order-note-cancel-button"
+              onClick={resetOrderNoteComposer}
+              disabled={orderNoteSaving}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="order-note-save-button"
+              onClick={saveOrderNote}
+              disabled={orderNoteSaving || !String(orderNoteDraftBody || '').trim()}
+            >
+              {orderNoteSaving ? 'Saving...' : 'Save Note'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderOrderNoteCard(note, index = 0) {
+    const noteType = note.NoteType || 'Uncategorized';
+    const noteBody = note.NoteBody || note.Title || '';
+    const createdBy = note.CreatedBy || 'Unknown source';
+    const timestamp = getOrderNoteTimestamp(note);
+    const noteKey = note.id || `${note.KernelID || 'note'}-${note.CreatedAtLocal || note.CreatedDate || note.CreatedAtDisplay || index}`;
+
+    return (
+      <article key={noteKey} className="order-note-card">
+        <div className="order-note-card-header">
+          <div className="order-note-title-stack">
+            <span className={getOrderNoteTypeClass(noteType)}>{noteType}</span>
+            <span className="order-note-source">{createdBy}</span>
+          </div>
+          <time className="order-note-timestamp">{timestamp}</time>
+        </div>
+
+        <p className="order-note-body">{noteBody || 'No note body entered.'}</p>
+      </article>
+    );
+  }
+
+  function renderOrderNotesView() {
+    const notes = orderNotesData?.notes || [];
+    const countsByType = orderNotesData?.counts?.byType || {};
+    const typeEntries = getSortedOrderNoteTypeEntries(countsByType);
+    const hasLooked = Boolean(orderNotesData || orderNotesError || orderNotesLoading);
+    const activeFilter = getOrderNoteFilterKey(orderNotesTypeFilter || 'All');
+    const filteredNotes = activeFilter === 'All'
+      ? notes
+      : notes.filter((note) => getOrderNoteFilterKey(note.NoteType) === activeFilter);
+
+    return (
+      <div className="order-notes-view">
+        <div className="order-notes-toolbar">
+          <div>
+            <div>
+              <strong>{selected?.BOL ? `Order notes for ${selected.BOL}` : 'Order notes'}</strong>
+              <small>{selected?.BidID || 'Matched by BOL / Bid ID'}</small>
+            </div>
+          </div>
+
+          <div className="order-notes-toolbar-actions">
+            <button
+              type="button"
+              className="view-button"
+              onClick={() => loadOrderNotes(selected, { forceRefresh: true })}
+              disabled={orderNotesLoading || orderNoteSaving}
+            >
+              {orderNotesLoading ? 'Refreshing...' : 'Refresh'}
+            </button>
+            <button
+              type="button"
+              className="order-note-add-button"
+              onClick={toggleOrderNoteComposer}
+              disabled={orderNoteSaving}
+            >
+              {orderNoteComposerOpen ? 'Close Add Note' : 'Add Note'}
+            </button>
+          </div>
+        </div>
+
+        {orderNoteComposerOpen && renderOrderNoteComposer()}
+        {orderNoteSaveMessage && <div className="order-note-save-message">{orderNoteSaveMessage}</div>}
+        {orderNoteSaveError && <div className="msg error order-notes-message">{orderNoteSaveError}</div>}
+
+        {notes.length > 0 && (
+          <div className="order-notes-type-summary" aria-label="Filter order notes by type">
+            <button
+              type="button"
+              className={`order-note-type-pill all order-notes-filter-button ${activeFilter === 'All' ? 'is-active' : ''}`}
+              onClick={() => setOrderNotesTypeFilter('All')}
+            >
+              All: {notes.length}
+            </button>
+
+            {typeEntries.map(([type, count]) => (
+              <button
+                key={type}
+                type="button"
+                className={`${getOrderNoteTypeClass(type)} order-notes-filter-button ${activeFilter === getOrderNoteFilterKey(type) ? 'is-active' : ''}`}
+                onClick={() => setOrderNotesTypeFilter(getOrderNoteFilterKey(type))}
+              >
+                {type}: {count}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {orderNotesError && <div className="msg error order-notes-message">{orderNotesError}</div>}
+
+        {orderNotesLoading && (
+          <div className="order-notes-empty-state">
+            <strong>Loading order notes...</strong>
+            <span>Checking the Order Notes list for matching BOL / Bid ID entries.</span>
+          </div>
+        )}
+
+        {!orderNotesLoading && hasLooked && notes.length === 0 && !orderNotesError && (
+          <div className="order-notes-empty-state">
+            <strong>No notes found for this order.</strong>
+            <span>The connection worked, but this BOL / Bid ID does not have matching notes yet.</span>
+          </div>
+        )}
+
+        {!orderNotesLoading && notes.length > 0 && filteredNotes.length === 0 && !orderNotesError && (
+          <div className="order-notes-empty-state">
+            <strong>No {activeFilter} notes for this order.</strong>
+            <span>Choose All to bring the full note history back.</span>
+          </div>
+        )}
+
+        {!orderNotesLoading && filteredNotes.length > 0 && (
+          <div className="order-notes-list">
+            {filteredNotes.map((note, index) => renderOrderNoteCard(note, index))}
+          </div>
+        )}
       </div>
     );
   }
@@ -14259,6 +14659,13 @@ function openReportLoadDetails(load) {
                   </button>
                 </>
               )}
+
+              <button
+                className={selectedView === 'notes' ? 'active-tab' : ''}
+                onClick={openOrderNotesTab}
+              >
+                Notes
+              </button>
             </div>
 
             <div className="modal-body">
@@ -14266,6 +14673,7 @@ function openReportLoadDetails(load) {
               {selectedView === 'dispatch' && <DispatchView />}
               {selectedView === 'billing' && <BillingView />}
               {selectedView === 'documents' && <DocumentsView />}
+              {selectedView === 'notes' && renderOrderNotesView()}
             </div>
           </div>
         </div>
