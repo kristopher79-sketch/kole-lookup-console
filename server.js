@@ -1449,6 +1449,8 @@ async function createOrderNote(token, input = {}) {
   );
 
   clearOrderNotesCacheForOrder(bol, bidId);
+  cachedOperationsToday = null;
+  cachedOperationsTodayAt = 0;
   return cleanOrderNoteItem(item);
 }
 
@@ -1464,6 +1466,148 @@ function getOrderNotesSummary(notes) {
     total: notes.length,
     byType
   };
+}
+
+
+function getActiveOrderNoteTypes() {
+  const configured = String(process.env.ORDER_NOTES_ACTIVE_NOTE_TYPES || 'Dispatch,Paperwork,Permits')
+    .split(',')
+    .map((value) => normalizeText(value))
+    .filter(Boolean);
+
+  const types = configured.length > 0 ? configured : ['dispatch', 'paperwork', 'permits'];
+  return new Set(types);
+}
+
+function getOperationOrderNoteKey(record = {}) {
+  const bol = normalizeBolKey(record.BOL || record.BOLNumber);
+  const bidId = normalizeText(record.BidID);
+  return [bol, bidId].filter(Boolean).join('|');
+}
+
+function getOperationOrderNoteCode(noteType) {
+  const normalized = normalizeText(noteType);
+
+  if (normalized === 'dispatch') return 'DIS';
+  if (normalized === 'paperwork') return 'PWK';
+  if (normalized === 'permit' || normalized === 'permits') return 'PER';
+
+  return String(noteType || '')
+    .trim()
+    .replace(/[^A-Za-z0-9]+/g, '')
+    .slice(0, 3)
+    .toUpperCase();
+}
+
+function sortOperationOrderNoteCodes(codes = []) {
+  const order = new Map([
+    ['DIS', 1],
+    ['PWK', 2],
+    ['PER', 3]
+  ]);
+
+  return [...new Set(codes.filter(Boolean))].sort((a, b) => {
+    const aOrder = order.get(a) || 99;
+    const bOrder = order.get(b) || 99;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return String(a).localeCompare(String(b));
+  });
+}
+
+function addOperationOrderNoteIndicators(record, noteIndicatorsByOrder) {
+  const key = getOperationOrderNoteKey(record);
+  const indicator = key ? noteIndicatorsByOrder.get(key) : null;
+  const codes = sortOperationOrderNoteCodes(indicator?.codes || []);
+  const types = sortOperationOrderNoteCodes(indicator?.types || []);
+
+  return {
+    ...record,
+    orderNoteCodes: codes,
+    orderNoteTypes: types,
+    hasOperationNotes: codes.length > 0
+  };
+}
+
+async function getOperationOrderNoteIndicators(token, records = []) {
+  const listId = getOrderNotesListId();
+  const activeTypes = getActiveOrderNoteTypes();
+  const byOrder = new Map();
+  const recordKeyByBol = new Map();
+  const recordKeyByBidId = new Map();
+
+  records.forEach((record) => {
+    const key = getOperationOrderNoteKey(record);
+    if (!key) return;
+
+    const bol = normalizeBolKey(record.BOL);
+    const bidId = normalizeText(record.BidID);
+
+    if (bol) recordKeyByBol.set(bol, key);
+    if (bidId) recordKeyByBidId.set(bidId, key);
+  });
+
+  if (!listId || records.length === 0 || (recordKeyByBol.size === 0 && recordKeyByBidId.size === 0)) {
+    return {
+      byOrder,
+      recordsScanned: 0,
+      usedFallback: false,
+      warning: listId ? '' : 'ORDER_NOTES_LIST_ID is not configured.'
+    };
+  }
+
+  try {
+    const bundle = await getAllListItemsWithFieldsResilient(token, listId, getOrderNoteFieldSelect());
+
+    (bundle.items || [])
+      .map(cleanOrderNoteItem)
+      .forEach((note) => {
+        const noteTypeKey = normalizeText(note.NoteType || '');
+        if (!noteTypeKey || !activeTypes.has(noteTypeKey)) return;
+
+        const matchedKeys = new Set();
+        const noteBol = normalizeBolKey(note.BOLNumber);
+        const noteBidId = normalizeText(note.BidID);
+
+        if (noteBol && recordKeyByBol.has(noteBol)) matchedKeys.add(recordKeyByBol.get(noteBol));
+        if (noteBidId && recordKeyByBidId.has(noteBidId)) matchedKeys.add(recordKeyByBidId.get(noteBidId));
+
+        matchedKeys.forEach((key) => {
+          if (!byOrder.has(key)) {
+            byOrder.set(key, {
+              codes: new Set(),
+              types: new Set()
+            });
+          }
+
+          const bucket = byOrder.get(key);
+          const code = getOperationOrderNoteCode(note.NoteType);
+          if (code) bucket.codes.add(code);
+          bucket.types.add(note.NoteType || noteTypeKey);
+        });
+      });
+
+    const normalizedByOrder = new Map();
+    byOrder.forEach((value, key) => {
+      normalizedByOrder.set(key, {
+        codes: sortOperationOrderNoteCodes([...value.codes]),
+        types: [...value.types]
+      });
+    });
+
+    return {
+      byOrder: normalizedByOrder,
+      recordsScanned: (bundle.items || []).length,
+      usedFallback: bundle.usedFallback,
+      warning: bundle.warning || ''
+    };
+  } catch (error) {
+    return {
+      byOrder,
+      recordsScanned: 0,
+      usedFallback: false,
+      warning: error.message || 'Order note indicators could not be loaded.'
+    };
+  }
 }
 
 async function getOrderNotesForOrder(token, { bol = '', bidId = '', forceRefresh = false } = {}) {
@@ -11284,7 +11428,7 @@ app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, asyn
     ]);
     const driverTimeOffCurrent = buildDriverTimeOffCurrentResponse(driverTimeOffResult.rows || [], { targetDate });
 
-    const activeToday = openWon
+    let activeToday = openWon
       .filter((r) => {
         const pickup = normalizeEasternDateOnly(r.PickupDate);
         const delivery = normalizeEasternDateOnly(r.DeliveryDate);
@@ -11308,6 +11452,9 @@ app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, asyn
       })
       .map((r) => addUploadEvidence(r, evidenceSets));
 
+    const orderNoteIndicatorResult = await getOperationOrderNoteIndicators(token, activeToday);
+    activeToday = activeToday.map((record) => addOperationOrderNoteIndicators(record, orderNoteIndicatorResult.byOrder));
+
     const payload = {
       success: true,
       generatedAt: `${formatEasternTimestamp()} Eastern`,
@@ -11325,6 +11472,13 @@ app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, asyn
       uploadDigest: {
         checked: true,
         recordsScanned: evidenceSets.uploadDigestCount
+      },
+      orderNotes: {
+        checked: Boolean(getOrderNotesListId()),
+        activeNoteTypes: [...getActiveOrderNoteTypes()],
+        recordsScanned: orderNoteIndicatorResult.recordsScanned || 0,
+        usedFallback: orderNoteIndicatorResult.usedFallback || false,
+        warning: orderNoteIndicatorResult.warning || ''
       },
       driverTimeOff: {
         ...driverTimeOffCurrent,

@@ -5629,6 +5629,88 @@ function openReportLoadDetails(load) {
       .sort(([typeA], [typeB]) => String(typeA).localeCompare(String(typeB), undefined, { sensitivity: 'base' }));
   }
 
+
+  function getOperationOrderNoteCode(noteType) {
+    const normalized = String(noteType || '').trim().toLowerCase();
+
+    if (normalized === 'dispatch') return 'DIS';
+    if (normalized === 'paperwork') return 'PWK';
+    if (normalized === 'permit' || normalized === 'permits') return 'PER';
+
+    return '';
+  }
+
+  function sortOperationOrderNoteCodes(codes = []) {
+    const order = new Map([
+      ['DIS', 1],
+      ['PWK', 2],
+      ['PER', 3]
+    ]);
+
+    return [...new Set(codes.filter(Boolean))].sort((a, b) => {
+      const aOrder = order.get(a) || 99;
+      const bOrder = order.get(b) || 99;
+      if (aOrder !== bOrder) return aOrder - bOrder;
+      return String(a).localeCompare(String(b));
+    });
+  }
+
+  function recordsReferToSameOrder(a = {}, b = {}) {
+    const aBol = String(a.BOL || '').trim().toUpperCase();
+    const bBol = String(b.BOL || '').trim().toUpperCase();
+    const aBidId = String(a.BidID || '').trim().toLowerCase();
+    const bBidId = String(b.BidID || '').trim().toLowerCase();
+
+    return Boolean(
+      (aBol && bBol && aBol === bBol) ||
+      (aBidId && bBidId && aBidId === bBidId)
+    );
+  }
+
+  function addOperationNoteCodeToRecord(record = {}, noteType = '') {
+    const code = getOperationOrderNoteCode(noteType);
+    if (!code) return record;
+
+    const codes = sortOperationOrderNoteCodes([...(record.orderNoteCodes || []), code]);
+
+    return {
+      ...record,
+      orderNoteCodes: codes,
+      hasOperationNotes: codes.length > 0
+    };
+  }
+
+  function addOperationNoteToOperationsData(currentData, record, noteType) {
+    const code = getOperationOrderNoteCode(noteType);
+    if (!currentData || !code || !record) return currentData;
+
+    return {
+      ...currentData,
+      activeToday: (currentData.activeToday || []).map((activeRecord) => (
+        recordsReferToSameOrder(activeRecord, record)
+          ? addOperationNoteCodeToRecord(activeRecord, noteType)
+          : activeRecord
+      ))
+    };
+  }
+
+  function renderOperationNotesPill(record) {
+    const codes = sortOperationOrderNoteCodes(record?.orderNoteCodes || []);
+
+    if (codes.length === 0) {
+      return <span className="operation-note-empty" aria-label="No dispatch, paperwork, or permit notes">—</span>;
+    }
+
+    return (
+      <span
+        className="operation-note-pill"
+        title="Dispatch, paperwork, or permit notes are present for this order"
+      >
+        {codes.join(', ')}
+      </span>
+    );
+  }
+
   async function loadOrderNotes(record = selected, options = {}) {
     const { forceRefresh = false } = options;
 
@@ -5757,10 +5839,12 @@ function openReportLoadDetails(load) {
 
       const cacheKey = getOrderNotesCacheKey(record);
       orderNotesCacheRef.current.delete(cacheKey);
+      const savedNoteType = data.note?.NoteType || orderNoteDraftType;
+      setOperationsData((currentData) => addOperationNoteToOperationsData(currentData, record, savedNoteType));
       setOrderNoteDraftBody('');
       setOrderNoteComposerOpen(false);
       setOrderNoteSaveMessage('Note added.');
-      setOrderNotesTypeFilter(getOrderNoteFilterKey(data.note?.NoteType || orderNoteDraftType));
+      setOrderNotesTypeFilter(getOrderNoteFilterKey(savedNoteType));
       await loadOrderNotes(record, { forceRefresh: true });
     } catch (err) {
       setOrderNoteSaveError(err.message || 'Unable to save order note.');
@@ -13834,7 +13918,7 @@ function openReportLoadDetails(load) {
             <div className="msg">No active shipments today.</div>
           ) : (
             <div className="operations-table-wrap">
-              <table>
+              <table className="operations-active-today-table">
                 <thead>
                   <tr>
                     <th>BOL</th>
@@ -13842,6 +13926,7 @@ function openReportLoadDetails(load) {
                     <th>Origin</th>
                     <th>Destination</th>
                     <th>Delivery</th>
+                    <th className="operation-notes-column">Notes</th>
                   </tr>
                 </thead>
 
@@ -13857,6 +13942,7 @@ function openReportLoadDetails(load) {
                       <td>{r.Origin || '-'}</td>
                       <td>{r.Destination || '-'}</td>
                       <td>{formatDateOnly(r.DeliveryDate)}</td>
+                      <td className="operation-notes-cell">{renderOperationNotesPill(r)}</td>
                     </tr>
                   ))}
                 </tbody>

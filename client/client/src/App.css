@@ -13060,3 +13060,44 @@ button.available-truck-distribution-summary-card:disabled {
     justify-content: flex-start;
   }
 }
+
+/* PASS 24: Active Today dispatch/paperwork/permit note indicators */
+.operations-active-today-table .operation-notes-column,
+.operations-active-today-table .operation-notes-cell {
+  width: 1%;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.operation-note-pill {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid rgba(99, 102, 241, 0.34);
+  border-radius: 999px;
+  background: rgba(99, 102, 241, 0.16);
+  color: #c7d2fe;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.operation-note-empty {
+  color: #64748b;
+  font-weight: 800;
+}
+
+:root[data-theme='light'] .operation-note-pill {
+  background: #e0e7ff;
+  border-color: #a5b4fc;
+  color: #3730a3;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.76);
+}
+
+:root[data-theme='light'] .operation-note-empty {
+  color: #94a3b8;
+}
