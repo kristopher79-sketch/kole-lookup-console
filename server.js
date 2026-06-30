@@ -1687,6 +1687,58 @@ async function getOrderNotesForOrder(token, { bol = '', bidId = '', forceRefresh
   setCacheRecord(cachedOrderNotesByOrder, cacheKey, response, 80);
   return response;
 }
+
+function getOrderNoteReportDays(value) {
+  const days = Number(value || 7);
+  if (!Number.isFinite(days)) return 7;
+  return Math.min(Math.max(Math.round(days), 1), 31);
+}
+
+async function getRecentOrderNotesReport(token, options = {}) {
+  const listId = getOrderNotesListId();
+
+  if (!listId) {
+    const error = new Error('ORDER_NOTES_LIST_ID is not configured on the server.');
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const days = getOrderNoteReportDays(options.days);
+  const now = Date.now();
+  const cutoffTime = now - (days * 24 * 60 * 60 * 1000);
+  const bundle = await getAllListItemsWithFieldsResilient(token, listId, getOrderNoteFieldSelect());
+  const notes = (bundle.items || [])
+    .map(cleanOrderNoteItem)
+    .filter((note) => {
+      const sortTime = Number(note.SortTime || 0);
+      return sortTime > 0 && sortTime >= cutoffTime;
+    })
+    .sort((a, b) => {
+      const timeDiff = (b.SortTime || 0) - (a.SortTime || 0);
+      if (timeDiff !== 0) return timeDiff;
+      return Number(b.id || 0) - Number(a.id || 0);
+    })
+    .map(({ SortTime, ...note }) => note);
+
+  const today = formatEasternDate();
+  const startDate = addDaysToDateInput(today, -days);
+
+  return {
+    success: true,
+    reportLabel: `Order Notes - Last ${days} Days`,
+    days,
+    periodLabel: `${formatShortDate(startDate)} through ${formatShortDate(today)}`,
+    count: notes.length,
+    notes,
+    counts: getOrderNotesSummary(notes),
+    sourceListId: listId,
+    recordsScanned: (bundle.items || []).length,
+    usedFallback: bundle.usedFallback,
+    warning: bundle.warning || '',
+    generatedAt: `${formatEasternTimestamp()} Eastern`
+  };
+}
+
 function cleanSalesLeadNoteItem(item) {
   const f = item.fields || {};
   const touchDate = getFlexibleField(f, [
@@ -7347,6 +7399,23 @@ app.get('/documents/permits', requireLookupAccess, async (req, res) => {
   }
 });
 
+
+
+app.get('/reports/order-notes/recent', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const data = await getRecentOrderNotesReport(token, {
+      days: req.query.days
+    });
+    res.json(data);
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to load recent order notes.'
+    });
+  }
+});
 
 app.get('/order-notes', requireLookupAccess, async (req, res) => {
   try {

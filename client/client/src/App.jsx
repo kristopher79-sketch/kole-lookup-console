@@ -626,6 +626,9 @@ export default function App() {
   const [driverPositionsData, setDriverPositionsData] = useState(null);
   const [driverPositionsLoading, setDriverPositionsLoading] = useState(false);
   const [driverPositionsError, setDriverPositionsError] = useState('');
+  const [driverRosterAccordionOpen, setDriverRosterAccordionOpen] = useState(false);
+  const [driverTimeOffAccordionOpen, setDriverTimeOffAccordionOpen] = useState(false);
+  const [driverTimeOffPaneFilter, setDriverTimeOffPaneFilter] = useState('current');
   const [selectedDriverRoster, setSelectedDriverRoster] = useState(null);
   const [driverHistoryModalOpen, setDriverHistoryModalOpen] = useState(false);
   const [driverHistorySnapshot, setDriverHistorySnapshot] = useState(null);
@@ -719,7 +722,14 @@ export default function App() {
   const [onThisDayModalOpen, setOnThisDayModalOpen] = useState(false);
   const [onThisDayPdfLoading, setOnThisDayPdfLoading] = useState(false);
   const [onThisDayPdfError, setOnThisDayPdfError] = useState('');
-  const [noAvailabilityYear, setNoAvailabilityYear] = useState('all');
+  const [operationalNotesReport, setOperationalNotesReport] = useState(null);
+  const [operationalNotesLoading, setOperationalNotesLoading] = useState(false);
+  const [operationalNotesError, setOperationalNotesError] = useState(null);
+  const [operationalNotesModalOpen, setOperationalNotesModalOpen] = useState(false);
+  const [operationalNotesTypeFilter, setOperationalNotesTypeFilter] = useState('Dispatch');
+  const [operationalNotesOpenOrderKey, setOperationalNotesOpenOrderKey] = useState('');
+  const [operationalNotesOpenOrderError, setOperationalNotesOpenOrderError] = useState('');
+  const [noAvailabilityYear, setNoAvailabilityYear] = useState(() => String(new Date().getFullYear()));
   const [noAvailabilityReport, setNoAvailabilityReport] = useState(null);
   const [noAvailabilityLoading, setNoAvailabilityLoading] = useState(false);
   const [noAvailabilityError, setNoAvailabilityError] = useState(null);
@@ -876,6 +886,7 @@ export default function App() {
     wonNotRegisteredModalOpen ||
     permitGovernanceModalOpen ||
     selectedPermitHistoryLoad ||
+    operationalNotesModalOpen ||
     activeDriverRosterModalOpen ||
     inactiveDriverRosterModalOpen ||
     fleetEquipmentModalOpen ||
@@ -1572,6 +1583,8 @@ export default function App() {
     setReportActionAlerts(null);
     setReportActionAlertsLoading(false);
     setReportActionAlertsError('');
+    setOperationalNotesOpenOrderKey('');
+    setOperationalNotesOpenOrderError('');
     setDriverTimeOffReport(null);
     setDriverTimeOffError(null);
     setDriverTimeOffModalOpen(false);
@@ -4209,6 +4222,140 @@ function getPositionStatusLabel(position) {
     setOnThisDayModalOpen(false);
   }
 
+  async function loadOperationalNotesReport() {
+    setOperationalNotesLoading(true);
+    setOperationalNotesError(null);
+    setOperationalNotesOpenOrderError('');
+    setOperationalNotesOpenOrderKey('');
+    setOperationalNotesReport(null);
+    setOperationalNotesModalOpen(false);
+    setOperationalNotesTypeFilter('Dispatch');
+
+    try {
+      const res = await authedFetch(`${API}/reports/order-notes/recent?days=7`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to load recent order notes.');
+      }
+
+      setOperationalNotesReport(data);
+      setOperationalNotesTypeFilter('Dispatch');
+      setOperationalNotesModalOpen(true);
+    } catch (err) {
+      setOperationalNotesError({
+        code: 'REPORT_ERROR',
+        message: err.message || 'Unable to load recent order notes.'
+      });
+    } finally {
+      setOperationalNotesLoading(false);
+    }
+  }
+
+  function closeOperationalNotesModal() {
+    setOperationalNotesModalOpen(false);
+    setOperationalNotesOpenOrderError('');
+    setOperationalNotesOpenOrderKey('');
+  }
+
+  function getOperationalNoteActionKey(note, index = '') {
+    return String(note?.id || note?.KernelID || `${note?.BOLNumber || 'note'}-${note?.CreatedAtLocal || note?.CreatedDate || index}`);
+  }
+
+  function normalizeOperationalOrderLookup(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function normalizeOperationalBolLookup(value) {
+    return normalizeOperationalOrderLookup(value).replace(/\s+/g, '').toUpperCase();
+  }
+
+  function findBestOperationalNoteOrderMatch(records = [], note = {}) {
+    const targetBol = normalizeOperationalBolLookup(note.BOLNumber);
+    const targetBidId = normalizeOperationalOrderLookup(note.BidID);
+
+    if (targetBol && targetBidId) {
+      const exactBoth = records.find((record) =>
+        normalizeOperationalBolLookup(record.BOL) === targetBol &&
+        normalizeOperationalOrderLookup(record.BidID) === targetBidId
+      );
+      if (exactBoth) return exactBoth;
+    }
+
+    if (targetBol) {
+      const exactBol = records.find((record) => normalizeOperationalBolLookup(record.BOL) === targetBol);
+      if (exactBol) return exactBol;
+    }
+
+    if (targetBidId) {
+      const exactBid = records.find((record) => normalizeOperationalOrderLookup(record.BidID) === targetBidId);
+      if (exactBid) return exactBid;
+    }
+
+    return records.length === 1 ? records[0] : null;
+  }
+
+  async function openOrderFromOperationalNote(note, index = '') {
+    const actionKey = getOperationalNoteActionKey(note, index);
+    const bol = String(note?.BOLNumber || '').trim();
+    const bidId = String(note?.BidID || '').trim();
+    const lookupValue = bol || bidId;
+
+    if (!lookupValue) {
+      setOperationalNotesOpenOrderError('This note does not have a BOL number or Bid ID to look up.');
+      return;
+    }
+
+    setOperationalNotesOpenOrderKey(actionKey);
+    setOperationalNotesOpenOrderError('');
+    setLoadingDetail(true);
+
+    try {
+      const searchParams = new URLSearchParams({
+        q: lookupValue,
+        includeArchives: 'true'
+      });
+      const searchRes = await authedFetch(`${API}/search?${searchParams.toString()}`);
+      const searchData = await searchRes.json().catch(() => ({}));
+
+      if (!searchRes.ok || !searchData.success) {
+        throw new Error(searchData.error || searchData.message || 'Unable to search for the order tied to this note.');
+      }
+
+      const match = findBestOperationalNoteOrderMatch(searchData.results || [], note);
+
+      if (!match?.id) {
+        throw new Error(`No matching order was found for ${bol || bidId}.`);
+      }
+
+      setSelectedView('basic');
+      setOrderNotesData(null);
+      setOrderNotesLoading(false);
+      setOrderNotesError('');
+      setOrderNotesTypeFilter('All');
+      resetOrderNoteComposer();
+      orderNotesRequestRef.current += 1;
+      setDocumentError('');
+
+      const detailEndpoint = match.SourceListId
+        ? `${API}/record/${encodeURIComponent(match.SourceListId)}/${encodeURIComponent(match.id)}`
+        : `${API}/record/${encodeURIComponent(match.id)}`;
+      const detailRes = await authedFetch(detailEndpoint);
+      const detailData = await detailRes.json().catch(() => ({}));
+
+      if (!detailRes.ok || !detailData.success) {
+        throw new Error(detailData.error || detailData.message || 'Unable to open the matching order.');
+      }
+
+      setSelected(detailData);
+    } catch (err) {
+      setOperationalNotesOpenOrderError(err.message || 'Unable to open the order for this note.');
+    } finally {
+      setLoadingDetail(false);
+      setOperationalNotesOpenOrderKey('');
+    }
+  }
+
   function getDriverTimeOffOptions() {
     return driverTimeOffReport?.activeDriverOptions || operationsData?.driverTimeOff?.activeDriverOptions || [];
   }
@@ -4225,28 +4372,34 @@ function getPositionStatusLabel(position) {
     return operationsData?.driverTimeOff?.upcomingRecords || [];
   }
 
-  function getDriverTimeOffPanelRows() {
+  function getDriverTimeOffPanelRows(panelFilter = 'current') {
     const currentRows = getDriverTimeOffCurrentRecords().map((record) => ({
       ...record,
       displayBucket: 'current'
     }));
 
-    if (!showRecentlyEndedTimeOff) return currentRows;
+    const currentKeys = new Set(currentRows.map((record) => record.id || `${record.operatorName}-${record.truckNumber}-${record.startDate}-${record.endDate}`));
 
-    const seen = new Set(currentRows.map((record) => record.id || `${record.operatorName}-${record.truckNumber}-${record.startDate}-${record.endDate}`));
-    const recentlyEndedRows = getDriverTimeOffRecentlyEndedRecords()
-      .filter((record) => {
-        const key = record.id || `${record.operatorName}-${record.truckNumber}-${record.startDate}-${record.endDate}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      })
-      .map((record) => ({
+    if (panelFilter === 'ended') {
+      return getDriverTimeOffRecentlyEndedRecords()
+        .filter((record) => {
+          const key = record.id || `${record.operatorName}-${record.truckNumber}-${record.startDate}-${record.endDate}`;
+          return !currentKeys.has(key);
+        })
+        .map((record) => ({
+          ...record,
+          displayBucket: 'recently-ended'
+        }));
+    }
+
+    if (panelFilter === 'starting-soon') {
+      return getDriverTimeOffUpcomingRecords().map((record) => ({
         ...record,
-        displayBucket: 'recently-ended'
+        displayBucket: 'starting-soon'
       }));
+    }
 
-    return [...currentRows, ...recentlyEndedRows];
+    return currentRows;
   }
 
   function getDriverTimeOffEndedLabel(record = {}) {
@@ -4475,7 +4628,7 @@ function getPositionStatusLabel(position) {
     }));
   }
 
-  async function loadDriverTimeOffReport() {
+  async function loadDriverTimeOffReport(options = {}) {
     setDriverTimeOffLoading(true);
     setDriverTimeOffError(null);
     setDriverTimeOffReport(null);
@@ -4485,7 +4638,8 @@ function getPositionStatusLabel(position) {
     setDriverTimeOffModalOpen(false);
 
     try {
-      const params = new URLSearchParams({ year: String(driverTimeOffYear) });
+      const reportYearToLoad = Number(options.yearOverride || driverTimeOffYear || new Date().getFullYear());
+      const params = new URLSearchParams({ year: String(reportYearToLoad) });
       const res = await authedFetch(`${API}/reports/driver-time-off?${params.toString()}`);
       const data = await res.json().catch(() => ({}));
 
@@ -4507,6 +4661,12 @@ function getPositionStatusLabel(position) {
 
   function closeDriverTimeOffModal() {
     setDriverTimeOffModalOpen(false);
+  }
+
+  async function openFutureTimeOffQuickReport() {
+    const currentYear = String(new Date().getFullYear());
+    setDriverTimeOffYear(Number(currentYear));
+    await loadDriverTimeOffReport({ yearOverride: currentYear });
   }
 
   async function submitDriverTimeOff(event) {
@@ -4566,7 +4726,7 @@ function getPositionStatusLabel(position) {
 
   const reportPanelsByGroup = {
     financial: ['grossRevenue', 'yearlyProjection', 'driverSummary', 'weeklySettlement'],
-    operational: ['monthlyOperations', 'ordersDueSettlement', 'wonNotRegistered', 'permitGovernance', 'onThisDay', 'noAvailability'],
+    operational: ['monthlyOperations', 'ordersDueSettlement', 'wonNotRegistered', 'permitGovernance', 'onThisDay', 'operationalNotes', 'noAvailability'],
     driverFleet: ['activeDriverRoster', 'inactiveDriverRoster', 'fleetEquipment', 'driverTimeOff'],
     sales: ['customerBookingTrends', 'salesActivity', 'leadSuppression', 'salesLeads']
   };
@@ -5478,6 +5638,10 @@ function getPositionStatusLabel(position) {
     target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  function OperationsSectionHeading({ children }) {
+    return <h3>{children}</h3>;
+  }
+
   function toggleReportPanel(panelName) {
     const isOpeningPanel = activeReportPanel !== panelName;
 
@@ -6032,6 +6196,126 @@ function openReportLoadDetails(load) {
         {!orderNotesLoading && filteredNotes.length > 0 && (
           <div className="order-notes-list">
             {filteredNotes.map((note, index) => renderOrderNoteCard(note, index))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+
+  function OperationalNotesPreview() {
+    const notes = operationalNotesReport?.notes || [];
+    const countsByType = operationalNotesReport?.counts?.byType || {};
+    const typeEntries = getSortedOrderNoteTypeEntries(countsByType);
+    const activeFilter = operationalNotesTypeFilter || 'Dispatch';
+    const filteredNotes = activeFilter === 'All'
+      ? notes
+      : notes.filter((note) => getOrderNoteFilterKey(note.NoteType) === activeFilter);
+
+    return (
+      <div className="order-notes-view operational-notes-report-preview">
+        <div className="order-notes-toolbar operational-notes-toolbar">
+          <div>
+            <div>
+              <strong>Order Notes added in the last 7 days</strong>
+              <small>{operationalNotesReport?.periodLabel || 'Recent note activity'} · {formatReportNumber(notes.length)} total note(s)</small>
+            </div>
+          </div>
+
+          <div className="order-notes-toolbar-actions">
+            <button
+              type="button"
+              className="view-button"
+              onClick={loadOperationalNotesReport}
+              disabled={operationalNotesLoading}
+            >
+              {operationalNotesLoading ? 'Refreshing...' : 'Refresh'}
+            </button>
+          </div>
+        </div>
+
+        {notes.length > 0 && (
+          <div className="order-notes-type-summary" aria-label="Filter recent order notes by type">
+            <button
+              type="button"
+              className={`order-note-type-pill all order-notes-filter-button ${activeFilter === 'All' ? 'is-active' : ''}`}
+              onClick={() => setOperationalNotesTypeFilter('All')}
+            >
+              All: {notes.length}
+            </button>
+
+            {typeEntries.map(([type, count]) => (
+              <button
+                key={type}
+                type="button"
+                className={`${getOrderNoteTypeClass(type)} order-notes-filter-button ${activeFilter === getOrderNoteFilterKey(type) ? 'is-active' : ''}`}
+                onClick={() => setOperationalNotesTypeFilter(getOrderNoteFilterKey(type))}
+              >
+                {type}: {count}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {operationalNotesOpenOrderError && (
+          <div className="msg error operational-notes-open-order-error">{operationalNotesOpenOrderError}</div>
+        )}
+
+        {notes.length === 0 && (
+          <div className="order-notes-empty-state">
+            <strong>No recent notes found.</strong>
+            <span>The Order Notes list connected, but nothing was added inside the last 7 days.</span>
+          </div>
+        )}
+
+        {notes.length > 0 && filteredNotes.length === 0 && (
+          <div className="order-notes-empty-state">
+            <strong>No {activeFilter} notes in the last 7 days.</strong>
+            <span>Choose All or another note type to review the remaining recent notes.</span>
+          </div>
+        )}
+
+        {filteredNotes.length > 0 && (
+          <div className="order-notes-list operational-notes-report-list">
+            {filteredNotes.map((note, index) => {
+              const noteType = note.NoteType || 'Uncategorized';
+              const noteBody = note.NoteBody || note.Title || '';
+              const createdBy = note.CreatedBy || 'Unknown source';
+              const noteKey = getOperationalNoteActionKey(note, index);
+
+              return (
+                <article key={noteKey} className="order-note-card operational-note-report-card">
+                  <div className="order-note-card-header">
+                    <div className="order-note-title-stack">
+                      <span className={getOrderNoteTypeClass(noteType)}>{noteType}</span>
+                      <span className="order-note-source">{createdBy}</span>
+                    </div>
+                    <div className="order-note-timestamp-stack">
+                      <time className="order-note-timestamp">{getOrderNoteTimestamp(note)}</time>
+                      <button
+                        type="button"
+                        className="order-note-open-order-button"
+                        onClick={() => openOrderFromOperationalNote(note, index)}
+                        disabled={operationalNotesOpenOrderKey === noteKey || loadingDetail}
+                        title="Open the full order modal for this note"
+                      >
+                        {operationalNotesOpenOrderKey === noteKey ? 'Opening...' : 'Open order'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <p className="order-note-body">{noteBody || 'No note body entered.'}</p>
+
+                  <div className="order-note-footline">
+                    <span>BOL: {note.BOLNumber || '-'}</span>
+                    <span>Bid: {note.BidID || '-'}</span>
+                    <span>Driver: {note.OperatorTeam || '-'}</span>
+                    <span>Truck: {note.TruckNumber || '-'}</span>
+                    <span>Customer: {note.CustomerName || note.CustomerNumber || '-'}</span>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         )}
       </div>
@@ -8513,110 +8797,246 @@ function openReportLoadDetails(load) {
     const currentRecords = getDriverTimeOffCurrentRecords();
     const recentlyEndedRecords = getDriverTimeOffRecentlyEndedRecords();
     const upcomingRecords = getDriverTimeOffUpcomingRecords();
-    const records = getDriverTimeOffPanelRows();
+    const activePane = driverTimeOffPaneFilter || 'current';
+    const records = getDriverTimeOffPanelRows(activePane);
     const warning = operationsData?.driverTimeOff?.warning || '';
-    const hasRecentlyEnded = recentlyEndedRecords.length > 0;
-    const hasUpcoming = upcomingRecords.length > 0;
-    const upcomingPreview = upcomingRecords.slice(0, 4);
+    const targetDate = operationsData?.driverTimeOff?.targetDate || getEasternDateInputValue();
+
+    function getDateInputDayDiff(startDate, endDate) {
+      const startValue = String(startDate || '').slice(0, 10);
+      const endValue = String(endDate || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(startValue) || !/^\d{4}-\d{2}-\d{2}$/.test(endValue)) return null;
+
+      const startTime = new Date(`${startValue}T00:00:00Z`).getTime();
+      const endTime = new Date(`${endValue}T00:00:00Z`).getTime();
+      if (Number.isNaN(startTime) || Number.isNaN(endTime)) return null;
+
+      return Math.round((endTime - startTime) / 86400000);
+    }
+
+    function getDriverTimeOffReasonKey(record = {}) {
+      const reason = String(record.reason || '').toLowerCase();
+      if (record.displayBucket === 'recently-ended') return 'recently-ended';
+      if (record.displayBucket === 'starting-soon') return 'starting-soon';
+      if (reason.includes('repair')) return 'repairs';
+      if (reason.includes('home')) return 'home-time';
+      if (reason.includes('suspend')) return 'suspended';
+      return 'other';
+    }
+
+    function getDriverTimeOffReasonTitle(reasonKey) {
+      if (reasonKey === 'home-time') return 'Home Time';
+      if (reasonKey === 'repairs') return 'Repairs';
+      if (reasonKey === 'suspended') return 'Suspended';
+      if (reasonKey === 'recently-ended') return 'Ended Recently';
+      if (reasonKey === 'starting-soon') return 'Starting Soon';
+      return 'Other Time Off';
+    }
+
+    function getDriverTimeOffReturnLabel(record = {}) {
+      if (record.displayBucket === 'recently-ended') return getDriverTimeOffEndedLabel(record);
+      if (record.displayBucket === 'starting-soon') return getDriverTimeOffStartsLabel(record);
+
+      const endDate = String(record.endDate || record.startDate || '').slice(0, 10);
+      const daysUntilReturn = getDateInputDayDiff(targetDate, endDate);
+
+      if (daysUntilReturn === 0) return 'Returns today';
+      if (daysUntilReturn === 1) return 'Returns tomorrow';
+      if (Number.isFinite(daysUntilReturn) && daysUntilReturn > 1) return `Returns in ${daysUntilReturn} days`;
+
+      return endDate ? `Returns ${formatDateOnly(endDate)}` : 'Return unknown';
+    }
+
+    function getDriverTimeOffCardStatusLabel(record = {}) {
+      if (record.displayBucket === 'recently-ended') return 'Status';
+      if (record.displayBucket === 'starting-soon') return 'Starts';
+      return 'Return';
+    }
+
+    function chooseDriverTimeOffPane(filterKey) {
+      setDriverTimeOffPaneFilter(filterKey);
+      setDriverTimeOffAccordionOpen(true);
+    }
+
+    const panePills = [
+      { key: 'current', label: 'Current', value: currentRecords.length, detail: 'off now', tone: currentRecords.length > 0 ? 'current' : 'quiet' },
+      { key: 'ended', label: 'Ended', value: recentlyEndedRecords.length, detail: 'last 7 days', tone: recentlyEndedRecords.length > 0 ? 'ended' : 'quiet' },
+      { key: 'starting-soon', label: 'Starting Soon', value: upcomingRecords.length, detail: 'next 7 days', tone: upcomingRecords.length > 0 ? 'starting' : 'quiet' }
+    ];
+
+    const groupedRecords = activePane === 'starting-soon'
+      ? [{ reasonKey: 'starting-soon', title: 'Starting Soon', records }]
+      : activePane === 'ended'
+        ? [{ reasonKey: 'recently-ended', title: 'Ended Recently', records }]
+        : ['home-time', 'repairs', 'suspended', 'other']
+            .map((reasonKey) => ({
+              reasonKey,
+              title: getDriverTimeOffReasonTitle(reasonKey),
+              records: records.filter((record) => getDriverTimeOffReasonKey(record) === reasonKey)
+            }))
+            .filter((group) => group.records.length > 0);
+
+    const emptyMessage = activePane === 'starting-soon'
+      ? 'No driver time off is scheduled to start in the next 7 days.'
+      : activePane === 'ended'
+        ? 'No driver time off ended in the last 7 days.'
+        : 'No drivers are currently marked off.';
 
     return (
-      <div className="driver-time-off-panel">
-        <div className="driver-position-header driver-time-off-header">
-          <div className="driver-time-off-title-block">
-            <h3>Current Driver Time Off</h3>
-            <p>Current records by default. Toggle recently ended records for recent edit access.</p>
+      <div className={`driver-time-off-panel driver-time-off-accordion ${driverTimeOffAccordionOpen ? 'is-open' : 'is-closed'}`}>
+        <div className="driver-position-header driver-time-off-header driver-time-off-accordion-header">
+          <button
+            type="button"
+            className="driver-time-off-header-main"
+            onClick={() => setDriverTimeOffAccordionOpen((current) => !current)}
+            aria-expanded={driverTimeOffAccordionOpen}
+          >
+            <div className="driver-time-off-title-block">
+              <h3>Current Driver Time Off</h3>
+              <p>{driverTimeOffAccordionOpen ? 'Expanded time-off cards. Pick a pill to switch the view.' : 'Closed by default; pills show the quick status.'}</p>
+            </div>
+          </button>
+
+          <div className="driver-time-off-pill-lineup" aria-label="Driver time off quick filters">
+            {panePills.map((pill) => (
+              <button
+                key={pill.key}
+                type="button"
+                className={`driver-time-off-lineup-pill ${pill.tone} ${activePane === pill.key ? 'is-active' : ''}`}
+                onClick={() => chooseDriverTimeOffPane(pill.key)}
+                title={`Show ${pill.label.toLowerCase()} driver time off`}
+              >
+                <span>{pill.label}</span>
+                <strong>{formatReportNumber(pill.value)}</strong>
+                <small>{pill.detail}</small>
+              </button>
+            ))}
           </div>
-          <div className="driver-time-off-actions">
-            <label className={`driver-time-off-recent-toggle ${showRecentlyEndedTimeOff ? 'is-on' : ''}`}>
-              <input
-                type="checkbox"
-                checked={showRecentlyEndedTimeOff}
-                onChange={(event) => setShowRecentlyEndedTimeOff(event.target.checked)}
-                disabled={!hasRecentlyEnded}
-              />
-              <span>Show recently ended</span>
-            </label>
-            <button type="button" className="view-button driver-time-off-main-add-button" onClick={() => openDriverTimeOffForm()}>
-              Add Time Off
-            </button>
-            <span className={`driver-time-off-count-pill ${currentRecords.length > 0 ? 'has-items' : 'is-zero'}`}>{formatReportNumber(currentRecords.length)} current</span>
-            {hasRecentlyEnded && (
-              <span className="driver-time-off-recent-count-pill">{formatReportNumber(recentlyEndedRecords.length)} ended 7d</span>
-            )}
-          </div>
+
+          <button
+            type="button"
+            className="driver-time-off-accordion-chevron"
+            onClick={() => setDriverTimeOffAccordionOpen((current) => !current)}
+            aria-label={driverTimeOffAccordionOpen ? 'Collapse Current Driver Time Off' : 'Expand Current Driver Time Off'}
+            aria-expanded={driverTimeOffAccordionOpen}
+          >
+            {driverTimeOffAccordionOpen ? '▲' : '▼'}
+          </button>
         </div>
 
-        {warning && <div className="msg error">{warning}</div>}
-        {hasUpcoming && (
-          <div className="driver-time-off-upcoming-alert">
-            <div>
-              <strong>{formatReportNumber(upcomingRecords.length)} time-off request{upcomingRecords.length === 1 ? '' : 's'} starting in the next 7 days</strong>
-              <span>
-                {upcomingPreview.map((record) => (
-                  `${record.operatorName || 'Unknown driver'} (${formatDateOnly(record.startDate)}, ${getDriverTimeOffStartsLabel(record)})`
-                )).join(' · ')}
-                {upcomingRecords.length > upcomingPreview.length ? ` · +${upcomingRecords.length - upcomingPreview.length} more` : ''}
-              </span>
-            </div>
-          </div>
-        )}
-        {driverTimeOffActionMessage && <div className="msg success-message">{driverTimeOffActionMessage}</div>}
-        {driverTimeOffActionError && <div className="msg error">{driverTimeOffActionError}</div>}
+        {driverTimeOffAccordionOpen && (
+          <div className="driver-time-off-accordion-body">
+            {warning && <div className="msg error">{warning}</div>}
 
-        {records.length === 0 ? (
-          <div className="msg">No drivers are currently marked off.</div>
-        ) : (
-          <div className="operations-table-wrap driver-time-off-table-wrap">
-            <table className="driver-time-off-table">
-              <thead>
-                <tr>
-                  <th>Driver</th>
-                  <th>Truck</th>
-                  <th>Start</th>
-                  <th>Return / End</th>
-                  <th>Reason</th>
-                  <th>Days</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {records.map((record) => {
-                  const recentlyEnded = record.displayBucket === 'recently-ended';
-                  return (
-                    <tr
-                      key={record.id || `${record.operatorName}-${record.startDate}`}
-                      className={`driver-time-off-clickable-row ${recentlyEnded ? 'recently-ended-time-off-row' : ''}`}
-                      onClick={() => openDriverTimeOffForm(record)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          openDriverTimeOffForm(record);
-                        }
-                      }}
-                      tabIndex={0}
-                      title="Click to view or edit this time-off record"
-                    >
-                      <td><strong>{record.operatorName || '-'}</strong></td>
-                      <td>{record.truckNumber || '-'}</td>
-                      <td>{formatDateOnly(record.startDate)}</td>
-                      <td>{formatDateOnly(record.endDate)}</td>
-                      <td>{record.reason || '-'}</td>
-                      <td>{formatReportNumber(record.days)}</td>
-                      <td>
-                        <span className={`driver-time-off-row-status ${recentlyEnded ? 'recent' : 'current'}`}>
-                          {getDriverTimeOffEndedLabel(record)}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="driver-time-off-body-toolbar">
+              <div>
+                <strong>{panePills.find((pill) => pill.key === activePane)?.label || 'Current'} time off</strong>
+                <small>
+                  {activePane === 'starting-soon'
+                    ? 'Scheduled records starting in the next 7 days.'
+                    : activePane === 'ended'
+                      ? 'Recently ended records available for quick correction.'
+                      : 'Currently active time-off records grouped by reason.'}
+                </small>
+              </div>
+
+              <div className="driver-time-off-actions">
+                {activePane === 'starting-soon' && upcomingRecords.length > 0 && (
+                  <button
+                    type="button"
+                    className="view-button secondary-action-button"
+                    onClick={openFutureTimeOffQuickReport}
+                    disabled={driverTimeOffLoading}
+                    title="Open the Driver Time Off report preview"
+                  >
+                    {driverTimeOffLoading ? 'Opening...' : 'Preview Report'}
+                  </button>
+                )}
+                <button type="button" className="view-button driver-time-off-main-add-button" onClick={() => openDriverTimeOffForm()}>
+                  Add Time Off
+                </button>
+              </div>
+            </div>
+
+            {driverTimeOffActionMessage && <div className="msg success-message">{driverTimeOffActionMessage}</div>}
+            {driverTimeOffActionError && <div className="msg error">{driverTimeOffActionError}</div>}
+
+            {records.length === 0 ? (
+              <div className="msg driver-time-off-empty-message">{emptyMessage}</div>
+            ) : (
+              <div className="driver-time-off-board">
+                {groupedRecords.map((group) => (
+                  <section className={`driver-time-off-group ${group.reasonKey}`} key={group.reasonKey}>
+                    <div className="driver-time-off-group-header">
+                      <div>
+                        <h4>{group.title}</h4>
+                        <p>
+                          {group.reasonKey === 'starting-soon'
+                            ? 'Scheduled to begin soon.'
+                            : group.reasonKey === 'recently-ended'
+                              ? 'Recently closed records available for quick correction.'
+                              : 'Currently marked off.'}
+                        </p>
+                      </div>
+                      <span>{formatReportNumber(group.records.length)}</span>
+                    </div>
+
+                    <div className="driver-time-off-card-grid">
+                      {group.records.map((record) => {
+                        const recentlyEnded = record.displayBucket === 'recently-ended';
+                        const startingSoon = record.displayBucket === 'starting-soon';
+                        const reasonKey = getDriverTimeOffReasonKey(record);
+                        const recordKey = record.id || `${record.operatorName}-${record.truckNumber}-${record.startDate}-${record.endDate}`;
+
+                        return (
+                          <button
+                            type="button"
+                            key={recordKey}
+                            className={`driver-time-off-card ${reasonKey} ${recentlyEnded ? 'recently-ended' : ''} ${startingSoon ? 'starting-soon' : ''}`}
+                            onClick={() => openDriverTimeOffForm(record)}
+                            title="Open this time-off record"
+                          >
+                            <div className="driver-time-off-card-topline">
+                              <div>
+                                <strong>{record.operatorName || '-'}</strong>
+                                <span>{record.truckNumber ? `Truck ${record.truckNumber}` : 'Truck -'}</span>
+                              </div>
+                              <span className={`driver-time-off-reason-pill ${reasonKey}`}>
+                                {recentlyEnded ? 'Ended' : startingSoon ? 'Starting Soon' : (record.reason || 'Time Off')}
+                              </span>
+                            </div>
+
+                            <div className="driver-time-off-date-range">
+                              <span>Off Window</span>
+                              <strong>{formatDateOnly(record.startDate)} → {formatDateOnly(record.endDate || record.startDate)}</strong>
+                            </div>
+
+                            <div className="driver-time-off-card-facts">
+                              <div>
+                                <span>Days</span>
+                                <strong>{formatReportNumber(record.days)}</strong>
+                              </div>
+                              <div>
+                                <span>{getDriverTimeOffCardStatusLabel(record)}</span>
+                                <strong>{getDriverTimeOffReturnLabel(record)}</strong>
+                              </div>
+                            </div>
+
+                            <small>Open details / edit</small>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
     );
   }
+
 
   function DriverTimeOffFormModal() {
     if (!driverTimeOffFormOpen) return null;
@@ -8946,11 +9366,16 @@ function openReportLoadDetails(load) {
     const positions = driverPositionsData?.positions || [];
 
     return (
-      <div className="driver-position-panel">
-        <div className="driver-position-header">
+      <div className={`driver-position-panel ${driverRosterAccordionOpen ? 'is-open' : 'is-closed'}`}>
+        <button
+          type="button"
+          className="driver-position-header driver-position-header-button"
+          onClick={() => setDriverRosterAccordionOpen((current) => !current)}
+          aria-expanded={driverRosterAccordionOpen}
+        >
           <div>
             <h3>Active Driver Roster</h3>
-          
+            <p>{driverRosterAccordionOpen ? 'Roster detail is open.' : 'Closed by default; expand when you need the row detail.'}</p>
           </div>
 
           {driverPositionsData?.counts && (
@@ -8963,61 +9388,67 @@ function openReportLoadDetails(load) {
               )}
             </div>
           )}
-        </div>
 
-        {driverPositionsError && <div className="msg error">{driverPositionsError}</div>}
-        {driverPositionsLoading && !driverPositionsData && <div className="msg">Loading active driver roster...</div>}
+          <span className="driver-position-accordion-chevron" aria-hidden="true">{driverRosterAccordionOpen ? '▲' : '▼'}</span>
+        </button>
 
-        {driverPositionsData && positions.length === 0 && (
-          <div className="msg">No active driver roster rows were found.</div>
-        )}
+        {driverRosterAccordionOpen && (
+          <div className="driver-position-accordion-body">
+            {driverPositionsError && <div className="msg error">{driverPositionsError}</div>}
+            {driverPositionsLoading && !driverPositionsData && <div className="msg">Loading active driver roster...</div>}
 
-        {positions.length > 0 && (
-          <div className="operations-table-wrap driver-position-table-wrap">
-            <table className="driver-position-table">
-              <thead>
-                <tr>
-                  <th>Status</th>
-                  <th>Truck</th>
-                  <th>Driver</th>
-                  <th>Location</th>
-                  <th>Speed</th>
-                  <th>Ignition</th>
-                  <th>Position Time</th>
-                </tr>
-              </thead>
+            {driverPositionsData && positions.length === 0 && (
+              <div className="msg">No active driver roster rows were found.</div>
+            )}
 
-              <tbody>
-                {positions.map((position) => (
-                  <tr
-                    key={position.id || position.equipmentId}
-                    className={`driver-position-row ${position.hasRosterDetails ? 'has-roster-details' : 'missing-roster-details'}`}
-                    onClick={() => setSelectedDriverRoster(position)}
-                    title={position.hasRosterDetails ? 'Open driver roster details' : 'Open active position details'}
-                  >
-                    <td>
-                      <span className={getPositionStatusClass(position)}>
-                        {getPositionStatusLabel(position)}
-                      </span>
-                    </td>
-                    <td>{position.equipmentId || '-'}</td>
-                    <td>
-                      <strong>{position.roster?.tmsName || position.driverName || 'Unmatched'}</strong>
-                      {position.roster?.operatorTeamName && position.roster.operatorTeamName !== position.roster.tmsName && (
-                        <small>{position.roster.operatorTeamName}</small>
-                      )}
-                      {!position.hasRosterDetails && (
-                        <small className="roster-warning-text">No roster details matched</small>
-                      )}
-                    </td>
-                    <td>{position.currentCityState || '-'}</td>
-                    <td>{formatSpeed(position.speed)}</td>
-                    <td>{position.ignitionStatusLabel || '-'}</td>
-                    <td>{formatTrackingTimestamp(position.positionTimeUtc)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {positions.length > 0 && (
+              <div className="operations-table-wrap driver-position-table-wrap">
+                <table className="driver-position-table">
+                  <thead>
+                    <tr>
+                      <th>Status</th>
+                      <th>Truck</th>
+                      <th>Driver</th>
+                      <th>Location</th>
+                      <th>Speed</th>
+                      <th>Ignition</th>
+                      <th>Position Time</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {positions.map((position) => (
+                      <tr
+                        key={position.id || position.equipmentId}
+                        className={`driver-position-row ${position.hasRosterDetails ? 'has-roster-details' : 'missing-roster-details'}`}
+                        onClick={() => setSelectedDriverRoster(position)}
+                        title={position.hasRosterDetails ? 'Open driver roster details' : 'Open active position details'}
+                      >
+                        <td>
+                          <span className={getPositionStatusClass(position)}>
+                            {getPositionStatusLabel(position)}
+                          </span>
+                        </td>
+                        <td>{position.equipmentId || '-'}</td>
+                        <td>
+                          <strong>{position.roster?.tmsName || position.driverName || 'Unmatched'}</strong>
+                          {position.roster?.operatorTeamName && position.roster.operatorTeamName !== position.roster.tmsName && (
+                            <small>{position.roster.operatorTeamName}</small>
+                          )}
+                          {!position.hasRosterDetails && (
+                            <small className="roster-warning-text">No roster details matched</small>
+                          )}
+                        </td>
+                        <td>{position.currentCityState || '-'}</td>
+                        <td>{formatSpeed(position.speed)}</td>
+                        <td>{position.ignitionStatusLabel || '-'}</td>
+                        <td>{formatTrackingTimestamp(position.positionTimeUtc)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -12403,6 +12834,7 @@ function openReportLoadDetails(load) {
     const isWonNotRegisteredOpen = activeReportPanel === 'wonNotRegistered';
     const isPermitGovernanceOpen = activeReportPanel === 'permitGovernance';
     const isOnThisDayOpen = activeReportPanel === 'onThisDay';
+    const isOperationalNotesOpen = activeReportPanel === 'operationalNotes';
     const isActiveDriverRosterOpen = activeReportPanel === 'activeDriverRoster';
     const isInactiveDriverRosterOpen = activeReportPanel === 'inactiveDriverRoster';
     const isFleetEquipmentOpen = activeReportPanel === 'fleetEquipment';
@@ -13188,6 +13620,59 @@ function openReportLoadDetails(load) {
             )}
           </div>
 
+
+          <div className={`report-accordion ${isOperationalNotesOpen ? 'open' : ''}`}>
+            <button
+              type="button"
+              className="report-accordion-button"
+              onClick={(e) => handleReportPanelClick(e, 'operationalNotes')}
+            >
+              <span>Order Notes — Last 7 Days</span>
+              <span className="report-accordion-icon">{isOperationalNotesOpen ? '▼' : '▶'}</span>
+            </button>
+
+            {isOperationalNotesOpen && (
+              <div className="report-accordion-body">
+                <div className="report-card compact-report-card accordion-inner-card briefing-report-card operational-notes-report-card-shell">
+                  <div className="report-card-header centered-report-header">
+                    <div>
+                      <h3>Order Notes — Last 7 Days</h3>
+                      <p>Recent Dispatch, Paperwork, Permits, Billing, Operations, and System notes across all orders.</p>
+                    </div>
+                  </div>
+
+                  <div className="report-controls centered-report-controls">
+                    <button onClick={loadOperationalNotesReport} disabled={operationalNotesLoading}>
+                      {operationalNotesLoading ? 'Loading Notes...' : 'Preview Report'}
+                    </button>
+                  </div>
+
+                  {operationalNotesReport && !operationalNotesModalOpen && (
+                    <div className="report-ready-card">
+                      <div>
+                        <strong>{operationalNotesReport.reportLabel || 'Recent Order Notes'} is ready.</strong>
+                        <span> The preview opens with Dispatch selected first.</span>
+                      </div>
+                      <button className="view-button" onClick={() => {
+                        setOperationalNotesTypeFilter('Dispatch');
+                        setOperationalNotesModalOpen(true);
+                      }}>
+                        Reopen Preview
+                      </button>
+                    </div>
+                  )}
+
+                  {operationalNotesError && (
+                    <div className="report-alert error">
+                      <h4>Report could not be loaded.</h4>
+                      <p>{operationalNotesError.message}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className={`report-accordion ${isNoAvailabilityOpen ? 'open' : ''}`}>
             <button
               type="button"
@@ -13912,7 +14397,7 @@ function openReportLoadDetails(load) {
         <DriverPositionTrackingPanel />
 
         <div id="operations-active-today" ref={operationsActiveTodayRef} className="operations-detail-section">
-          <h3>Active Today</h3>
+          <OperationsSectionHeading>Active Today</OperationsSectionHeading>
 
           {operationsData.activeToday.length === 0 ? (
             <div className="msg">No active shipments today.</div>
@@ -13952,7 +14437,7 @@ function openReportLoadDetails(load) {
         </div>
 
         <div id="operations-loading-today" ref={operationsLoadingTodayRef} className="operations-detail-section">
-          <h3>Loading Today</h3>
+          <OperationsSectionHeading>Loading Today</OperationsSectionHeading>
 
           {operationsData.loadingToday.length === 0 ? (
             <div className="msg">No loads scheduled to load today.</div>
@@ -13994,7 +14479,7 @@ function openReportLoadDetails(load) {
         </div>
 
         <div id="operations-delivering-today" ref={operationsDeliveringTodayRef} className="operations-detail-section">
-          <h3>Delivering Today</h3>
+          <OperationsSectionHeading>Delivering Today</OperationsSectionHeading>
 
           {operationsData.deliveringToday.length === 0 ? (
             <div className="msg">No deliveries scheduled today.</div>
@@ -14038,7 +14523,7 @@ function openReportLoadDetails(load) {
         </div>
 
         <div id="operations-loading-next-7" ref={operationsLoadingNext7Ref} className="operations-detail-section">
-          <h3>Loading Next 7 Days</h3>
+          <OperationsSectionHeading>Loading Next 7 Days</OperationsSectionHeading>
 
           {operationsData.loadingNext7.length === 0 ? (
             <div className="msg">No upcoming loads in the next 7 days.</div>
@@ -14608,6 +15093,28 @@ function openReportLoadDetails(load) {
                 <div className="msg error pdf-export-error">{driverTimeOffPdfError}</div>
               )}
               <DriverTimeOffPreview />
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {operationalNotesModalOpen && operationalNotesReport && (
+        <div className="modal-overlay report-modal-overlay" onClick={closeOperationalNotesModal}>
+          <div className="detail-modal report-modal wide-report-modal operational-notes-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="detail-header report-modal-header">
+              <div>
+                <h2>{operationalNotesReport.reportLabel || 'Order Notes — Last 7 Days'}</h2>
+                <p>{formatReportNumber(operationalNotesReport.count)} note(s) · Generated {operationalNotesReport.generatedAt || ''}</p>
+              </div>
+
+              <button className="close-button" onClick={closeOperationalNotesModal}>
+                Close
+              </button>
+            </div>
+
+            <div className="modal-body report-modal-body">
+              <OperationalNotesPreview />
             </div>
           </div>
         </div>
