@@ -8893,8 +8893,7 @@ function openReportLoadDetails(load) {
           >
             <div className="driver-time-off-title-block">
               <h3>Current Driver Time Off</h3>
-              <p>{driverTimeOffAccordionOpen ? 'Expanded time-off cards. Pick a pill to switch the view.' : 'Closed by default; pills show the quick status.'}</p>
-            </div>
+                </div>
           </button>
 
           <div className="driver-time-off-pill-lineup" aria-label="Driver time off quick filters">
@@ -8931,13 +8930,6 @@ function openReportLoadDetails(load) {
             <div className="driver-time-off-body-toolbar">
               <div>
                 <strong>{panePills.find((pill) => pill.key === activePane)?.label || 'Current'} time off</strong>
-                <small>
-                  {activePane === 'starting-soon'
-                    ? 'Scheduled records starting in the next 7 days.'
-                    : activePane === 'ended'
-                      ? 'Recently ended records available for quick correction.'
-                      : 'Currently active time-off records grouped by reason.'}
-                </small>
               </div>
 
               <div className="driver-time-off-actions">
@@ -9375,8 +9367,7 @@ function openReportLoadDetails(load) {
         >
           <div>
             <h3>Active Driver Roster</h3>
-            <p>{driverRosterAccordionOpen ? 'Roster detail is open.' : 'Closed by default; expand when you need the row detail.'}</p>
-          </div>
+              </div>
 
           {driverPositionsData?.counts && (
             <div className="driver-position-counts">
@@ -10053,8 +10044,7 @@ function openReportLoadDetails(load) {
         >
           <span className="feature-section-title-block">
             <span className="feature-section-title">Available Equipment</span>
-            <span className="feature-section-subtitle">Current advertised availability, recent location patterns, advertise new availability, view email blast list.</span>
-          </span>
+                      </span>
           {showAvailableTrucksStatusPill && (
             <span className={`feature-section-status-pill ${currentCount > 0 ? 'has-items' : 'is-zero'} ${availableTrucksLoading ? 'is-loading' : ''}`}>
               {availableTrucksLoading ? 'Loading...' : `${currentCount} current`}
@@ -10088,7 +10078,6 @@ function openReportLoadDetails(load) {
                     </span>
                   )}
                 </span>
-                <span className="available-trucks-subtitle">Current advertised trucks that are not hidden by active or future assignment.</span>
               </span>
               <span className="available-trucks-chevron">
                 {availableTrucksCurrentOpen ? '▲' : '▼'}
@@ -10187,8 +10176,7 @@ function openReportLoadDetails(load) {
             >
               <span className="available-trucks-title-block">
                 <span className="available-trucks-title">Available Equipment Analysis</span>
-                <span className="available-trucks-subtitle">Recent posting patterns, assignment filters, locations, proximity, and equipment mix.</span>
-              </span>
+                </span>
               <span className="available-trucks-chevron">
                 {availableTrucksOpen ? '▲' : '▼'}
               </span>
@@ -10280,8 +10268,7 @@ function openReportLoadDetails(load) {
             >
               <span className="available-trucks-title-block">
                 <span className="available-trucks-title">Add Available Equipment</span>
-                <span className="available-trucks-subtitle">Advertise Available Equipment to the customer mass distribution list.</span>
-              </span>
+                           </span>
               <span className="available-trucks-chevron">
                 {availableTrucksActionOpen ? '▲' : '▼'}
               </span>
@@ -10397,7 +10384,7 @@ function openReportLoadDetails(load) {
             >
               <span className="available-trucks-title-block">
                 <span className="available-trucks-title">Available Equipment Distribution List</span>
-                <span className="available-trucks-subtitle">View and add active recipients for Available Equipment mass emails.</span>
+                
               </span>
               <span className="available-trucks-chevron available-trucks-chevron-slot" aria-hidden="true">
                 {availableTruckDistributionOpen ? '▲' : '▼'}
@@ -10630,8 +10617,7 @@ function openReportLoadDetails(load) {
         >
           <span className="feature-section-title-block">
             <span className="feature-section-title">IntelliTrack</span>
-            <span className="feature-section-subtitle">Automatic tracking visibility and start/stop controls.</span>
-          </span>
+                      </span>
           {showIntelliTrackStatusPill && (
             <span className={`feature-section-status-pill ${count > 0 ? 'has-items' : 'is-zero'} ${intelliTrackLoading ? 'is-loading' : ''}`}>
               {intelliTrackLoading ? 'Loading...' : `${count} tracking`}
@@ -10665,8 +10651,7 @@ function openReportLoadDetails(load) {
                     </span>
                   )}
                 </span>
-                <span className="intellitrack-subtitle">Show orders currently enrolled in IntelliTrack.</span>
-              </span>
+                </span>
               <span className="intellitrack-chevron">
                 {intelliTrackOpen ? '▲' : '▼'}
               </span>
@@ -10751,8 +10736,7 @@ function openReportLoadDetails(load) {
             >
               <span className="intellitrack-title-block">
                 <span className="intellitrack-title">Start or Stop Tracking</span>
-                <span className="intellitrack-subtitle">Search a BOL and toggle IntelliTrack from the Bid Listing record.</span>
-              </span>
+                              </span>
               <span className="intellitrack-chevron">
                 {intelliTrackActionOpen ? '▲' : '▼'}
               </span>
@@ -10879,7 +10863,6 @@ function openReportLoadDetails(load) {
         >
           <span className="feature-section-title-block">
             <span className="feature-section-title">Job Photo Uploads</span>
-            <span className="feature-section-subtitle">Pickup and delivery photo log for {dateLabel}.</span>
           </span>
           {showUploadDigestStatusPill && (
             <span className={`feature-section-status-pill ${count > 0 ? 'has-items' : 'is-zero'} ${uploadDigestLoading ? 'is-loading' : ''}`}>
@@ -12727,8 +12710,7 @@ function openReportLoadDetails(load) {
         >
           <span className="feature-section-title-block">
             <span className="feature-section-title">Sales and Leads</span>
-            <span className="feature-section-subtitle">Customers, leads, follow-ups, aviation prospects, and customer cards.</span>
-          </span>
+             </span>
           {showSalesAndLeadsPill && (
             <span className="feature-section-status-pill sales-and-leads-status-pill has-items">
               {formatReportNumber(salesAndLeadsPillCount)} {salesAndLeadsPillLabel}
@@ -12858,7 +12840,7 @@ function openReportLoadDetails(load) {
         >
           <span className="feature-section-title-block">
             <span className="feature-section-title">Reports</span>
-            <span className="feature-section-subtitle">Financial, operational, and driver/fleet reporting.</span>
+            
           </span>
           {!reportsSectionOpen && (
             <span
@@ -12887,7 +12869,6 @@ function openReportLoadDetails(load) {
             >
               <div>
                 <strong>Financial Reports</strong>
-                <span>Revenue totals, yearly projections, monthly driver summaries, and weekly settlements</span>
               </div>
               <span className="report-accordion-icon">{isFinancialReportsOpen ? '▼' : '▶'}</span>
             </button>
@@ -13280,7 +13261,6 @@ function openReportLoadDetails(load) {
             >
               <div>
                 <strong>Operational Reports</strong>
-                <span>Action items, permit control, daily history, and availability reporting</span>
               </div>
               <span className="report-group-button-actions">
                 {!isOperationalReportsOpen && (
@@ -13651,8 +13631,7 @@ function openReportLoadDetails(load) {
                     <div className="report-ready-card">
                       <div>
                         <strong>{operationalNotesReport.reportLabel || 'Recent Order Notes'} is ready.</strong>
-                        <span> The preview opens with Dispatch selected first.</span>
-                      </div>
+                              </div>
                       <button className="view-button" onClick={() => {
                         setOperationalNotesTypeFilter('Dispatch');
                         setOperationalNotesModalOpen(true);
@@ -13772,7 +13751,6 @@ function openReportLoadDetails(load) {
             >
               <div>
                 <strong>Driver / Fleet Reports</strong>
-                <span>Roster, equipment, and time-off reporting</span>
               </div>
               <span className="report-accordion-icon">{isDriverFleetReportsOpen ? '▼' : '▶'}</span>
             </button>
