@@ -7690,13 +7690,59 @@ function openReportLoadDetails(load) {
     const driverRows = yearlyProjectionReport.driverRows || [];
     const monthlyTotals = yearlyProjectionReport.monthlyTotals || [];
     const sensitivityRows = yearlyProjectionReport.driverCountSensitivity || [];
+    const offTimeAdjustment = yearlyProjectionReport.offTimeAdjustment || {};
+    const offTimePeriods = offTimeAdjustment.periods || [];
+    const activeDriverCount = Number(summary.activeDriverCount || 0);
+    const averageMonthlyRevenuePerActiveDriver = Number(summary.averageMonthlyRevenuePerActiveDriver || 0);
+    const projectionLockedRevenue = Number(summary.projectionLockedRevenue ?? summary.actualRevenueThroughCurrentMonth ?? 0);
+    const currentMonthRemainingProjectedRevenueBeforeOffTime = Number(
+      summary.currentMonthRemainingProjectedRevenueBeforeOffTime ?? summary.currentMonthRemainingProjectedRevenue ?? 0
+    );
+    const remainingFullMonthsAfterCurrent = Number(summary.remainingFullMonthsAfterCurrent || 0);
+    const sensitivityAppliesToRemainingYear = Boolean(summary.sensitivityAppliesToRemainingYear);
+
+    function getProjectionAvailabilityRatioForDriverCount(period = {}, driverCount = 0) {
+      const cleanDriverCount = Math.max(0, Number(driverCount || 0));
+      const days = Math.max(0, Number(period.days || 0));
+      const baselineDriverDays = cleanDriverCount * days;
+
+      if (baselineDriverDays <= 0) return 0;
+
+      const knownOffDays = Math.min(Math.max(0, Number(period.knownOffDays || 0)), baselineDriverDays);
+      return Math.max(0, (baselineDriverDays - knownOffDays) / baselineDriverDays);
+    }
+
+    function getCustomYearlyProjectionForDriverCount(driverCount) {
+      const cleanDriverCount = Math.max(0, Number(driverCount || 0));
+
+      if (sensitivityAppliesToRemainingYear) {
+        const driverCountScale = activeDriverCount > 0 ? cleanDriverCount / activeDriverCount : 0;
+        const currentMonthPeriod = offTimePeriods.find((period) => period.periodType === 'currentMonthRemainder') || null;
+        const futureMonthPeriods = offTimePeriods.filter((period) => period.periodType === 'futureFullMonth');
+        const currentMonthAvailabilityRatio = currentMonthPeriod
+          ? getProjectionAvailabilityRatioForDriverCount(currentMonthPeriod, cleanDriverCount)
+          : 1;
+        const projectedCurrentMonthRemainder = currentMonthRemainingProjectedRevenueBeforeOffTime * driverCountScale * currentMonthAvailabilityRatio;
+        const projectedFutureFullMonths = futureMonthPeriods.length > 0
+          ? futureMonthPeriods.reduce((sum, period) => {
+              const monthAvailabilityRatio = getProjectionAvailabilityRatioForDriverCount(period, cleanDriverCount);
+              return sum + (averageMonthlyRevenuePerActiveDriver * cleanDriverCount * monthAvailabilityRatio);
+            }, 0)
+          : averageMonthlyRevenuePerActiveDriver * cleanDriverCount * remainingFullMonthsAfterCurrent;
+
+        return projectionLockedRevenue + projectedCurrentMonthRemainder + projectedFutureFullMonths;
+      }
+
+      return averageMonthlyRevenuePerActiveDriver * cleanDriverCount * 12;
+    }
+
     const customDriverCount = Number(yearlyProjectionCustomDriverCount);
     const customScenario = Number.isFinite(customDriverCount) && customDriverCount > 0
       ? {
           label: String(yearlyProjectionCustomName || 'Custom scenario').trim() || 'Custom scenario',
           driverCount: customDriverCount,
-          projectedAnnualRevenue: Number(summary.averageMonthlyRevenuePerActiveDriver || 0) * customDriverCount * 12,
-          differenceFromCurrent: (Number(summary.averageMonthlyRevenuePerActiveDriver || 0) * customDriverCount * 12) - Number(summary.projectedAnnualRevenue || 0)
+          projectedAnnualRevenue: getCustomYearlyProjectionForDriverCount(customDriverCount),
+          differenceFromCurrent: getCustomYearlyProjectionForDriverCount(customDriverCount) - Number(summary.projectedAnnualRevenue || 0)
         }
       : null;
 
@@ -7706,7 +7752,11 @@ function openReportLoadDetails(load) {
           <div>
             <span>Projected Annual Revenue</span>
             <strong>{formatReportMoney(summary.projectedAnnualRevenue)}</strong>
-            <small>{formatReportMoney(summary.averageMonthlyRevenuePerActiveDriver)} average monthly revenue per active driver × {formatReportNumber(summary.activeDriverCount)} active driver{Number(summary.activeDriverCount) === 1 ? '' : 's'} × 12</small>
+            <small>
+              {sensitivityAppliesToRemainingYear
+                ? `${formatReportMoney(summary.projectionLockedRevenue)} already logged + ${formatReportMoney(summary.projectedRemainingRevenue)} projected remaining year`
+                : `${formatReportMoney(summary.averageMonthlyRevenuePerActiveDriver)} average monthly revenue per active driver × ${formatReportNumber(summary.activeDriverCount)} active driver${Number(summary.activeDriverCount) === 1 ? '' : 's'} × 12`}
+            </small>
           </div>
           <div>
             <span>Basis</span>
@@ -7721,8 +7771,11 @@ function openReportLoadDetails(load) {
             <strong>{formatReportNumber(summary.activeDriverCount)}</strong>
           </div>
           <div className="report-kpi-card">
-            <span>Basis Revenue (YTD Gross)</span>
+            <span>Projection Basis Revenue</span>
             <strong>{formatReportMoney(summary.basisRevenue)}</strong>
+            {Number(summary.basisActualRevenue || 0) > 0 && Number(summary.basisActualRevenue || 0) !== Number(summary.basisRevenue || 0) && (
+              <small>{formatReportMoney(summary.basisActualRevenue)} actual logged</small>
+            )}
           </div>
           <div className="report-kpi-card">
             <span>Avg Monthly Revenue</span>
@@ -7738,13 +7791,32 @@ function openReportLoadDetails(load) {
           </div>
         </div>
 
-        {summary.currentMonthIsBasis && summary.currentMonthRevenue > 0 && (
+        {yearlyProjectionReport.basisIncludesProratedCurrentMonth && summary.currentMonthRevenue > 0 && (
           <div className="yearly-projection-note">
-            <strong>Current month included:</strong> {formatReportMoney(summary.currentMonthRevenue)} from {summary.currentMonthName || 'the current month'} is included in the projection basis. This will move as more current-month loads are logged.
+            <strong>Current month paced:</strong> {formatReportMoney(summary.currentMonthRevenue)} is logged in {summary.currentMonthName || 'the current month'} through day {formatReportNumber(summary.currentMonthElapsedDay)} of {formatReportNumber(summary.currentMonthDays)}, pacing to {formatReportMoney(summary.currentMonthProjectedRevenueBeforeOffTime ?? summary.currentMonthProjectedRevenue)} before known off-time.
+            {Number(offTimeAdjustment.currentMonthProjectedRevenueReduction || 0) > 0 && (
+              <> Known off-time adjusts the current-month projection to <strong>{formatReportMoney(summary.currentMonthProjectedRevenue)}</strong>.</>
+            )}
+            {' '}Driver count sensitivity only changes the remaining-year projection; revenue already logged stays locked.
           </div>
         )}
 
-        {!summary.currentMonthIsBasis && summary.currentPartialMonthRevenue > 0 && (
+        {offTimeAdjustment.checked && Number(offTimeAdjustment.futureKnownOffDays || 0) > 0 && (
+          <div className="yearly-projection-note">
+            <strong>Known off-time adjustment:</strong> {formatReportNumber(offTimeAdjustment.futureKnownOffDays)} scheduled future driver-day{Number(offTimeAdjustment.futureKnownOffDays) === 1 ? '' : 's'} are removed from remaining-year capacity.
+            {' '}That reduces this projection by {formatReportMoney(offTimeAdjustment.projectedRevenueReduction || summary.offTimeProjectedRevenueReduction)}.
+            <br />
+            Current month remaining: {formatReportNumber(offTimeAdjustment.currentMonthKnownOffDays)} off-day{Number(offTimeAdjustment.currentMonthKnownOffDays) === 1 ? '' : 's'} · future full months: {formatReportNumber(offTimeAdjustment.futureFullMonthKnownOffDays)} off-day{Number(offTimeAdjustment.futureFullMonthKnownOffDays) === 1 ? '' : 's'}.
+          </div>
+        )}
+
+        {offTimeAdjustment.checked && offTimeAdjustment.warning && (
+          <div className="yearly-projection-note">
+            <strong>Driver Time Off warning:</strong> {offTimeAdjustment.warning}
+          </div>
+        )}
+
+        {!yearlyProjectionReport.basisIncludesProratedCurrentMonth && !summary.currentMonthIsBasis && summary.currentPartialMonthRevenue > 0 && (
           <div className="yearly-projection-note">
             <strong>Current month watch:</strong> {formatReportMoney(summary.currentPartialMonthRevenue)} is logged in {summary.currentPartialMonthName || 'the current month'} so far, but it is not part of the projection basis.
           </div>
@@ -7753,7 +7825,7 @@ function openReportLoadDetails(load) {
         <div className="yearly-projection-grid">
           <section className="yearly-projection-card">
             <h3>Run-rate scenarios</h3>
-            <p className="yearly-projection-card-note">Static math scenarios based on the current projection basis.</p>
+            <p className="yearly-projection-card-note">Scenarios adjust the remaining-year run rate while keeping revenue already logged intact.</p>
             <div className="report-table-wrap">
               <table className="driver-report-table yearly-projection-scenario-table">
                 <thead>
@@ -7785,7 +7857,8 @@ function openReportLoadDetails(load) {
             <div className="yearly-projection-card-heading-row">
               <div>
                 <h3>Driver count sensitivity</h3>
-                              </div>
+                <p className="yearly-projection-card-note">Driver changes apply from today forward, not retroactively to months already posted.</p>
+              </div>
               <button
                 type="button"
                 className="view-button yearly-projection-custom-toggle"
@@ -7852,18 +7925,26 @@ function openReportLoadDetails(load) {
         <section className="yearly-projection-card yearly-projection-monthly-card">
           <h3>Monthly revenue basis</h3>
           <div className="yearly-projection-month-strip">
-            {monthlyTotals.map((month) => (
-              <div
-                key={month.month}
-                className={`yearly-projection-month-card ${month.isBasisMonth ? 'basis' : ''} ${month.isCurrentMonth ? 'current' : ''}`}
-              >
-                <span>{month.shortName || month.name}</span>
-                {month.isBasisMonth && <em>Basis</em>}
-                {month.isCurrentMonth && !month.isBasisMonth && <em>Current</em>}
-                <strong>{formatReportMoney(month.revenue)}</strong>
-                <small>{formatReportNumber(month.loadCount)} load{Number(month.loadCount) === 1 ? '' : 's'}</small>
-              </div>
-            ))}
+            {monthlyTotals.map((month) => {
+              const isPacedMonth = Boolean(month.isProratedBasisMonth);
+
+              return (
+                <div
+                  key={month.month}
+                  className={`yearly-projection-month-card ${month.isBasisMonth ? 'basis' : ''} ${month.isCurrentMonth ? 'current' : ''}`}
+                >
+                  <span>{month.shortName || month.name}</span>
+                  {isPacedMonth ? <em>Paced</em> : month.isBasisMonth && <em>Basis</em>}
+                  {month.isCurrentMonth && !month.isBasisMonth && <em>Current</em>}
+                  <strong>{formatReportMoney(isPacedMonth ? month.projectedBasisRevenue : month.revenue)}</strong>
+                  <small>
+                    {isPacedMonth
+                      ? `${formatReportMoney(month.revenue)} actual · day ${formatReportNumber(month.currentMonthElapsedDay)} of ${formatReportNumber(month.currentMonthDays)}${Number(offTimeAdjustment.currentMonthProjectedRevenueReduction || 0) > 0 ? ` · off-time adjusted to ${formatReportMoney(summary.currentMonthProjectedRevenue)}` : ''}`
+                      : `${formatReportNumber(month.loadCount)} load${Number(month.loadCount) === 1 ? '' : 's'}`}
+                  </small>
+                </div>
+              );
+            })}
           </div>
         </section>
 
