@@ -7372,8 +7372,7 @@ function openReportLoadDetails(load) {
             <div className="yearly-projection-card-heading-row">
               <div>
                 <h3>Driver count sensitivity</h3>
-                <p className="yearly-projection-card-note">Not clickable; use the custom scenario option for a named driver-count test.</p>
-              </div>
+                              </div>
               <button
                 type="button"
                 className="view-button yearly-projection-custom-toggle"
@@ -9220,8 +9219,10 @@ function openReportLoadDetails(load) {
     }
 
     function chooseDriverTimeOffPane(filterKey) {
+      const isSamePane = filterKey === activePane;
+
       setDriverTimeOffPaneFilter(filterKey);
-      setDriverTimeOffAccordionOpen(true);
+      setDriverTimeOffAccordionOpen((current) => (isSamePane ? !current : true));
     }
 
     const panePills = [
@@ -9269,7 +9270,9 @@ function openReportLoadDetails(load) {
                 type="button"
                 className={`driver-time-off-lineup-pill ${pill.tone} ${activePane === pill.key ? 'is-active' : ''}`}
                 onClick={() => chooseDriverTimeOffPane(pill.key)}
-                title={`Show ${pill.label.toLowerCase()} driver time off`}
+                title={`${driverTimeOffAccordionOpen && activePane === pill.key ? 'Hide' : 'Show'} ${pill.label.toLowerCase()} driver time off`}
+                aria-expanded={driverTimeOffAccordionOpen && activePane === pill.key}
+                aria-pressed={activePane === pill.key}
               >
                 <span>{pill.label}</span>
                 <strong>{formatReportNumber(pill.value)}</strong>
@@ -10576,15 +10579,14 @@ function openReportLoadDetails(load) {
                         <strong>{summary.activeFutureAssignmentExclusions || 0}</strong>
                         <small>Truck/driver now active or future-booked</small>
                       </button>
-                      <button
-                        type="button"
-                        className="available-trucks-kpi-button"
-                        onClick={() => openAvailableTruckDrilldown('Recent posts', 'Rows in the recent pattern window, with the first later Won pickup when found. Historical follow-through only; not current status.', recentRecords)}
+                      <div
+                        className="available-trucks-kpi-card available-trucks-kpi-static"
+                        title="Unique drivers represented in the recent pattern window"
                       >
                         <span>Recent drivers</span>
                         <strong>{summary.uniqueRecentDrivers || 0}</strong>
-                        <small>{summary.recentRecordCount || 0} rows in pattern window</small>
-                      </button>
+                        <small>{summary.recentRecordCount || 0} posting row{summary.recentRecordCount === 1 ? '' : 's'} in pattern window</small>
+                      </div>
                     </div>
 
                     {attentionItems.length > 0 && (
@@ -13926,9 +13928,7 @@ function openReportLoadDetails(load) {
                     )}
                   </div>
 
-                  <p className="on-this-day-run-hint">
-                    Opens the selected date only. The old comparison-year view has been removed so this report stays light on the server.
-                  </p>
+            
 
                   {getPdfExportNotice('onThisDay') && !onThisDayModalOpen && (
                     <div className="pdf-export-success">{getPdfExportNotice('onThisDay')}</div>

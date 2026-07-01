@@ -14161,3 +14161,115 @@ button.available-truck-distribution-summary-card:disabled {
     height: min(720px, 94vh);
   }
 }
+
+
+/* PASS 28: Driver Time Off pill readability + click-again collapse support */
+.driver-time-off-lineup-pill span,
+.driver-time-off-lineup-pill small {
+  color: #cbd5e1 !important;
+  text-shadow: 0 1px 1px rgba(2, 6, 23, 0.42);
+}
+
+.driver-time-off-lineup-pill.current:not(.quiet) span,
+.driver-time-off-lineup-pill.current:not(.quiet) small {
+  color: #99f6e4 !important;
+}
+
+.driver-time-off-lineup-pill.ended:not(.quiet) span,
+.driver-time-off-lineup-pill.ended:not(.quiet) small {
+  color: #bfdbfe !important;
+}
+
+.driver-time-off-lineup-pill.starting:not(.quiet) span,
+.driver-time-off-lineup-pill.starting:not(.quiet) small {
+  color: #fde68a !important;
+}
+
+.driver-time-off-lineup-pill strong {
+  color: #ffffff !important;
+}
+
+:root[data-theme='light'] .driver-time-off-lineup-pill span,
+:root[data-theme='light'] .driver-time-off-lineup-pill small {
+  color: #334155 !important;
+  text-shadow: none !important;
+}
+
+:root[data-theme='light'] .driver-time-off-lineup-pill.current:not(.quiet) span,
+:root[data-theme='light'] .driver-time-off-lineup-pill.current:not(.quiet) small {
+  color: #0f766e !important;
+}
+
+:root[data-theme='light'] .driver-time-off-lineup-pill.ended:not(.quiet) span,
+:root[data-theme='light'] .driver-time-off-lineup-pill.ended:not(.quiet) small {
+  color: #1d4ed8 !important;
+}
+
+:root[data-theme='light'] .driver-time-off-lineup-pill.starting:not(.quiet) span,
+:root[data-theme='light'] .driver-time-off-lineup-pill.starting:not(.quiet) small {
+  color: #92400e !important;
+}
+
+:root[data-theme='light'] .driver-time-off-lineup-pill strong {
+  color: #020617 !important;
+}
+
+
+/* PASS 28b: Driver Time Off record chip readability in light mode */
+:root[data-theme='light'] .driver-time-off-reason-pill {
+  border-color: #0f766e !important;
+  background: #ccfbf1 !important;
+  color: #115e59 !important;
+  font-weight: 950 !important;
+  text-shadow: none !important;
+}
+
+:root[data-theme='light'] .driver-time-off-reason-pill.repairs {
+  border-color: #d97706 !important;
+  background: #fef3c7 !important;
+  color: #78350f !important;
+}
+
+:root[data-theme='light'] .driver-time-off-reason-pill.recently-ended {
+  border-color: #2563eb !important;
+  background: #dbeafe !important;
+  color: #1e3a8a !important;
+}
+
+:root[data-theme='light'] .driver-time-off-reason-pill.starting-soon {
+  border-color: #d97706 !important;
+  background: #fef3c7 !important;
+  color: #78350f !important;
+}
+
+
+/* PASS 29: remove false-click affordances from static Available Equipment items. */
+.available-trucks-kpi-static {
+  cursor: default !important;
+}
+
+.available-trucks-kpi-static:hover {
+  transform: none !important;
+}
+
+.available-truck-distribution-table tbody tr,
+.available-truck-distribution-table tbody tr:hover {
+  cursor: default !important;
+  transform: none !important;
+}
+
+.available-truck-distribution-table tbody tr:hover {
+  background: var(--kole-table-row) !important;
+}
+
+.available-truck-distribution-table tbody tr:nth-child(even):hover {
+  background: var(--kole-table-body) !important;
+}
+
+:root[data-theme='light'] .available-truck-distribution-table tbody tr:hover {
+  background: #ffffff !important;
+}
+
+:root[data-theme='light'] .available-truck-distribution-table tbody tr:nth-child(even):hover {
+  background: #f8fafc !important;
+}
