@@ -694,6 +694,7 @@ export default function App() {
   const [brandRevealActive, setBrandRevealActive] = useState(false);
   const [brandRevealKey, setBrandRevealKey] = useState(0);
   const brandRevealTimerRef = useRef(null);
+  const lastRefreshCueAtRef = useRef(0);
   const isAuthenticated = Boolean(accessToken);
 
   const [query, setQuery] = useState('');
@@ -1221,6 +1222,125 @@ export default function App() {
     }, 2900);
   }
 
+  async function playRefreshPlaneSound() {
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return;
+
+      const audioContext = new AudioContextClass();
+
+      if (audioContext.state === 'suspended' && typeof audioContext.resume === 'function') {
+        await audioContext.resume();
+      }
+
+      const now = audioContext.currentTime;
+      const duration = 1.18;
+      const masterGain = audioContext.createGain();
+      masterGain.gain.setValueAtTime(0.0001, now);
+      masterGain.gain.exponentialRampToValueAtTime(0.085, now + 0.08);
+      masterGain.gain.setValueAtTime(0.085, now + 0.82);
+      masterGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      masterGain.connect(audioContext.destination);
+
+      const propChopGain = audioContext.createGain();
+      propChopGain.gain.setValueAtTime(0.32, now);
+      propChopGain.connect(masterGain);
+
+      // The little propeller "chop": quick repeating pulses over a low engine hum.
+      for (let offset = 0; offset < duration; offset += 0.047) {
+        const pulseAt = now + offset;
+        propChopGain.gain.setValueAtTime(0.24, pulseAt);
+        propChopGain.gain.linearRampToValueAtTime(0.82, pulseAt + 0.011);
+        propChopGain.gain.exponentialRampToValueAtTime(0.28, pulseAt + 0.041);
+      }
+
+      const engineFilter = audioContext.createBiquadFilter();
+      engineFilter.type = 'lowpass';
+      engineFilter.frequency.setValueAtTime(520, now);
+      engineFilter.frequency.exponentialRampToValueAtTime(760, now + 0.5);
+      engineFilter.frequency.exponentialRampToValueAtTime(440, now + duration);
+      engineFilter.Q.setValueAtTime(0.65, now);
+      engineFilter.connect(propChopGain);
+
+      const engine = audioContext.createOscillator();
+      engine.type = 'sawtooth';
+      engine.frequency.setValueAtTime(72, now);
+      engine.frequency.exponentialRampToValueAtTime(104, now + 0.42);
+      engine.frequency.exponentialRampToValueAtTime(86, now + duration);
+      engine.connect(engineFilter);
+      engine.start(now);
+      engine.stop(now + duration);
+
+      const harmonicGain = audioContext.createGain();
+      harmonicGain.gain.setValueAtTime(0.22, now);
+      harmonicGain.connect(engineFilter);
+
+      const harmonic = audioContext.createOscillator();
+      harmonic.type = 'triangle';
+      harmonic.frequency.setValueAtTime(144, now);
+      harmonic.frequency.exponentialRampToValueAtTime(208, now + 0.42);
+      harmonic.frequency.exponentialRampToValueAtTime(172, now + duration);
+      harmonic.connect(harmonicGain);
+      harmonic.start(now);
+      harmonic.stop(now + duration);
+
+      const bufferSize = Math.max(1, Math.floor(audioContext.sampleRate * duration));
+      const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+      const noise = noiseBuffer.getChannelData(0);
+      let lastNoiseValue = 0;
+
+      for (let index = 0; index < bufferSize; index += 1) {
+        lastNoiseValue = (lastNoiseValue + (Math.random() * 2 - 1) * 0.18) * 0.72;
+        noise[index] = lastNoiseValue;
+      }
+
+      const noiseSource = audioContext.createBufferSource();
+      noiseSource.buffer = noiseBuffer;
+
+      const noiseFilter = audioContext.createBiquadFilter();
+      noiseFilter.type = 'bandpass';
+      noiseFilter.frequency.setValueAtTime(260, now);
+      noiseFilter.frequency.exponentialRampToValueAtTime(380, now + 0.48);
+      noiseFilter.frequency.exponentialRampToValueAtTime(230, now + duration);
+      noiseFilter.Q.setValueAtTime(0.9, now);
+
+      const noiseGain = audioContext.createGain();
+      noiseGain.gain.setValueAtTime(0.0001, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.035, now + 0.08);
+      noiseGain.gain.setValueAtTime(0.035, now + 0.82);
+      noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+      noiseSource.connect(noiseFilter);
+      noiseFilter.connect(noiseGain);
+      noiseGain.connect(masterGain);
+      noiseSource.start(now);
+      noiseSource.stop(now + duration);
+
+      window.setTimeout(() => {
+        if (typeof audioContext.close === 'function') {
+          audioContext.close().catch(() => {});
+        }
+      }, 1500);
+    } catch (err) {
+      // Browser/Tauri audio permissions vary. If the sound is blocked, the visual refresh cue still runs.
+    }
+  }
+
+  function playDataRefreshCue({ sound = true } = {}) {
+    const now = Date.now();
+
+    if (now - lastRefreshCueAtRef.current < 2500) {
+      return;
+    }
+
+    lastRefreshCueAtRef.current = now;
+    playBrandReveal();
+
+    if (sound) {
+      void playRefreshPlaneSound();
+    }
+  }
+
   function toggleColorTheme() {
     setColorTheme((currentTheme) => currentTheme === 'light' ? 'dark' : 'light');
   }
@@ -1717,12 +1837,19 @@ export default function App() {
     loadReportActionAlerts({ silent: true });
 
     const interval = window.setInterval(() => {
-      loadOperationsDashboard({ silent: true });
+      const operationsRefresh = loadOperationsDashboard({ silent: true });
+
       loadDriverPositions({ silent: true });
       loadIntelliTrack({ silent: true });
       loadAvailableTrucks({ silent: true });
       loadAvailableTruckDistributionList({ silent: true });
       loadReportActionAlerts({ silent: true });
+
+      operationsRefresh.then((operationsSucceeded) => {
+        if (operationsSucceeded) {
+          playDataRefreshCue();
+        }
+      });
     }, 10 * 60 * 1000);
 
     return () => window.clearInterval(interval);
@@ -3212,7 +3339,7 @@ async function refreshOperationsAndTracking() {
   const operationsSucceeded = await operationsRefresh;
 
   if (operationsSucceeded) {
-    playBrandReveal();
+    playDataRefreshCue();
   }
 }
 
