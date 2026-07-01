@@ -7801,15 +7801,7 @@ function openReportLoadDetails(load) {
           </div>
         )}
 
-        {offTimeAdjustment.checked && Number(offTimeAdjustment.futureKnownOffDays || 0) > 0 && (
-          <div className="yearly-projection-note">
-            <strong>Known off-time adjustment:</strong> {formatReportNumber(offTimeAdjustment.futureKnownOffDays)} scheduled future driver-day{Number(offTimeAdjustment.futureKnownOffDays) === 1 ? '' : 's'} are removed from remaining-year capacity.
-            {' '}That reduces this projection by {formatReportMoney(offTimeAdjustment.projectedRevenueReduction || summary.offTimeProjectedRevenueReduction)}.
-            <br />
-            Current month remaining: {formatReportNumber(offTimeAdjustment.currentMonthKnownOffDays)} off-day{Number(offTimeAdjustment.currentMonthKnownOffDays) === 1 ? '' : 's'} · future full months: {formatReportNumber(offTimeAdjustment.futureFullMonthKnownOffDays)} off-day{Number(offTimeAdjustment.futureFullMonthKnownOffDays) === 1 ? '' : 's'}.
-          </div>
-        )}
-
+        
         {offTimeAdjustment.checked && offTimeAdjustment.warning && (
           <div className="yearly-projection-note">
             <strong>Driver Time Off warning:</strong> {offTimeAdjustment.warning}
@@ -7927,6 +7919,22 @@ function openReportLoadDetails(load) {
           <div className="yearly-projection-month-strip">
             {monthlyTotals.map((month) => {
               const isPacedMonth = Boolean(month.isProratedBasisMonth);
+              const currentMonthOffTimeReduction = Number(offTimeAdjustment.currentMonthProjectedRevenueReduction || 0);
+              const hasCurrentMonthOffTimeAdjustment = Boolean(
+                isPacedMonth &&
+                month.isCurrentMonth &&
+                currentMonthOffTimeReduction > 0 &&
+                Number(summary.currentMonthProjectedRevenue || 0) > 0
+              );
+              const rawPacedRevenue = Number(
+                summary.currentMonthProjectedRevenueBeforeOffTime ??
+                month.projectedBasisRevenue ??
+                month.revenue ??
+                0
+              );
+              const displayedRevenue = hasCurrentMonthOffTimeAdjustment
+                ? Number(summary.currentMonthProjectedRevenue || 0)
+                : (isPacedMonth ? Number(month.projectedBasisRevenue || 0) : Number(month.revenue || 0));
 
               return (
                 <div
@@ -7934,12 +7942,14 @@ function openReportLoadDetails(load) {
                   className={`yearly-projection-month-card ${month.isBasisMonth ? 'basis' : ''} ${month.isCurrentMonth ? 'current' : ''}`}
                 >
                   <span>{month.shortName || month.name}</span>
-                  {isPacedMonth ? <em>Paced</em> : month.isBasisMonth && <em>Basis</em>}
+                  {hasCurrentMonthOffTimeAdjustment ? <em>Adjusted</em> : (isPacedMonth ? <em>Paced</em> : month.isBasisMonth && <em>Basis</em>)}
                   {month.isCurrentMonth && !month.isBasisMonth && <em>Current</em>}
-                  <strong>{formatReportMoney(isPacedMonth ? month.projectedBasisRevenue : month.revenue)}</strong>
+                  <strong>{formatReportMoney(displayedRevenue)}</strong>
                   <small>
                     {isPacedMonth
-                      ? `${formatReportMoney(month.revenue)} actual · day ${formatReportNumber(month.currentMonthElapsedDay)} of ${formatReportNumber(month.currentMonthDays)}${Number(offTimeAdjustment.currentMonthProjectedRevenueReduction || 0) > 0 ? ` · off-time adjusted to ${formatReportMoney(summary.currentMonthProjectedRevenue)}` : ''}`
+                      ? (hasCurrentMonthOffTimeAdjustment
+                          ? `${formatReportMoney(month.revenue)} actual · day ${formatReportNumber(month.currentMonthElapsedDay)} of ${formatReportNumber(month.currentMonthDays)} · ${formatReportMoney(rawPacedRevenue)} before off-time`
+                          : `${formatReportMoney(month.revenue)} actual · day ${formatReportNumber(month.currentMonthElapsedDay)} of ${formatReportNumber(month.currentMonthDays)}`)
                       : `${formatReportNumber(month.loadCount)} load${Number(month.loadCount) === 1 ? '' : 's'}`}
                   </small>
                 </div>
