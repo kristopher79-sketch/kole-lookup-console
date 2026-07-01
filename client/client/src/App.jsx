@@ -35,12 +35,65 @@ const STARTUP_SPLASH_MIN_MS = 5000;
 const STARTUP_SPLASH_EXIT_MS = 420;
 const STARTUP_SPLASH_FAKE_LIGHTS_COMPLETE_MS = 4600;
 const KOLE_THEME_STORAGE_KEY = 'koleConnectTheme';
+const KOLE_USER_PREFS_STORAGE_KEY = 'koleConnectUserPreferences';
+const DRIVER_TIME_OFF_PANE_OPTIONS = ['current', 'ended', 'starting-soon'];
+
+const DEFAULT_KOLE_USER_PREFERENCES = {
+  driverRosterDefaultOpen: false,
+  driverTimeOffDefaultOpen: false,
+  driverTimeOffDefaultPane: 'current',
+  uploadDigestDefaultOpen: false,
+  intelliTrackDefaultOpen: false,
+  availableTrucksDefaultOpen: false,
+  salesAndLeadsDefaultOpen: false,
+  reportsDefaultOpen: false,
+  hideYearlyProjection: false,
+  hideOnThisDay: false,
+  hideWeeklySettlementReport: false,
+  skipStartupSplash: false
+};
 
 function getSavedKoleTheme() {
   try {
     return localStorage.getItem(KOLE_THEME_STORAGE_KEY) === 'light' ? 'light' : 'dark';
   } catch (err) {
     return 'dark';
+  }
+}
+
+function normalizeKoleUserPreferences(value = {}) {
+  const prefs = {
+    ...DEFAULT_KOLE_USER_PREFERENCES,
+    ...(value && typeof value === 'object' ? value : {})
+  };
+
+  if (!DRIVER_TIME_OFF_PANE_OPTIONS.includes(prefs.driverTimeOffDefaultPane)) {
+    prefs.driverTimeOffDefaultPane = DEFAULT_KOLE_USER_PREFERENCES.driverTimeOffDefaultPane;
+  }
+
+  Object.keys(DEFAULT_KOLE_USER_PREFERENCES).forEach((key) => {
+    if (key !== 'driverTimeOffDefaultPane') {
+      prefs[key] = Boolean(prefs[key]);
+    }
+  });
+
+  return prefs;
+}
+
+function getSavedKoleUserPreferences() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(KOLE_USER_PREFS_STORAGE_KEY) || '{}');
+    return normalizeKoleUserPreferences(parsed);
+  } catch (err) {
+    return { ...DEFAULT_KOLE_USER_PREFERENCES };
+  }
+}
+
+function saveKoleUserPreferences(preferences) {
+  try {
+    localStorage.setItem(KOLE_USER_PREFS_STORAGE_KEY, JSON.stringify(normalizeKoleUserPreferences(preferences)));
+  } catch (err) {
+    // Local storage may be unavailable in a locked-down webview; preferences still work for this session.
   }
 }
 
@@ -283,6 +336,42 @@ function getAvailableTruckRowSuggestionGroup(row, suggestionIndex = {}) {
   if (!key) return null;
 
   return suggestionIndex?.[key] || null;
+}
+
+
+function getMailtoLink(email) {
+  const clean = String(email || '').trim();
+  if (!clean) return '';
+
+  return `mailto:${clean}`;
+}
+
+async function openEmailLink(email, event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  const url = getMailtoLink(email);
+  if (!url) return;
+
+  await openExternalLink(url);
+}
+
+function EmailLink({ email }) {
+  const clean = String(email || '').trim();
+  if (!clean) return <>-</>;
+
+  return (
+    <a
+      className="email-link"
+      href={getMailtoLink(clean)}
+      onClick={(event) => openEmailLink(clean, event)}
+      title={`Compose email to ${clean}`}
+    >
+      {clean}
+    </a>
+  );
 }
 
 
@@ -600,6 +689,8 @@ export default function App() {
   const [accessToken, setAccessToken] = useState(() => sessionStorage.getItem('koleLookupToken') || '');
   const [password, setPassword] = useState('');
   const [colorTheme, setColorTheme] = useState(getSavedKoleTheme);
+  const [userPrefs, setUserPrefs] = useState(getSavedKoleUserPreferences);
+  const [preferencesModalOpen, setPreferencesModalOpen] = useState(false);
   const [brandRevealActive, setBrandRevealActive] = useState(false);
   const [brandRevealKey, setBrandRevealKey] = useState(0);
   const brandRevealTimerRef = useRef(null);
@@ -636,9 +727,9 @@ export default function App() {
   const [driverPositionsData, setDriverPositionsData] = useState(null);
   const [driverPositionsLoading, setDriverPositionsLoading] = useState(false);
   const [driverPositionsError, setDriverPositionsError] = useState('');
-  const [driverRosterAccordionOpen, setDriverRosterAccordionOpen] = useState(false);
-  const [driverTimeOffAccordionOpen, setDriverTimeOffAccordionOpen] = useState(false);
-  const [driverTimeOffPaneFilter, setDriverTimeOffPaneFilter] = useState('current');
+  const [driverRosterAccordionOpen, setDriverRosterAccordionOpen] = useState(() => userPrefs.driverRosterDefaultOpen);
+  const [driverTimeOffAccordionOpen, setDriverTimeOffAccordionOpen] = useState(() => userPrefs.driverTimeOffDefaultOpen);
+  const [driverTimeOffPaneFilter, setDriverTimeOffPaneFilter] = useState(() => userPrefs.driverTimeOffDefaultPane);
   const [selectedDriverRoster, setSelectedDriverRoster] = useState(null);
   const [driverHistoryModalOpen, setDriverHistoryModalOpen] = useState(false);
   const [driverHistorySnapshot, setDriverHistorySnapshot] = useState(null);
@@ -831,7 +922,7 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginStatusMessage, setLoginStatusMessage] = useState('');
-  const [startupSplashVisible, setStartupSplashVisible] = useState(() => Boolean(sessionStorage.getItem('koleLookupToken')));
+  const [startupSplashVisible, setStartupSplashVisible] = useState(() => Boolean(sessionStorage.getItem('koleLookupToken')) && !userPrefs.skipStartupSplash);
   const [startupSplashExiting, setStartupSplashExiting] = useState(false);
   const [startupSplashDismissed, setStartupSplashDismissed] = useState(false);
   const [startupSplashElapsedMs, setStartupSplashElapsedMs] = useState(0);
@@ -840,8 +931,8 @@ export default function App() {
   const [uploadDigestLoading, setUploadDigestLoading] = useState(false);
   const [uploadDigestError, setUploadDigestError] = useState('');
   const [uploadDigestActionError, setUploadDigestActionError] = useState('');
-  const [uploadDigestSectionOpen, setUploadDigestSectionOpen] = useState(false);
-  const [intelliTrackSectionOpen, setIntelliTrackSectionOpen] = useState(false);
+  const [uploadDigestSectionOpen, setUploadDigestSectionOpen] = useState(() => userPrefs.uploadDigestDefaultOpen);
+  const [intelliTrackSectionOpen, setIntelliTrackSectionOpen] = useState(() => userPrefs.intelliTrackDefaultOpen);
   const [intelliTrackOpen, setIntelliTrackOpen] = useState(false);
   const [intelliTrackActionOpen, setIntelliTrackActionOpen] = useState(false);
   const [intelliTrackData, setIntelliTrackData] = useState(null);
@@ -856,7 +947,7 @@ export default function App() {
   const [intelliTrackActionLoading, setIntelliTrackActionLoading] = useState('');
   const [intelliTrackPendingBol, setIntelliTrackPendingBol] = useState('');
   const [intelliTrackSuppressedBols, setIntelliTrackSuppressedBols] = useState([]);
-  const [availableTrucksSectionOpen, setAvailableTrucksSectionOpen] = useState(false);
+  const [availableTrucksSectionOpen, setAvailableTrucksSectionOpen] = useState(() => userPrefs.availableTrucksDefaultOpen);
   const [availableTrucksCurrentOpen, setAvailableTrucksCurrentOpen] = useState(false);
   const [availableTrucksOpen, setAvailableTrucksOpen] = useState(false);
   const [availableTrucksActionOpen, setAvailableTrucksActionOpen] = useState(false);
@@ -882,10 +973,11 @@ export default function App() {
   const [availableTruckActionMessage, setAvailableTruckActionMessage] = useState('');
   const [availableTruckActionError, setAvailableTruckActionError] = useState('');
   const [availableTruckDrilldown, setAvailableTruckDrilldown] = useState(null);
-  const [reportsSectionOpen, setReportsSectionOpen] = useState(false);
-  const [salesAndLeadsSectionOpen, setSalesAndLeadsSectionOpen] = useState(false);
+  const [reportsSectionOpen, setReportsSectionOpen] = useState(() => userPrefs.reportsDefaultOpen);
+  const [salesAndLeadsSectionOpen, setSalesAndLeadsSectionOpen] = useState(() => userPrefs.salesAndLeadsDefaultOpen);
 
   const isAnyModalOpen = Boolean(
+    preferencesModalOpen ||
     selected ||
     selectedDriverRoster ||
     driverHistoryModalOpen ||
@@ -1150,6 +1242,297 @@ export default function App() {
     );
   }
 
+  function applyDashboardPreferenceDefaults(preferences = userPrefs) {
+    const nextPrefs = normalizeKoleUserPreferences(preferences);
+
+    setDriverRosterAccordionOpen(nextPrefs.driverRosterDefaultOpen);
+    setDriverTimeOffAccordionOpen(nextPrefs.driverTimeOffDefaultOpen);
+    setDriverTimeOffPaneFilter(nextPrefs.driverTimeOffDefaultPane);
+    setUploadDigestSectionOpen(nextPrefs.uploadDigestDefaultOpen);
+    setIntelliTrackSectionOpen(nextPrefs.intelliTrackDefaultOpen);
+    setAvailableTrucksSectionOpen(nextPrefs.availableTrucksDefaultOpen);
+    setSalesAndLeadsSectionOpen(nextPrefs.salesAndLeadsDefaultOpen);
+    setReportsSectionOpen(nextPrefs.reportsDefaultOpen);
+
+    if (!nextPrefs.intelliTrackDefaultOpen) {
+      closeIntelliTrackSubsections();
+    }
+
+    if (!nextPrefs.availableTrucksDefaultOpen) {
+      closeAvailableTruckSubsections();
+    }
+
+    if (!nextPrefs.salesAndLeadsDefaultOpen) {
+      closeSalesAndLeadsSubsections();
+    }
+
+    if (!nextPrefs.reportsDefaultOpen) {
+      closeReportSubsections();
+    }
+  }
+
+  function applySinglePreference(key, value) {
+    if (key === 'driverRosterDefaultOpen') {
+      setDriverRosterAccordionOpen(Boolean(value));
+    }
+
+    if (key === 'driverTimeOffDefaultOpen') {
+      setDriverTimeOffAccordionOpen(Boolean(value));
+    }
+
+    if (key === 'driverTimeOffDefaultPane') {
+      setDriverTimeOffPaneFilter(DRIVER_TIME_OFF_PANE_OPTIONS.includes(value) ? value : 'current');
+    }
+
+    if (key === 'uploadDigestDefaultOpen') {
+      setUploadDigestSectionOpen(Boolean(value));
+    }
+
+    if (key === 'intelliTrackDefaultOpen') {
+      setIntelliTrackSectionOpen(Boolean(value));
+      if (!value) closeIntelliTrackSubsections();
+    }
+
+    if (key === 'availableTrucksDefaultOpen') {
+      setAvailableTrucksSectionOpen(Boolean(value));
+      if (!value) closeAvailableTruckSubsections();
+    }
+
+    if (key === 'salesAndLeadsDefaultOpen') {
+      setSalesAndLeadsSectionOpen(Boolean(value));
+      if (!value) closeSalesAndLeadsSubsections();
+    }
+
+    if (key === 'reportsDefaultOpen') {
+      setReportsSectionOpen(Boolean(value));
+      if (!value) closeReportSubsections();
+    }
+
+    if (key === 'hideYearlyProjection' && value && activeReportPanel === 'yearlyProjection') {
+      setActiveReportPanel('');
+    }
+
+    if (key === 'hideOnThisDay' && value && activeReportPanel === 'onThisDay') {
+      setActiveReportPanel('');
+    }
+
+    if (key === 'hideWeeklySettlementReport' && value && activeReportPanel === 'weeklySettlement') {
+      setActiveReportPanel('');
+    }
+
+    if (key === 'skipStartupSplash' && value && startupSplashVisible) {
+      beginStartupSplashClose();
+    }
+
+    if (key === 'skipStartupSplash' && value && isAuthenticated) {
+      setStartupSplashDismissed(true);
+    }
+  }
+
+  function updateUserPreference(key, value, options = {}) {
+    const applyNow = options.applyNow !== false;
+
+    setUserPrefs((currentPrefs) => {
+      const nextPrefs = normalizeKoleUserPreferences({
+        ...currentPrefs,
+        [key]: value
+      });
+
+      saveKoleUserPreferences(nextPrefs);
+
+      if (applyNow) {
+        applySinglePreference(key, nextPrefs[key]);
+      }
+
+      return nextPrefs;
+    });
+  }
+
+  function resetUserPreferences() {
+    const nextPrefs = { ...DEFAULT_KOLE_USER_PREFERENCES };
+
+    saveKoleUserPreferences(nextPrefs);
+    setUserPrefs(nextPrefs);
+    applyDashboardPreferenceDefaults(nextPrefs);
+
+    if (activeReportPanel === 'yearlyProjection' || activeReportPanel === 'onThisDay') {
+      setActiveReportPanel('');
+    }
+  }
+
+  function PreferencesButton({ className = '' }) {
+    return (
+      <button
+        type="button"
+        className={`preferences-toggle-button ${className}`.trim()}
+        onClick={() => setPreferencesModalOpen(true)}
+        title="Open Kole Connect preferences"
+      >
+        <span className="preferences-toggle-icon" aria-hidden="true">⚙</span>
+        <span>Preferences</span>
+      </button>
+    );
+  }
+
+  function PreferenceSwitch({ label, description, checked, onChange, locked = false }) {
+    return (
+      <label className={`preference-toggle-row ${locked ? 'locked' : ''}`.trim()}>
+        <span>
+          <strong>{label}</strong>
+          {description && <small>{description}</small>}
+        </span>
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          disabled={locked}
+        />
+      </label>
+    );
+  }
+
+  function renderPreferencesModal() {
+    if (!preferencesModalOpen) return null;
+
+    return (
+      <div className="modal-overlay preferences-overlay" role="presentation">
+        <div className="detail-modal preferences-modal" role="dialog" aria-modal="true" aria-labelledby="preferences-modal-title">
+          <div className="detail-header preferences-modal-header">
+            <div>
+              <h2 id="preferences-modal-title">Kole Connect Preferences</h2>
+              <p>These settings are saved on this device. Theme stays separate so light/dark mode remains one-click.</p>
+            </div>
+            <button type="button" className="close-button" onClick={() => setPreferencesModalOpen(false)}>
+              Close
+            </button>
+          </div>
+
+          <div className="modal-body preferences-modal-body">
+            <section className="preferences-section">
+              <div className="preferences-section-heading">
+                <h3>Dashboard startup</h3>
+                <p>Choose what should already be open when Kole Connect starts.</p>
+              </div>
+
+              <div className="preferences-grid">
+                <PreferenceSwitch
+                  label="Driver Roster starts open"
+                  description="Keeps the roster visible without a fresh click each session."
+                  checked={userPrefs.driverRosterDefaultOpen}
+                  onChange={(checked) => updateUserPreference('driverRosterDefaultOpen', checked)}
+                />
+                <PreferenceSwitch
+                  label="Current Driver Time Off starts open"
+                  description="Pairs well with roster if you read both together."
+                  checked={userPrefs.driverTimeOffDefaultOpen}
+                  onChange={(checked) => updateUserPreference('driverTimeOffDefaultOpen', checked)}
+                />
+                <PreferenceSwitch
+                  label="Upload Digest starts open"
+                  description="Open today's pickup and delivery uploads automatically."
+                  checked={userPrefs.uploadDigestDefaultOpen}
+                  onChange={(checked) => updateUserPreference('uploadDigestDefaultOpen', checked)}
+                />
+                <PreferenceSwitch
+                  label="IntelliTrack starts open"
+                  description="Open active tracking tools at startup."
+                  checked={userPrefs.intelliTrackDefaultOpen}
+                  onChange={(checked) => updateUserPreference('intelliTrackDefaultOpen', checked)}
+                />
+                <PreferenceSwitch
+                  label="Available Trucks starts open"
+                  description="Open availability analysis and posting tools at startup."
+                  checked={userPrefs.availableTrucksDefaultOpen}
+                  onChange={(checked) => updateUserPreference('availableTrucksDefaultOpen', checked)}
+                />
+                <PreferenceSwitch
+                  label="Reports starts open"
+                  description="Open the report hub automatically."
+                  checked={userPrefs.reportsDefaultOpen}
+                  onChange={(checked) => updateUserPreference('reportsDefaultOpen', checked)}
+                />
+                <PreferenceSwitch
+                  label="Sales & Leads starts open"
+                  description="Open customer cards and sales reports automatically."
+                  checked={userPrefs.salesAndLeadsDefaultOpen}
+                  onChange={(checked) => updateUserPreference('salesAndLeadsDefaultOpen', checked)}
+                />
+              </div>
+
+              <label className="preference-select-row">
+                <span>
+                  <strong>Driver Time Off default pill</strong>
+                  <small>Used when Current Driver Time Off starts open.</small>
+                </span>
+                <select
+                  value={userPrefs.driverTimeOffDefaultPane}
+                  onChange={(e) => updateUserPreference('driverTimeOffDefaultPane', e.target.value)}
+                >
+                  <option value="current">Current</option>
+                  <option value="ended">Ended</option>
+                  <option value="starting-soon">Starting Soon</option>
+                </select>
+              </label>
+            </section>
+
+            <section className="preferences-section">
+              <div className="preferences-section-heading">
+                <h3>Hide optional report tools</h3>
+                <p>Operational exception reports stay visible; these are comfort/noise controls.</p>
+              </div>
+
+              <div className="preferences-grid">
+                <PreferenceSwitch
+                  label="Hide Yearly Revenue Projection"
+                  description="Removes the projection accordion from Financial Reports."
+                  checked={userPrefs.hideYearlyProjection}
+                  onChange={(checked) => updateUserPreference('hideYearlyProjection', checked)}
+                />
+                <PreferenceSwitch
+                  label="Hide On This Day"
+                  description="Removes the historical daily snapshot from Operational Reports."
+                  checked={userPrefs.hideOnThisDay}
+                  onChange={(checked) => updateUserPreference('hideOnThisDay', checked)}
+                />
+                <PreferenceSwitch
+                  label="Hide Weekly Settlement Report"
+                  description="Removes the Weekly Settlement Report from Financial Reports."
+                  checked={userPrefs.hideWeeklySettlementReport}
+                  onChange={(checked) => updateUserPreference('hideWeeklySettlementReport', checked)}
+                />
+              </div>
+            </section>
+
+            <section className="preferences-section">
+              <div className="preferences-section-heading">
+                <h3>Startup behavior</h3>
+                <p>Keeps the dashboard loading normally, but hides the full-screen startup animation.</p>
+              </div>
+
+              <div className="preferences-grid">
+                <PreferenceSwitch
+                  label="Hide startup loading overlay"
+                  description="Keeps normal dashboard loading, but removes the full-screen startup animation."
+                  checked={userPrefs.skipStartupSplash}
+                  onChange={(checked) => updateUserPreference('skipStartupSplash', checked)}
+                />
+              </div>
+            </section>
+
+            <div className="preferences-footer">
+              <button type="button" className="secondary-button" onClick={resetUserPreferences}>
+                Reset Preferences
+              </button>
+              <button type="button" onClick={() => setPreferencesModalOpen(false)}>
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
 
   useEffect(() => {
     const runtimeClass = isTauriRuntime ? 'tauri-runtime' : 'web-runtime';
@@ -1169,6 +1552,27 @@ export default function App() {
       // Local storage may be unavailable in a locked-down webview; the toggle still works for this session.
     }
   }, [colorTheme]);
+
+  useEffect(() => {
+    if (!userPrefs.skipStartupSplash || !isAuthenticated) return;
+
+    setStartupSplashVisible(false);
+    setStartupSplashExiting(false);
+    setStartupSplashDismissed(true);
+    setStartupSplashElapsedMs(0);
+  }, [userPrefs.skipStartupSplash, isAuthenticated]);
+
+  useEffect(() => {
+    const hiddenPanels = [];
+
+    if (userPrefs.hideYearlyProjection) hiddenPanels.push('yearlyProjection');
+    if (userPrefs.hideOnThisDay) hiddenPanels.push('onThisDay');
+    if (userPrefs.hideWeeklySettlementReport) hiddenPanels.push('weeklySettlement');
+
+    if (hiddenPanels.includes(activeReportPanel)) {
+      setActiveReportPanel('');
+    }
+  }, [userPrefs.hideYearlyProjection, userPrefs.hideOnThisDay, userPrefs.hideWeeklySettlementReport, activeReportPanel]);
 
   useEffect(() => {
     const body = document.body;
@@ -1259,13 +1663,21 @@ export default function App() {
       return;
     }
 
+    if (userPrefs.skipStartupSplash) {
+      setStartupSplashVisible(false);
+      setStartupSplashExiting(false);
+      setStartupSplashDismissed(true);
+      setStartupSplashElapsedMs(0);
+      return;
+    }
+
     if (!startupSplashDismissed && !startupSplashVisible && !startupDashboardSettled) {
       startupSplashStartedAtRef.current = Date.now();
       setStartupSplashElapsedMs(0);
       setStartupSplashExiting(false);
       setStartupSplashVisible(true);
     }
-  }, [isAuthenticated, startupSplashDismissed, startupSplashVisible, startupDashboardSettled]);
+  }, [isAuthenticated, userPrefs.skipStartupSplash, startupSplashDismissed, startupSplashVisible, startupDashboardSettled]);
 
   useEffect(() => {
     if (!startupSplashVisible || !isAuthenticated) return undefined;
@@ -1683,9 +2095,10 @@ export default function App() {
       driverHistoryCacheRef.current.clear();
       startupSplashStartedAtRef.current = Date.now();
       setStartupSplashElapsedMs(0);
-      setStartupSplashDismissed(false);
+      setStartupSplashDismissed(userPrefs.skipStartupSplash);
       setStartupSplashExiting(false);
-      setStartupSplashVisible(true);
+      setStartupSplashVisible(!userPrefs.skipStartupSplash);
+      applyDashboardPreferenceDefaults(userPrefs);
       setAccessToken(token);
       setPassword('');
       setLoginStatusMessage('');
@@ -5966,11 +6379,11 @@ function openReportLoadDetails(load) {
     return 'Basic Load Info';
   }
 
-  function DetailItem({ label, value, wide = false, className = '', children }) {
+  function DetailItem({ label, value, valueNode = null, wide = false, className = '', children }) {
     return (
       <div className={`detail-item ${wide ? 'wide' : ''} ${className}`}>
         <span>{label}</span>
-        <strong>{formatValue(value)}</strong>
+        <strong>{valueNode || formatValue(value)}</strong>
         {children}
       </div>
     );
@@ -8342,7 +8755,7 @@ function openReportLoadDetails(load) {
                 <td>{getRosterDisplayName(roster)}</td>
                 <td>{roster.truck || '-'}</td>
                 <td>{formatPhone(roster.cellPhone1) || '-'}</td>
-                <td>{roster.emailAddress1 || '-'}</td>
+                <td><EmailLink email={roster.emailAddress1} /></td>
                 <td>{[roster.soloOrTeam, roster.trailerType].filter(Boolean).join(' / ') || '-'}</td>
                 <td>{formatRosterDate(roster.startDate)}</td>
                 {inactive && <td>{formatRosterDate(roster.termDate)}</td>}
@@ -10111,8 +10524,8 @@ function openReportLoadDetails(load) {
                 <DetailItem label="Truck" value={roster.truck} />
                 <DetailItem label="Cell Phone 1" value={formatPhone(roster.cellPhone1)} />
                 <DetailItem label="Cell Phone 2" value={formatPhone(roster.cellPhone2)} />
-                <DetailItem label="Email Address 1" value={roster.emailAddress1} wide />
-                <DetailItem label="Email Address 2" value={roster.emailAddress2} wide />
+                <DetailItem label="Email Address 1" valueNode={<EmailLink email={roster.emailAddress1} />} wide />
+                <DetailItem label="Email Address 2" valueNode={<EmailLink email={roster.emailAddress2} />} wide />
                 <DetailItem label="Driver PIN" value={roster.pin} />
                 <DetailItem label="Start Date" value={formatRosterDate(roster.startDate)} />
                 <DetailItem label="Term Date" value={formatRosterDate(roster.termDate)} />
@@ -10881,7 +11294,7 @@ function openReportLoadDetails(load) {
                           sortedDistributionRows.map((row) => (
                             <tr key={row.id || `${row.company}-${row.email}`}>
                               <td><strong>{row.company || '-'}</strong></td>
-                              <td>{row.email || '-'}</td>
+                              <td><EmailLink email={row.email} /></td>
                             </tr>
                           ))
                         )}
@@ -10930,7 +11343,7 @@ function openReportLoadDetails(load) {
                         {sortAvailableTruckDistributionRowsForDisplay(inactiveDistributionRows, 'company', 'asc').map((row) => (
                           <tr key={row.id || `${row.company}-${row.email}`}>
                             <td><strong>{row.company || '-'}</strong></td>
-                            <td>{row.email || '-'}</td>
+                            <td><EmailLink email={row.email} /></td>
                           </tr>
                         ))}
                       </tbody>
@@ -13323,6 +13736,7 @@ function openReportLoadDetails(load) {
             )}
           </div>
 
+          {!userPrefs.hideYearlyProjection && (
           <div className={`report-accordion ${isYearlyProjectionOpen ? 'open' : ''}`}>
             <button
               type="button"
@@ -13390,6 +13804,8 @@ function openReportLoadDetails(load) {
               </div>
             )}
           </div>
+
+          )}
 
           <div className={`report-accordion ${isDriverSummaryOpen ? 'open' : ''}`}>
             <button
@@ -13533,6 +13949,7 @@ function openReportLoadDetails(load) {
             )}
           </div>
 
+          {!userPrefs.hideWeeklySettlementReport && (
           <div className={`report-accordion ${isWeeklySettlementOpen ? 'open' : ''}`}>
             <button
               type="button"
@@ -13629,6 +14046,7 @@ function openReportLoadDetails(load) {
               </div>
             )}
           </div>
+          )}
               </div>
             )}
           </div>
@@ -13874,6 +14292,7 @@ function openReportLoadDetails(load) {
 
 
 
+          {!userPrefs.hideOnThisDay && (
           <div className={`report-accordion ${isOnThisDayOpen ? 'open' : ''}`}>
             <button
               type="button"
@@ -13971,6 +14390,8 @@ function openReportLoadDetails(load) {
             )}
           </div>
 
+
+          )}
 
           <div className={`report-accordion ${isOperationalNotesOpen ? 'open' : ''}`}>
             <button
@@ -14504,6 +14925,8 @@ function openReportLoadDetails(load) {
 
   if (!isAuthenticated) {
     return (
+      <>
+      {renderPreferencesModal()}
       <div className="container">
         <header className="app-header app-header-branded">
   <div className="brand-stack">
@@ -14519,6 +14942,7 @@ function openReportLoadDetails(load) {
 
   <div className="header-actions login-header-actions">
     <ThemeToggleButton />
+    <PreferencesButton />
   </div>
 </header>
 
@@ -14565,11 +14989,14 @@ function openReportLoadDetails(load) {
           </div>
         </div>
       </div>
+      </>
     );
   }
 
   return (
     <>
+      {renderPreferencesModal()}
+
       {startupSplashVisible && (
         <KoleStartupSplash
           exiting={startupSplashExiting}
@@ -14603,6 +15030,7 @@ function openReportLoadDetails(load) {
 
   <div className="header-actions">
     <ThemeToggleButton />
+    <PreferencesButton />
     <button type="button" className="close-button header-logoff" onClick={handleLogout}>
       Log Off
     </button>
