@@ -7694,43 +7694,39 @@ function openReportLoadDetails(load) {
     const offTimePeriods = offTimeAdjustment.periods || [];
     const activeDriverCount = Number(summary.activeDriverCount || 0);
     const averageMonthlyRevenuePerActiveDriver = Number(summary.averageMonthlyRevenuePerActiveDriver || 0);
-    const projectionLockedRevenue = Number(summary.projectionLockedRevenue ?? summary.actualRevenueThroughCurrentMonth ?? 0);
+    const projectionLockedRevenue = Number(summary.projectionKnownRevenue ?? summary.projectionLockedRevenue ?? summary.actualRevenueThroughCurrentMonth ?? 0);
     const currentMonthRemainingProjectedRevenueBeforeOffTime = Number(
       summary.currentMonthRemainingProjectedRevenueBeforeOffTime ?? summary.currentMonthRemainingProjectedRevenue ?? 0
     );
     const remainingFullMonthsAfterCurrent = Number(summary.remainingFullMonthsAfterCurrent || 0);
     const sensitivityAppliesToRemainingYear = Boolean(summary.sensitivityAppliesToRemainingYear);
 
-    function getProjectionAvailabilityRatioForDriverCount(period = {}, driverCount = 0) {
+    function getProjectionOpenDriverDaysForDriverCount(period = {}, driverCount = 0) {
       const cleanDriverCount = Math.max(0, Number(driverCount || 0));
       const days = Math.max(0, Number(period.days || 0));
       const baselineDriverDays = cleanDriverCount * days;
 
       if (baselineDriverDays <= 0) return 0;
 
-      const knownOffDays = Math.min(Math.max(0, Number(period.knownOffDays || 0)), baselineDriverDays);
-      return Math.max(0, (baselineDriverDays - knownOffDays) / baselineDriverDays);
+      const fixedUnavailableDriverDays = Math.min(
+        Math.max(0, Number(period.knownUnavailableDriverDays || period.knownOffDays || 0)),
+        baselineDriverDays
+      );
+
+      return Math.max(0, baselineDriverDays - fixedUnavailableDriverDays);
     }
 
     function getCustomYearlyProjectionForDriverCount(driverCount) {
       const cleanDriverCount = Math.max(0, Number(driverCount || 0));
 
       if (sensitivityAppliesToRemainingYear) {
-        const driverCountScale = activeDriverCount > 0 ? cleanDriverCount / activeDriverCount : 0;
-        const currentMonthPeriod = offTimePeriods.find((period) => period.periodType === 'currentMonthRemainder') || null;
-        const futureMonthPeriods = offTimePeriods.filter((period) => period.periodType === 'futureFullMonth');
-        const currentMonthAvailabilityRatio = currentMonthPeriod
-          ? getProjectionAvailabilityRatioForDriverCount(currentMonthPeriod, cleanDriverCount)
-          : 1;
-        const projectedCurrentMonthRemainder = currentMonthRemainingProjectedRevenueBeforeOffTime * driverCountScale * currentMonthAvailabilityRatio;
-        const projectedFutureFullMonths = futureMonthPeriods.length > 0
-          ? futureMonthPeriods.reduce((sum, period) => {
-              const monthAvailabilityRatio = getProjectionAvailabilityRatioForDriverCount(period, cleanDriverCount);
-              return sum + (averageMonthlyRevenuePerActiveDriver * cleanDriverCount * monthAvailabilityRatio);
-            }, 0)
-          : averageMonthlyRevenuePerActiveDriver * cleanDriverCount * remainingFullMonthsAfterCurrent;
+        const revenuePerDriverDay = Number(summary.revenuePerAvailableDriverDay || 0);
+        const futurePeriods = offTimePeriods.filter((period) => period.periodType !== 'elapsedYear');
+        const projectedOpenFutureRevenue = futurePeriods.reduce((sum, period) => (
+          sum + (revenuePerDriverDay * getProjectionOpenDriverDaysForDriverCount(period, cleanDriverCount))
+        ), 0);
 
-        return projectionLockedRevenue + projectedCurrentMonthRemainder + projectedFutureFullMonths;
+        return projectionLockedRevenue + projectedOpenFutureRevenue;
       }
 
       return averageMonthlyRevenuePerActiveDriver * cleanDriverCount * 12;
@@ -7754,7 +7750,7 @@ function openReportLoadDetails(load) {
             <strong>{formatReportMoney(summary.projectedAnnualRevenue)}</strong>
             <small>
               {sensitivityAppliesToRemainingYear
-                ? `${formatReportMoney(summary.projectionLockedRevenue)} already logged + ${formatReportMoney(summary.projectedRemainingRevenue)} projected remaining year`
+                ? `${formatReportMoney(projectionLockedRevenue)} known/dated revenue + ${formatReportMoney(summary.projectedRemainingRevenue)} projected open capacity`
                 : `${formatReportMoney(summary.averageMonthlyRevenuePerActiveDriver)} average monthly revenue per active driver × ${formatReportNumber(summary.activeDriverCount)} active driver${Number(summary.activeDriverCount) === 1 ? '' : 's'} × 12`}
             </small>
           </div>
@@ -7771,10 +7767,10 @@ function openReportLoadDetails(load) {
             <strong>{formatReportNumber(summary.activeDriverCount)}</strong>
           </div>
           <div className="report-kpi-card">
-            <span>Projection Basis Revenue</span>
+            <span>Known / Dated Revenue</span>
             <strong>{formatReportMoney(summary.basisRevenue)}</strong>
             {Number(summary.basisActualRevenue || 0) > 0 && Number(summary.basisActualRevenue || 0) !== Number(summary.basisRevenue || 0) && (
-              <small>{formatReportMoney(summary.basisActualRevenue)} actual logged</small>
+              <small>{formatReportMoney(summary.actualRevenueThroughCurrentMonth)} through today + {formatReportMoney(summary.futureBookedRevenue)} future booked</small>
             )}
           </div>
           <div className="report-kpi-card">
@@ -7791,17 +7787,19 @@ function openReportLoadDetails(load) {
           </div>
         </div>
 
-        {yearlyProjectionReport.basisIncludesProratedCurrentMonth && summary.currentMonthRevenue > 0 && (
+        {yearlyProjectionReport.basisIncludesProratedCurrentMonth && (summary.currentMonthRevenue > 0 || summary.currentMonthFutureBookedRevenue > 0) && (
           <div className="yearly-projection-note">
-            <strong>Current month paced:</strong> {formatReportMoney(summary.currentMonthRevenue)} is logged in {summary.currentMonthName || 'the current month'} through day {formatReportNumber(summary.currentMonthElapsedDay)} of {formatReportNumber(summary.currentMonthDays)}, pacing to {formatReportMoney(summary.currentMonthProjectedRevenueBeforeOffTime ?? summary.currentMonthProjectedRevenue)} before known off-time.
-            {Number(offTimeAdjustment.currentMonthProjectedRevenueReduction || 0) > 0 && (
-              <> Known off-time adjusts the current-month projection to <strong>{formatReportMoney(summary.currentMonthProjectedRevenue)}</strong>.</>
+            <strong>Current month capacity pace:</strong> {formatReportMoney(summary.currentMonthRevenue)} is dated through day {formatReportNumber(summary.currentMonthElapsedDay)} of {formatReportNumber(summary.currentMonthDays)}.
+            {Number(summary.currentMonthFutureBookedRevenue || 0) > 0 && (
+              <> {formatReportMoney(summary.currentMonthFutureBookedRevenue)} is already booked for later in {summary.currentMonthName || 'the current month'} and is counted once, not multiplied into the day-1 pace.</>
             )}
-            {' '}Driver count sensitivity only changes the remaining-year projection; revenue already logged stays locked.
+            {' '}Open current-month capacity adds {formatReportMoney(summary.currentMonthOpenProjectedRevenue)} after known off-time and committed load-days, for a current-month projection of <strong>{formatReportMoney(summary.currentMonthProjectedRevenue)}</strong>.
+            {' '}Driver count sensitivity only changes open future capacity; known/dated revenue stays locked.
           </div>
         )}
 
-        
+       
+
         {offTimeAdjustment.checked && offTimeAdjustment.warning && (
           <div className="yearly-projection-note">
             <strong>Driver Time Off warning:</strong> {offTimeAdjustment.warning}
@@ -7817,7 +7815,7 @@ function openReportLoadDetails(load) {
         <div className="yearly-projection-grid">
           <section className="yearly-projection-card">
             <h3>Run-rate scenarios</h3>
-            <p className="yearly-projection-card-note">Scenarios adjust the remaining-year run rate while keeping revenue already logged intact.</p>
+            <p className="yearly-projection-card-note">Scenarios adjust the open-capacity run rate while keeping known/dated revenue intact.</p>
             <div className="report-table-wrap">
               <table className="driver-report-table yearly-projection-scenario-table">
                 <thead>
@@ -7919,22 +7917,16 @@ function openReportLoadDetails(load) {
           <div className="yearly-projection-month-strip">
             {monthlyTotals.map((month) => {
               const isPacedMonth = Boolean(month.isProratedBasisMonth);
-              const currentMonthOffTimeReduction = Number(offTimeAdjustment.currentMonthProjectedRevenueReduction || 0);
-              const hasCurrentMonthOffTimeAdjustment = Boolean(
-                isPacedMonth &&
-                month.isCurrentMonth &&
-                currentMonthOffTimeReduction > 0 &&
-                Number(summary.currentMonthProjectedRevenue || 0) > 0
-              );
-              const rawPacedRevenue = Number(
-                summary.currentMonthProjectedRevenueBeforeOffTime ??
-                month.projectedBasisRevenue ??
-                month.revenue ??
-                0
-              );
-              const displayedRevenue = hasCurrentMonthOffTimeAdjustment
-                ? Number(summary.currentMonthProjectedRevenue || 0)
-                : (isPacedMonth ? Number(month.projectedBasisRevenue || 0) : Number(month.revenue || 0));
+              const isFutureBookedOnly = Boolean(!month.isCurrentMonth && !month.isCompletedBasisMonth && Number(month.futureBookedRevenue || 0) > 0);
+              const displayedRevenue = month.isCurrentMonth
+                ? Number(summary.currentMonthProjectedRevenue ?? month.projectedBasisRevenue ?? 0)
+                : (isFutureBookedOnly ? Number(month.futureBookedRevenue || 0) : Number(month.revenue || 0));
+
+              let cardTag = null;
+              if (month.isCurrentMonth) cardTag = <em>Capacity</em>;
+              else if (isFutureBookedOnly) cardTag = <em>Booked</em>;
+              else if (isPacedMonth) cardTag = <em>Paced</em>;
+              else if (month.isBasisMonth) cardTag = <em>Basis</em>;
 
               return (
                 <div
@@ -7942,15 +7934,15 @@ function openReportLoadDetails(load) {
                   className={`yearly-projection-month-card ${month.isBasisMonth ? 'basis' : ''} ${month.isCurrentMonth ? 'current' : ''}`}
                 >
                   <span>{month.shortName || month.name}</span>
-                  {hasCurrentMonthOffTimeAdjustment ? <em>Adjusted</em> : (isPacedMonth ? <em>Paced</em> : month.isBasisMonth && <em>Basis</em>)}
+                  {cardTag}
                   {month.isCurrentMonth && !month.isBasisMonth && <em>Current</em>}
                   <strong>{formatReportMoney(displayedRevenue)}</strong>
                   <small>
-                    {isPacedMonth
-                      ? (hasCurrentMonthOffTimeAdjustment
-                          ? `${formatReportMoney(month.revenue)} actual · day ${formatReportNumber(month.currentMonthElapsedDay)} of ${formatReportNumber(month.currentMonthDays)} · ${formatReportMoney(rawPacedRevenue)} before off-time`
-                          : `${formatReportMoney(month.revenue)} actual · day ${formatReportNumber(month.currentMonthElapsedDay)} of ${formatReportNumber(month.currentMonthDays)}`)
-                      : `${formatReportNumber(month.loadCount)} load${Number(month.loadCount) === 1 ? '' : 's'}`}
+                    {month.isCurrentMonth
+                      ? `${formatReportMoney(month.elapsedRevenue)} through day ${formatReportNumber(month.currentMonthElapsedDay)} · ${formatReportMoney(month.futureBookedRevenue)} future booked · ${formatReportMoney(month.currentMonthOpenProjectedRevenue)} open capacity`
+                      : (isFutureBookedOnly
+                          ? `${formatReportMoney(month.futureBookedRevenue)} future booked · ${formatReportNumber(month.futureBookedLoadCount)} load${Number(month.futureBookedLoadCount) === 1 ? '' : 's'}`
+                          : `${formatReportNumber(month.loadCount)} load${Number(month.loadCount) === 1 ? '' : 's'}`)}
                   </small>
                 </div>
               );
@@ -7966,11 +7958,11 @@ function openReportLoadDetails(load) {
                 <tr>
                   <th>Truck</th>
                   <th>Driver</th>
-                  <th>YTD Revenue</th>
-                  <th>Basis Revenue</th>
-                  <th>Avg / Pace Month</th>
+                  <th>Actual Logged</th>
+                  <th>Known Revenue</th>
+                  <th>Blended Pace</th>
                   <th>Projected Annual</th>
-                  <th>Loads</th>
+                  <th>Capacity</th>
                   <th>Pace</th>
                 </tr>
               </thead>
@@ -7991,20 +7983,33 @@ function openReportLoadDetails(load) {
                       <strong>{row.operator || '-'}</strong>
                       {row.hasNoRevenue && <small>No revenue in projection year</small>}
                     </td>
-                    <td>{formatReportMoney(row.ytdRevenue)}</td>
-                    <td>{formatReportMoney(row.basisRevenue)}</td>
+                    <td>
+                      {formatReportMoney(row.actualRevenue ?? row.ytdRevenue)}
+                      {Number(row.actualLoadCount || 0) > 0 && <small>{formatReportNumber(row.actualLoadCount)} logged load{Number(row.actualLoadCount) === 1 ? '' : 's'}</small>}
+                    </td>
+                    <td>
+                      {formatReportMoney(row.knownRevenue ?? row.basisRevenue)}
+                      {Number(row.futureBookedRevenue || 0) > 0 && <small>{formatReportMoney(row.futureBookedRevenue)} future booked</small>}
+                    </td>
                     <td>
                       {formatReportMoney(row.averageMonthlyRevenue)}
-                      {row.paceBasisLabel && <small>{row.paceBasisLabel}</small>}
+                      {row.usesFleetBaselinePace && <small>Blended with fleet baseline</small>}
+                      {Number(row.revenuePerAvailableDriverDay || 0) > 0 && <small>{formatReportMoney(row.revenuePerAvailableDriverDay)} / available day</small>}
+                      {row.usesFleetBaselinePace && Number(row.observedRevenuePerAvailableDriverDay || 0) > 0 && (
+                        <small>{formatReportMoney(row.observedRevenuePerAvailableDriverDay)} observed</small>
+                      )}
                     </td>
                     <td>{formatReportMoney(row.projectedAnnualRevenue)}</td>
                     <td>
-                      {formatReportNumber(row.loadCount)}
-                      {Number(row.paceLoadCount || 0) !== Number(row.loadCount || 0) && <small>{formatReportNumber(row.paceLoadCount)} in pace</small>}
+                      {formatReportNumber(row.futureOpenDriverDays || 0)} open days
+                      <small>
+                        {formatReportNumber(row.futureOffDays || 0)} off · {formatReportNumber(row.futureBookedDriverDays || 0)} booked
+                      </small>
                     </td>
                     <td>
                       {row.paceLabel || '-'}
-                      {row.hasLimitedPaceHistory && <small>Limited history</small>}
+                      {row.paceBasisLabel && <small>{row.paceBasisLabel}</small>}
+                      {row.usesFleetBaselinePace && <small>{formatReportNumber(row.paceConfidencePercent || 0)}% driver-specific confidence</small>}
                     </td>
                   </tr>
                 ))}

@@ -2579,6 +2579,7 @@ function getDriverSummaryItem(item, sourceList) {
     BidID: f.BidID || '',
     Customer: customer,
     PickupDate: f.Pickup_x0020_Offer_x0020_Date || '',
+    DeliveryDate: f.Expected_x0020_Delivery_x0020_Da || '',
     PickupDateDisplay: formatShortDate(f.Pickup_x0020_Offer_x0020_Date),
     DeliveryDate: f.Expected_x0020_Delivery_x0020_Da || '',
     DeliveryDateDisplay: formatShortDate(f.Expected_x0020_Delivery_x0020_Da),
@@ -4373,6 +4374,7 @@ function getGrossRevenueFieldSelect() {
     'BidID',
     'Company',
     'Pickup_x0020_Offer_x0020_Date',
+    'Expected_x0020_Delivery_x0020_Da',
     'Truck_x0020_Number',
     'Operator_x002f_Team',
     'TMSName',
@@ -4403,6 +4405,7 @@ function getGrossRevenueReportItem(item, sourceList) {
     Operator: f.TMSName || operatorTeam || 'Unknown Operator',
     Status: f.Status || '',
     PickupDate: f.Pickup_x0020_Offer_x0020_Date || '',
+    DeliveryDate: f.Expected_x0020_Delivery_x0020_Da || '',
     PickupDateDisplay: formatShortDate(f.Pickup_x0020_Offer_x0020_Date),
     QuotedTotal: quotedTotal,
     PermitsEscortFees: permitsEscortFees,
@@ -4799,6 +4802,270 @@ function getProjectionAvailabilityRatioForDriverCount(period = {}, driverCount =
   return Math.max(0, (baselineDriverDays - knownOffDays) / baselineDriverDays);
 }
 
+
+function normalizeProjectionDateOnly(value) {
+  if (!value) return '';
+
+  const raw = String(value).trim();
+  const dateOnlyMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (dateOnlyMatch) return dateOnlyMatch[1];
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return '';
+
+  return [
+    parsed.getUTCFullYear(),
+    String(parsed.getUTCMonth() + 1).padStart(2, '0'),
+    String(parsed.getUTCDate()).padStart(2, '0')
+  ].join('-');
+}
+
+function getProjectionDateYearMonth(dateValue) {
+  const normalized = normalizeProjectionDateOnly(dateValue);
+  if (!normalized) return null;
+
+  const [year, month, day] = normalized.split('-').map(Number);
+  if (!year || !month || !day) return null;
+
+  return { year, month, day, date: normalized };
+}
+
+function getRevenueProjectionLoads(items = [], sourceList = {}, year) {
+  const selectedYear = Number(year);
+
+  return (items || [])
+    .map((item) => getGrossRevenueReportItem(item, sourceList))
+    .map((load) => {
+      const pickup = getProjectionDateYearMonth(load.PickupDate);
+      const deliveryDate = normalizeProjectionDateOnly(load.DeliveryDate) || pickup?.date || '';
+
+      return {
+        ...load,
+        pickupDateInput: pickup?.date || '',
+        deliveryDateInput: deliveryDate,
+        pickupYear: pickup?.year || 0,
+        pickupMonth: pickup?.month || 0,
+        pickupDay: pickup?.day || 0
+      };
+    })
+    .filter((load) => {
+      const status = normalizeText(load.Status);
+      return (
+        load.pickupYear === selectedYear &&
+        (status === 'won' || status === 'tonu')
+      );
+    });
+}
+
+function getRevenueProjectionCurrentDateInput(year, basisInfo = {}) {
+  const currentYear = Number(basisInfo.currentYear || getEasternParts().year || year);
+  const currentMonth = Number(basisInfo.currentMonth || getEasternParts().month || 1);
+  const currentDay = Number(basisInfo.currentDay || getEasternParts().day || 1);
+
+  return formatProjectionDateInput(currentYear, currentMonth, currentDay);
+}
+
+function getRevenueProjectionDatePeriod(periodType, label, startDate, endDate, extra = {}) {
+  const days = getProjectionDateRangeDays(startDate, endDate);
+
+  return {
+    periodType,
+    label,
+    startDate,
+    endDate,
+    days: days.length,
+    dayValues: days,
+    ...extra
+  };
+}
+
+function addProjectionLoadDaysToSet(set, load = {}, period = {}) {
+  const truckKey = normalizeTruckKey(load.Truck || load.truck || '');
+  if (!truckKey || !load.pickupDateInput) return;
+
+  const loadStart = load.pickupDateInput;
+  const loadEnd = load.deliveryDateInput && load.deliveryDateInput >= loadStart
+    ? load.deliveryDateInput
+    : loadStart;
+  const overlapStart = loadStart > period.startDate ? loadStart : period.startDate;
+  const overlapEnd = loadEnd < period.endDate ? loadEnd : period.endDate;
+  const overlapDays = getProjectionDateRangeDays(overlapStart, overlapEnd);
+
+  overlapDays.forEach((dateValue) => {
+    set.add(`${truckKey}|${dateValue}`);
+  });
+}
+
+function getRevenueProjectionCapacityModel(rows = [], activeDrivers = [], year, basisInfo = {}, futureLoads = [], warning = '') {
+  const activeTruckKeys = new Set(
+    (activeDrivers || [])
+      .map((driver) => normalizeTruckKey(driver?.truck))
+      .filter(Boolean)
+  );
+  const activeDriverCount = (activeDrivers || []).length;
+  const selectedYear = Number(year);
+  const currentDate = getRevenueProjectionCurrentDateInput(year, basisInfo);
+  const currentMonth = Number(basisInfo.currentMonth || getEasternParts().month || 1);
+  const currentDay = Number(basisInfo.currentDay || getEasternParts().day || 1);
+  const currentMonthDays = Number(basisInfo.currentMonthDays || getDaysInMonth(selectedYear, currentMonth));
+  const periods = [];
+
+  if (basisInfo.isCurrentYear) {
+    periods.push(getRevenueProjectionDatePeriod(
+      'elapsedYear',
+      'Year to date through today',
+      formatProjectionDateInput(selectedYear, 1, 1),
+      currentDate,
+      { year: selectedYear, month: 0 }
+    ));
+
+    if (currentDay < currentMonthDays) {
+      periods.push(getRevenueProjectionDatePeriod(
+        'currentMonthRemainder',
+        'Current month remainder',
+        formatProjectionDateInput(selectedYear, currentMonth, currentDay + 1),
+        formatProjectionDateInput(selectedYear, currentMonth, currentMonthDays),
+        { year: selectedYear, month: currentMonth }
+      ));
+    }
+
+    for (let month = currentMonth + 1; month <= 12; month += 1) {
+      const monthPeriod = getProjectionMonthPeriod(selectedYear, month);
+      periods.push(getRevenueProjectionDatePeriod(
+        'futureFullMonth',
+        monthPeriod.label,
+        monthPeriod.startDate,
+        monthPeriod.endDate,
+        { year: selectedYear, month }
+      ));
+    }
+  }
+
+  const periodOffDaySets = periods.map(() => new Set());
+  const periodBookedDaySets = periods.map(() => new Set());
+  let ignoredRows = 0;
+  let matchedRows = 0;
+
+  (rows || []).forEach((row) => {
+    if (!row || row.isCancelled) return;
+
+    const truckKey = normalizeTruckKey(row.truckNumber || row.TruckNumber || '');
+    if (!truckKey || !activeTruckKeys.has(truckKey)) {
+      ignoredRows += 1;
+      return;
+    }
+
+    const startDate = normalizeEasternDateOnly(row.startDate || row.StartDate);
+    const endDate = normalizeEasternDateOnly(row.endDate || row.EndDate || startDate);
+    if (!startDate || !endDate) return;
+
+    let rowMatched = false;
+
+    periods.forEach((period, index) => {
+      const overlapStart = startDate > period.startDate ? startDate : period.startDate;
+      const overlapEnd = endDate < period.endDate ? endDate : period.endDate;
+      const overlapDays = getProjectionDateRangeDays(overlapStart, overlapEnd);
+
+      if (!overlapDays.length) return;
+      rowMatched = true;
+
+      overlapDays.forEach((dateValue) => {
+        periodOffDaySets[index].add(`${truckKey}|${dateValue}`);
+      });
+    });
+
+    if (rowMatched) matchedRows += 1;
+  });
+
+  (futureLoads || []).forEach((load) => {
+    const truckKey = normalizeTruckKey(load.Truck || '');
+    if (!truckKey || !activeTruckKeys.has(truckKey)) return;
+
+    periods.forEach((period, index) => {
+      if (period.periodType === 'elapsedYear') return;
+      addProjectionLoadDaysToSet(periodBookedDaySets[index], load, period);
+    });
+  });
+
+  const periodSummaries = periods.map((period, index) => {
+    const knownOffDays = periodOffDaySets[index].size;
+    const knownBookedDriverDays = periodBookedDaySets[index].size;
+    const unavailableSet = new Set([
+      ...Array.from(periodOffDaySets[index]),
+      ...Array.from(periodBookedDaySets[index])
+    ]);
+    const knownUnavailableDriverDays = unavailableSet.size;
+    const baselineDriverDays = activeDriverCount * Number(period.days || 0);
+    const availableDriverDays = Math.max(0, baselineDriverDays - knownOffDays);
+    const openDriverDays = Math.max(0, baselineDriverDays - knownUnavailableDriverDays);
+    const availabilityRatio = baselineDriverDays > 0 ? availableDriverDays / baselineDriverDays : 1;
+    const openCapacityRatio = baselineDriverDays > 0 ? openDriverDays / baselineDriverDays : 1;
+
+    return {
+      ...period,
+      dayValues: undefined,
+      activeDriverCount,
+      baselineDriverDays,
+      knownOffDays,
+      knownBookedDriverDays,
+      knownUnavailableDriverDays,
+      availableDriverDays,
+      openDriverDays,
+      availabilityRatio,
+      openCapacityRatio
+    };
+  });
+
+  const sumBy = (filterFn, field) => periodSummaries
+    .filter(filterFn)
+    .reduce((sum, period) => sum + Number(period[field] || 0), 0);
+
+  const elapsedPeriod = periodSummaries.find((period) => period.periodType === 'elapsedYear') || null;
+  const futurePeriods = periodSummaries.filter((period) => period.periodType !== 'elapsedYear');
+
+  return {
+    checked: true,
+    warning: warning || '',
+    activeDriverCount,
+    periods: periodSummaries,
+    elapsedPeriod,
+    futurePeriods,
+    matchedRows,
+    ignoredRows,
+    futureKnownOffDays: sumBy((period) => period.periodType !== 'elapsedYear', 'knownOffDays'),
+    elapsedKnownOffDays: sumBy((period) => period.periodType === 'elapsedYear', 'knownOffDays'),
+    currentMonthKnownOffDays: sumBy((period) => period.periodType === 'currentMonthRemainder', 'knownOffDays'),
+    futureFullMonthKnownOffDays: sumBy((period) => period.periodType === 'futureFullMonth', 'knownOffDays'),
+    futureKnownBookedDriverDays: sumBy((period) => period.periodType !== 'elapsedYear', 'knownBookedDriverDays'),
+    currentMonthKnownBookedDriverDays: sumBy((period) => period.periodType === 'currentMonthRemainder', 'knownBookedDriverDays'),
+    futureFullMonthKnownBookedDriverDays: sumBy((period) => period.periodType === 'futureFullMonth', 'knownBookedDriverDays'),
+    futureOpenDriverDays: sumBy((period) => period.periodType !== 'elapsedYear', 'openDriverDays'),
+    currentMonthOpenDriverDays: sumBy((period) => period.periodType === 'currentMonthRemainder', 'openDriverDays'),
+    futureFullMonthOpenDriverDays: sumBy((period) => period.periodType === 'futureFullMonth', 'openDriverDays'),
+    baselineDriverDays: sumBy(() => true, 'baselineDriverDays'),
+    availableDriverDays: sumBy(() => true, 'availableDriverDays'),
+    openDriverDays: sumBy(() => true, 'openDriverDays'),
+    availabilityRatio: sumBy(() => true, 'baselineDriverDays') > 0
+      ? sumBy(() => true, 'availableDriverDays') / sumBy(() => true, 'baselineDriverDays')
+      : 1
+  };
+}
+
+function getProjectionOpenDriverDaysForDriverCount(period = {}, driverCount = 0) {
+  const cleanDriverCount = Math.max(0, Number(driverCount || 0));
+  const periodDays = Math.max(0, Number(period.days || 0));
+  const baselineDriverDays = cleanDriverCount * periodDays;
+
+  if (baselineDriverDays <= 0) return 0;
+
+  const fixedUnavailableDriverDays = Math.min(
+    Math.max(0, Number(period.knownUnavailableDriverDays || period.knownOffDays || 0)),
+    baselineDriverDays
+  );
+
+  return Math.max(0, baselineDriverDays - fixedUnavailableDriverDays);
+}
+
 function buildYearlyRevenueProjectionResponse(items, sourceList, year, rosterItems = [], driverTimeOffResult = {}) {
   const rosterByTruck = new Map();
 
@@ -4844,63 +5111,44 @@ function buildYearlyRevenueProjectionResponse(items, sourceList, year, rosterIte
     return numericValue;
   }
 
-  const monthlyTotals = months.map((month) => {
-    const monthNumber = Number(month.month);
-    const revenue = Number(monthlyTotalsByNumber[month.month] || 0);
-    const loadCount = Number(monthlyLoadCountsByNumber[month.month] || 0);
-    const isCurrentMonth = isCurrentProjectionYear && monthNumber === currentMonthNumber;
-    const isBasisMonth = basisMonthNumbers.has(monthNumber);
-    const isCompletedBasisMonth = completedMonthNumbers.has(monthNumber);
-    const isProratedBasisMonth = Boolean(isCurrentMonth && isBasisMonth && shouldProrateCurrentMonth);
-    const projectedBasisRevenue = isProratedBasisMonth
-      ? getProjectionBasisValueForMonth(month, revenue)
-      : revenue;
+  const currentDateInput = getRevenueProjectionCurrentDateInput(selectedYearNumber, basisInfo);
+  const projectionLoads = getRevenueProjectionLoads(items, sourceList, year);
+  const elapsedRevenueLoads = projectionLoads.filter((load) => (
+    !isCurrentProjectionYear || !load.pickupDateInput || load.pickupDateInput <= currentDateInput
+  ));
+  const futureBookedLoads = projectionLoads.filter((load) => (
+    isCurrentProjectionYear && load.pickupDateInput && load.pickupDateInput > currentDateInput
+  ));
 
-    return {
-      ...month,
-      revenue,
-      loadCount,
-      basisRevenue: projectedBasisRevenue,
-      projectedBasisRevenue,
-      isBasisMonth,
-      isCompletedBasisMonth,
-      isCurrentMonth,
-      isProratedBasisMonth,
-      currentMonthElapsedDay: isCurrentMonth ? Number(basisInfo.currentDay || 0) : 0,
-      currentMonthDays: isCurrentMonth ? Number(basisInfo.currentMonthDays || 0) : 0,
-      currentMonthCompletionRatio: isCurrentMonth ? currentMonthCompletionRatio : 0,
-      currentMonthRemainingRatio: isCurrentMonth ? currentMonthRemainingRatio : 0
-    };
+  const emptyMonthStats = () => ({
+    revenue: 0,
+    loadCount: 0,
+    elapsedRevenue: 0,
+    elapsedLoadCount: 0,
+    futureBookedRevenue: 0,
+    futureBookedLoadCount: 0
   });
+  const monthStatsByNumber = new Map(months.map((month) => [Number(month.month), emptyMonthStats()]));
 
-  const basisRevenue = monthlyTotals
-    .filter((month) => month.isBasisMonth)
-    .reduce((sum, month) => sum + Number(month.basisRevenue ?? month.revenue ?? 0), 0);
-  const basisActualRevenue = monthlyTotals
-    .filter((month) => month.isBasisMonth)
-    .reduce((sum, month) => sum + Number(month.revenue || 0), 0);
-  const completedMonthRevenue = monthlyTotals
-    .filter((month) => month.isCompletedBasisMonth)
-    .reduce((sum, month) => sum + Number(month.revenue || 0), 0);
-  const basisLoadCount = monthlyTotals
-    .filter((month) => month.isBasisMonth)
-    .reduce((sum, month) => sum + Number(month.loadCount || 0), 0);
-  const currentMonthRevenue = monthlyTotals
-    .filter((month) => month.isCurrentMonth)
-    .reduce((sum, month) => sum + Number(month.revenue || 0), 0);
-  const currentMonthLoadCount = monthlyTotals
-    .filter((month) => month.isCurrentMonth)
-    .reduce((sum, month) => sum + Number(month.loadCount || 0), 0);
-  const currentMonthProjectedRevenue = monthlyTotals
-    .filter((month) => month.isCurrentMonth)
-    .reduce((sum, month) => sum + Number(month.projectedBasisRevenue ?? month.revenue ?? 0), 0);
-  const currentMonthRemainingProjectedRevenue = Math.max(0, currentMonthProjectedRevenue - currentMonthRevenue);
-  const currentMonthIsBasis = monthlyTotals.some((month) => month.isCurrentMonth && month.isBasisMonth);
-  const currentPartialMonthRevenue = currentMonthIsBasis ? 0 : currentMonthRevenue;
-  const currentPartialMonthLoadCount = currentMonthIsBasis ? 0 : currentMonthLoadCount;
-  const actualRevenueThroughCurrentMonth = isCurrentProjectionYear
-    ? completedMonthRevenue + currentMonthRevenue
-    : basisActualRevenue;
+  projectionLoads.forEach((load) => {
+    const monthNumber = Number(load.pickupMonth || 0);
+    if (!monthStatsByNumber.has(monthNumber)) return;
+
+    const stats = monthStatsByNumber.get(monthNumber);
+    const revenue = Number(load.GrossRevenue || 0);
+    const isFutureBooked = Boolean(isCurrentProjectionYear && load.pickupDateInput && load.pickupDateInput > currentDateInput);
+
+    stats.revenue += revenue;
+    stats.loadCount += 1;
+
+    if (isFutureBooked) {
+      stats.futureBookedRevenue += revenue;
+      stats.futureBookedLoadCount += 1;
+    } else {
+      stats.elapsedRevenue += revenue;
+      stats.elapsedLoadCount += 1;
+    }
+  });
 
   const activeDrivers = rosterItems
     .filter((roster) => normalizeText(roster.status) === 'active')
@@ -4913,136 +5161,407 @@ function buildYearlyRevenueProjectionResponse(items, sourceList, year, rosterIte
   const driverTimeOffWarning = Array.isArray(driverTimeOffResult)
     ? ''
     : (driverTimeOffResult?.warning || '');
-  const offTimeAdjustment = getRevenueProjectionOffTimeAdjustment(
+  const offTimeAdjustment = getRevenueProjectionCapacityModel(
     driverTimeOffRows,
     activeDrivers,
     selectedYearNumber,
     basisInfo,
+    futureBookedLoads,
     driverTimeOffWarning
   );
   const currentMonthRemainderPeriod = (offTimeAdjustment.periods || [])
     .find((period) => period.periodType === 'currentMonthRemainder') || null;
+  const futureProjectionPeriods = (offTimeAdjustment.periods || [])
+    .filter((period) => period.periodType !== 'elapsedYear');
   const futureFullMonthPeriods = (offTimeAdjustment.periods || [])
     .filter((period) => period.periodType === 'futureFullMonth');
-  const basisMonthCount = basisInfo.basisMonths.length;
-  const averageMonthlyRevenue = safeAverage(basisRevenue, basisMonthCount);
-  const averageMonthlyRevenuePerActiveDriver = safeAverage(averageMonthlyRevenue, activeDriverCount);
+  const elapsedPeriod = offTimeAdjustment.elapsedPeriod || null;
+  const elapsedAvailableDriverDays = Number(elapsedPeriod?.availableDriverDays || 0);
+  const elapsedBaselineDriverDays = Number(elapsedPeriod?.baselineDriverDays || 0);
+
+  const actualRevenueThroughCurrentMonth = isCurrentProjectionYear
+    ? elapsedRevenueLoads.reduce((sum, load) => sum + Number(load.GrossRevenue || 0), 0)
+    : projectionLoads.reduce((sum, load) => sum + Number(load.GrossRevenue || 0), 0);
+  const futureBookedRevenue = futureBookedLoads.reduce((sum, load) => sum + Number(load.GrossRevenue || 0), 0);
+  const futureBookedLoadCount = futureBookedLoads.length;
+  const projectionKnownRevenue = actualRevenueThroughCurrentMonth + futureBookedRevenue;
+  const revenuePerAvailableDriverDay = elapsedAvailableDriverDays > 0
+    ? actualRevenueThroughCurrentMonth / elapsedAvailableDriverDays
+    : 0;
+  const averageDaysPerMonth = 365 / 12;
+  const averageMonthlyRevenuePerActiveDriver = revenuePerAvailableDriverDay * averageDaysPerMonth;
+  const averageMonthlyRevenue = averageMonthlyRevenuePerActiveDriver * activeDriverCount;
   const annualizedRevenuePerActiveDriver = averageMonthlyRevenuePerActiveDriver * 12;
-  const remainingProjectionMonthWeight = isCurrentProjectionYear
-    ? currentMonthRemainingRatio + remainingFullMonthsAfterCurrent
-    : Math.max(0, 12 - basisMonthCount);
+  const futureOpenDriverDays = Number(offTimeAdjustment.futureOpenDriverDays || 0);
+  const futureBaselineDriverDays = futureProjectionPeriods
+    .reduce((sum, period) => sum + Number(period.baselineDriverDays || 0), 0);
+  const projectedOpenFutureRevenue = revenuePerAvailableDriverDay * futureOpenDriverDays;
+  const projectedOpenFutureRevenueBeforeKnownCapacity = revenuePerAvailableDriverDay * futureBaselineDriverDays;
+  const projectedAnnualRevenue = isCurrentProjectionYear
+    ? projectionKnownRevenue + projectedOpenFutureRevenue
+    : (basisInfo.basisMonths.length >= 12
+        ? actualRevenueThroughCurrentMonth
+        : actualRevenueThroughCurrentMonth + (averageMonthlyRevenuePerActiveDriver * activeDriverCount * Math.max(0, 12 - basisInfo.basisMonths.length)));
+  const projectedAnnualRevenueBeforeOffTime = isCurrentProjectionYear
+    ? projectionKnownRevenue + projectedOpenFutureRevenueBeforeKnownCapacity
+    : projectedAnnualRevenue;
+  const projectedRemainingRevenue = Math.max(0, projectedAnnualRevenue - projectionKnownRevenue);
+  const projectedRemainingRevenueBeforeOffTime = Math.max(0, projectedAnnualRevenueBeforeOffTime - projectionKnownRevenue);
+  const offTimeProjectedRevenueReduction = Math.max(0, projectedAnnualRevenueBeforeOffTime - projectedAnnualRevenue);
+
+  const completedMonthRevenue = months
+    .filter((month) => completedMonthNumbers.has(Number(month.month)))
+    .reduce((sum, month) => sum + Number(monthStatsByNumber.get(Number(month.month))?.revenue || 0), 0);
+  const completedMonthLoadCount = months
+    .filter((month) => completedMonthNumbers.has(Number(month.month)))
+    .reduce((sum, month) => sum + Number(monthStatsByNumber.get(Number(month.month))?.loadCount || 0), 0);
+  const currentMonthStats = monthStatsByNumber.get(currentMonthNumber) || emptyMonthStats();
+  const currentMonthRevenue = Number(currentMonthStats.elapsedRevenue || 0);
+  const currentMonthFutureBookedRevenue = Number(currentMonthStats.futureBookedRevenue || 0);
+  const currentMonthTotalKnownRevenue = currentMonthRevenue + currentMonthFutureBookedRevenue;
+  const currentMonthLoadCount = Number(currentMonthStats.elapsedLoadCount || 0);
+  const currentMonthFutureBookedLoadCount = Number(currentMonthStats.futureBookedLoadCount || 0);
+  const currentMonthOpenDriverDays = Number(offTimeAdjustment.currentMonthOpenDriverDays || 0);
+  const currentMonthOpenProjectedRevenue = revenuePerAvailableDriverDay * currentMonthOpenDriverDays;
+  const currentMonthProjectedRevenue = currentMonthTotalKnownRevenue + currentMonthOpenProjectedRevenue;
+  const currentMonthBaselineFutureDriverDays = currentMonthRemainderPeriod
+    ? Number(currentMonthRemainderPeriod.baselineDriverDays || 0)
+    : 0;
+  const currentMonthProjectedRevenueBeforeOffTime = currentMonthTotalKnownRevenue + (revenuePerAvailableDriverDay * currentMonthBaselineFutureDriverDays);
+  const currentMonthRemainingProjectedRevenue = currentMonthOpenProjectedRevenue;
+  const currentMonthRemainingProjectedRevenueBeforeOffTime = revenuePerAvailableDriverDay * currentMonthBaselineFutureDriverDays;
+  const currentMonthIsBasis = monthlyTotalsByNumber[currentMonthNumber] !== undefined && basisMonthNumbers.has(currentMonthNumber);
+  const currentPartialMonthRevenue = currentMonthIsBasis ? 0 : currentMonthRevenue;
+  const currentPartialMonthLoadCount = currentMonthIsBasis ? 0 : currentMonthLoadCount;
+  const basisMonthCount = basisInfo.basisMonths.length;
+  const basisActualRevenue = actualRevenueThroughCurrentMonth;
+  const basisRevenue = projectionKnownRevenue;
+  const basisLoadCount = elapsedRevenueLoads.length + futureBookedLoadCount;
+  const remainingProjectionMonthWeight = activeDriverCount > 0
+    ? futureOpenDriverDays / activeDriverCount / averageDaysPerMonth
+    : 0;
+  const ytdGrossRevenue = projectionLoads.reduce((sum, load) => sum + Number(load.GrossRevenue || 0), 0);
+  const ytdLoadCount = projectionLoads.length;
+
+  const monthlyTotals = months.map((month) => {
+    const monthNumber = Number(month.month);
+    const stats = monthStatsByNumber.get(monthNumber) || emptyMonthStats();
+    const isCurrentMonth = isCurrentProjectionYear && monthNumber === currentMonthNumber;
+    const isBasisMonth = basisMonthNumbers.has(monthNumber);
+    const isCompletedBasisMonth = completedMonthNumbers.has(monthNumber);
+    const isProratedBasisMonth = Boolean(isCurrentMonth && isBasisMonth && shouldProrateCurrentMonth);
+    const projectedBasisRevenue = isCurrentMonth
+      ? currentMonthProjectedRevenue
+      : stats.revenue;
+    const currentMonthBeforeCapacityRevenue = isCurrentMonth
+      ? currentMonthProjectedRevenueBeforeOffTime
+      : stats.revenue;
+    const currentMonthOpenRevenue = isCurrentMonth
+      ? currentMonthOpenProjectedRevenue
+      : 0;
+
+    return {
+      ...month,
+      revenue: Number(stats.revenue || 0),
+      loadCount: Number(stats.loadCount || 0),
+      elapsedRevenue: Number(stats.elapsedRevenue || 0),
+      elapsedLoadCount: Number(stats.elapsedLoadCount || 0),
+      futureBookedRevenue: Number(stats.futureBookedRevenue || 0),
+      futureBookedLoadCount: Number(stats.futureBookedLoadCount || 0),
+      basisRevenue: projectedBasisRevenue,
+      projectedBasisRevenue,
+      currentMonthBeforeCapacityRevenue,
+      currentMonthOpenProjectedRevenue: currentMonthOpenRevenue,
+      isBasisMonth,
+      isCompletedBasisMonth,
+      isCurrentMonth,
+      isProratedBasisMonth,
+      currentMonthElapsedDay: isCurrentMonth ? Number(basisInfo.currentDay || 0) : 0,
+      currentMonthDays: isCurrentMonth ? Number(basisInfo.currentMonthDays || 0) : 0,
+      currentMonthCompletionRatio: isCurrentMonth ? currentMonthCompletionRatio : 0,
+      currentMonthRemainingRatio: isCurrentMonth ? currentMonthRemainingRatio : 0
+    };
+  });
 
   function getProjectedAnnualRevenueForDriverCount(driverCount, monthlyRevenuePerDriver = averageMonthlyRevenuePerActiveDriver) {
     const cleanDriverCount = Math.max(0, Number(driverCount || 0));
     const cleanMonthlyRevenuePerDriver = Number(monthlyRevenuePerDriver || 0);
+    const cleanRevenuePerDriverDay = averageDaysPerMonth > 0
+      ? cleanMonthlyRevenuePerDriver / averageDaysPerMonth
+      : 0;
 
     if (isCurrentProjectionYear) {
-      const driverCountScale = activeDriverCount > 0 ? cleanDriverCount / activeDriverCount : 0;
-      const runRateScale = averageMonthlyRevenuePerActiveDriver > 0
-        ? cleanMonthlyRevenuePerDriver / averageMonthlyRevenuePerActiveDriver
-        : 0;
-      const rawCurrentMonthRemainder = currentMonthRemainingProjectedRevenue * driverCountScale * runRateScale;
-      const currentMonthAvailabilityRatio = currentMonthRemainderPeriod
-        ? getProjectionAvailabilityRatioForDriverCount(currentMonthRemainderPeriod, cleanDriverCount)
-        : 1;
-      const projectedCurrentMonthRemainder = rawCurrentMonthRemainder * currentMonthAvailabilityRatio;
-      const projectedFutureFullMonths = futureFullMonthPeriods.length > 0
-        ? futureFullMonthPeriods.reduce((sum, period) => {
-            const monthAvailabilityRatio = getProjectionAvailabilityRatioForDriverCount(period, cleanDriverCount);
-            return sum + (cleanMonthlyRevenuePerDriver * cleanDriverCount * monthAvailabilityRatio);
-          }, 0)
-        : cleanMonthlyRevenuePerDriver * cleanDriverCount * remainingFullMonthsAfterCurrent;
+      const openDriverDays = futureProjectionPeriods.reduce((sum, period) => (
+        sum + getProjectionOpenDriverDaysForDriverCount(period, cleanDriverCount)
+      ), 0);
 
-      return actualRevenueThroughCurrentMonth + projectedCurrentMonthRemainder + projectedFutureFullMonths;
+      return projectionKnownRevenue + (cleanRevenuePerDriverDay * openDriverDays);
     }
 
     if (basisMonthCount >= 12) {
-      return basisRevenue;
+      return actualRevenueThroughCurrentMonth;
     }
 
-    return basisRevenue + (cleanMonthlyRevenuePerDriver * cleanDriverCount * Math.max(0, 12 - basisMonthCount));
+    return actualRevenueThroughCurrentMonth + (cleanMonthlyRevenuePerDriver * cleanDriverCount * Math.max(0, 12 - basisMonthCount));
   }
 
   function getUnadjustedProjectedAnnualRevenueForDriverCount(driverCount, monthlyRevenuePerDriver = averageMonthlyRevenuePerActiveDriver) {
     const cleanDriverCount = Math.max(0, Number(driverCount || 0));
     const cleanMonthlyRevenuePerDriver = Number(monthlyRevenuePerDriver || 0);
+    const cleanRevenuePerDriverDay = averageDaysPerMonth > 0
+      ? cleanMonthlyRevenuePerDriver / averageDaysPerMonth
+      : 0;
 
     if (isCurrentProjectionYear) {
-      const driverCountScale = activeDriverCount > 0 ? cleanDriverCount / activeDriverCount : 0;
-      const runRateScale = averageMonthlyRevenuePerActiveDriver > 0
-        ? cleanMonthlyRevenuePerDriver / averageMonthlyRevenuePerActiveDriver
-        : 0;
-      const projectedCurrentMonthRemainder = currentMonthRemainingProjectedRevenue * driverCountScale * runRateScale;
-      const projectedFutureFullMonths = cleanMonthlyRevenuePerDriver * cleanDriverCount * remainingFullMonthsAfterCurrent;
+      const baselineDriverDays = futureProjectionPeriods.reduce((sum, period) => (
+        sum + (cleanDriverCount * Number(period.days || 0))
+      ), 0);
 
-      return actualRevenueThroughCurrentMonth + projectedCurrentMonthRemainder + projectedFutureFullMonths;
+      return projectionKnownRevenue + (cleanRevenuePerDriverDay * baselineDriverDays);
     }
 
     if (basisMonthCount >= 12) {
-      return basisRevenue;
+      return actualRevenueThroughCurrentMonth;
     }
 
-    return basisRevenue + (cleanMonthlyRevenuePerDriver * cleanDriverCount * Math.max(0, 12 - basisMonthCount));
+    return actualRevenueThroughCurrentMonth + (cleanMonthlyRevenuePerDriver * cleanDriverCount * Math.max(0, 12 - basisMonthCount));
+  }
+  const grossTruckByKey = new Map((grossReport.trucks || []).map((truck) => [normalizeTruckKey(truck.truck), truck]));
+  const elapsedStartDate = formatProjectionDateInput(selectedYearNumber, 1, 1);
+  const elapsedEndDate = currentDateInput;
+  const futureStartDate = addDaysToDateInput(currentDateInput, 1);
+  const futureEndDate = formatProjectionDateInput(selectedYearNumber, 12, 31);
+  const elapsedYearDays = isCurrentProjectionYear
+    ? getProjectionDateRangeDays(elapsedStartDate, elapsedEndDate).length
+    : 0;
+  const futureYearDays = isCurrentProjectionYear && futureStartDate <= futureEndDate
+    ? getProjectionDateRangeDays(futureStartDate, futureEndDate).length
+    : 0;
+  const driverPaceFullConfidenceLoads = Number(process.env.REVENUE_PROJECTION_DRIVER_PACE_SAMPLE_LOADS || 25);
+  const driverPaceFullConfidenceDays = Number(process.env.REVENUE_PROJECTION_DRIVER_PACE_SAMPLE_DAYS || 90);
+
+  function getProjectionDriverActiveStartDate(roster = {}, fallbackStartDate = elapsedStartDate) {
+    const rosterStartDate = normalizeProjectionDateOnly(roster?.startDate || roster?.StartDate || '');
+
+    if (!rosterStartDate) return fallbackStartDate;
+
+    return rosterStartDate > fallbackStartDate ? rosterStartDate : fallbackStartDate;
   }
 
-  const projectedAnnualRevenueBeforeOffTime = getUnadjustedProjectedAnnualRevenueForDriverCount(activeDriverCount);
-  const projectedAnnualRevenue = getProjectedAnnualRevenueForDriverCount(activeDriverCount);
-  const projectedRemainingRevenueBeforeOffTime = Math.max(0, projectedAnnualRevenueBeforeOffTime - actualRevenueThroughCurrentMonth);
-  const projectedRemainingRevenue = Math.max(0, projectedAnnualRevenue - actualRevenueThroughCurrentMonth);
-  const offTimeProjectedRevenueReduction = Math.max(0, projectedAnnualRevenueBeforeOffTime - projectedAnnualRevenue);
-  const adjustedCurrentMonthRemainingProjectedRevenue = currentMonthRemainderPeriod
-    ? currentMonthRemainingProjectedRevenue * getProjectionAvailabilityRatioForDriverCount(currentMonthRemainderPeriod, activeDriverCount)
-    : currentMonthRemainingProjectedRevenue;
-  const adjustedCurrentMonthProjectedRevenue = currentMonthRevenue + adjustedCurrentMonthRemainingProjectedRevenue;
-  const ytdGrossRevenue = grossReport.totals?.totalGrossRevenue || 0;
+  function getRevenueProjectionDriverPaceConfidence(loadCount = 0, availableDays = 0) {
+    const cleanLoadCount = Math.max(0, Number(loadCount || 0));
+    const cleanAvailableDays = Math.max(0, Number(availableDays || 0));
+    const loadConfidence = driverPaceFullConfidenceLoads > 0
+      ? Math.min(1, cleanLoadCount / driverPaceFullConfidenceLoads)
+      : 1;
+    const dayConfidence = driverPaceFullConfidenceDays > 0
+      ? Math.min(1, cleanAvailableDays / driverPaceFullConfidenceDays)
+      : 1;
 
-  const grossTruckByKey = new Map((grossReport.trucks || []).map((truck) => [normalizeTruckKey(truck.truck), truck]));
+    if (cleanLoadCount <= 0 || cleanAvailableDays <= 0) {
+      return {
+        confidence: 0,
+        loadConfidence,
+        dayConfidence,
+        fullConfidenceLoads: driverPaceFullConfidenceLoads,
+        fullConfidenceDays: driverPaceFullConfidenceDays,
+        isBuildingSample: true
+      };
+    }
+
+    const confidence = Math.max(0, Math.min(1, loadConfidence, dayConfidence));
+
+    return {
+      confidence,
+      loadConfidence,
+      dayConfidence,
+      fullConfidenceLoads: driverPaceFullConfidenceLoads,
+      fullConfidenceDays: driverPaceFullConfidenceDays,
+      isBuildingSample: confidence < 1
+    };
+  }
+
+  function getLoadsByTruckMap(loads = []) {
+    const map = new Map();
+
+    (loads || []).forEach((load) => {
+      const truckKey = normalizeTruckKey(load.Truck || load.truck || '');
+      if (!truckKey) return;
+      if (!map.has(truckKey)) map.set(truckKey, []);
+      map.get(truckKey).push(load);
+    });
+
+    return map;
+  }
+
+  const elapsedLoadsByTruck = getLoadsByTruckMap(elapsedRevenueLoads);
+  const futureLoadsByTruck = getLoadsByTruckMap(futureBookedLoads);
+
+  function getProjectionOffDaySetForTruck(truckKey, startDate, endDate) {
+    const dates = new Set();
+    const cleanTruckKey = normalizeTruckKey(truckKey);
+
+    if (!cleanTruckKey || !startDate || !endDate || endDate < startDate) return dates;
+
+    (driverTimeOffRows || []).forEach((row) => {
+      if (!row || row.isCancelled) return;
+
+      const rowTruckKey = normalizeTruckKey(row.truckNumber || row.TruckNumber || '');
+      if (rowTruckKey !== cleanTruckKey) return;
+
+      const rowStart = normalizeEasternDateOnly(row.startDate || row.StartDate);
+      const rowEnd = normalizeEasternDateOnly(row.endDate || row.EndDate || rowStart);
+      if (!rowStart || !rowEnd) return;
+
+      const overlapStart = rowStart > startDate ? rowStart : startDate;
+      const overlapEnd = rowEnd < endDate ? rowEnd : endDate;
+
+      getProjectionDateRangeDays(overlapStart, overlapEnd).forEach((dateValue) => dates.add(dateValue));
+    });
+
+    return dates;
+  }
+
+  function getProjectionBookedDaySetForTruck(loads = [], startDate, endDate) {
+    const dates = new Set();
+
+    if (!startDate || !endDate || endDate < startDate) return dates;
+
+    (loads || []).forEach((load) => {
+      const loadStart = load.pickupDateInput;
+      if (!loadStart) return;
+
+      const loadEnd = load.deliveryDateInput && load.deliveryDateInput >= loadStart
+        ? load.deliveryDateInput
+        : loadStart;
+      const overlapStart = loadStart > startDate ? loadStart : startDate;
+      const overlapEnd = loadEnd < endDate ? loadEnd : endDate;
+
+      getProjectionDateRangeDays(overlapStart, overlapEnd).forEach((dateValue) => dates.add(dateValue));
+    });
+
+    return dates;
+  }
 
   const driverRows = activeDrivers.map((roster) => {
     const truckKey = normalizeTruckKey(roster.truck);
     const truckRevenue = grossTruckByKey.get(truckKey) || null;
-    const basisMonthsForDriver = basisInfo.basisMonths || [];
-    const driverBasisRevenue = basisMonthsForDriver
-      .reduce((sum, month) => sum + getProjectionBasisValueForMonth(month, truckRevenue?.monthTotals?.[month.month] || 0), 0);
-    const driverBasisLoadCount = basisMonthsForDriver
-      .reduce((sum, month) => sum + Number(truckRevenue?.monthLoadCounts?.[month.month] || 0), 0);
-    const firstRevenueMonthIndex = basisMonthsForDriver.findIndex((month) => (
-      Number(truckRevenue?.monthTotals?.[month.month] || 0) > 0 ||
-      Number(truckRevenue?.monthLoadCounts?.[month.month] || 0) > 0
-    ));
-    const driverPaceMonths = firstRevenueMonthIndex >= 0
-      ? basisMonthsForDriver.slice(firstRevenueMonthIndex)
-      : basisMonthsForDriver;
-    const driverPaceRevenue = driverPaceMonths
-      .reduce((sum, month) => sum + getProjectionBasisValueForMonth(month, truckRevenue?.monthTotals?.[month.month] || 0), 0);
-    const driverPaceLoadCount = driverPaceMonths
-      .reduce((sum, month) => sum + Number(truckRevenue?.monthLoadCounts?.[month.month] || 0), 0);
-    const driverPaceMonthCount = driverPaceMonths.length || basisMonthCount;
-    const averageDriverMonthlyRevenue = safeAverage(driverPaceRevenue, driverPaceMonthCount);
-    const paceIncludesProratedCurrentMonth = driverPaceMonths.some((month) => (
-      shouldProrateCurrentMonth && Number(month.month) === currentMonthNumber
-    ));
-    const paceBasisLabel = driverPaceMonths.length > 0
-      ? `${driverPaceMonths.map((month) => month.shortName || month.name).join(' / ')}${paceIncludesProratedCurrentMonth ? ' paced' : ''} pace`
-      : 'No pace months';
+    const driverElapsedStartDate = isCurrentProjectionYear
+      ? getProjectionDriverActiveStartDate(roster, elapsedStartDate)
+      : elapsedStartDate;
+    const driverFutureStartDate = isCurrentProjectionYear
+      ? getProjectionDriverActiveStartDate(roster, futureStartDate)
+      : futureStartDate;
+    const actualLoadsForDriver = isCurrentProjectionYear
+      ? (elapsedLoadsByTruck.get(truckKey) || []).filter((load) => !driverElapsedStartDate || !load.pickupDateInput || load.pickupDateInput >= driverElapsedStartDate)
+      : (elapsedLoadsByTruck.get(truckKey) || []);
+    const futureLoadsForDriver = isCurrentProjectionYear
+      ? (futureLoadsByTruck.get(truckKey) || []).filter((load) => !driverFutureStartDate || !load.pickupDateInput || load.pickupDateInput >= driverFutureStartDate)
+      : (futureLoadsByTruck.get(truckKey) || []);
+    const actualRevenue = isCurrentProjectionYear
+      ? actualLoadsForDriver.reduce((sum, load) => sum + Number(load.GrossRevenue || 0), 0)
+      : Number(truckRevenue?.totalGrossRevenue || 0);
+    const futureBookedRevenueForDriver = isCurrentProjectionYear
+      ? futureLoadsForDriver.reduce((sum, load) => sum + Number(load.GrossRevenue || 0), 0)
+      : 0;
+    const knownRevenueForDriver = actualRevenue + futureBookedRevenueForDriver;
+    const actualLoadCount = isCurrentProjectionYear
+      ? actualLoadsForDriver.length
+      : Number(truckRevenue?.loadCount || 0);
+    const futureBookedLoadCountForDriver = isCurrentProjectionYear
+      ? futureLoadsForDriver.length
+      : 0;
+    const driverElapsedYearDays = isCurrentProjectionYear && driverElapsedStartDate <= elapsedEndDate
+      ? getProjectionDateRangeDays(driverElapsedStartDate, elapsedEndDate).length
+      : 0;
+    const driverFutureYearDays = isCurrentProjectionYear && driverFutureStartDate <= futureEndDate
+      ? getProjectionDateRangeDays(driverFutureStartDate, futureEndDate).length
+      : 0;
+    const elapsedOffDaySet = isCurrentProjectionYear && driverElapsedYearDays > 0
+      ? getProjectionOffDaySetForTruck(truckKey, driverElapsedStartDate, elapsedEndDate)
+      : new Set();
+    const futureOffDaySet = isCurrentProjectionYear && driverFutureYearDays > 0
+      ? getProjectionOffDaySetForTruck(truckKey, driverFutureStartDate, futureEndDate)
+      : new Set();
+    const futureBookedDaySet = isCurrentProjectionYear && driverFutureYearDays > 0
+      ? getProjectionBookedDaySetForTruck(futureLoadsForDriver, driverFutureStartDate, futureEndDate)
+      : new Set();
+    const futureUnavailableDaySet = new Set([
+      ...Array.from(futureOffDaySet),
+      ...Array.from(futureBookedDaySet)
+    ]);
+    const elapsedAvailableDriverDaysForDriver = isCurrentProjectionYear
+      ? Math.max(0, driverElapsedYearDays - elapsedOffDaySet.size)
+      : 0;
+    const futureOpenDriverDaysForDriver = isCurrentProjectionYear
+      ? Math.max(0, driverFutureYearDays - futureUnavailableDaySet.size)
+      : 0;
+    const observedRevenuePerAvailableDriverDayForDriver = isCurrentProjectionYear
+      ? safeAverage(actualRevenue, elapsedAvailableDriverDaysForDriver)
+      : 0;
+    const paceConfidence = isCurrentProjectionYear
+      ? getRevenueProjectionDriverPaceConfidence(actualLoadCount, elapsedAvailableDriverDaysForDriver)
+      : { confidence: 1, loadConfidence: 1, dayConfidence: 1, isBuildingSample: false, fullConfidenceLoads: driverPaceFullConfidenceLoads, fullConfidenceDays: driverPaceFullConfidenceDays };
+    const driverPaceConfidence = Number(paceConfidence.confidence || 0);
+    const blendedRevenuePerAvailableDriverDayForDriver = isCurrentProjectionYear
+      ? ((observedRevenuePerAvailableDriverDayForDriver * driverPaceConfidence) + (revenuePerAvailableDriverDay * (1 - driverPaceConfidence)))
+      : 0;
+    const revenuePerAvailableDriverDayForDriver = isCurrentProjectionYear
+      ? blendedRevenuePerAvailableDriverDayForDriver
+      : 0;
+    const capacityAverageMonthlyRevenue = isCurrentProjectionYear
+      ? revenuePerAvailableDriverDayForDriver * averageDaysPerMonth
+      : safeAverage(Number(truckRevenue?.totalGrossRevenue || 0), Math.max(1, basisMonthCount || 12));
+    const projectedAnnualRevenueForDriver = isCurrentProjectionYear
+      ? knownRevenueForDriver + (revenuePerAvailableDriverDayForDriver * futureOpenDriverDaysForDriver)
+      : capacityAverageMonthlyRevenue * 12;
 
     return {
       truck: roster.truck || truckRevenue?.truck || '',
       operator: getRosterReportDisplayName(roster) || truckRevenue?.operator || 'Unknown Operator',
       rosterStatus: roster.status || '',
-      ytdRevenue: Number(truckRevenue?.totalGrossRevenue || 0),
-      basisRevenue: driverBasisRevenue,
-      basisLoadCount: driverBasisLoadCount,
-      paceRevenue: driverPaceRevenue,
-      paceLoadCount: driverPaceLoadCount,
-      paceMonthCount: driverPaceMonthCount,
-      paceBasisLabel,
-      averageMonthlyRevenue: averageDriverMonthlyRevenue,
-      projectedAnnualRevenue: averageDriverMonthlyRevenue * 12,
-      loadCount: Number(truckRevenue?.loadCount || 0),
-      paceLabel: getRevenueProjectionPaceLabel(averageDriverMonthlyRevenue, averageMonthlyRevenuePerActiveDriver),
-      hasNoRevenue: Number(truckRevenue?.totalGrossRevenue || 0) <= 0,
-      hasLimitedPaceHistory: driverPaceMonthCount > 0 && driverPaceMonthCount < Math.min(3, basisMonthCount)
+      ytdRevenue: actualRevenue,
+      actualRevenue,
+      actualLoadCount,
+      futureBookedRevenue: futureBookedRevenueForDriver,
+      futureBookedLoadCount: futureBookedLoadCountForDriver,
+      knownRevenue: knownRevenueForDriver,
+      basisRevenue: knownRevenueForDriver,
+      basisLoadCount: actualLoadCount + futureBookedLoadCountForDriver,
+      paceRevenue: actualRevenue,
+      paceLoadCount: actualLoadCount,
+      paceMonthCount: isCurrentProjectionYear ? 0 : basisMonthCount,
+      paceBasisLabel: isCurrentProjectionYear
+        ? (paceConfidence.isBuildingSample
+            ? `${Math.round(driverPaceConfidence * 100)}% driver sample / ${Math.round((1 - driverPaceConfidence) * 100)}% fleet baseline`
+            : 'Driver pace × open driver-days')
+        : `${basisInfo.basisMonths.map((month) => month.shortName || month.name).join(' / ')} pace`,
+      driverActiveStartDate: driverElapsedStartDate,
+      driverFutureStartDate,
+      elapsedYearDays: driverElapsedYearDays,
+      elapsedAvailableDriverDays: elapsedAvailableDriverDaysForDriver,
+      futureOpenDriverDays: futureOpenDriverDaysForDriver,
+      futureOffDays: futureOffDaySet.size,
+      futureBookedDriverDays: futureBookedDaySet.size,
+      futureUnavailableDriverDays: futureUnavailableDaySet.size,
+      observedRevenuePerAvailableDriverDay: observedRevenuePerAvailableDriverDayForDriver,
+      fleetRevenuePerAvailableDriverDay: revenuePerAvailableDriverDay,
+      revenuePerAvailableDriverDay: revenuePerAvailableDriverDayForDriver,
+      averageMonthlyRevenue: capacityAverageMonthlyRevenue,
+      projectedAnnualRevenue: projectedAnnualRevenueForDriver,
+      loadCount: actualLoadCount + futureBookedLoadCountForDriver,
+      paceConfidence: driverPaceConfidence,
+      paceConfidencePercent: Math.round(driverPaceConfidence * 100),
+      paceLoadConfidence: Number(paceConfidence.loadConfidence || 0),
+      paceDayConfidence: Number(paceConfidence.dayConfidence || 0),
+      paceFullConfidenceLoads: Number(paceConfidence.fullConfidenceLoads || driverPaceFullConfidenceLoads),
+      paceFullConfidenceDays: Number(paceConfidence.fullConfidenceDays || driverPaceFullConfidenceDays),
+      usesFleetBaselinePace: Boolean(isCurrentProjectionYear && paceConfidence.isBuildingSample),
+      paceLabel: isCurrentProjectionYear && paceConfidence.isBuildingSample
+        ? 'Building sample'
+        : getRevenueProjectionPaceLabel(capacityAverageMonthlyRevenue, averageMonthlyRevenuePerActiveDriver),
+      hasNoRevenue: actualRevenue <= 0 && futureBookedRevenueForDriver <= 0,
+      hasLimitedPaceHistory: Boolean(isCurrentProjectionYear && paceConfidence.isBuildingSample)
     };
   }).sort((a, b) => b.projectedAnnualRevenue - a.projectedAnnualRevenue || String(a.operator || '').localeCompare(String(b.operator || ''), undefined, { numeric: true }));
 
@@ -5108,17 +5627,32 @@ function buildYearlyRevenueProjectionResponse(items, sourceList, year, rosterIte
       projectedRemainingRevenueBeforeOffTime,
       offTimeProjectedRevenueReduction,
       ytdGrossRevenue,
-      ytdLoadCount: grossReport.totals?.loadCount || 0,
+      ytdLoadCount,
       completedMonthRevenue,
+      completedMonthLoadCount,
       actualRevenueThroughCurrentMonth,
-      projectionLockedRevenue: actualRevenueThroughCurrentMonth,
+      futureBookedRevenue,
+      futureBookedLoadCount,
+      projectionKnownRevenue,
+      projectionLockedRevenue: projectionKnownRevenue,
+      projectedOpenFutureRevenue,
+      revenuePerAvailableDriverDay,
+      elapsedAvailableDriverDays,
+      elapsedBaselineDriverDays,
+      futureOpenDriverDays,
+      futureBaselineDriverDays,
       currentPartialMonthRevenue,
       currentPartialMonthLoadCount,
       currentMonthRevenue,
-      currentMonthProjectedRevenue: adjustedCurrentMonthProjectedRevenue,
-      currentMonthProjectedRevenueBeforeOffTime: currentMonthProjectedRevenue,
-      currentMonthRemainingProjectedRevenue: adjustedCurrentMonthRemainingProjectedRevenue,
-      currentMonthRemainingProjectedRevenueBeforeOffTime: currentMonthRemainingProjectedRevenue,
+      currentMonthFutureBookedRevenue,
+      currentMonthFutureBookedLoadCount,
+      currentMonthTotalKnownRevenue,
+      currentMonthOpenDriverDays,
+      currentMonthOpenProjectedRevenue,
+      currentMonthProjectedRevenue,
+      currentMonthProjectedRevenueBeforeOffTime,
+      currentMonthRemainingProjectedRevenue,
+      currentMonthRemainingProjectedRevenueBeforeOffTime,
       currentMonthLoadCount,
       currentMonthIsBasis,
       currentMonthElapsedDay: Number(basisInfo.currentDay || 0),
@@ -5139,9 +5673,9 @@ function buildYearlyRevenueProjectionResponse(items, sourceList, year, rosterIte
       projectedAnnualRevenueBeforeOffTime,
       projectedAnnualRevenueAfterOffTime: projectedAnnualRevenue,
       projectedRevenueReduction: offTimeProjectedRevenueReduction,
-      currentMonthProjectedRevenueBeforeOffTime: currentMonthProjectedRevenue,
-      currentMonthProjectedRevenueAfterOffTime: adjustedCurrentMonthProjectedRevenue,
-      currentMonthProjectedRevenueReduction: Math.max(0, currentMonthProjectedRevenue - adjustedCurrentMonthProjectedRevenue)
+      currentMonthProjectedRevenueBeforeOffTime,
+      currentMonthProjectedRevenueAfterOffTime: currentMonthProjectedRevenue,
+      currentMonthProjectedRevenueReduction: Math.max(0, currentMonthProjectedRevenueBeforeOffTime - currentMonthProjectedRevenue)
     },
     driverRows,
     grossRevenueTotals: grossReport.totals
@@ -5205,6 +5739,7 @@ function getOrdersDueForSettlementItem(item, sourceList) {
     Status: f.Status || '',
     FinalSettleSent: f.FinalSettleSent ?? false,
     PickupDate: f.Pickup_x0020_Offer_x0020_Date || '',
+    DeliveryDate: f.Expected_x0020_Delivery_x0020_Da || '',
     PickupDateDisplay: formatShortDate(f.Pickup_x0020_Offer_x0020_Date),
     DeliveryDate: f.Expected_x0020_Delivery_x0020_Da || '',
     DeliveryDateDisplay: formatShortDate(f.Expected_x0020_Delivery_x0020_Da),
@@ -5427,6 +5962,7 @@ function getPermitGovernanceReportItem(item, sourceList, permitRootItems = []) {
     Truck: truck || '',
     Status: f.Status || '',
     PickupDate: f.Pickup_x0020_Offer_x0020_Date || '',
+    DeliveryDate: f.Expected_x0020_Delivery_x0020_Da || '',
     PickupDateDisplay: formatShortDate(f.Pickup_x0020_Offer_x0020_Date),
     DeliveryDate: f.Expected_x0020_Delivery_x0020_Da || '',
     DeliveryDateDisplay: formatShortDate(f.Expected_x0020_Delivery_x0020_Da),
@@ -6843,6 +7379,7 @@ function getWonNotRegisteredItem(item, sourceList) {
     Truck: truck || '',
     Status: f.Status || '',
     PickupDate: f.Pickup_x0020_Offer_x0020_Date || '',
+    DeliveryDate: f.Expected_x0020_Delivery_x0020_Da || '',
     PickupDateDisplay: formatShortDate(f.Pickup_x0020_Offer_x0020_Date),
     Origin: f.Shipment_x0020_Origin || '',
     Destination: f.Shipment_x0020_Destination || ''
