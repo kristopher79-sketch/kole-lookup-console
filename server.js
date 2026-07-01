@@ -6137,6 +6137,13 @@ function getDriverTimeOffFilterLabel(filterType = '', filterKey = '', providedLa
   return '';
 }
 
+function normalizeDriverTimeOffReason(value) {
+  const normalized = normalizeSearchValue(value);
+
+  if (normalized.includes('repair')) return 'Repairs';
+  return 'Home Time';
+}
+
 function applyDriverTimeOffReportFilter(report, options = {}) {
   const filterType = normalizeText(options.filterType);
   const filterKey = String(options.filterKey || '').trim();
@@ -6171,7 +6178,7 @@ function buildDriverTimeOffFieldsFromBody(body = {}, rosterOption = null) {
   const endDate = normalizeEasternDateOnly(body.endDate);
   const operatorName = cleanRosterText(rosterOption?.driverName || body.operatorName);
   const truckNumber = cleanRosterText(rosterOption?.unitNo || body.truckNumber);
-  const reason = cleanRosterText(body.reason);
+  const reason = normalizeDriverTimeOffReason(body.reason);
   const status = cleanRosterText(body.status || 'Active') || 'Active';
 
   if (!operatorName) throw new Error('Driver is required.');
@@ -11949,8 +11956,10 @@ app.get('/reports/customer-booking-trends', requireLookupAccess, async (req, res
 
 
 function normalizeOnThisDayMode(value) {
-  const normalized = normalizeText(value);
-  return normalized === 'across' ? 'across' : 'exact';
+  // Comparison-years mode was intentionally retired after it caused oversized
+  // multi-source report loads on Render. Keep accepting the query parameter,
+  // but always run the lightweight exact-date version.
+  return 'exact';
 }
 
 function getOnThisDayTargetDate(value) {

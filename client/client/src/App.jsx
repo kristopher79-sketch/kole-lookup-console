@@ -22,6 +22,14 @@ const ON_THIS_DAY_CLIENT_CACHE_LIMIT = 10;
 const ORDER_NOTES_CLIENT_CACHE_MS = 60 * 1000;
 const ORDER_NOTE_MAX_LENGTH = 20000;
 const ORDER_NOTE_TYPE_OPTIONS = ['Dispatch', 'Paperwork', 'Permits', 'Billing', 'Operations'];
+const DRIVER_TIME_OFF_REASON_OPTIONS = ['Home Time', 'Repairs'];
+
+function normalizeDriverTimeOffReason(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+
+  if (normalized.includes('repair')) return 'Repairs';
+  return 'Home Time';
+}
 
 const STARTUP_SPLASH_MIN_MS = 5000;
 const STARTUP_SPLASH_EXIT_MS = 420;
@@ -606,6 +614,8 @@ export default function App() {
   const [hasSearched, setHasSearched] = useState(false);
   const [selected, setSelected] = useState(null);
   const [selectedView, setSelectedView] = useState('basic');
+  const [orderReturnTrailLabel, setOrderReturnTrailLabel] = useState('');
+  const [orderDrilldownReturn, setOrderDrilldownReturn] = useState(null);
   const [statusFilter, setStatusFilter] = useState('All');
   const [includeArchives, setIncludeArchives] = useState(false);
   const [documentLoading, setDocumentLoading] = useState('');
@@ -653,6 +663,9 @@ export default function App() {
   const [yearlyProjectionLoading, setYearlyProjectionLoading] = useState(false);
   const [yearlyProjectionError, setYearlyProjectionError] = useState(null);
   const [yearlyProjectionModalOpen, setYearlyProjectionModalOpen] = useState(false);
+  const [yearlyProjectionCustomOpen, setYearlyProjectionCustomOpen] = useState(false);
+  const [yearlyProjectionCustomName, setYearlyProjectionCustomName] = useState('What if');
+  const [yearlyProjectionCustomDriverCount, setYearlyProjectionCustomDriverCount] = useState('');
   const [openGrossRevenueQuarters, setOpenGrossRevenueQuarters] = useState([]);
   const [selectedGrossRevenueTruck, setSelectedGrossRevenueTruck] = useState(null);
   const [driverSummaryReport, setDriverSummaryReport] = useState(null);
@@ -754,7 +767,7 @@ export default function App() {
     truckNumber: '',
     startDate: getEasternDateInputValue(),
     endDate: getEasternDateInputValue(),
-    reason: '',
+    reason: 'Home Time',
     status: 'Active'
   }));
   const [activeReportPanel, setActiveReportPanel] = useState('');
@@ -1186,6 +1199,8 @@ export default function App() {
     function handleEsc(e) {
       if (e.key === 'Escape') {
         setSelected(null);
+        setOrderReturnTrailLabel('');
+        setOrderDrilldownReturn(null);
         setOrderNotesData(null);
         setOrderNotesLoading(false);
         setOrderNotesError('');
@@ -1529,6 +1544,8 @@ export default function App() {
     setResults([]);
     setSearchedRecords(0);
     setSelected(null);
+    setOrderReturnTrailLabel('');
+    setOrderDrilldownReturn(null);
     setOrderNotesData(null);
     setOrderNotesLoading(false);
     setOrderNotesError('');
@@ -1610,6 +1627,8 @@ export default function App() {
     setYearlyProjectionLoading(false);
     setYearlyProjectionError(null);
     setYearlyProjectionModalOpen(false);
+    setYearlyProjectionCustomOpen(false);
+    setYearlyProjectionCustomDriverCount('');
     searchCacheRef.current.clear();
     onThisDayReportCacheRef.current.clear();
 
@@ -1726,6 +1745,7 @@ export default function App() {
     setResults([]);
     setSearchedRecords(0);
     setSelected(null);
+    setOrderReturnTrailLabel('');
     setHasSearched(false);
     setError('');
     setStatusFilter('All');
@@ -1741,6 +1761,7 @@ export default function App() {
     setResults([]);
     setSearchedRecords(0);
     setSelected(null);
+    setOrderReturnTrailLabel('');
     setHasSearched(false);
     setError('');
     setStatusFilter('All');
@@ -1760,6 +1781,7 @@ export default function App() {
     setResults([]);
     setSearchedRecords(0);
     setSelected(null);
+    setOrderReturnTrailLabel('');
     setHasSearched(false);
     setError('');
     setStatusFilter('All');
@@ -1782,6 +1804,7 @@ export default function App() {
     setError('');
     setHasSearched(true);
     setSelected(null);
+    setOrderReturnTrailLabel('');
     setSelectedView('basic');
     setStatusFilter('All');
     setDocumentError('');
@@ -2683,6 +2706,87 @@ async function openUploadDigestLoadPhotos(record) {
   }
 }
 
+
+function findBestOrderLookupMatch(records = [], lookupValue = '') {
+  const normalized = String(lookupValue || '').trim().toLowerCase();
+  const compact = normalized.replace(/\s+/g, '');
+
+  if (!compact) return null;
+
+  const exactBol = records.find((record) => String(record?.BOL || '').trim().toLowerCase().replace(/\s+/g, '') === compact);
+  if (exactBol) return exactBol;
+
+  const exactBid = records.find((record) => String(record?.BidID || '').trim().toLowerCase() === normalized);
+  if (exactBid) return exactBid;
+
+  return records.length === 1 ? records[0] : null;
+}
+
+async function openOrderFromLookupValue(lookupValue, options = {}) {
+  const cleanLookup = String(lookupValue || '').trim();
+  const {
+    view = 'basic',
+    returnLabel = '',
+    loadingKey = '',
+    setActionError = setError,
+    includeArchives = true
+  } = options;
+
+  if (!cleanLookup) {
+    setActionError('This row does not have enough order information to look up.');
+    return;
+  }
+
+  if (loadingKey) {
+    setDocumentLoading(loadingKey);
+  }
+
+  setActionError('');
+  setLoadingDetail(true);
+
+  try {
+    const params = new URLSearchParams({
+      q: cleanLookup,
+      includeArchives: includeArchives ? 'true' : 'false'
+    });
+
+    const res = await authedFetch(`${API}/search?${params.toString()}`);
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || data.message || 'Unable to search for the linked order.');
+    }
+
+    const match = findBestOrderLookupMatch(data.results || [], cleanLookup);
+
+    if (!match?.id) {
+      throw new Error(`No matching order was found for ${cleanLookup}.`);
+    }
+
+    await loadDetails(match.id, view, match.SourceListId || '', { returnLabel });
+  } catch (err) {
+    setActionError(err.message || 'Unable to open linked order.');
+  } finally {
+    setLoadingDetail(false);
+    if (loadingKey) {
+      setDocumentLoading('');
+    }
+  }
+}
+
+function openUploadDigestOrder(record, event) {
+  event?.stopPropagation();
+
+  const bol = String(record?.BOLNumber || '').trim();
+  const loadingKey = `upload-digest-order-${record?.id || bol}`;
+
+  openOrderFromLookupValue(bol, {
+    returnLabel: 'Job Photo Uploads',
+    loadingKey,
+    setActionError: setUploadDigestActionError
+  });
+}
+
 async function refreshOperationsAndTracking() {
   const operationsRefresh = loadOperationsDashboard({ forceRefresh: true });
 
@@ -2705,6 +2809,74 @@ function closeDriverRosterModal() {
   setDriverHistorySnapshot(null);
   setDriverHistoryLoading(false);
   setDriverHistoryError('');
+  setOrderDrilldownReturn(null);
+}
+
+function getOrderDrilldownReturnLabel(snapshot = orderDrilldownReturn) {
+  const order = snapshot?.order;
+  if (!order) return '';
+
+  return `Order ${order.BOL || order.BidID || ''}`.trim();
+}
+
+function getDriverRosterReturnTrailLabel() {
+  if (orderDrilldownReturn) return getOrderDrilldownReturnLabel();
+  if (activeDriverRosterModalOpen) return 'Active Driver Roster';
+  if (inactiveDriverRosterModalOpen) return 'Inactive Drivers';
+  if (fleetEquipmentModalOpen) return 'Fleet Equipment';
+  return '';
+}
+
+function handleDriverRosterReturnTrailClick() {
+  if (orderDrilldownReturn) {
+    restoreOrderFromDrilldown();
+    return;
+  }
+
+  closeDriverRosterModal();
+}
+
+function getCurrentOrderDrilldownSnapshot(record = selected, view = selectedView) {
+  if (!record) return null;
+
+  return {
+    order: record,
+    view: view || 'basic'
+  };
+}
+
+function parkOrderDrilldownSnapshot(snapshot) {
+  if (!snapshot?.order) return;
+
+  setOrderDrilldownReturn(snapshot);
+  setSelected(null);
+  setOrderReturnTrailLabel('');
+  setDocumentError('');
+  setDriverLookupError('');
+}
+
+function restoreOrderFromDrilldown() {
+  const snapshot = orderDrilldownReturn;
+  if (!snapshot?.order) return;
+
+  setDriverHistoryModalOpen(false);
+  setSelectedDriverRoster(null);
+  setDriverHistorySnapshot(null);
+  setDriverHistoryLoading(false);
+  setDriverHistoryError('');
+  setSelectedSalesLead(null);
+  setSalesNoteDraft('');
+  setSalesNoteMessage('');
+  setSalesNoteError('');
+  setSalesLeadSuppressionReason('');
+  setSalesLeadSuppressionMessage('');
+  setSalesLeadSuppressionError('');
+  setSelected(snapshot.order);
+  setSelectedView(snapshot.view || 'basic');
+  if (snapshot.view === 'notes') {
+    loadOrderNotes(snapshot.order);
+  }
+  setOrderDrilldownReturn(null);
 }
 
 function closeDriverPerformanceModal() {
@@ -2851,12 +3023,17 @@ function getPositionStatusLabel(position) {
   if (Number(position?.speed || 0) > 0) return 'Moving';
   return 'Stopped';
 }
-  async function loadDetails(id, view = 'basic', sourceListId = '') {
+  async function loadDetails(id, view = 'basic', sourceListId = '', options = {}) {
     if (!id) {
       setError('This row does not have a record ID.');
       return;
     }
 
+    const returnLabel = Object.prototype.hasOwnProperty.call(options, 'returnLabel')
+      ? options.returnLabel
+      : getLiveOrderReturnTrailLabel();
+
+    setOrderReturnTrailLabel(returnLabel || '');
     setSelectedView(view);
     setOrderNotesData(null);
     setOrderNotesLoading(false);
@@ -2879,9 +3056,14 @@ function getPositionStatusLabel(position) {
       if (!data.success) throw new Error(data.error || 'Unable to load record details');
 
       setSelected(data);
+
+      if (view === 'notes') {
+        loadOrderNotes(data);
+      }
     } catch (err) {
       setError(err.message);
       setSelected(null);
+      setOrderReturnTrailLabel('');
     } finally {
       setLoadingDetail(false);
     }
@@ -3065,6 +3247,8 @@ function getPositionStatusLabel(position) {
 
   function closeModal() {
     setSelected(null);
+    setOrderReturnTrailLabel('');
+    setOrderDrilldownReturn(null);
     setDocumentError('');
     setOrderNotesData(null);
     setOrderNotesLoading(false);
@@ -3276,6 +3460,8 @@ function getPositionStatusLabel(position) {
     setYearlyProjectionError(null);
     setYearlyProjectionReport(null);
     setYearlyProjectionModalOpen(false);
+    setYearlyProjectionCustomOpen(false);
+    setYearlyProjectionCustomDriverCount('');
 
     try {
       const res = await authedFetch(
@@ -4147,8 +4333,8 @@ function getPositionStatusLabel(position) {
       return;
     }
 
-    const requestedMode = modeOverride || onThisDayMode || 'exact';
-    const normalizedMode = requestedMode === 'across' ? 'across' : 'exact';
+    const requestedMode = 'exact';
+    const normalizedMode = 'exact';
     const exactCacheKey = `${onThisDayDate}|exact`;
     const acrossCacheKey = `${onThisDayDate}|across`;
     const cachedSource = normalizedMode === 'exact'
@@ -4208,10 +4394,6 @@ function getPositionStatusLabel(position) {
     } finally {
       setOnThisDayLoading(false);
     }
-  }
-
-  function loadOnThisDayComparisonReport() {
-    loadOnThisDayReport('across');
   }
 
   function loadOnThisDayExactReport() {
@@ -4328,6 +4510,7 @@ function getPositionStatusLabel(position) {
         throw new Error(`No matching order was found for ${bol || bidId}.`);
       }
 
+      setOrderReturnTrailLabel('Operational Notes');
       setSelectedView('basic');
       setOrderNotesData(null);
       setOrderNotesLoading(false);
@@ -4579,7 +4762,7 @@ function getPositionStatusLabel(position) {
         truckNumber: record.truckNumber || '',
         startDate: record.startDate || getEasternDateInputValue(),
         endDate: record.endDate || record.startDate || getEasternDateInputValue(),
-        reason: record.reason || '',
+        reason: normalizeDriverTimeOffReason(record.reason),
         status: record.status || 'Active'
       };
     }
@@ -4591,7 +4774,7 @@ function getPositionStatusLabel(position) {
       truckNumber: '',
       startDate: today,
       endDate: today,
-      reason: '',
+      reason: 'Home Time',
       status: 'Active'
     };
   }
@@ -4683,7 +4866,10 @@ function getPositionStatusLabel(position) {
       const res = await authedFetch(url, {
         method: isEditing ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(driverTimeOffDraft)
+        body: JSON.stringify({
+          ...driverTimeOffDraft,
+          reason: normalizeDriverTimeOffReason(driverTimeOffDraft.reason)
+        })
       });
       const data = await res.json().catch(() => ({}));
 
@@ -5199,8 +5385,8 @@ function getPositionStatusLabel(position) {
 
     if (!customerName) return;
 
-    closeCustomerTrendModal();
-    await openCustomerCardForName(customerName);
+    setSelectedCustomerTrend(null);
+    await openCustomerCardForName(customerName, '', { returnToOrder: false });
   }
 
   function normalizeCustomerLookupKey(value) {
@@ -5242,9 +5428,12 @@ function getPositionStatusLabel(position) {
     return matches[0]?.record || null;
   }
 
-  async function openCustomerCardForName(customerName, customerCode = '') {
+  async function openCustomerCardForName(customerName, customerCode = '', options = {}) {
     const cleanName = String(customerName || '').trim();
     const cleanCode = String(customerCode || '').trim();
+    const returnSnapshot = options.returnToOrder === false
+      ? null
+      : options.returnSnapshot || (selected ? getCurrentOrderDrilldownSnapshot(selected, selectedView) : null);
 
     if (!cleanName && !cleanCode) {
       setCustomerLookupError('This order does not have a customer name or customer code to match.');
@@ -5253,6 +5442,9 @@ function getPositionStatusLabel(position) {
 
     const localMatch = findLocalSalesLeadMatch(cleanName, cleanCode);
     if (localMatch) {
+      if (returnSnapshot) {
+        parkOrderDrilldownSnapshot(returnSnapshot);
+      }
       openSalesLeadCard(localMatch);
       return;
     }
@@ -5273,6 +5465,10 @@ function getPositionStatusLabel(position) {
 
       if (!data.matches || data.matches.length === 0) {
         throw new Error(`No Sales Leads customer card matched ${cleanName}.`);
+      }
+
+      if (returnSnapshot) {
+        parkOrderDrilldownSnapshot(returnSnapshot);
       }
 
       setSelectedSalesLead(data.matches[0]);
@@ -5497,6 +5693,7 @@ function getPositionStatusLabel(position) {
     setSalesLeadSuppressionReason('');
     setSalesLeadSuppressionMessage('');
     setSalesLeadSuppressionError('');
+    setOrderDrilldownReturn(null);
   }
 
   function openRosterFromReport(roster) {
@@ -5579,6 +5776,7 @@ function getPositionStatusLabel(position) {
 
   async function openDriverRosterFromOrder(record = selected) {
     const truck = String(record?.Truck || record?.truck || '').trim();
+    const returnSnapshot = selected ? getCurrentOrderDrilldownSnapshot(selected, selectedView) : null;
 
     if (!truck) {
       setDriverLookupError('This order does not have a truck number to match.');
@@ -5588,7 +5786,9 @@ function getPositionStatusLabel(position) {
     const localMatch = findLocalDriverRosterMatch(truck);
     if (localMatch) {
       setDriverLookupError('');
-      setSelected(null);
+      if (returnSnapshot) {
+        parkOrderDrilldownSnapshot(returnSnapshot);
+      }
       setSelectedDriverRoster(localMatch);
       return;
     }
@@ -5615,7 +5815,9 @@ function getPositionStatusLabel(position) {
         rosterModalSubtitle: `${data.roster.tmsName || data.roster.operatorTeamName || 'Driver'} · Truck ${data.roster.truck || truck}`
       });
 
-      setSelected(null);
+      if (returnSnapshot) {
+        parkOrderDrilldownSnapshot(returnSnapshot);
+      }
       setSelectedDriverRoster(payload);
     } catch (err) {
       setDriverLookupError(err.message || 'Unable to open Driver Roster.');
@@ -5715,6 +5917,45 @@ function openReportLoadDetails(load) {
       label: isSettled ? 'Net Driver Pay' : 'Estimated Driver Pay',
       value: value ? formatMoney(value) : '-'
     };
+  }
+
+  function getLiveOrderReturnTrailLabel() {
+    if (permitHistoryOrderReturnLoad || selectedPermitHistoryLoad) return 'Historical Permitted Loads';
+    if (operationalNotesModalOpen) return 'Operational Notes';
+    if (driverSummaryModalOpen) return 'Monthly Driver Summary';
+    if (weeklySettlementModalOpen) return 'Weekly Settlement Report';
+    if (grossRevenueModalOpen) return 'Gross Revenue Totals';
+    if (ordersDueSettlementModalOpen) return 'Orders Due for Settlement';
+    if (wonNotRegisteredModalOpen) return 'Orders Won Not Registered';
+    if (permitGovernanceModalOpen) return 'Permit Governance';
+    if (onThisDayModalOpen) return 'On This Day';
+    if (monthlyOpsModalOpen) return 'Monthly Operations Summary';
+    if (customerTrendModalOpen) return 'Customer Booking Trends';
+    if (salesSearchReturnLead) return 'Customer Card';
+    return '';
+  }
+
+  function getOrderReturnTrailLabel() {
+    return orderReturnTrailLabel || getLiveOrderReturnTrailLabel();
+  }
+
+  function handleOrderReturnTrailClick() {
+    if (salesSearchReturnLead) {
+      returnToCustomerCard();
+      return;
+    }
+
+    closeModal();
+  }
+
+  function ModalReturnTrail({ label, onClick }) {
+    if (!label) return null;
+
+    return (
+      <button type="button" className="modal-return-trail" onClick={onClick}>
+        ← Back to {label}
+      </button>
+    );
   }
 
   function viewTitle() {
@@ -6430,7 +6671,17 @@ function openReportLoadDetails(load) {
         <SectionTitle>Dispatch Overview</SectionTitle>
 
         <DetailItem label="BOL" value={selected.BOL} />
-        <DetailItem label="Driver" value={selected.Driver} />
+        <DetailItem label="Driver" value={selected.Driver}>
+          <button
+            type="button"
+            className="view-button driver-card-button"
+            onClick={() => openDriverRosterFromOrder(selected)}
+            disabled={!selected.Truck || driverLookupLoading}
+          >
+            {driverLookupLoading ? 'Looking up...' : 'View Driver Card'}
+          </button>
+          {driverLookupError && <small className="inline-error">{driverLookupError}</small>}
+        </DetailItem>
         <DetailItem label="Truck" value={selected.Truck} />
         <DetailItem label="Team Required" value={selected.TeamRequired} />
 
@@ -6501,7 +6752,17 @@ function openReportLoadDetails(load) {
 
         <DetailItem label="BOL" value={selected.BOL} />
         <DetailItem label="Bid ID" value={selected.BidID} />
-        <DetailItem label="Customer" value={selected.Customer} />
+        <DetailItem label="Customer" value={selected.Customer}>
+          <button
+            type="button"
+            className="view-button customer-card-button"
+            onClick={() => openCustomerCardForName(selected.Customer, selected.CustomerCode)}
+            disabled={!selected.Customer || customerLookupLoading}
+          >
+            {customerLookupLoading ? 'Looking up...' : 'View Customer Card'}
+          </button>
+          {customerLookupError && <small className="inline-error">{customerLookupError}</small>}
+        </DetailItem>
         <DetailItem label="Customer Code" value={selected.CustomerCode} />
 
         <SectionTitle>Revenue</SectionTitle>
@@ -6545,7 +6806,16 @@ function openReportLoadDetails(load) {
           }
         />
 
-        <DetailItem label="TMS Name" value={selected.TMSName} />
+        <DetailItem label="TMS Name" value={selected.TMSName || selected.Driver}>
+          <button
+            type="button"
+            className="view-button driver-card-button"
+            onClick={() => openDriverRosterFromOrder(selected)}
+            disabled={!selected.Truck || driverLookupLoading}
+          >
+            {driverLookupLoading ? 'Looking up...' : 'View Driver Card'}
+          </button>
+        </DetailItem>
       </div>
     );
   }
@@ -6962,6 +7232,43 @@ function openReportLoadDetails(load) {
     );
   }
 
+  async function openDriverRosterFromProjectionRow(row = {}) {
+    const truck = String(row?.truck || '').trim();
+    if (!truck) return;
+
+    const localMatch = findLocalDriverRosterMatch(truck);
+    if (localMatch) {
+      setDriverLookupError('');
+      setSelectedDriverRoster(localMatch);
+      return;
+    }
+
+    setDriverLookupLoading(true);
+    setDriverLookupError('');
+
+    try {
+      const res = await authedFetch(`${API}/driver-roster/lookup?truck=${encodeURIComponent(truck)}`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success || !data.roster) {
+        throw new Error(data.error || data.message || `No Driver Roster record matched truck ${truck}.`);
+      }
+
+      const payload = buildDriverRosterModalPayload(data.roster, {
+        truck,
+        statusLabel: data.roster.status || 'Driver Roster',
+        rosterModalTitle: getDriverRosterModalTitle(data.roster.status),
+        rosterModalSubtitle: `${data.roster.tmsName || data.roster.operatorTeamName || row.operator || 'Driver'} · Truck ${data.roster.truck || truck}`
+      });
+
+      setSelectedDriverRoster(payload);
+    } catch (err) {
+      setDriverLookupError(err.message || 'Unable to open Driver Roster.');
+    } finally {
+      setDriverLookupLoading(false);
+    }
+  }
+
   function YearlyRevenueProjectionPreview() {
     if (!yearlyProjectionReport) return null;
 
@@ -6970,6 +7277,15 @@ function openReportLoadDetails(load) {
     const driverRows = yearlyProjectionReport.driverRows || [];
     const monthlyTotals = yearlyProjectionReport.monthlyTotals || [];
     const sensitivityRows = yearlyProjectionReport.driverCountSensitivity || [];
+    const customDriverCount = Number(yearlyProjectionCustomDriverCount);
+    const customScenario = Number.isFinite(customDriverCount) && customDriverCount > 0
+      ? {
+          label: String(yearlyProjectionCustomName || 'Custom scenario').trim() || 'Custom scenario',
+          driverCount: customDriverCount,
+          projectedAnnualRevenue: Number(summary.averageMonthlyRevenuePerActiveDriver || 0) * customDriverCount * 12,
+          differenceFromCurrent: (Number(summary.averageMonthlyRevenuePerActiveDriver || 0) * customDriverCount * 12) - Number(summary.projectedAnnualRevenue || 0)
+        }
+      : null;
 
     return (
       <div className="driver-report-preview modal-report-preview yearly-projection-preview">
@@ -7024,6 +7340,7 @@ function openReportLoadDetails(load) {
         <div className="yearly-projection-grid">
           <section className="yearly-projection-card">
             <h3>Run-rate scenarios</h3>
+            <p className="yearly-projection-card-note">Static math scenarios based on the current projection basis.</p>
             <div className="report-table-wrap">
               <table className="driver-report-table yearly-projection-scenario-table">
                 <thead>
@@ -7052,7 +7369,51 @@ function openReportLoadDetails(load) {
           </section>
 
           <section className="yearly-projection-card">
-            <h3>Driver count sensitivity</h3>
+            <div className="yearly-projection-card-heading-row">
+              <div>
+                <h3>Driver count sensitivity</h3>
+                <p className="yearly-projection-card-note">Not clickable; use the custom scenario option for a named driver-count test.</p>
+              </div>
+              <button
+                type="button"
+                className="view-button yearly-projection-custom-toggle"
+                onClick={() => setYearlyProjectionCustomOpen((open) => !open)}
+              >
+                {yearlyProjectionCustomOpen ? 'Hide Custom' : 'Custom Scenario'}
+              </button>
+            </div>
+
+            {yearlyProjectionCustomOpen && (
+              <div className="yearly-projection-custom-box">
+                <label>
+                  <span>Scenario name</span>
+                  <input
+                    value={yearlyProjectionCustomName}
+                    onChange={(e) => setYearlyProjectionCustomName(e.target.value)}
+                    placeholder="Aggressive hiring"
+                  />
+                </label>
+                <label>
+                  <span>Active drivers</span>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={yearlyProjectionCustomDriverCount}
+                    onChange={(e) => setYearlyProjectionCustomDriverCount(e.target.value)}
+                    placeholder={String(summary.activeDriverCount || '')}
+                  />
+                </label>
+                {customScenario && (
+                  <div className="yearly-projection-custom-result">
+                    <strong>{customScenario.label}</strong>
+                    <span>{formatReportNumber(customScenario.driverCount)} drivers → {formatReportMoney(customScenario.projectedAnnualRevenue)}</span>
+                    <small>{formatReportMoney(customScenario.differenceFromCurrent)} vs current projection</small>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="report-table-wrap">
               <table className="driver-report-table yearly-projection-sensitivity-table">
                 <thead>
@@ -7116,7 +7477,12 @@ function openReportLoadDetails(load) {
                     <td colSpan={8}>No active drivers were found for this projection.</td>
                   </tr>
                 ) : driverRows.map((row) => (
-                  <tr key={row.truck || row.operator}>
+                  <tr
+                    key={row.truck || row.operator}
+                    className="yearly-projection-driver-row"
+                    onClick={() => openDriverRosterFromProjectionRow(row)}
+                    title="Open Driver Roster card"
+                  >
                     <td>{row.truck || '-'}</td>
                     <td>
                       <strong>{row.operator || '-'}</strong>
@@ -7853,7 +8219,7 @@ function openReportLoadDetails(load) {
 
       setPermitHistoryOrderReturnLoad(load);
       setSelectedPermitHistoryLoad(null);
-      loadDetails(load.id, 'basic', load.SourceListId || '');
+      loadDetails(load.id, 'basic', load.SourceListId || '', { returnLabel: 'Historical Permitted Loads' });
     }
 
     return (
@@ -9107,12 +9473,15 @@ function openReportLoadDetails(load) {
 
               <label>
                 <span>Reason</span>
-                <input
-                  value={driverTimeOffDraft.reason || ''}
+                <select
+                  value={normalizeDriverTimeOffReason(driverTimeOffDraft.reason)}
                   onChange={(e) => updateDriverTimeOffDraft('reason', e.target.value)}
-                  placeholder="Vacation, home time, medical, etc."
                   disabled={driverTimeOffSubmitting}
-                />
+                >
+                  {DRIVER_TIME_OFF_REASON_OPTIONS.map((reason) => (
+                    <option key={reason} value={reason}>{reason}</option>
+                  ))}
+                </select>
               </label>
 
               <label>
@@ -9214,28 +9583,7 @@ function openReportLoadDetails(load) {
     return (
       <div className="driver-report-preview driver-time-off-preview">
         {driverTimeOffReport.warning && <div className="msg error">{driverTimeOffReport.warning}</div>}
-        <div className="driver-time-off-report-actions driver-time-off-report-actions-only">
-          <button
-            type="button"
-            className="pdf-export-button compact"
-            onClick={downloadDriverTimeOffPdf}
-            disabled={driverTimeOffPdfLoading || driverTimeOffLoading}
-          >
-            {driverTimeOffPdfLoading ? 'Exporting...' : 'Export PDF'}
-          </button>
-          <button type="button" className="view-button" onClick={() => openDriverTimeOffForm()}>
-            Add Time Off
-          </button>
-        </div>
-
         <div className="pdf-export-guidance">PDF export includes the summary cards and analysis sections only, not the full Time Off Log.</div>
-        {getPdfExportNotice('driverTimeOff') && (
-          <div className="pdf-export-success">{getPdfExportNotice('driverTimeOff')}</div>
-        )}
-        {driverTimeOffPdfError && (
-          <div className="msg error pdf-export-error">{driverTimeOffPdfError}</div>
-        )}
-
         {driverTimeOffReportFilter && (
           <div className="driver-time-off-filter-banner">
             <span>Showing {formatReportNumber(visibleRows.length)} of {formatReportNumber(rows.length)} row(s) for <strong>{activeFilterLabel}</strong>.</span>
@@ -9721,6 +10069,7 @@ function openReportLoadDetails(load) {
         <div className="detail-modal driver-roster-modal" onClick={(e) => e.stopPropagation()}>
           <div className="detail-header">
             <div>
+              <ModalReturnTrail label={getDriverRosterReturnTrailLabel()} onClick={handleDriverRosterReturnTrailClick} />
               <h2>{modalTitle}</h2>
               <p>{modalSubtitle}</p>
             </div>
@@ -10698,7 +11047,12 @@ function openReportLoadDetails(load) {
                           const rowLoadingKey = `${record.BidListingID}-off`;
 
                           return (
-                            <tr key={record.id || `${record.BOLNumber}-${i}`}>
+                            <tr
+                              key={record.id || `${record.BOLNumber}-${i}`}
+                              className={record.BidListingID ? 'report-clickable-row' : ''}
+                              onClick={() => record.BidListingID && loadDetails(record.BidListingID, 'basic', '', { returnLabel: 'IntelliTrack' })}
+                              title={record.BidListingID ? 'Open full order screen' : ''}
+                            >
                               <td>{record.BOLNumber || '-'}</td>
                               <td>{record.Company || '-'}</td>
                               <td>{record.Operator || '-'}</td>
@@ -10820,6 +11174,14 @@ function openReportLoadDetails(load) {
                     <div className="intellitrack-action-row">
                       <button
                         type="button"
+                        className="secondary-action-button"
+                        onClick={() => loadDetails(order.id, 'basic', order.SourceListId || '', { returnLabel: 'IntelliTrack' })}
+                        disabled={!order.id || loadingDetail}
+                      >
+                        Open Order
+                      </button>
+                      <button
+                        type="button"
                         className={buttonState.enabled ? 'primary-action-button' : 'danger-button'}
                         onClick={() => toggleIntelliTrackOrder(order, buttonState.enabled)}
                         disabled={buttonState.disabled || intelliTrackActionLoading === orderLoadingKey}
@@ -10932,6 +11294,7 @@ function openReportLoadDetails(load) {
                           <th>BOL</th>
                           <th>Driver</th>
                           <th>Type</th>
+                          <th>Order</th>
                           <th>Folder</th>
                         </tr>
                       </thead>
@@ -10942,6 +11305,18 @@ function openReportLoadDetails(load) {
                             <td>{record.BOLNumber || '-'}</td>
                             <td>{record.DriverName || '-'}</td>
                             <td>{record.UploadType || '-'}</td>
+                            <td>
+                              <button
+                                type="button"
+                                className="table-link-button"
+                                onClick={(e) => openUploadDigestOrder(record, e)}
+                                disabled={!record.BOLNumber || documentLoading === `upload-digest-order-${record.id || record.BOLNumber}`}
+                              >
+                                {documentLoading === `upload-digest-order-${record.id || record.BOLNumber}`
+                                  ? 'Opening...'
+                                  : 'Open Order'}
+                              </button>
+                            </td>
                             <td>
                               <button
                                 type="button"
@@ -12446,6 +12821,10 @@ function openReportLoadDetails(load) {
         <div className="detail-modal report-modal sales-profile-modal" onClick={(e) => e.stopPropagation()}>
           <div className="detail-header report-modal-header">
             <div>
+              <ModalReturnTrail
+                label={getOrderDrilldownReturnLabel() || (customerTrendModalOpen ? 'Customer Booking Trends' : '')}
+                onClick={orderDrilldownReturn ? restoreOrderFromDrilldown : closeSalesLeadModal}
+              />
               <h2>{lead.CompanyName || 'Customer Card'}</h2>
               <p>{lead.CustomerCode || 'No customer code'} · {lead.Status || 'No status'}</p>
             </div>
@@ -13548,7 +13927,7 @@ function openReportLoadDetails(load) {
                   </div>
 
                   <p className="on-this-day-run-hint">
-                    Opens the selected date first for a lighter preview. Comparison years load only when requested and are cached for quick toggling.
+                    Opens the selected date only. The old comparison-year view has been removed so this report stays light on the server.
                   </p>
 
                   {getPdfExportNotice('onThisDay') && !onThisDayModalOpen && (
@@ -13568,14 +13947,6 @@ function openReportLoadDetails(load) {
                       <div className="report-ready-actions">
                         <button className="view-button" onClick={() => setOnThisDayModalOpen(true)}>
                           Reopen Preview
-                        </button>
-                        <button
-                          type="button"
-                          className="view-button on-this-day-compare-button"
-                          onClick={onThisDayReport?.mode === 'exact' ? loadOnThisDayComparisonReport : loadOnThisDayExactReport}
-                          disabled={onThisDayLoading}
-                        >
-                          {onThisDayReport?.mode === 'exact' ? 'Load Comparison Years' : 'Back to Selected Date'}
                         </button>
                         <button
                           type="button"
@@ -14405,7 +14776,19 @@ function openReportLoadDetails(load) {
                       <td>{r.Origin || '-'}</td>
                       <td>{r.Destination || '-'}</td>
                       <td>{formatDateOnly(r.DeliveryDate)}</td>
-                      <td className="operation-notes-cell">{renderOperationNotesPill(r)}</td>
+                      <td className="operation-notes-cell">
+                        <button
+                          type="button"
+                          className="operation-notes-cell-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            loadDetails(r.id, 'notes', r.SourceListId);
+                          }}
+                          title="Open this order's notes"
+                        >
+                          {renderOperationNotesPill(r)}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -15010,14 +15393,6 @@ function openReportLoadDetails(load) {
               <div className="report-modal-actions">
                 <button
                   type="button"
-                  className="view-button on-this-day-compare-button"
-                  onClick={onThisDayReport?.mode === 'exact' ? loadOnThisDayComparisonReport : loadOnThisDayExactReport}
-                  disabled={onThisDayLoading}
-                >
-                  {onThisDayReport?.mode === 'exact' ? 'Load Comparison Years' : 'Back to Selected Date'}
-                </button>
-                <button
-                  type="button"
                   className="pdf-export-button"
                   onClick={downloadOnThisDayPdf}
                   disabled={onThisDayPdfLoading || onThisDayLoading}
@@ -15186,9 +15561,10 @@ function openReportLoadDetails(load) {
 
       {selected && (
         <div className="modal-overlay" onClick={closeModal}>
-          <div className="detail-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="detail-modal order-detail-modal" onClick={(e) => e.stopPropagation()}>
             <div className="detail-header">
               <div>
+                <ModalReturnTrail label={getOrderReturnTrailLabel()} onClick={handleOrderReturnTrailClick} />
                 <h2>{viewTitle()}</h2>
                 <p>{selected.Customer || 'No customer listed'} · {selected.BOL || 'No BOL'}</p>
               </div>

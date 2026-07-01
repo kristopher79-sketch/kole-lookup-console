@@ -13929,3 +13929,235 @@ button.available-truck-distribution-summary-card:disabled {
   background: #fffbeb !important;
   color: #92400e !important;
 }
+
+/* Polish round: comparison-year On This Day was retired; yearly projection tables should not pretend every row is clickable. */
+.yearly-projection-scenario-table tbody tr,
+.yearly-projection-sensitivity-table tbody tr,
+.yearly-projection-month-card {
+  cursor: default !important;
+}
+
+.yearly-projection-driver-table tbody tr.yearly-projection-driver-row {
+  cursor: pointer !important;
+}
+
+.yearly-projection-driver-table tbody tr.yearly-projection-driver-row:hover td {
+  background: rgba(37, 99, 235, 0.16);
+}
+
+.yearly-projection-card-note {
+  margin: -2px 0 12px;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.yearly-projection-card-heading-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.yearly-projection-card-heading-row h3 {
+  margin-bottom: 6px;
+}
+
+.yearly-projection-custom-toggle {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.yearly-projection-custom-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px minmax(190px, 0.9fr);
+  gap: 10px;
+  align-items: end;
+  margin: 0 0 12px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.22);
+}
+
+.yearly-projection-custom-box label span {
+  display: block;
+  margin-bottom: 6px;
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.yearly-projection-custom-box input {
+  width: 100%;
+}
+
+.yearly-projection-custom-result {
+  padding: 10px 12px;
+  border: 1px solid rgba(250, 204, 21, 0.26);
+  border-radius: 10px;
+  background: rgba(250, 204, 21, 0.08);
+}
+
+.yearly-projection-custom-result strong,
+.yearly-projection-custom-result span,
+.yearly-projection-custom-result small {
+  display: block;
+}
+
+.yearly-projection-custom-result strong {
+  color: #f8fafc;
+}
+
+.yearly-projection-custom-result span {
+  margin-top: 4px;
+  color: #fde68a;
+  font-weight: 850;
+}
+
+.yearly-projection-custom-result small {
+  margin-top: 3px;
+  color: #cbd5e1;
+}
+
+:root[data-theme='light'] .yearly-projection-card-note {
+  color: #475569;
+}
+
+:root[data-theme='light'] .yearly-projection-driver-table tbody tr.yearly-projection-driver-row:hover td {
+  background: #dbeafe !important;
+}
+
+:root[data-theme='light'] .yearly-projection-custom-box {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+:root[data-theme='light'] .yearly-projection-custom-box label span {
+  color: #334155;
+}
+
+:root[data-theme='light'] .yearly-projection-custom-result {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+:root[data-theme='light'] .yearly-projection-custom-result strong,
+:root[data-theme='light'] .yearly-projection-custom-result span {
+  color: #111827;
+}
+
+:root[data-theme='light'] .yearly-projection-custom-result small {
+  color: #475569;
+}
+
+/* Starting Soon pills were too pale in light mode. Keep the yellow cue, make it readable. */
+:root[data-theme='light'] .driver-time-off-card.starting-soon {
+  border-left-color: #d97706 !important;
+}
+
+:root[data-theme='light'] .driver-time-off-reason-pill.starting-soon {
+  border-color: #d97706 !important;
+  background: #fef3c7 !important;
+  color: #78350f !important;
+  font-weight: 950 !important;
+  text-shadow: none !important;
+}
+
+@media (max-width: 900px) {
+  .yearly-projection-card-heading-row,
+  .yearly-projection-custom-box {
+    grid-template-columns: 1fr;
+  }
+
+  .yearly-projection-card-heading-row {
+    flex-direction: column;
+  }
+}
+
+/* POLISH PASS: breadcrumb drilldowns + stable order-card shell */
+.order-detail-modal {
+  width: min(1400px, 94vw);
+  height: min(820px, 90vh);
+  min-height: 0;
+}
+
+.order-detail-modal .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.order-detail-modal .view-tabs {
+  flex: 0 0 auto;
+}
+
+.modal-return-trail {
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+}
+
+.modal-return-trail:hover {
+  background: rgba(250, 204, 21, 0.16);
+  color: #fef3c7;
+}
+
+.operation-notes-cell-button {
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.operation-notes-cell-button:hover,
+.operation-notes-cell-button:focus-visible {
+  background: transparent;
+  outline: none;
+}
+
+.operation-notes-cell-button:hover .operation-note-pill,
+.operation-notes-cell-button:focus-visible .operation-note-pill {
+  border-color: rgba(250, 204, 21, 0.78);
+  box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.16);
+}
+
+.detail-item .view-button {
+  margin-top: 10px;
+}
+
+:root[data-theme='light'] .modal-return-trail {
+  border-color: #cbd5e1 !important;
+  background: #f8fafc !important;
+  color: #334155 !important;
+}
+
+:root[data-theme='light'] .modal-return-trail:hover {
+  border-color: #d97706 !important;
+  background: #fff7ed !important;
+  color: #92400e !important;
+}
+
+@media (max-width: 700px) {
+  .order-detail-modal {
+    width: 100%;
+    height: min(720px, 94vh);
+  }
+}
