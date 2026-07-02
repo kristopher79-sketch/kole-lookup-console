@@ -3682,8 +3682,62 @@ input:focus,
   background: rgba(2, 6, 23, 0.84);
 }
 
+.driver-roster-modal-overlay {
+  z-index: 1400;
+}
+
+.driver-performance-modal-overlay {
+  z-index: 1500;
+}
+
 .gross-driver-detail-modal {
   width: min(1180px, 94vw);
+}
+
+.gross-driver-detail-header {
+  align-items: flex-start;
+}
+
+.gross-driver-detail-title-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.gross-driver-detail-title-block p {
+  margin: 0;
+}
+
+.gross-driver-card-link {
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #93c5fd;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  box-shadow: none;
+}
+
+.gross-driver-card-link:hover:not(:disabled) {
+  background: transparent;
+  color: #bfdbfe;
+}
+
+.gross-driver-card-link:focus-visible {
+  outline: 2px solid rgba(147, 197, 253, 0.75);
+  outline-offset: 3px;
+}
+
+.gross-driver-card-link:disabled {
+  background: transparent;
+  color: #94a3b8;
+  opacity: 0.65;
 }
 
 .gross-driver-month-grid {
@@ -13945,6 +13999,10 @@ button.available-truck-distribution-summary-card:disabled {
   background: rgba(37, 99, 235, 0.16);
 }
 
+.yearly-projection-driver-table tbody tr.yearly-projection-driver-row.opening-detail td {
+  background: rgba(37, 99, 235, 0.24);
+}
+
 .yearly-projection-card-note {
   margin: -2px 0 12px;
   color: #94a3b8;
@@ -14512,4 +14570,332 @@ button.available-truck-distribution-summary-card:disabled {
 
 :root[data-theme='light'] .email-link:hover {
   color: #1e40af !important;
+}
+
+/* Final polish: live action reports + Gross Revenue month load drilldown */
+.inline-action-report-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.34);
+  color: var(--kole-muted, #94a3b8);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.inline-action-report-preview {
+  margin-top: 0;
+}
+
+.inline-action-report-preview .driver-report-generated {
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.inline-action-report-preview .report-kpi-grid {
+  margin-top: 0;
+}
+
+.gross-driver-month-card {
+  appearance: none;
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+
+.gross-driver-month-card:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.075);
+  transform: translateY(-1px);
+}
+
+.gross-driver-month-card.zero:hover:not(:disabled) {
+  background: rgba(100, 116, 139, 0.13);
+}
+
+.gross-driver-month-card.current-month:hover:not(:disabled) {
+  background: rgba(250, 204, 21, 0.15);
+}
+
+.gross-month-load-overlay {
+  z-index: 1300;
+  background: rgba(2, 6, 23, 0.86);
+}
+
+.gross-month-load-modal {
+  width: min(1180px, 94vw);
+}
+
+.gross-month-load-header {
+  align-items: flex-start;
+}
+
+.gross-month-back-link {
+  margin: 0 0 8px;
+}
+
+.gross-month-load-kpi-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.gross-month-load-table th:nth-child(1),
+.gross-month-load-table td:nth-child(1) {
+  width: 120px;
+}
+
+.gross-month-load-table th:nth-child(6),
+.gross-month-load-table td:nth-child(6) {
+  text-align: right;
+  width: 150px;
+}
+
+@media (max-width: 900px) {
+  .inline-action-report-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .gross-month-load-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+:root[data-theme='light'] .inline-action-report-toolbar {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: var(--kole-light-muted-strong);
+}
+
+:root[data-theme='light'] .gross-driver-month-card:hover:not(:disabled) {
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.055), transparent 42%),
+    #ffffff !important;
+}
+
+:root[data-theme='light'] .gross-driver-month-card.zero:hover:not(:disabled) {
+  background:
+    linear-gradient(135deg, rgba(100, 116, 139, 0.08), transparent 42%),
+    #f8fafc !important;
+}
+
+:root[data-theme='light'] .gross-driver-month-card.current-month:hover:not(:disabled) {
+  background:
+    linear-gradient(135deg, rgba(245, 158, 11, 0.17), transparent 44%),
+    #fffbeb !important;
+}
+
+/* Final polish tidy: live action report cards should not look like a generated report shoved inside the accordion. */
+.orders-due-settlement-kpi-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.won-not-registered-kpi-grid {
+  grid-template-columns: minmax(220px, 360px);
+  justify-content: center;
+}
+
+.inline-action-report-preview .report-table-wrap {
+  overflow-x: visible;
+}
+
+.inline-action-report-preview .won-not-registered-table,
+.inline-action-report-preview .orders-due-settlement-table {
+  width: 100%;
+  min-width: 0;
+}
+
+.inline-action-report-preview .won-not-registered-table {
+  table-layout: fixed;
+}
+
+.inline-action-report-preview .won-not-registered-table th,
+.inline-action-report-preview .won-not-registered-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.inline-action-report-preview .won-not-registered-table th:nth-child(1),
+.inline-action-report-preview .won-not-registered-table td:nth-child(1) {
+  width: 22%;
+}
+
+.inline-action-report-preview .won-not-registered-table th:nth-child(2),
+.inline-action-report-preview .won-not-registered-table td:nth-child(2) {
+  width: 22%;
+}
+
+.inline-action-report-preview .won-not-registered-table th:nth-child(3),
+.inline-action-report-preview .won-not-registered-table td:nth-child(3) {
+  width: 16%;
+}
+
+.inline-action-report-preview .won-not-registered-table th:nth-child(4),
+.inline-action-report-preview .won-not-registered-table td:nth-child(4) {
+  width: 14%;
+}
+
+.inline-action-report-preview .won-not-registered-table th:nth-child(5),
+.inline-action-report-preview .won-not-registered-table td:nth-child(5),
+.inline-action-report-preview .won-not-registered-table th:nth-child(6),
+.inline-action-report-preview .won-not-registered-table td:nth-child(6) {
+  width: 13%;
+}
+
+@media (max-width: 900px) {
+  .orders-due-settlement-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .inline-action-report-preview .orders-due-settlement-table {
+    min-width: 760px;
+  }
+
+  .inline-action-report-preview .orders-due-settlement-table + * {
+    overflow-x: auto;
+  }
+}
+
+/* Monthly Operations Summary click-throughs */
+.monthly-ops-summary-grid .monthly-ops-kpi-card {
+  position: relative;
+  overflow: hidden;
+  display: block;
+  width: 100%;
+  min-height: 88px;
+  padding: 15px 14px;
+  border: 1px solid rgba(129, 140, 248, 0.30) !important;
+  border-radius: 12px;
+  text-align: left;
+  background:
+    linear-gradient(135deg, rgba(99, 102, 241, 0.16), rgba(15, 23, 42, 0.72)) !important;
+  box-shadow:
+    0 12px 24px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07) !important;
+  color: #ffffff;
+}
+
+.monthly-ops-summary-grid .monthly-ops-kpi-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, #6366f1, #14b8a6);
+  opacity: 0.88;
+}
+
+.monthly-ops-summary-grid .monthly-ops-kpi-card.clickable {
+  cursor: pointer;
+}
+
+.monthly-ops-summary-grid .monthly-ops-kpi-card.clickable:hover {
+  transform: translateY(-1px);
+  border-color: rgba(250, 204, 21, 0.56) !important;
+  background:
+    linear-gradient(135deg, rgba(99, 102, 241, 0.24), rgba(15, 23, 42, 0.82)) !important;
+}
+
+.monthly-ops-summary-grid .monthly-ops-kpi-card span {
+  display: block;
+  margin-bottom: 5px;
+  color: #cbd5e1 !important;
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.monthly-ops-summary-grid .monthly-ops-kpi-card strong {
+  display: block;
+  color: #ffffff !important;
+  font-size: 19px;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+}
+
+.monthly-ops-summary-grid .monthly-ops-kpi-card small {
+  display: block;
+  margin-top: 7px;
+  color: #bfdbfe;
+  font-size: 11px;
+  font-weight: 750;
+  opacity: 0.86;
+}
+
+.monthly-ops-drilldown-overlay {
+  z-index: 1300;
+  background: rgba(2, 6, 23, 0.86);
+}
+
+.monthly-ops-drilldown-modal {
+  width: min(1320px, 95vw);
+}
+
+.monthly-ops-drilldown-header {
+  align-items: flex-start;
+}
+
+.monthly-ops-drilldown-kpi-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.monthly-ops-drilldown-table-wrap table {
+  min-width: 980px;
+}
+
+.monthly-ops-drilldown-table th:last-child,
+.monthly-ops-drilldown-table td:last-child {
+  text-align: right;
+}
+
+.monthly-ops-drilldown-table tbody tr.report-clickable-row:hover {
+  background: rgba(99, 102, 241, 0.18);
+}
+
+.availability-detail-table th:last-child,
+.availability-detail-table td:last-child {
+  text-align: left;
+}
+
+.no-availability-detail-table th:nth-child(7),
+.no-availability-detail-table td:nth-child(7) {
+  text-align: right;
+}
+
+@media (max-width: 900px) {
+  .monthly-ops-drilldown-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+:root[data-theme='light'] .monthly-ops-summary-grid .monthly-ops-kpi-card {
+  border-color: #c7d2fe !important;
+  background:
+    linear-gradient(135deg, rgba(79, 70, 229, 0.08), rgba(255, 255, 255, 0.98)) !important;
+  color: #0f172a;
+  box-shadow:
+    0 12px 24px rgba(15, 23, 42, 0.07),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .monthly-ops-summary-grid .monthly-ops-kpi-card.clickable:hover {
+  border-color: #4f46e5 !important;
+  background:
+    linear-gradient(135deg, rgba(79, 70, 229, 0.13), #ffffff) !important;
+}
+
+:root[data-theme='light'] .monthly-ops-summary-grid .monthly-ops-kpi-card span {
+  color: #475569 !important;
+}
+
+:root[data-theme='light'] .monthly-ops-summary-grid .monthly-ops-kpi-card strong {
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .monthly-ops-summary-grid .monthly-ops-kpi-card small {
+  color: #4338ca;
 }

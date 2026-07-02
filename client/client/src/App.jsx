@@ -321,6 +321,17 @@ function hasAvailableTruckDraftData(row) {
   );
 }
 
+
+function normalizeSearchValue(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function normalizeAvailableTruckSuggestionKey(value) {
   return String(value || '')
     .trim()
@@ -760,6 +771,9 @@ export default function App() {
   const [yearlyProjectionCustomDriverCount, setYearlyProjectionCustomDriverCount] = useState('');
   const [openGrossRevenueQuarters, setOpenGrossRevenueQuarters] = useState([]);
   const [selectedGrossRevenueTruck, setSelectedGrossRevenueTruck] = useState(null);
+  const [selectedGrossRevenueMonth, setSelectedGrossRevenueMonth] = useState(null);
+  const [projectionRevenueDrilldownLoadingTruck, setProjectionRevenueDrilldownLoadingTruck] = useState('');
+  const [projectionRevenueDrilldownError, setProjectionRevenueDrilldownError] = useState('');
   const [driverSummaryReport, setDriverSummaryReport] = useState(null);
   const [driverSummaryLoading, setDriverSummaryLoading] = useState(false);
   const [driverSummaryError, setDriverSummaryError] = useState(null);
@@ -772,6 +786,7 @@ export default function App() {
   const [monthlyOpsLoading, setMonthlyOpsLoading] = useState(false);
   const [monthlyOpsError, setMonthlyOpsError] = useState(null);
   const [monthlyOpsModalOpen, setMonthlyOpsModalOpen] = useState(false);
+  const [selectedMonthlyOpsDrilldown, setSelectedMonthlyOpsDrilldown] = useState(null);
   const [monthlyOpsPdfLoading, setMonthlyOpsPdfLoading] = useState(false);
   const [monthlyOpsPdfError, setMonthlyOpsPdfError] = useState('');
   const [pdfExportNotice, setPdfExportNotice] = useState(null);
@@ -1171,6 +1186,14 @@ export default function App() {
     reportActionAlertCounts.isLoaded && reportActionAlertCounts.ordersDueSettlement <= 0;
   const wonNotRegisteredActionBlocked =
     reportActionAlertCounts.isLoaded && reportActionAlertCounts.wonNotRegistered <= 0;
+
+  const liveOrdersDueSettlementReport = useMemo(() => (
+    ordersDueSettlementReport || reportActionAlerts?.alerts?.ordersDueSettlement?.report || null
+  ), [ordersDueSettlementReport, reportActionAlerts]);
+
+  const liveWonNotRegisteredReport = useMemo(() => (
+    wonNotRegisteredReport || reportActionAlerts?.alerts?.wonNotRegistered?.report || null
+  ), [wonNotRegisteredReport, reportActionAlerts]);
 
   const reportActionAlertSummary = useMemo(() => {
     if (reportActionAlertsLoading && !reportActionAlerts) return 'Checking Operations Reports...';
@@ -1733,6 +1756,7 @@ export default function App() {
         orderNotesRequestRef.current += 1;
         setGrossRevenueModalOpen(false);
         setSelectedGrossRevenueTruck(null);
+        setSelectedGrossRevenueMonth(null);
         setDriverSummaryModalOpen(false);
         setOrdersDueSettlementModalOpen(false);
         setWeeklySettlementModalOpen(false);
@@ -2168,6 +2192,8 @@ export default function App() {
     setYearlyProjectionModalOpen(false);
     setYearlyProjectionCustomOpen(false);
     setYearlyProjectionCustomDriverCount('');
+    setProjectionRevenueDrilldownLoadingTruck('');
+    setProjectionRevenueDrilldownError('');
     searchCacheRef.current.clear();
     onThisDayReportCacheRef.current.clear();
 
@@ -3361,6 +3387,8 @@ function getOrderDrilldownReturnLabel(snapshot = orderDrilldownReturn) {
 
 function getDriverRosterReturnTrailLabel() {
   if (orderDrilldownReturn) return getOrderDrilldownReturnLabel();
+  if (selectedGrossRevenueTruck) return 'Revenue Detail';
+  if (grossRevenueModalOpen) return 'Gross Revenue Totals';
   if (activeDriverRosterModalOpen) return 'Active Driver Roster';
   if (inactiveDriverRosterModalOpen) return 'Inactive Drivers';
   if (fleetEquipmentModalOpen) return 'Fleet Equipment';
@@ -3951,6 +3979,20 @@ function getPositionStatusLabel(position) {
   }
 
 
+  async function fetchGrossRevenueReport(selectedYear) {
+    const res = await authedFetch(
+      `${API}/reports/gross-revenue-totals?year=${encodeURIComponent(selectedYear)}`
+    );
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || data.message || 'Unable to load Gross Revenue Totals.');
+    }
+
+    return data;
+  }
+
   async function loadGrossRevenueReport() {
     const selectedYear = Number(grossRevenueYear);
 
@@ -3959,17 +4001,10 @@ function getPositionStatusLabel(position) {
     setGrossRevenueReport(null);
     setGrossRevenueModalOpen(false);
     setSelectedGrossRevenueTruck(null);
+    setSelectedGrossRevenueMonth(null);
 
     try {
-      const res = await authedFetch(
-        `${API}/reports/gross-revenue-totals?year=${encodeURIComponent(selectedYear)}`
-      );
-
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || data.message || 'Unable to load Gross Revenue Totals.');
-      }
+      const data = await fetchGrossRevenueReport(selectedYear);
 
       setGrossRevenueReport(data);
       setOpenGrossRevenueQuarters([getDefaultGrossRevenueQuarter(selectedYear)]);
@@ -3987,10 +4022,16 @@ function getPositionStatusLabel(position) {
   function closeGrossRevenueModal() {
     setGrossRevenueModalOpen(false);
     setSelectedGrossRevenueTruck(null);
+    setSelectedGrossRevenueMonth(null);
   }
 
   function closeGrossRevenueTruckModal() {
     setSelectedGrossRevenueTruck(null);
+    setSelectedGrossRevenueMonth(null);
+  }
+
+  function closeGrossRevenueMonthModal() {
+    setSelectedGrossRevenueMonth(null);
   }
 
   async function loadYearlyRevenueProjectionReport() {
@@ -4002,6 +4043,8 @@ function getPositionStatusLabel(position) {
     setYearlyProjectionModalOpen(false);
     setYearlyProjectionCustomOpen(false);
     setYearlyProjectionCustomDriverCount('');
+    setProjectionRevenueDrilldownLoadingTruck('');
+    setProjectionRevenueDrilldownError('');
 
     try {
       const res = await authedFetch(
@@ -4089,6 +4132,7 @@ function getPositionStatusLabel(position) {
     setMonthlyOpsError(null);
     setMonthlyOpsReport(null);
     setMonthlyOpsModalOpen(false);
+    setSelectedMonthlyOpsDrilldown(null);
 
     try {
       const res = await authedFetch(
@@ -4123,6 +4167,11 @@ function getPositionStatusLabel(position) {
 
   function closeMonthlyOperationsSummaryModal() {
     setMonthlyOpsModalOpen(false);
+    setSelectedMonthlyOpsDrilldown(null);
+  }
+
+  function closeMonthlyOperationsDrilldown() {
+    setSelectedMonthlyOpsDrilldown(null);
   }
 
 
@@ -7696,6 +7745,116 @@ function openReportLoadDetails(load) {
     );
   }
 
+  function getTruckMonthLoads(truck, monthNumber) {
+    const targetMonth = Number(monthNumber);
+
+    if (!targetMonth || targetMonth < 1 || targetMonth > 12) return [];
+
+    return [...(truck?.loads || [])]
+      .filter((load) => getLoadMonthNumber(load.PickupDate) === targetMonth)
+      .sort((a, b) => String(a.PickupDate || '').localeCompare(String(b.PickupDate || '')));
+  }
+
+  function openGrossRevenueMonthDetail(truck, month) {
+    if (!truck || !month) return;
+
+    setSelectedGrossRevenueMonth({
+      truck,
+      month
+    });
+  }
+
+  function GrossRevenueMonthLoadModal() {
+    if (!grossRevenueReport || !selectedGrossRevenueMonth?.truck || !selectedGrossRevenueMonth?.month) return null;
+
+    const truck = selectedGrossRevenueMonth.truck;
+    const month = selectedGrossRevenueMonth.month;
+    const monthNumber = Number(month.month);
+    const loads = getTruckMonthLoads(truck, monthNumber);
+    const monthRevenue = Number(truck.monthTotals?.[monthNumber] || 0);
+    const loadCount = getTruckMonthLoadCount(truck, monthNumber);
+
+    return (
+      <div className="modal-overlay report-modal-overlay gross-month-load-overlay" onClick={closeGrossRevenueMonthModal}>
+        <div className="detail-modal report-modal gross-month-load-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="detail-header report-modal-header gross-month-load-header">
+            <div>
+              <button
+                type="button"
+                className="gross-driver-card-link gross-month-back-link"
+                onClick={closeGrossRevenueMonthModal}
+              >
+                Back to 12-month view
+              </button>
+              <h2>{month.name || 'Month'} Loads</h2>
+              <p>{truck.operator || 'Driver'} · Truck {truck.truck || '-'} · {grossRevenueReport.year}</p>
+            </div>
+
+            <button className="close-button" onClick={closeGrossRevenueMonthModal}>
+              Close
+            </button>
+          </div>
+
+          <div className="modal-body report-modal-body">
+            <div className="report-kpi-grid gross-month-load-kpi-grid">
+              <div className="report-kpi-card">
+                <span>Month Revenue</span>
+                <strong>{formatReportMoney(monthRevenue)}</strong>
+              </div>
+              <div className="report-kpi-card">
+                <span>Loads</span>
+                <strong>{formatReportNumber(loadCount)}</strong>
+              </div>
+              <div className="report-kpi-card">
+                <span>Source</span>
+                <strong>{grossRevenueReport.dataSource || 'Bid Listing'}</strong>
+              </div>
+            </div>
+
+            {loads.length === 0 ? (
+              <div className="report-alert locked">
+                <h4>No load rows found for {month.name}.</h4>
+                <p>This month has no posted Gross Revenue Totals load rows for this driver yet.</p>
+              </div>
+            ) : (
+              <div className="report-table-wrap">
+                <table className="driver-report-table gross-month-load-table">
+                  <thead>
+                    <tr>
+                      <th>BOL</th>
+                      <th>Customer</th>
+                      <th>Pickup</th>
+                      <th>Delivery</th>
+                      <th>Route</th>
+                      <th>Gross Revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loads.map((load, index) => (
+                      <tr
+                        key={`${load.BOL || load.BidID || load.id || index}-${index}`}
+                        className={load.id ? 'report-clickable-row' : ''}
+                        onClick={() => openReportLoadDetails(load)}
+                        title={load.id ? 'Open full order screen' : ''}
+                      >
+                        <td>{load.BOL || '-'}</td>
+                        <td>{load.Customer || '-'}</td>
+                        <td>{load.PickupDateDisplay || formatDateOnly(load.PickupDate)}</td>
+                        <td>{formatDateOnly(load.DeliveryDate)}</td>
+                        <td>{[load.Origin, load.Destination].filter(Boolean).join(' to ') || '-'}</td>
+                        <td>{formatReportMoney(load.GrossRevenue)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function GrossRevenueDriverDetailModal() {
     if (!grossRevenueReport || !selectedGrossRevenueTruck) return null;
 
@@ -7710,18 +7869,36 @@ function openReportLoadDetails(load) {
     return (
       <div className="modal-overlay report-modal-overlay nested-report-modal-overlay" onClick={closeGrossRevenueTruckModal}>
         <div className="detail-modal report-modal gross-driver-detail-modal" onClick={(e) => e.stopPropagation()}>
-          <div className="detail-header report-modal-header">
-            <div>
+          <div className="detail-header report-modal-header gross-driver-detail-header">
+            <div className="gross-driver-detail-title-block">
               <h2>{truck.operator || 'Driver Revenue Detail'}</h2>
               <p>12-Month Revenue Detail · Truck {truck.truck || '-'} · {grossRevenueReport.year}</p>
+              <button
+                type="button"
+                className="gross-driver-card-link"
+                onClick={() => openDriverRosterFromGrossRevenueTruck(truck)}
+                disabled={!truck.truck || driverLookupLoading}
+              >
+                {driverLookupLoading ? 'Looking up...' : 'View Driver Card'}
+              </button>
             </div>
 
-            <button className="close-button" onClick={closeGrossRevenueTruckModal}>
-              Close
-            </button>
+            <div className="report-modal-actions">
+              <button className="close-button" onClick={closeGrossRevenueTruckModal}>
+                Close
+              </button>
+            </div>
           </div>
 
           <div className="modal-body report-modal-body">
+            {driverLookupError && <div className="msg error">{driverLookupError}</div>}
+            {truck.isProjectionFallback && (
+              <div className="report-alert locked">
+                <h4>No posted Gross Revenue Totals row matched this active driver yet.</h4>
+                <p>This month-to-month view is still opening from the projection row, with posted months shown as zero until revenue is logged for this truck.</p>
+              </div>
+            )}
+
             <div className="report-kpi-grid gross-driver-kpi-grid">
               <div className="report-kpi-card">
                 <span>Year Total</span>
@@ -7754,15 +7931,18 @@ function openReportLoadDetails(load) {
                 const isCurrentMonth = shouldHighlightCurrentMonth && Number(month.month) === currentEasternMonth;
 
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={`driver-month-${truck.truck}-${month.month}`}
                     className={`gross-driver-month-card ${revenue === 0 ? 'zero' : ''} ${isCurrentMonth ? 'current-month' : ''}`}
+                    onClick={() => openGrossRevenueMonthDetail(truck, month)}
+                    title={`View ${month.name} load detail`}
                   >
                     <span>{month.name}</span>
                     {isCurrentMonth && <em>Current Month</em>}
                     <strong>{formatReportMoney(revenue)}</strong>
-                    <small>{formatReportNumber(loadCount)} load{loadCount === 1 ? '' : 's'}</small>
-                  </div>
+                    <small>{formatReportNumber(loadCount)} load{loadCount === 1 ? '' : 's'} · View loads</small>
+                  </button>
                 );
               })}
             </div>
@@ -7770,6 +7950,103 @@ function openReportLoadDetails(load) {
         </div>
       </div>
     );
+  }
+
+  function getGrossRevenueQuarterForTruck(truck = {}, reportYear) {
+    const monthTotals = truck?.monthTotals || {};
+    const revenueMonths = Object.entries(monthTotals)
+      .map(([month, revenue]) => ({
+        month: Number(month),
+        revenue: Number(revenue || 0)
+      }))
+      .filter((month) => month.month >= 1 && month.month <= 12 && month.revenue > 0)
+      .sort((a, b) => b.month - a.month);
+
+    if (revenueMonths.length > 0) {
+      return `Q${Math.floor((revenueMonths[0].month - 1) / 3) + 1}`;
+    }
+
+    return getDefaultGrossRevenueQuarter(reportYear);
+  }
+
+  function findGrossRevenueTruckForProjectionRow(report, row = {}) {
+    const truckKey = normalizeDriverHistoryTruckKey(row?.truck);
+    const operatorKey = normalizeSearchValue(row?.operator || '');
+    const trucks = report?.trucks || [];
+
+    if (truckKey) {
+      const truckMatch = trucks.find((truck) => normalizeDriverHistoryTruckKey(truck?.truck) === truckKey);
+      if (truckMatch) return truckMatch;
+    }
+
+    if (operatorKey) {
+      return trucks.find((truck) => normalizeSearchValue(truck?.operator || '') === operatorKey) || null;
+    }
+
+    return null;
+  }
+
+  function buildProjectionFallbackGrossRevenueTruck(row = {}, report = {}) {
+    const monthTotals = Object.fromEntries(
+      (report.months || []).map((month) => [month.month, 0])
+    );
+    const monthLoadCounts = Object.fromEntries(
+      (report.months || []).map((month) => [month.month, 0])
+    );
+    const actualRevenue = Number(row.actualRevenue ?? row.ytdRevenue ?? 0);
+    const actualLoadCount = Number(row.actualLoadCount || 0);
+
+    return {
+      truck: String(row?.truck || '').trim() || 'Unassigned Truck',
+      operator: row?.operator || 'Driver Revenue Detail',
+      rosterStatus: row?.rosterStatus || 'Active',
+      rosterTermDate: row?.rosterTermDate || '',
+      monthTotals,
+      monthLoadCounts,
+      totalGrossRevenue: actualRevenue,
+      loadCount: actualLoadCount,
+      permitEscortTotal: 0,
+      loads: [],
+      averageMonthlyRevenue: Number(row.averageMonthlyRevenue || 0),
+      averageActiveMonthRevenue: Number(row.averageMonthlyRevenue || 0),
+      averageRevenueMonthRevenue: Number(row.averageMonthlyRevenue || 0),
+      monthsElapsed: Number(report.totals?.monthsElapsed || 12),
+      monthsWithRevenue: actualRevenue > 0 ? 1 : 0,
+      isProjectionFallback: true
+    };
+  }
+
+  async function openGrossRevenueDetailFromProjectionRow(row = {}) {
+    const truck = String(row?.truck || '').trim();
+    const truckKey = normalizeDriverHistoryTruckKey(truck);
+    const selectedYear = Number(yearlyProjectionReport?.year || yearlyProjectionYear);
+
+    if (!truckKey) {
+      setProjectionRevenueDrilldownError('This projection row does not have a truck number to match in Gross Revenue Totals.');
+      return;
+    }
+
+    setProjectionRevenueDrilldownLoadingTruck(truckKey);
+    setProjectionRevenueDrilldownError('');
+    setGrossRevenueError(null);
+
+    try {
+      const report = grossRevenueReport && Number(grossRevenueReport.year) === selectedYear
+        ? grossRevenueReport
+        : await fetchGrossRevenueReport(selectedYear);
+      const grossTruck = findGrossRevenueTruckForProjectionRow(report, row) || buildProjectionFallbackGrossRevenueTruck(row, report);
+
+      setGrossRevenueYear(selectedYear);
+      setGrossRevenueReport(report);
+      setOpenGrossRevenueQuarters([getGrossRevenueQuarterForTruck(grossTruck, selectedYear)]);
+      setSelectedGrossRevenueTruck(grossTruck);
+      setYearlyProjectionModalOpen(false);
+      setGrossRevenueModalOpen(true);
+    } catch (err) {
+      setProjectionRevenueDrilldownError(err.message || 'Unable to open the Gross Revenue month detail for this driver.');
+    } finally {
+      setProjectionRevenueDrilldownLoadingTruck('');
+    }
   }
 
   async function openDriverRosterFromProjectionRow(row = {}) {
@@ -7807,6 +8084,13 @@ function openReportLoadDetails(load) {
     } finally {
       setDriverLookupLoading(false);
     }
+  }
+
+  function openDriverRosterFromGrossRevenueTruck(truck = selectedGrossRevenueTruck) {
+    return openDriverRosterFromProjectionRow({
+      truck: truck?.truck,
+      operator: truck?.operator
+    });
   }
 
   function YearlyRevenueProjectionPreview() {
@@ -8079,6 +8363,9 @@ function openReportLoadDetails(load) {
 
         <section className="yearly-projection-card">
           <h3>Active driver pace</h3>
+          {projectionRevenueDrilldownError && (
+            <div className="msg error">{projectionRevenueDrilldownError}</div>
+          )}
           <div className="report-table-wrap yearly-projection-driver-table-wrap">
             <table className="driver-report-table yearly-projection-driver-table">
               <thead>
@@ -8098,12 +8385,16 @@ function openReportLoadDetails(load) {
                   <tr>
                     <td colSpan={8}>No active drivers were found for this projection.</td>
                   </tr>
-                ) : driverRows.map((row) => (
+                ) : driverRows.map((row) => {
+                  const rowTruckKey = normalizeDriverHistoryTruckKey(row?.truck);
+                  const isOpeningGrossRevenueDetail = projectionRevenueDrilldownLoadingTruck === rowTruckKey;
+
+                  return (
                   <tr
                     key={row.truck || row.operator}
-                    className="yearly-projection-driver-row"
-                    onClick={() => openDriverRosterFromProjectionRow(row)}
-                    title="Open Driver Roster card"
+                    className={`yearly-projection-driver-row ${isOpeningGrossRevenueDetail ? 'opening-detail' : ''}`}
+                    onClick={() => openGrossRevenueDetailFromProjectionRow(row)}
+                    title="Open Gross Revenue month detail"
                   >
                     <td>{row.truck || '-'}</td>
                     <td>
@@ -8137,9 +8428,11 @@ function openReportLoadDetails(load) {
                       {row.paceLabel || '-'}
                       {row.paceBasisLabel && <small>{row.paceBasisLabel}</small>}
                       {row.usesFleetBaselinePace && <small>{formatReportNumber(row.paceConfidencePercent || 0)}% driver-specific confidence</small>}
+                      {isOpeningGrossRevenueDetail && <small>Opening month detail...</small>}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -8440,33 +8733,29 @@ function openReportLoadDetails(load) {
   }
 
 
-  function OrdersDueSettlementPreview() {
-    const rows = ordersDueSettlementReport?.rows || [];
+  function OrdersDueSettlementPreview({ report = liveOrdersDueSettlementReport, inline = false } = {}) {
+    const rows = report?.rows || [];
 
-    if (!ordersDueSettlementReport) return null;
+    if (!report) return null;
 
     return (
-      <div className="settlement-report-preview modal-report-preview">
+      <div className={`settlement-report-preview modal-report-preview ${inline ? 'inline-action-report-preview' : ''}`}>
         <div className="driver-report-generated">
-          Generated: {ordersDueSettlementReport.generatedAt}
+          Generated: {report.generatedAt}
         </div>
 
-        <div className="report-kpi-grid won-not-registered-kpi-grid">
+        <div className="report-kpi-grid orders-due-settlement-kpi-grid">
           <div className="report-kpi-card">
             <span>Orders Due</span>
-            <strong>{formatReportNumber(ordersDueSettlementReport.count)}</strong>
+            <strong>{formatReportNumber(report.count)}</strong>
           </div>
           <div className="report-kpi-card">
             <span>Bid Total</span>
-            <strong>{formatReportMoney(ordersDueSettlementReport.totals?.bidTotal)}</strong>
+            <strong>{formatReportMoney(report.totals?.bidTotal)}</strong>
           </div>
           <div className="report-kpi-card">
             <span>Driver Pay</span>
-            <strong>{formatReportMoney(ordersDueSettlementReport.totals?.driverPayTotal)}</strong>
-          </div>
-          <div className="report-kpi-card">
-            <span>Source</span>
-            <strong>{ordersDueSettlementReport.dataSource || 'Bid Listing'}</strong>
+            <strong>{formatReportMoney(report.totals?.driverPayTotal)}</strong>
           </div>
         </div>
 
@@ -8581,25 +8870,21 @@ function openReportLoadDetails(load) {
   }
 
 
-  function WonNotRegisteredPreview() {
-    const rows = wonNotRegisteredReport?.rows || [];
+  function WonNotRegisteredPreview({ report = liveWonNotRegisteredReport, inline = false } = {}) {
+    const rows = report?.rows || [];
 
-    if (!wonNotRegisteredReport) return null;
+    if (!report) return null;
 
     return (
-      <div className="driver-report-preview modal-report-preview">
+      <div className={`driver-report-preview modal-report-preview ${inline ? 'inline-action-report-preview' : ''}`}>
         <div className="driver-report-generated">
-          Generated: {wonNotRegisteredReport.generatedAt}
+          Generated: {report.generatedAt}
         </div>
 
         <div className="report-kpi-grid won-not-registered-kpi-grid">
           <div className="report-kpi-card">
             <span>Open Orders</span>
-            <strong>{formatReportNumber(wonNotRegisteredReport.count)}</strong>
-          </div>
-          <div className="report-kpi-card">
-            <span>Source</span>
-            <strong>{wonNotRegisteredReport.dataSource || 'Bid Listing'}</strong>
+            <strong>{formatReportNumber(report.count)}</strong>
           </div>
         </div>
 
@@ -10704,7 +10989,7 @@ function openReportLoadDetails(load) {
     const hasLivePosition = !selectedDriverRoster.rosterModalTitle;
 
     return (
-      <div className="modal-overlay" onClick={closeDriverRosterModal}>
+      <div className="modal-overlay driver-roster-modal-overlay" onClick={closeDriverRosterModal}>
         <div className="detail-modal driver-roster-modal" onClick={(e) => e.stopPropagation()}>
           <div className="detail-header">
             <div>
@@ -12354,7 +12639,419 @@ function openReportLoadDetails(load) {
     );
   }
 
-  function MonthlyOperationsTable({ title, subtitle, rows = [], columns = [], emptyMessage = 'No rows found.' }) {
+
+  function getMonthlyOpsLoadRevenue(load = {}) {
+    return Number(load.GrossRevenue ?? load.Revenue ?? load.revenue ?? 0) || 0;
+  }
+
+  function sortMonthlyOpsLoadRows(rows = []) {
+    return [...(rows || [])].sort((a, b) => (
+      String(a.PickupDate || a.pickupDate || '').localeCompare(String(b.PickupDate || b.pickupDate || '')) ||
+      String(a.BOL || a.BidID || a.id || '').localeCompare(String(b.BOL || b.BidID || b.id || ''), undefined, { numeric: true })
+    ));
+  }
+
+  function getMonthlyOpsTopCustomerRow() {
+    const customers = monthlyOpsReport?.sections?.customers || [];
+    const topCustomer = monthlyOpsReport?.summary?.topCustomer || '';
+    return customers.find((row) => normalizeSearchValue(row.customer) === normalizeSearchValue(topCustomer)) || customers[0] || null;
+  }
+
+  function getMonthlyOpsTopRouteRow() {
+    const routes = monthlyOpsReport?.sections?.routes || [];
+    const topRoute = monthlyOpsReport?.summary?.topRoute || '';
+    return routes.find((row) => normalizeSearchValue(row.route) === normalizeSearchValue(topRoute)) || routes[0] || null;
+  }
+
+  function getMonthlyOpsTopEmptyCityRow() {
+    const cities = monthlyOpsReport?.sections?.availability?.topEmptyCities || [];
+    const topCity = monthlyOpsReport?.summary?.topEmptyCity || '';
+    return cities.find((row) => normalizeSearchValue(row.city) === normalizeSearchValue(topCity)) || cities[0] || null;
+  }
+
+  function buildMonthlyOpsDrilldown(kind, sourceRow = null) {
+    const report = monthlyOpsReport;
+    if (!report) return null;
+
+    const summary = report.summary || {};
+    const sections = report.sections || {};
+    const availability = sections.availability || {};
+    const noAvailability = sections.noAvailability || {};
+    const monthLabel = report.reportLabel || `${getReportMonthName(report.month || monthlyOpsMonth)} ${report.year || monthlyOpsYear}`;
+    const bookings = sortMonthlyOpsLoadRows(sections.bookings || []);
+    const offers = [...(sections.offers || [])].sort((a, b) => (
+      String(a.SolicitDate || '').localeCompare(String(b.SolicitDate || '')) ||
+      String(a.BidID || a.id || '').localeCompare(String(b.BidID || b.id || ''), undefined, { numeric: true })
+    ));
+
+    const topCustomer = sourceRow || getMonthlyOpsTopCustomerRow();
+    const topRoute = sourceRow || getMonthlyOpsTopRouteRow();
+    const topEmptyCity = sourceRow || getMonthlyOpsTopEmptyCityRow();
+
+    const base = {
+      kind,
+      monthLabel,
+      generatedAt: report.generatedAt || '',
+      totalRevenue: summary.grossRevenue || 0
+    };
+
+    switch (kind) {
+      case 'offers':
+        return {
+          ...base,
+          title: 'Total Offers',
+          subtitle: `${formatReportNumber(offers.length)} offer row(s) solicited in ${monthLabel}.`,
+          rowType: 'offers',
+          rows: offers
+        };
+      case 'winRate':
+        return {
+          ...base,
+          title: 'Win Rate Detail',
+          subtitle: `${formatReportNumber(summary.totalBookings)} booked from ${formatReportNumber(summary.totalOffers)} offer row(s).`,
+          rowType: 'offers',
+          rows: offers
+        };
+      case 'bookings':
+        return {
+          ...base,
+          title: 'Bookings',
+          subtitle: `${formatReportNumber(bookings.length)} Won/TONU booking row(s) picked up in ${monthLabel}.`,
+          rowType: 'loads',
+          rows: bookings
+        };
+      case 'revenue':
+        return {
+          ...base,
+          title: 'Gross Revenue Detail',
+          subtitle: `${formatReportMoney(summary.grossRevenue)} across ${formatReportNumber(bookings.length)} booked load row(s).`,
+          rowType: 'loads',
+          rows: bookings
+        };
+      case 'loadedRate':
+        return {
+          ...base,
+          title: '$ / Loaded Mile Detail',
+          subtitle: `${formatReportMoney(summary.avgLoadedMile)} from ${formatReportNumber(summary.loadedMiles)} loaded miles.`,
+          rowType: 'loads',
+          rows: bookings
+        };
+      case 'allMileRate':
+        return {
+          ...base,
+          title: '$ / All Miles Detail',
+          subtitle: `${formatReportMoney(summary.avgAllMile)} across ${formatReportNumber(summary.totalMiles)} total miles.`,
+          rowType: 'loads',
+          rows: bookings
+        };
+      case 'emptyMiles':
+        return {
+          ...base,
+          title: 'Empty Mile Detail',
+          subtitle: `${formatPercent(summary.emptyMilePercent)} empty miles from ${formatReportNumber(summary.emptyMiles)} empty / ${formatReportNumber(summary.totalMiles)} total miles.`,
+          rowType: 'loads',
+          rows: bookings
+        };
+      case 'noAvailability':
+        return {
+          ...base,
+          title: 'No Availability Detail',
+          subtitle: `${formatReportNumber(noAvailability.rows?.length || 0)} no-availability request row(s) in ${monthLabel}.`,
+          rowType: 'noAvailability',
+          rows: noAvailability.rows || []
+        };
+      case 'driverDays':
+        return {
+          ...base,
+          title: 'Driver-Days Listed Detail',
+          subtitle: `${formatReportNumber(availability.driverDayRows?.length || 0)} unique driver-day row(s) listed available/empty.`,
+          rowType: 'availability',
+          rows: availability.driverDayRows || []
+        };
+      case 'topCustomer':
+        return {
+          ...base,
+          title: topCustomer?.customer ? `Top Customer: ${topCustomer.customer}` : 'Top Customer Detail',
+          subtitle: `${formatReportMoney(topCustomer?.revenue || 0)} across ${formatReportNumber(topCustomer?.jobs || 0)} booked load row(s).`,
+          rowType: 'loads',
+          rows: sortMonthlyOpsLoadRows(topCustomer?.loads || [])
+        };
+      case 'topRoute':
+        return {
+          ...base,
+          title: topRoute?.route ? `Top Route: ${topRoute.route}` : 'Top Route Detail',
+          subtitle: `${formatReportMoney(topRoute?.revenue || 0)} across ${formatReportNumber(topRoute?.jobs || 0)} booked load row(s).`,
+          rowType: 'loads',
+          rows: sortMonthlyOpsLoadRows(topRoute?.loads || [])
+        };
+      case 'topEmptyCity':
+        return {
+          ...base,
+          title: topEmptyCity?.city ? `Top Empty City: ${topEmptyCity.city}` : 'Top Empty City Detail',
+          subtitle: `${formatReportNumber(topEmptyCity?.driverDays || 0)} driver-day row(s).`,
+          rowType: 'availability',
+          rows: topEmptyCity?.rows || []
+        };
+      case 'customer':
+        return {
+          ...base,
+          title: sourceRow?.customer ? `Customer: ${sourceRow.customer}` : 'Customer Detail',
+          subtitle: `${formatReportMoney(sourceRow?.revenue || 0)} across ${formatReportNumber(sourceRow?.jobs || 0)} booked load row(s).`,
+          rowType: 'loads',
+          rows: sortMonthlyOpsLoadRows(sourceRow?.loads || [])
+        };
+      case 'driver':
+        return {
+          ...base,
+          title: sourceRow?.driver ? `Driver: ${sourceRow.driver}` : 'Driver Detail',
+          subtitle: `${formatReportMoney(sourceRow?.revenue || 0)} across ${formatReportNumber(sourceRow?.jobs || 0)} booked load row(s).`,
+          rowType: 'loads',
+          rows: sortMonthlyOpsLoadRows(sourceRow?.loads || [])
+        };
+      case 'route':
+        return {
+          ...base,
+          title: sourceRow?.route ? `Route: ${sourceRow.route}` : 'Route Detail',
+          subtitle: `${formatReportMoney(sourceRow?.revenue || 0)} across ${formatReportNumber(sourceRow?.jobs || 0)} booked load row(s).`,
+          rowType: 'loads',
+          rows: sortMonthlyOpsLoadRows(sourceRow?.loads || [])
+        };
+      case 'emptyCity':
+        return {
+          ...base,
+          title: sourceRow?.city ? `Available Empty City: ${sourceRow.city}` : 'Available Empty City Detail',
+          subtitle: `${formatReportNumber(sourceRow?.driverDays || 0)} driver-day row(s).`,
+          rowType: 'availability',
+          rows: sourceRow?.rows || []
+        };
+      case 'availableDriver':
+        return {
+          ...base,
+          title: sourceRow?.driver ? `Available Days: ${sourceRow.driver}` : 'Available Days Detail',
+          subtitle: `${formatReportNumber(sourceRow?.days || 0)} day(s) listed available/empty.`,
+          rowType: 'availability',
+          rows: sourceRow?.rows || []
+        };
+      case 'noAvailabilityCustomer':
+        return {
+          ...base,
+          title: sourceRow?.company ? `No Availability: ${sourceRow.company}` : 'No Availability Customer Detail',
+          subtitle: `${formatReportNumber(sourceRow?.requests || 0)} request row(s) across ${formatReportNumber(sourceRow?.daysNoAvail || 0)} day(s).`,
+          rowType: 'noAvailability',
+          rows: sourceRow?.rows || []
+        };
+      default:
+        return null;
+    }
+  }
+
+  function openMonthlyOpsDrilldown(kind, sourceRow = null) {
+    const drilldown = buildMonthlyOpsDrilldown(kind, sourceRow);
+    if (!drilldown) return;
+    setSelectedMonthlyOpsDrilldown(drilldown);
+  }
+
+  function MonthlyOpsKpiCard({ label, value, detail, onClick }) {
+    if (onClick) {
+      return (
+        <button type="button" className="monthly-ops-kpi-card clickable" onClick={onClick}>
+          <span>{label}</span>
+          <strong>{value}</strong>
+          {detail && <small>{detail}</small>}
+        </button>
+      );
+    }
+
+    return (
+      <div className="monthly-ops-kpi-card">
+        <span>{label}</span>
+        <strong>{value}</strong>
+        {detail && <small>{detail}</small>}
+      </div>
+    );
+  }
+
+  function MonthlyOperationsDrilldownModal() {
+    const drilldown = selectedMonthlyOpsDrilldown;
+    if (!monthlyOpsReport || !drilldown) return null;
+
+    const rows = drilldown.rows || [];
+    const loadRevenue = rows.reduce((sum, row) => sum + getMonthlyOpsLoadRevenue(row), 0);
+
+    return (
+      <div className="modal-overlay report-modal-overlay monthly-ops-drilldown-overlay" onClick={closeMonthlyOperationsDrilldown}>
+        <div className="detail-modal report-modal monthly-ops-drilldown-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="detail-header report-modal-header monthly-ops-drilldown-header">
+            <div>
+              <button
+                type="button"
+                className="gross-driver-card-link gross-month-back-link"
+                onClick={closeMonthlyOperationsDrilldown}
+              >
+                Back to Monthly Operations Summary
+              </button>
+              <h2>{drilldown.title}</h2>
+              <p>{drilldown.subtitle}</p>
+            </div>
+
+            <button className="close-button" onClick={closeMonthlyOperationsDrilldown}>
+              Close
+            </button>
+          </div>
+
+          <div className="modal-body report-modal-body">
+            <div className="report-kpi-grid monthly-ops-drilldown-kpi-grid">
+              <div className="report-kpi-card">
+                <span>Rows</span>
+                <strong>{formatReportNumber(rows.length)}</strong>
+              </div>
+              {(drilldown.rowType === 'loads' || drilldown.rowType === 'offers') && (
+                <div className="report-kpi-card">
+                  <span>Revenue in Rows</span>
+                  <strong>{formatReportMoney(loadRevenue)}</strong>
+                </div>
+              )}
+              <div className="report-kpi-card">
+                <span>Month</span>
+                <strong>{drilldown.monthLabel}</strong>
+              </div>
+            </div>
+
+            {rows.length === 0 ? (
+              <div className="report-alert locked">
+                <h4>No supporting rows found.</h4>
+                <p>This KPI did not return any supporting detail rows for the selected month.</p>
+              </div>
+            ) : (
+              <div className="report-table-wrap monthly-ops-drilldown-table-wrap">
+                {drilldown.rowType === 'noAvailability' ? (
+                  <table className="driver-report-table monthly-ops-drilldown-table no-availability-detail-table">
+                    <thead>
+                      <tr>
+                        <th>Solicit Date</th>
+                        <th>Customer</th>
+                        <th>Requestor</th>
+                        <th>Pickup</th>
+                        <th>Delivery</th>
+                        <th>Type</th>
+                        <th>Miles</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row, index) => (
+                        <tr key={`${row.id || row.solicitDateKey || index}-${index}`}>
+                          <td>{formatDateOnly(row.solicitDateKey || row.solicitDate)}</td>
+                          <td>{row.company || '-'}</td>
+                          <td>{row.requestor || '-'}</td>
+                          <td>{row.pickupLocation || '-'}</td>
+                          <td>{row.deliveryLocation || '-'}</td>
+                          <td>{row.shipmentType || '-'}</td>
+                          <td>{formatReportNumber(row.totalMiles)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : drilldown.rowType === 'availability' ? (
+                  <table className="driver-report-table monthly-ops-drilldown-table availability-detail-table">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Driver</th>
+                        <th>Truck</th>
+                        <th>Location</th>
+                        <th>Equipment</th>
+                        <th>Time</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row, index) => (
+                        <tr key={`${row.driver || row.city || index}-${row.dateOnly || index}-${index}`}>
+                          <td>{formatDateOnly(row.dateOnly)}</td>
+                          <td>{row.driver || '-'}</td>
+                          <td>{row.unitNo || '-'}</td>
+                          <td>{row.currentLocation || row.city || '-'}</td>
+                          <td>{row.equipmentType || '-'}</td>
+                          <td>{row.timeOfDay || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : drilldown.rowType === 'offers' ? (
+                  <table className="driver-report-table monthly-ops-drilldown-table offers-detail-table">
+                    <thead>
+                      <tr>
+                        <th>Bid ID</th>
+                        <th>Customer</th>
+                        <th>Operator/Team</th>
+                        <th>Solicited</th>
+                        <th>Pickup</th>
+                        <th>Status</th>
+                        <th>Revenue</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row, index) => (
+                        <tr
+                          key={`${row.BidID || row.id || index}-${index}`}
+                          className={row.id ? 'report-clickable-row' : ''}
+                          onClick={() => openReportLoadDetails(row)}
+                          title={row.id ? 'Open full order screen' : ''}
+                        >
+                          <td>{row.BidID || '-'}</td>
+                          <td>{row.Customer || '-'}</td>
+                          <td>{row.Driver || '-'}</td>
+                          <td>{formatDateOnly(row.SolicitDate)}</td>
+                          <td>{row.PickupDateDisplay || formatDateOnly(row.PickupDate)}</td>
+                          <td>{row.Status || '-'}</td>
+                          <td>{formatReportMoney(getMonthlyOpsLoadRevenue(row))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <table className="driver-report-table monthly-ops-drilldown-table loads-detail-table">
+                    <thead>
+                      <tr>
+                        <th>BOL</th>
+                        <th>Customer</th>
+                        <th>Driver</th>
+                        <th>Truck</th>
+                        <th>Pickup</th>
+                        <th>Route</th>
+                        <th>Status</th>
+                        <th>Revenue</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row, index) => (
+                        <tr
+                          key={`${row.BOL || row.BidID || row.id || index}-${index}`}
+                          className={row.id ? 'report-clickable-row' : ''}
+                          onClick={() => openReportLoadDetails(row)}
+                          title={row.id ? 'Open full order screen' : ''}
+                        >
+                          <td>{row.BOL || '-'}</td>
+                          <td>{row.Customer || '-'}</td>
+                          <td>{row.Driver || '-'}</td>
+                          <td>{row.Truck || '-'}</td>
+                          <td>{row.PickupDateDisplay || formatDateOnly(row.PickupDate)}</td>
+                          <td>{row.Route || [row.Origin, row.Destination].filter(Boolean).join(' to ') || '-'}</td>
+                          <td>{row.Status || '-'}</td>
+                          <td>{formatReportMoney(getMonthlyOpsLoadRevenue(row))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function MonthlyOperationsTable({ title, subtitle, rows = [], columns = [], emptyMessage = 'No rows found.', onRowClick }) {
     return (
       <div className="driver-report-section monthly-ops-section">
         <div className="driver-report-section-header">
@@ -12381,7 +13078,12 @@ function openReportLoadDetails(load) {
               </thead>
               <tbody>
                 {rows.map((row, rowIndex) => (
-                  <tr key={row.key || row.id || `${title}-${rowIndex}`}>
+                  <tr
+                    key={row.key || row.id || `${title}-${rowIndex}`}
+                    className={onRowClick ? 'report-clickable-row' : ''}
+                    onClick={onRowClick ? () => onRowClick(row) : undefined}
+                    title={onRowClick ? 'View supporting rows' : ''}
+                  >
                     {columns.map((column) => (
                       <td key={column.key}>{column.render ? column.render(row) : row[column.key]}</td>
                     ))}
@@ -12407,54 +13109,78 @@ function openReportLoadDetails(load) {
     return (
       <div className="modal-report-preview monthly-ops-preview">
         <div className="sales-summary-grid monthly-ops-summary-grid">
-          <div>
-            <span>Total Offers</span>
-            <strong>{formatReportNumber(summary.totalOffers)}</strong>
-          </div>
-          <div>
-            <span>Bookings</span>
-            <strong>{formatReportNumber(summary.totalBookings)}</strong>
-          </div>
-          <div>
-            <span>Win %</span>
-            <strong>{formatPercent(summary.winRate)}</strong>
-          </div>
-          <div>
-            <span>Gross Revenue</span>
-            <strong>{formatReportMoney(summary.grossRevenue)}</strong>
-          </div>
-          <div>
-            <span>$ / Loaded Mile</span>
-            <strong>{formatReportMoney(summary.avgLoadedMile)}</strong>
-          </div>
-          <div>
-            <span>$ / All Miles</span>
-            <strong>{formatReportMoney(summary.avgAllMile)}</strong>
-          </div>
-          <div>
-            <span>Empty Mile %</span>
-            <strong>{formatPercent(summary.emptyMilePercent)}</strong>
-          </div>
-          <div>
-            <span>No Availability</span>
-            <strong>{formatReportNumber(summary.noAvailabilityCount)}</strong>
-          </div>
-          <div>
-            <span>Driver-Days Listed</span>
-            <strong>{formatReportNumber(summary.driverDaysListed)}</strong>
-          </div>
-          <div>
-            <span>Top Customer</span>
-            <strong>{summary.topCustomer || '-'}</strong>
-          </div>
-          <div>
-            <span>Top Route</span>
-            <strong>{summary.topRoute || '-'}</strong>
-          </div>
-          <div>
-            <span>Top Empty City</span>
-            <strong>{summary.topEmptyCity || '-'}</strong>
-          </div>
+          <MonthlyOpsKpiCard
+            label="Total Offers"
+            value={formatReportNumber(summary.totalOffers)}
+            detail="View solicited rows"
+            onClick={() => openMonthlyOpsDrilldown('offers')}
+          />
+          <MonthlyOpsKpiCard
+            label="Bookings"
+            value={formatReportNumber(summary.totalBookings)}
+            detail="View booked loads"
+            onClick={() => openMonthlyOpsDrilldown('bookings')}
+          />
+          <MonthlyOpsKpiCard
+            label="Win %"
+            value={formatPercent(summary.winRate)}
+            detail="View offer status mix"
+            onClick={() => openMonthlyOpsDrilldown('winRate')}
+          />
+          <MonthlyOpsKpiCard
+            label="Gross Revenue"
+            value={formatReportMoney(summary.grossRevenue)}
+            detail="View revenue loads"
+            onClick={() => openMonthlyOpsDrilldown('revenue')}
+          />
+          <MonthlyOpsKpiCard
+            label="$ / Loaded Mile"
+            value={formatReportMoney(summary.avgLoadedMile)}
+            detail="View load mileage"
+            onClick={() => openMonthlyOpsDrilldown('loadedRate')}
+          />
+          <MonthlyOpsKpiCard
+            label="$ / All Miles"
+            value={formatReportMoney(summary.avgAllMile)}
+            detail="View all-mile detail"
+            onClick={() => openMonthlyOpsDrilldown('allMileRate')}
+          />
+          <MonthlyOpsKpiCard
+            label="Empty Mile %"
+            value={formatPercent(summary.emptyMilePercent)}
+            detail="View empty-mile loads"
+            onClick={() => openMonthlyOpsDrilldown('emptyMiles')}
+          />
+          <MonthlyOpsKpiCard
+            label="No Availability"
+            value={formatReportNumber(summary.noAvailabilityCount)}
+            detail="View missed requests"
+            onClick={() => openMonthlyOpsDrilldown('noAvailability')}
+          />
+          <MonthlyOpsKpiCard
+            label="Driver-Days Listed"
+            value={formatReportNumber(summary.driverDaysListed)}
+            detail="View available days"
+            onClick={() => openMonthlyOpsDrilldown('driverDays')}
+          />
+          <MonthlyOpsKpiCard
+            label="Top Customer"
+            value={summary.topCustomer || '-'}
+            detail="View customer loads"
+            onClick={() => openMonthlyOpsDrilldown('topCustomer')}
+          />
+          <MonthlyOpsKpiCard
+            label="Top Route"
+            value={summary.topRoute || '-'}
+            detail="View route loads"
+            onClick={() => openMonthlyOpsDrilldown('topRoute')}
+          />
+          <MonthlyOpsKpiCard
+            label="Top Empty City"
+            value={summary.topEmptyCity || '-'}
+            detail="View city driver-days"
+            onClick={() => openMonthlyOpsDrilldown('topEmptyCity')}
+          />
         </div>
 
         <div className="customer-trends-meta-card monthly-ops-brief-card">
@@ -12488,6 +13214,7 @@ function openReportLoadDetails(load) {
             { key: 'revenueShare', label: '% Revenue', render: (row) => formatPercent(row.revenueShare) }
           ]}
           emptyMessage="No customer bookings found for this month."
+          onRowClick={(row) => openMonthlyOpsDrilldown('customer', row)}
         />
 
         <MonthlyOperationsTable
@@ -12505,6 +13232,7 @@ function openReportLoadDetails(load) {
             { key: 'avgAllMile', label: '$ / All Miles', render: (row) => formatReportMoney(row.avgAllMile) }
           ]}
           emptyMessage="No driver statistics found for this month."
+          onRowClick={(row) => openMonthlyOpsDrilldown('driver', row)}
         />
 
         <MonthlyOperationsTable
@@ -12520,6 +13248,7 @@ function openReportLoadDetails(load) {
             { key: 'emptyMiles', label: 'Empty Miles', render: (row) => formatReportNumber(row.emptyMiles) }
           ]}
           emptyMessage="No routes found for this month."
+          onRowClick={(row) => openMonthlyOpsDrilldown('route', row)}
         />
 
         <div className="monthly-ops-split-grid">
@@ -12532,6 +13261,7 @@ function openReportLoadDetails(load) {
               { key: 'driverDays', label: 'Driver-Days Listed', render: (row) => formatReportNumber(row.driverDays) }
             ]}
             emptyMessage="No available-empty city rows found for this month."
+            onRowClick={(row) => openMonthlyOpsDrilldown('emptyCity', row)}
           />
 
           <MonthlyOperationsTable
@@ -12543,6 +13273,7 @@ function openReportLoadDetails(load) {
               { key: 'days', label: 'Days Empty / Listed', render: (row) => formatReportNumber(row.days) }
             ]}
             emptyMessage="No driver-days listed rows found for this month."
+            onRowClick={(row) => openMonthlyOpsDrilldown('availableDriver', row)}
           />
         </div>
 
@@ -12557,6 +13288,7 @@ function openReportLoadDetails(load) {
             { key: 'miles', label: 'Missed Miles', render: (row) => formatReportNumber(row.miles) }
           ]}
           emptyMessage="No No Availability rows found for this month."
+          onRowClick={(row) => openMonthlyOpsDrilldown('noAvailabilityCustomer', row)}
         />
 
         <div className="customer-trends-meta-card">
@@ -12594,6 +13326,7 @@ function openReportLoadDetails(load) {
                 setMonthlyOpsReport(null);
                 setMonthlyOpsError(null);
                 setMonthlyOpsModalOpen(false);
+                setSelectedMonthlyOpsDrilldown(null);
                 setMonthlyOpsPdfError('');
                 clearPdfExportNotice('monthlyOperations');
               }}
@@ -12614,6 +13347,7 @@ function openReportLoadDetails(load) {
                 setMonthlyOpsReport(null);
                 setMonthlyOpsError(null);
                 setMonthlyOpsModalOpen(false);
+                setSelectedMonthlyOpsDrilldown(null);
                 setMonthlyOpsPdfError('');
                 clearPdfExportNotice('monthlyOperations');
               }}
@@ -13990,6 +14724,7 @@ function openReportLoadDetails(load) {
                           setYearlyProjectionReport(null);
                           setYearlyProjectionError(null);
                           setYearlyProjectionModalOpen(false);
+                          setProjectionRevenueDrilldownError('');
                         }}
                       >
                         {getReportYears().map((year) => (
@@ -14354,22 +15089,30 @@ function openReportLoadDetails(load) {
                       <h4>No settlement action items right now.</h4>
                       <p>{getActionReportClearMessage('Orders Due for Settlement')}</p>
                     </div>
+                  ) : liveOrdersDueSettlementReport ? (
+                    <>
+                      <div className="inline-action-report-toolbar">
+                        <span>Live from the Operations Reports ticker.</span>
+                        <button
+                          type="button"
+                          className="view-button"
+                          onClick={() => loadReportActionAlerts({ silent: false })}
+                          disabled={reportActionAlertsLoading}
+                        >
+                          {reportActionAlertsLoading ? 'Refreshing...' : 'Refresh'}
+                        </button>
+                      </div>
+                      <OrdersDueSettlementPreview report={liveOrdersDueSettlementReport} inline />
+                    </>
+                  ) : reportActionAlertsError ? (
+                    <div className="report-alert error">
+                      <h4>Report ticker could not be loaded.</h4>
+                      <p>{reportActionAlertsError}</p>
+                    </div>
                   ) : (
                     <div className="report-controls centered-report-controls">
-                      <button onClick={loadOrdersDueSettlementReport} disabled={ordersDueSettlementLoading}>
-                        {ordersDueSettlementLoading ? 'Loading Report...' : 'Preview Report'}
-                      </button>
-                    </div>
-                  )}
-
-                  {ordersDueSettlementReport && !ordersDueSettlementModalOpen && (
-                    <div className="report-ready-card">
-                      <div>
-                        <strong>{ordersDueSettlementReport.reportLabel} is ready.</strong>
-                        <span> The preview opens in a report window.</span>
-                      </div>
-                      <button className="view-button" onClick={() => setOrdersDueSettlementModalOpen(true)}>
-                        Reopen Preview
+                      <button onClick={() => loadReportActionAlerts({ silent: false })} disabled={reportActionAlertsLoading}>
+                        {reportActionAlertsLoading ? 'Checking...' : 'Load Live Rows'}
                       </button>
                     </div>
                   )}
@@ -14421,22 +15164,30 @@ function openReportLoadDetails(load) {
                       <h4>No unregistered won orders right now.</h4>
                       <p>{getActionReportClearMessage('Orders Won and Not Registered')}</p>
                     </div>
+                  ) : liveWonNotRegisteredReport ? (
+                    <>
+                      <div className="inline-action-report-toolbar">
+                        <span>Live from the Operations Reports ticker.</span>
+                        <button
+                          type="button"
+                          className="view-button"
+                          onClick={() => loadReportActionAlerts({ silent: false })}
+                          disabled={reportActionAlertsLoading}
+                        >
+                          {reportActionAlertsLoading ? 'Refreshing...' : 'Refresh'}
+                        </button>
+                      </div>
+                      <WonNotRegisteredPreview report={liveWonNotRegisteredReport} inline />
+                    </>
+                  ) : reportActionAlertsError ? (
+                    <div className="report-alert error">
+                      <h4>Report ticker could not be loaded.</h4>
+                      <p>{reportActionAlertsError}</p>
+                    </div>
                   ) : (
                     <div className="report-controls centered-report-controls">
-                      <button onClick={loadWonNotRegisteredReport} disabled={wonNotRegisteredLoading}>
-                        {wonNotRegisteredLoading ? 'Loading Report...' : 'Preview Report'}
-                      </button>
-                    </div>
-                  )}
-
-                  {wonNotRegisteredReport && !wonNotRegisteredModalOpen && (
-                    <div className="report-ready-card">
-                      <div>
-                        <strong>{wonNotRegisteredReport.reportLabel} is ready.</strong>
-                        <span> The preview opens in a report window.</span>
-                      </div>
-                      <button className="view-button" onClick={() => setWonNotRegisteredModalOpen(true)}>
-                        Reopen Preview
+                      <button onClick={() => loadReportActionAlerts({ silent: false })} disabled={reportActionAlertsLoading}>
+                        {reportActionAlertsLoading ? 'Checking...' : 'Load Live Rows'}
                       </button>
                     </div>
                   )}
@@ -15714,6 +16465,7 @@ function openReportLoadDetails(load) {
       )}
 
       <GrossRevenueDriverDetailModal />
+      <GrossRevenueMonthLoadModal />
 
       {yearlyProjectionModalOpen && yearlyProjectionReport && (
         <div className="modal-overlay report-modal-overlay" onClick={closeYearlyRevenueProjectionModal}>
@@ -15772,6 +16524,8 @@ function openReportLoadDetails(load) {
           </div>
         </div>
       )}
+
+      {monthlyOpsModalOpen && monthlyOpsReport && selectedMonthlyOpsDrilldown && <MonthlyOperationsDrilldownModal />}
 
       {driverSummaryModalOpen && driverSummaryReport && (
         <div className="modal-overlay report-modal-overlay" onClick={closeDriverSummaryModal}>

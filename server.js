@@ -3389,7 +3389,11 @@ function buildMonthlyOpsAvailabilitySections(availableItems, window) {
     if (!driverDayKeys.has(driverDayKey)) {
       driverDayKeys.set(driverDayKey, {
         driver,
-        dateOnly
+        dateOnly,
+        unitNo: record.unitNo || '',
+        equipmentType: record.equipmentType || '',
+        currentLocation: record.currentLocation || '',
+        timeOfDay: record.timeOfDay || ''
       });
     }
 
@@ -3400,7 +3404,11 @@ function buildMonthlyOpsAvailabilitySections(availableItems, window) {
       driverDayCityKeys.set(cityKey, {
         city,
         driver,
-        dateOnly
+        dateOnly,
+        unitNo: record.unitNo || '',
+        equipmentType: record.equipmentType || '',
+        currentLocation: record.currentLocation || '',
+        timeOfDay: record.timeOfDay || ''
       });
     }
   });
@@ -3409,8 +3417,9 @@ function buildMonthlyOpsAvailabilitySections(availableItems, window) {
   Array.from(driverDayCityKeys.values()).forEach((row) => {
     const key = normalizeSearchValue(row.city);
     if (!key) return;
-    const current = cityMap.get(key) || { city: row.city, driverDays: 0 };
+    const current = cityMap.get(key) || { city: row.city, driverDays: 0, rows: [] };
     current.driverDays += 1;
+    current.rows.push(row);
     cityMap.set(key, current);
   });
 
@@ -3418,32 +3427,51 @@ function buildMonthlyOpsAvailabilitySections(availableItems, window) {
   Array.from(driverDayKeys.values()).forEach((row) => {
     const key = normalizeSearchValue(row.driver);
     if (!key) return;
-    const current = driverMap.get(key) || { driver: row.driver, days: 0 };
+    const current = driverMap.get(key) || { driver: row.driver, days: 0, rows: [] };
     current.days += 1;
+    current.rows.push(row);
     driverMap.set(key, current);
   });
 
   const topEmptyCities = Array.from(cityMap.values())
+    .map((row) => ({
+      ...row,
+      rows: row.rows.sort((a, b) => String(a.dateOnly || '').localeCompare(String(b.dateOnly || '')) || String(a.driver || '').localeCompare(String(b.driver || '')))
+    }))
     .sort((a, b) => b.driverDays - a.driverDays || String(a.city).localeCompare(String(b.city)))
     .slice(0, 10);
 
   const driverDays = Array.from(driverMap.values())
+    .map((row) => ({
+      ...row,
+      rows: row.rows.sort((a, b) => String(a.dateOnly || '').localeCompare(String(b.dateOnly || '')))
+    }))
     .sort((a, b) => b.days - a.days || String(a.driver).localeCompare(String(b.driver)))
     .slice(0, 25);
+
+  const driverDayRows = Array.from(driverDayKeys.values())
+    .sort((a, b) => String(a.dateOnly || '').localeCompare(String(b.dateOnly || '')) || String(a.driver || '').localeCompare(String(b.driver || '')));
+
+  const cityDayRows = Array.from(driverDayCityKeys.values())
+    .sort((a, b) => String(a.dateOnly || '').localeCompare(String(b.dateOnly || '')) || String(a.city || '').localeCompare(String(b.city || '')) || String(a.driver || '').localeCompare(String(b.driver || '')));
 
   return {
     totalPostings: records.length,
     driverDayCityCount: driverDayCityKeys.size,
     driverDayCount: driverDayKeys.size,
     topEmptyCities,
-    driverDays
+    driverDays,
+    driverDayRows,
+    cityDayRows,
+    records
   };
 }
 
 function buildMonthlyOpsNoAvailabilitySections(noAvailabilityRows, window) {
   const monthlyRows = dedupeNoAvailabilityRows(noAvailabilityRows)
     .rows
-    .filter((row) => isDateKeyInReportWindow(row.solicitDateKey || row.solicitDate, window));
+    .filter((row) => isDateKeyInReportWindow(row.solicitDateKey || row.solicitDate, window))
+    .sort((a, b) => String(a.solicitDateKey || a.solicitDate || '').localeCompare(String(b.solicitDateKey || b.solicitDate || '')) || String(a.company || '').localeCompare(String(b.company || '')));
 
   const companyDateMap = new Map();
   monthlyRows.forEach((row) => {
@@ -3468,10 +3496,14 @@ function buildMonthlyOpsNoAvailabilitySections(noAvailabilityRows, window) {
   Array.from(companyDateMap.values()).forEach((row) => {
     const key = normalizeSearchValue(row.company);
     if (!key) return;
-    const current = customerMap.get(key) || { company: row.company, daysNoAvail: 0, requests: 0, miles: 0 };
+    const current = customerMap.get(key) || { company: row.company, daysNoAvail: 0, requests: 0, miles: 0, rows: [] };
     current.daysNoAvail += 1;
     current.requests += row.count;
     current.miles += row.miles;
+    current.rows.push(...monthlyRows.filter((sourceRow) =>
+      normalizeSearchValue(sourceRow.company) === key &&
+      normalizeEasternDateOnly(sourceRow.solicitDateKey || sourceRow.solicitDate) === row.dateOnly
+    ));
     customerMap.set(key, current);
   });
 
@@ -3482,7 +3514,8 @@ function buildMonthlyOpsNoAvailabilitySections(noAvailabilityRows, window) {
   return {
     totalNoAvailability: monthlyRows.length,
     uniqueCustomers: customerMap.size,
-    keyCustomers
+    keyCustomers,
+    rows: monthlyRows
   };
 }
 
@@ -3571,6 +3604,8 @@ function buildMonthlyOperationsSummaryResponse({ bidItems, availableItems, noAva
   };
 
   const sections = {
+    offers: offerRows,
+    bookings: bookedLoads,
     customers: bidSections.customers,
     drivers: bidSections.drivers,
     routes: bidSections.routes.slice(0, 25),
@@ -6225,13 +6260,15 @@ async function buildReportActionAlertsResponse(items, sourceList, options = {}) 
       reportKey: 'ordersDueSettlement',
       reportLabel: ordersDueSettlement.reportLabel,
       count: ordersDueSettlement.count,
-      hasAlert: ordersDueSettlement.count > 0
+      hasAlert: ordersDueSettlement.count > 0,
+      report: ordersDueSettlement
     },
     wonNotRegistered: {
       reportKey: 'wonNotRegistered',
       reportLabel: wonNotRegistered.reportLabel,
       count: wonNotRegistered.count,
-      hasAlert: wonNotRegistered.count > 0
+      hasAlert: wonNotRegistered.count > 0,
+      report: wonNotRegistered
     },
     permitGovernance: {
       reportKey: 'permitGovernance',
