@@ -5816,11 +5816,22 @@ function sortOrdersDueForSettlementRows(a, b) {
   return String(a.BOL || '').localeCompare(String(b.BOL || ''), undefined, { numeric: true });
 }
 
-function buildOrdersDueForSettlementResponse(items, sourceList) {
+function buildOrdersDueForSettlementResponse(items, sourceList, uploadEvidenceSets = {}) {
   const today = formatEasternDate();
+  const deliveryEvidenceBols = uploadEvidenceSets?.deliveryEvidenceBols instanceof Set
+    ? uploadEvidenceSets.deliveryEvidenceBols
+    : new Set();
 
   const rows = items
-    .map((item) => getOrdersDueForSettlementItem(item, sourceList))
+    .map((item) => {
+      const record = getOrdersDueForSettlementItem(item, sourceList);
+      const bolKey = normalizeBolKey(record.BOL);
+
+      return {
+        ...record,
+        DeliveryFilesLogged: bolKey ? deliveryEvidenceBols.has(bolKey) : false
+      };
+    })
     .filter((record) => {
       const status = normalizeText(record.Status);
       const delivery = getDateOnlyComparable(record.DeliveryDate);
@@ -5829,7 +5840,8 @@ function buildOrdersDueForSettlementResponse(items, sourceList) {
         (status === 'won' || status === 'tonu') &&
         !parseBoolean(record.FinalSettleSent) &&
         delivery &&
-        delivery < today
+        delivery <= today &&
+        record.DeliveryFilesLogged
       );
     })
     .sort(sortOrdersDueForSettlementRows);
@@ -5843,6 +5855,15 @@ function buildOrdersDueForSettlementResponse(items, sourceList) {
     generatedAt: `${formatEasternTimestamp()} Eastern`,
     dataSource: sourceList.label,
     targetDate: today,
+    criteria: {
+      deliveryDate: 'todayOrEarlier',
+      requireDeliveryFilesLogged: true,
+      finalSettleSent: false,
+      status: ['Won', 'TONU']
+    },
+    evidence: {
+      uploadDigestRowsScanned: Number(uploadEvidenceSets?.uploadDigestCount || 0)
+    },
     count: rows.length,
     totals,
     rows
@@ -6248,7 +6269,7 @@ function getReportActionAlertFieldSelect() {
 }
 
 async function buildReportActionAlertsResponse(items, sourceList, options = {}) {
-  const ordersDueSettlement = buildOrdersDueForSettlementResponse(items, sourceList);
+  const ordersDueSettlement = buildOrdersDueForSettlementResponse(items, sourceList, options.uploadEvidenceSets);
   const wonNotRegistered = buildWonNotRegisteredResponse(items, sourceList);
   const permitGovernance = await buildPermitGovernanceResponse(items, sourceList, {
     ...options,
@@ -8866,13 +8887,16 @@ app.get('/reports/action-alerts', requireLookupAccess, async (req, res) => {
       });
     }
 
-    const items = await getAllListItemsWithFields(
-      token,
-      currentList.listId,
-      getReportActionAlertFieldSelect()
-    );
+    const [items, uploadEvidenceSets] = await Promise.all([
+      getAllListItemsWithFields(
+        token,
+        currentList.listId,
+        getReportActionAlertFieldSelect()
+      ),
+      getUploadEvidenceSets(token)
+    ]);
 
-    res.json(await buildReportActionAlertsResponse(items, currentList, { token }));
+    res.json(await buildReportActionAlertsResponse(items, currentList, { token, uploadEvidenceSets }));
   } catch (error) {
     console.error(error);
 
@@ -9024,13 +9048,16 @@ app.get('/reports/orders-due-for-settlement', requireLookupAccess, async (req, r
       });
     }
 
-    const items = await getAllListItemsWithFields(
-      token,
-      currentList.listId,
-      getOrdersDueForSettlementFieldSelect()
-    );
+    const [items, uploadEvidenceSets] = await Promise.all([
+      getAllListItemsWithFields(
+        token,
+        currentList.listId,
+        getOrdersDueForSettlementFieldSelect()
+      ),
+      getUploadEvidenceSets(token)
+    ]);
 
-    res.json(buildOrdersDueForSettlementResponse(items, currentList));
+    res.json(buildOrdersDueForSettlementResponse(items, currentList, uploadEvidenceSets));
   } catch (error) {
     console.error(error);
 

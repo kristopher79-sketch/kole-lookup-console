@@ -12217,7 +12217,6 @@ function openReportLoadDetails(load) {
                           <th>BOL</th>
                           <th>Driver</th>
                           <th>Type</th>
-                          <th>Order</th>
                           <th>Folder</th>
                         </tr>
                       </thead>
@@ -12228,18 +12227,6 @@ function openReportLoadDetails(load) {
                             <td>{record.BOLNumber || '-'}</td>
                             <td>{record.DriverName || '-'}</td>
                             <td>{record.UploadType || '-'}</td>
-                            <td>
-                              <button
-                                type="button"
-                                className="table-link-button"
-                                onClick={(e) => openUploadDigestOrder(record, e)}
-                                disabled={!record.BOLNumber || documentLoading === `upload-digest-order-${record.id || record.BOLNumber}`}
-                              >
-                                {documentLoading === `upload-digest-order-${record.id || record.BOLNumber}`
-                                  ? 'Opening...'
-                                  : 'Open Order'}
-                              </button>
-                            </td>
                             <td>
                               <button
                                 type="button"
@@ -12991,12 +12978,7 @@ function openReportLoadDetails(load) {
                     </thead>
                     <tbody>
                       {rows.map((row, index) => (
-                        <tr
-                          key={`${row.BidID || row.id || index}-${index}`}
-                          className={row.id ? 'report-clickable-row' : ''}
-                          onClick={() => openReportLoadDetails(row)}
-                          title={row.id ? 'Open full order screen' : ''}
-                        >
+                        <tr key={`${row.BidID || row.id || index}-${index}`}>
                           <td>{row.BidID || '-'}</td>
                           <td>{row.Customer || '-'}</td>
                           <td>{row.Driver || '-'}</td>
@@ -13024,12 +13006,7 @@ function openReportLoadDetails(load) {
                     </thead>
                     <tbody>
                       {rows.map((row, index) => (
-                        <tr
-                          key={`${row.BOL || row.BidID || row.id || index}-${index}`}
-                          className={row.id ? 'report-clickable-row' : ''}
-                          onClick={() => openReportLoadDetails(row)}
-                          title={row.id ? 'Open full order screen' : ''}
-                        >
+                        <tr key={`${row.BOL || row.BidID || row.id || index}-${index}`}>
                           <td>{row.BOL || '-'}</td>
                           <td>{row.Customer || '-'}</td>
                           <td>{row.Driver || '-'}</td>
