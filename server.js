@@ -5732,6 +5732,7 @@ function getOrdersDueForSettlementFieldSelect() {
     'Operator_x002f_Team',
     'TMSName',
     'Status',
+    'Processed',
     'FinalSettleSent',
     'Quoted_x0020_Total',
     'FinalBillableTotal',
@@ -5772,6 +5773,9 @@ function getOrdersDueForSettlementItem(item, sourceList) {
     OperatorTeam: operatorTeam || '',
     Truck: truck || '',
     Status: f.Status || '',
+    Processed: f.Processed ?? false,
+    IsProcessed: parseBoolean(f.Processed),
+    IsSettled: parseBoolean(f.Processed),
     FinalSettleSent: f.FinalSettleSent ?? false,
     PickupDate: f.Pickup_x0020_Offer_x0020_Date || '',
     DeliveryDate: f.Expected_x0020_Delivery_x0020_Da || '',
@@ -5838,6 +5842,7 @@ function buildOrdersDueForSettlementResponse(items, sourceList, uploadEvidenceSe
 
       return (
         (status === 'won' || status === 'tonu') &&
+        !parseBoolean(record.Processed) &&
         !parseBoolean(record.FinalSettleSent) &&
         delivery &&
         delivery <= today &&
@@ -5858,6 +5863,7 @@ function buildOrdersDueForSettlementResponse(items, sourceList, uploadEvidenceSe
     criteria: {
       deliveryDate: 'todayOrEarlier',
       requireDeliveryFilesLogged: true,
+      processed: false,
       finalSettleSent: false,
       status: ['Won', 'TONU']
     },
