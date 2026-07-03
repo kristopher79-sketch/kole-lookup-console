@@ -26,6 +26,7 @@ const DEFAULT_AVAILABLE_EQUIPMENT_SOURCE_LIST_ID = '96af7972-58ff-4bb8-b5a6-ca86
 const DEFAULT_AVAILABLE_TRUCKS_EMAIL_LIST_ID = '2458883d-ea8b-4761-8047-a04e35e9f93f';
 const DRIVER_TIME_OFF_DEFAULT_REPORT_YEARS_BACK = 3;
 const AVAILABLE_TRUCKS_DEFAULT_LOOKBACK_DAYS = 30;
+const AVAILABLE_TRUCKS_DEFAULT_ASSIGNMENT_LOOKAHEAD_DAYS = Number(process.env.AVAILABLE_TRUCKS_ASSIGNMENT_LOOKAHEAD_DAYS || 2);
 const SALES_LEAD_NOTE_MAX_LENGTH = 63000;
 
 function getLoadPicturesFolderId() {
@@ -11114,15 +11115,23 @@ function cleanAvailableTruckAssignment(item, sourceList) {
   };
 }
 
-function isActiveOrFutureAssignment(assignment, targetDate = formatEasternDate()) {
+function isActiveOrFutureAssignment(assignment, targetDate = formatEasternDate(), lookaheadDays = AVAILABLE_TRUCKS_DEFAULT_ASSIGNMENT_LOOKAHEAD_DAYS) {
   if (normalizeText(assignment.status) !== 'won') return false;
   if (assignment.processed || assignment.finalSettleSent) return false;
 
   const pickup = assignment.pickupDate || '';
   const delivery = assignment.deliveryDate || '';
+  const safeLookaheadDays = Math.max(0, Math.min(Number(lookaheadDays) || 0, 14));
+  const futureCutoffDate = addDaysToDateInput(targetDate, safeLookaheadDays);
 
-  if (delivery && delivery >= targetDate) return true;
-  if (pickup && pickup >= targetDate) return true;
+  // Active right now: already picked up, and not delivered/settled yet.
+  if (pickup && pickup <= targetDate && (!delivery || delivery >= targetDate)) return true;
+
+  // If pickup is missing, only suppress when the delivery date itself is near-term.
+  if (!pickup && delivery && delivery >= targetDate && delivery <= futureCutoffDate) return true;
+
+  // Near-future booking: only suppress availability when the next pickup is close enough to matter.
+  if (pickup && pickup > targetDate && pickup <= futureCutoffDate) return true;
 
   return false;
 }
@@ -11192,8 +11201,9 @@ function sortAssignmentsByPickup(assignments = []) {
   });
 }
 
-function buildActiveFutureAssignmentIndex(items = [], sourceList = null) {
-  const targetDate = formatEasternDate();
+function buildActiveFutureAssignmentIndex(items = [], sourceList = null, options = {}) {
+  const targetDate = options.targetDate || formatEasternDate();
+  const assignmentLookaheadDays = Math.max(0, Math.min(Number(options.lookaheadDays ?? AVAILABLE_TRUCKS_DEFAULT_ASSIGNMENT_LOOKAHEAD_DAYS) || 0, 14));
   const truckMap = new Map();
   const driverMap = new Map();
   const truckAssignmentMap = new Map();
@@ -11218,7 +11228,7 @@ function buildActiveFutureAssignmentIndex(items = [], sourceList = null) {
 
   const allAssignments = allStatusAssignments.filter((assignment) => normalizeText(assignment.status) === 'won');
   const tonuAssignments = allStatusAssignments.filter((assignment) => normalizeText(assignment.status) === 'tonu');
-  const assignments = allAssignments.filter((assignment) => isActiveOrFutureAssignment(assignment, targetDate));
+  const assignments = allAssignments.filter((assignment) => isActiveOrFutureAssignment(assignment, targetDate, assignmentLookaheadDays));
 
   function indexAssignment(assignment, options = {}) {
     const { active = false } = options;
@@ -11284,6 +11294,7 @@ function buildActiveFutureAssignmentIndex(items = [], sourceList = null) {
     tonuDriverAssignmentMap,
     assignments,
     allAssignments,
+    assignmentLookaheadDays,
     tonuAssignments
   };
 }
@@ -11507,6 +11518,7 @@ function buildAvailableTrucksResponse(items, options = {}) {
   const lookbackDays = Math.max(1, Math.min(Number(options.lookbackDays) || AVAILABLE_TRUCKS_DEFAULT_LOOKBACK_DAYS, 365));
   const now = options.now instanceof Date ? options.now : new Date();
   const assignmentIndex = options.assignmentIndex || buildActiveFutureAssignmentIndex([], null);
+  const assignmentLookaheadDays = Number(assignmentIndex.assignmentLookaheadDays ?? AVAILABLE_TRUCKS_DEFAULT_ASSIGNMENT_LOOKAHEAD_DAYS);
   const sortedRecords = items
     .map(cleanAvailableTruckRecord)
     .filter((record) => record.driverName || record.unitNo || record.currentLocation)
@@ -11583,7 +11595,7 @@ function buildAvailableTrucksResponse(items, options = {}) {
       level: recordsWithin24Hours.length ? 'info' : 'warning',
       label: recordsWithin24Hours.length ? 'No current unassigned trucks' : 'No availability from the last 24 hours',
       detail: recordsWithin24Hours.length
-        ? 'Recent availability exists, but every recent row is tied to a truck/driver with an active or future assignment.'
+        ? 'Recent availability exists, but every recent row is tied to a truck/driver with an active or near-term assignment.'
         : 'The latest available-trucks data is older than 24 hours, so it is not shown as current.'
     });
   }
@@ -11592,7 +11604,7 @@ function buildAvailableTrucksResponse(items, options = {}) {
     attention.push({
       level: 'info',
       label: 'Removed from current availability',
-      detail: `${assignmentExcludedRecords.length} recent row${assignmentExcludedRecords.length === 1 ? ' was' : 's were'} hidden because the driver/truck now has an active or future assignment.`
+      detail: `${assignmentExcludedRecords.length} recent row${assignmentExcludedRecords.length === 1 ? ' was' : 's were'} hidden because the driver/truck now has an active or near-term assignment.`
     });
   }
 
@@ -11617,6 +11629,7 @@ function buildAvailableTrucksResponse(items, options = {}) {
     activeDriverOptionsWarning: options.activeDriverOptionsWarning || '',
     lookbackDays,
     currentWindowHours: 24,
+    assignmentLookaheadDays,
     count: currentRecords.length,
     totalRecords: sortedRecords.length,
     summary: {
@@ -11629,6 +11642,7 @@ function buildAvailableTrucksResponse(items, options = {}) {
       activeFutureAssignmentExclusions: assignmentExcludedRecords.length,
       staleRecordCount: staleRecords.length,
       activeFutureAssignmentsScanned: assignmentIndex.assignments?.length || 0,
+      assignmentLookaheadDays,
       wonAssignmentsScanned: assignmentIndex.allAssignments?.length || 0,
       recentRecordCount: recentRecords.length,
       proximitySuggestionLocationCount: Object.keys(proximitySuggestionIndex).length,

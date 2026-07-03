@@ -37,6 +37,7 @@ const STARTUP_SPLASH_FAKE_LIGHTS_COMPLETE_MS = 4600;
 const KOLE_THEME_STORAGE_KEY = 'koleConnectTheme';
 const KOLE_USER_PREFS_STORAGE_KEY = 'koleConnectUserPreferences';
 const DRIVER_TIME_OFF_PANE_OPTIONS = ['current', 'ended', 'starting-soon'];
+const SALES_AND_LEADS_PANEL_KEYS = ['customerBookingTrends', 'salesActivity', 'leadSuppression', 'salesLeads'];
 
 const DEFAULT_KOLE_USER_PREFERENCES = {
   driverRosterDefaultOpen: false,
@@ -46,7 +47,11 @@ const DEFAULT_KOLE_USER_PREFERENCES = {
   intelliTrackDefaultOpen: false,
   availableTrucksDefaultOpen: false,
   salesAndLeadsDefaultOpen: false,
+  operationsNext7DefaultClosed: false,
   reportsDefaultOpen: false,
+  hideSalesAndLeads: false,
+  compactDashboardMode: false,
+  orderCardView: false,
   hideYearlyProjection: false,
   hideOnThisDay: false,
   hideWeeklySettlementReport: false,
@@ -935,6 +940,7 @@ export default function App() {
   const operationsDeliveringTodayRef = useRef(null);
   const operationsLoadingNext7Ref = useRef(null);
 
+  const [operationsNext7Open, setOperationsNext7Open] = useState(() => !userPrefs.operationsNext7DefaultClosed);
   const [authError, setAuthError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginStatusMessage, setLoginStatusMessage] = useState('');
@@ -1394,7 +1400,8 @@ export default function App() {
     setUploadDigestSectionOpen(nextPrefs.uploadDigestDefaultOpen);
     setIntelliTrackSectionOpen(nextPrefs.intelliTrackDefaultOpen);
     setAvailableTrucksSectionOpen(nextPrefs.availableTrucksDefaultOpen);
-    setSalesAndLeadsSectionOpen(nextPrefs.salesAndLeadsDefaultOpen);
+    setOperationsNext7Open(!nextPrefs.operationsNext7DefaultClosed);
+    setSalesAndLeadsSectionOpen(nextPrefs.hideSalesAndLeads ? false : nextPrefs.salesAndLeadsDefaultOpen);
     setReportsSectionOpen(nextPrefs.reportsDefaultOpen);
 
     if (!nextPrefs.intelliTrackDefaultOpen) {
@@ -1405,7 +1412,7 @@ export default function App() {
       closeAvailableTruckSubsections();
     }
 
-    if (!nextPrefs.salesAndLeadsDefaultOpen) {
+    if (!nextPrefs.salesAndLeadsDefaultOpen || nextPrefs.hideSalesAndLeads) {
       closeSalesAndLeadsSubsections();
     }
 
@@ -1442,8 +1449,24 @@ export default function App() {
     }
 
     if (key === 'salesAndLeadsDefaultOpen') {
-      setSalesAndLeadsSectionOpen(Boolean(value));
-      if (!value) closeSalesAndLeadsSubsections();
+      setSalesAndLeadsSectionOpen(userPrefs.hideSalesAndLeads ? false : Boolean(value));
+      if (!value || userPrefs.hideSalesAndLeads) closeSalesAndLeadsSubsections();
+    }
+
+    if (key === 'operationsNext7DefaultClosed') {
+      setOperationsNext7Open(!Boolean(value));
+    }
+
+    if (key === 'hideSalesAndLeads') {
+      if (value) {
+        setSalesAndLeadsSectionOpen(false);
+        closeSalesAndLeadsSubsections();
+        if (SALES_AND_LEADS_PANEL_KEYS.includes(activeReportPanel)) {
+          setActiveReportPanel('');
+        }
+      } else if (userPrefs.salesAndLeadsDefaultOpen) {
+        setSalesAndLeadsSectionOpen(true);
+      }
     }
 
     if (key === 'reportsDefaultOpen') {
@@ -1498,7 +1521,7 @@ export default function App() {
     setUserPrefs(nextPrefs);
     applyDashboardPreferenceDefaults(nextPrefs);
 
-    if (activeReportPanel === 'yearlyProjection' || activeReportPanel === 'onThisDay') {
+    if (activeReportPanel === 'yearlyProjection' || activeReportPanel === 'onThisDay' || SALES_AND_LEADS_PANEL_KEYS.includes(activeReportPanel)) {
       setActiveReportPanel('');
     }
   }
@@ -1589,6 +1612,12 @@ export default function App() {
                   onChange={(checked) => updateUserPreference('availableTrucksDefaultOpen', checked)}
                 />
                 <PreferenceSwitch
+                  label="Start Loading Next 7 Days closed"
+                  description="Default is open; turn this on only when you want the forward-looking table collapsed on launch."
+                  checked={userPrefs.operationsNext7DefaultClosed}
+                  onChange={(checked) => updateUserPreference('operationsNext7DefaultClosed', checked)}
+                />
+                <PreferenceSwitch
                   label="Reports starts open"
                   description="Open the report hub automatically."
                   checked={userPrefs.reportsDefaultOpen}
@@ -1596,9 +1625,10 @@ export default function App() {
                 />
                 <PreferenceSwitch
                   label="Sales & Leads starts open"
-                  description="Open customer cards and sales reports automatically."
-                  checked={userPrefs.salesAndLeadsDefaultOpen}
+                  description={userPrefs.hideSalesAndLeads ? 'Unavailable while Sales & Leads is hidden.' : 'Open customer cards and sales reports automatically.'}
+                  checked={userPrefs.salesAndLeadsDefaultOpen && !userPrefs.hideSalesAndLeads}
                   onChange={(checked) => updateUserPreference('salesAndLeadsDefaultOpen', checked)}
+                  locked={userPrefs.hideSalesAndLeads}
                 />
               </div>
 
@@ -1616,6 +1646,34 @@ export default function App() {
                   <option value="starting-soon">Starting Soon</option>
                 </select>
               </label>
+            </section>
+
+            <section className="preferences-section">
+              <div className="preferences-section-heading">
+                <h3>Display and access</h3>
+                <p>Use these when the app needs to behave more like a personal cockpit than a one-size dashboard.</p>
+              </div>
+
+              <div className="preferences-grid">
+                <PreferenceSwitch
+                  label="Hide Sales & Leads"
+                  description="Removes the Sales and Leads section from the main dashboard on this device."
+                  checked={userPrefs.hideSalesAndLeads}
+                  onChange={(checked) => updateUserPreference('hideSalesAndLeads', checked)}
+                />
+                <PreferenceSwitch
+                  label="Compact dashboard mode"
+                  description="Tightens spacing and table padding for power-user scanning."
+                  checked={userPrefs.compactDashboardMode}
+                  onChange={(checked) => updateUserPreference('compactDashboardMode', checked)}
+                />
+                <PreferenceSwitch
+                  label="Order Card View"
+                  description="Shows order-oriented lists as cards instead of table rows. Search results and Operations Today are included first."
+                  checked={userPrefs.orderCardView}
+                  onChange={(checked) => updateUserPreference('orderCardView', checked)}
+                />
+              </div>
             </section>
 
             <section className="preferences-section">
@@ -1697,6 +1755,12 @@ export default function App() {
   }, [colorTheme]);
 
   useEffect(() => {
+    document.body.classList.toggle('compact-dashboard-mode', Boolean(userPrefs.compactDashboardMode));
+
+    return () => document.body.classList.remove('compact-dashboard-mode');
+  }, [userPrefs.compactDashboardMode]);
+
+  useEffect(() => {
     if (!userPrefs.skipStartupSplash || !isAuthenticated) return;
 
     setStartupSplashVisible(false);
@@ -1711,11 +1775,12 @@ export default function App() {
     if (userPrefs.hideYearlyProjection) hiddenPanels.push('yearlyProjection');
     if (userPrefs.hideOnThisDay) hiddenPanels.push('onThisDay');
     if (userPrefs.hideWeeklySettlementReport) hiddenPanels.push('weeklySettlement');
+    if (userPrefs.hideSalesAndLeads) hiddenPanels.push(...SALES_AND_LEADS_PANEL_KEYS);
 
     if (hiddenPanels.includes(activeReportPanel)) {
       setActiveReportPanel('');
     }
-  }, [userPrefs.hideYearlyProjection, userPrefs.hideOnThisDay, userPrefs.hideWeeklySettlementReport, activeReportPanel]);
+  }, [userPrefs.hideYearlyProjection, userPrefs.hideOnThisDay, userPrefs.hideWeeklySettlementReport, userPrefs.hideSalesAndLeads, activeReportPanel]);
 
   useEffect(() => {
     const body = document.body;
@@ -6423,10 +6488,16 @@ function getPositionStatusLabel(position) {
       loadingNext7: operationsLoadingNext7Ref
     };
 
-    const target = sectionRefs[sectionKey]?.current;
-    if (!target) return;
+    if (sectionKey === 'loadingNext7') {
+      setOperationsNext7Open(true);
+    }
 
-    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    window.setTimeout(() => {
+      const target = sectionRefs[sectionKey]?.current;
+      if (!target) return;
+
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, sectionKey === 'loadingNext7' ? 50 : 0);
   }
 
   function OperationsSectionHeading({ children }) {
@@ -7177,6 +7248,212 @@ function openReportLoadDetails(load) {
       <span className={`operation-status-pill ${settled ? 'settled' : 'open'}`}>
         {settled ? 'Settled' : 'Open'}
       </span>
+    );
+  }
+
+  function OrderCardField({ label, value, children }) {
+    const hasValue = value !== undefined && value !== null && String(value).trim() !== '';
+
+    return (
+      <div className="order-card-field">
+        <span>{label}</span>
+        <strong>{children || (hasValue ? value : '-')}</strong>
+      </div>
+    );
+  }
+
+  function OrderCardRoute({ origin, destination }) {
+    return (
+      <div className="order-card-route">
+        <span>{origin || '-'}</span>
+        <b aria-hidden="true">→</b>
+        <span>{destination || '-'}</span>
+      </div>
+    );
+  }
+
+  function SearchOrderActionButtons({ record }) {
+    return (
+      <div className="order-card-actions">
+        <button
+          type="button"
+          className="view-button"
+          onClick={(e) => {
+            e.stopPropagation();
+            loadDetails(record.id, 'basic', record.SourceListId);
+          }}
+        >
+          Basic
+        </button>
+
+        {canShowOrderViews(record.Status) && (
+          <>
+            <button
+              type="button"
+              className="view-button"
+              onClick={(e) => {
+                e.stopPropagation();
+                loadDetails(record.id, 'dispatch', record.SourceListId);
+              }}
+            >
+              Dispatch
+            </button>
+
+            <button
+              type="button"
+              className="view-button"
+              onClick={(e) => {
+                e.stopPropagation();
+                loadDetails(record.id, 'billing', record.SourceListId);
+              }}
+            >
+              Billing
+            </button>
+
+            {record.BOL && (
+              <button
+                type="button"
+                className="view-button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  loadDetails(record.id, 'documents', record.SourceListId);
+                }}
+              >
+                Documents
+              </button>
+            )}
+
+            {record.BOL && hasPermitFolder(record) && (
+              <button
+                type="button"
+                className="view-button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openPermitFolder(record);
+                }}
+                disabled={documentLoading === 'permits'}
+              >
+                {documentLoading === 'permits' ? 'Opening...' : 'Permits'}
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  function SearchOrderCard({ record, index }) {
+    const isSelected = selected?.id === record.id && selected?.SourceListId === record.SourceListId;
+
+    return (
+      <article
+        key={`${record.SourceListId || 'current'}-${record.id || index}`}
+        className={`order-card search-order-card ${isSelected ? 'selected-order-card' : ''}`.trim()}
+        onClick={() => loadDetails(record.id, 'basic', record.SourceListId)}
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            loadDetails(record.id, 'basic', record.SourceListId);
+          }
+        }}
+      >
+        <div className="order-card-header">
+          <div>
+            <span className="order-card-eyebrow">{record.SourceYear || record.SourceList || 'Current'}</span>
+            <h4>{record.BOL || record.BidID || 'Order'}</h4>
+            <p>{record.Customer || '-'}</p>
+          </div>
+
+          <span className={getStatusClass(record.Status)}>
+            {record.Status || '-'}
+          </span>
+        </div>
+
+        <OrderCardRoute origin={record.Origin} destination={record.Destination} />
+
+        <div className="order-card-field-grid">
+          <OrderCardField label="Driver" value={record.Driver} />
+          <OrderCardField label="Truck" value={record.Truck} />
+          <OrderCardField label="Pickup" value={formatDateOnly(record.PickupDate)} />
+          <OrderCardField label="Delivery" value={formatDateOnly(record.DeliveryDate)} />
+        </div>
+
+        <SearchOrderActionButtons record={record} />
+      </article>
+    );
+  }
+
+  function OperationOrderCard({ record, index, variant }) {
+    const showPickupEvidence = variant === 'loadingToday';
+    const showDeliveryEvidence = variant === 'deliveringToday';
+    const showDeliveryStatus = variant === 'deliveringToday';
+    const showNotes = variant === 'activeToday';
+    const dateLabel = variant === 'loadingToday' || variant === 'loadingNext7' ? 'Pickup' : 'Delivery';
+    const dateValue = variant === 'loadingToday' || variant === 'loadingNext7'
+      ? formatDateOnly(record.PickupDate)
+      : formatDateOnly(record.DeliveryDate);
+
+    return (
+      <article
+        key={`${variant}-${record.id || index}`}
+        className={`order-card operations-order-card operations-order-card-${variant}`.trim()}
+        onClick={() => loadDetails(record.id, 'basic', record.SourceListId)}
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            loadDetails(record.id, 'basic', record.SourceListId);
+          }
+        }}
+      >
+        <div className="order-card-header">
+          <div>
+            <span className="order-card-eyebrow">{dateLabel}: {dateValue || '-'}</span>
+            <h4>{record.BOL || record.BidID || 'Order'}</h4>
+            <p>{record.Customer || record.Company || record.Driver || '-'}</p>
+          </div>
+
+          <div className="operations-order-card-signals">
+            {showPickupEvidence && (
+              <span className="order-card-signal">
+                <EvidenceDot hasEvidence={record.hasPickupEvidence} label="Pickup" />
+                <small>Pickup</small>
+              </span>
+            )}
+            {showDeliveryEvidence && (
+              <span className="order-card-signal">
+                <EvidenceDot hasEvidence={record.hasDeliveryEvidence} label="Delivery" />
+                <small>Delivery</small>
+              </span>
+            )}
+            {showDeliveryStatus && <OperationStatusPill record={record} />}
+            {showNotes && (
+              <button
+                type="button"
+                className="operation-notes-cell-button order-card-notes-button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  loadDetails(record.id, 'notes', record.SourceListId);
+                }}
+                title="Open this order's notes"
+              >
+                <span className="order-card-notes-label">Note(s):</span>
+                {renderOperationNotesPill(record)}
+              </button>
+            )}
+          </div>
+        </div>
+
+        <OrderCardRoute origin={record.Origin} destination={record.Destination} />
+
+        <div className="order-card-field-grid">
+          <OrderCardField label="Driver" value={record.Driver} />
+          <OrderCardField label={dateLabel} value={dateValue} />
+          <OrderCardField label="Origin" value={record.Origin} />
+          <OrderCardField label="Destination" value={record.Destination} />
+        </div>
+      </article>
     );
   }
 
@@ -11291,6 +11568,7 @@ function openReportLoadDetails(load) {
     const attentionItems = (insights.attention || []).filter((item) => !['No availability from the last 24 hours', 'No current unassigned trucks', 'Repost collapsed'].includes(item.label));
     const currentCount = summary.currentRecordCount ?? availableTrucksData?.count ?? records.length;
     const excludedCount = summary.activeFutureAssignmentExclusions || 0;
+    const assignmentLookaheadDays = Number(summary.assignmentLookaheadDays ?? availableTrucksData?.assignmentLookaheadDays ?? 2);
     const distributionRows = availableTruckDistributionData?.rows || [];
     const inactiveDistributionRows = availableTruckDistributionData?.inactiveRows || [];
     const sortedDistributionRows = sortAvailableTruckDistributionRowsForDisplay(
@@ -11363,7 +11641,7 @@ function openReportLoadDetails(load) {
                   <div>
                     <h3>Last posting: {batchLabel}</h3>
                     <p>
-                      The date shown is the latest posting date from the availability list · Current window: last {availableTrucksData?.currentWindowHours || 24} hours · {excludedCount} hidden by active/future assignment
+                      The date shown is the latest posting date from the availability list · Current window: last {availableTrucksData?.currentWindowHours || 24} hours · assignment window: today + next {assignmentLookaheadDays} day{assignmentLookaheadDays === 1 ? '' : 's'} · {excludedCount} hidden by active/near-term assignment
                     </p>
                   </div>
 
@@ -11494,11 +11772,11 @@ function openReportLoadDetails(load) {
                       <button
                         type="button"
                         className="available-trucks-kpi-button"
-                        onClick={() => openAvailableTruckDrilldown('Hidden by assignment', 'Recent rows hidden because the truck/driver now has an active or future assignment. First later pickup is shown only as follow-through history.', assignmentExcludedRecords)}
+                        onClick={() => openAvailableTruckDrilldown('Hidden by assignment', `Recent rows hidden because the truck/driver now has an active load or a pickup inside the ${assignmentLookaheadDays}-day lookahead. First later pickup is shown only as follow-through history.`, assignmentExcludedRecords)}
                       >
                         <span>Assignment hidden</span>
                         <strong>{summary.activeFutureAssignmentExclusions || 0}</strong>
-                        <small>Truck/driver now active or future-booked</small>
+                        <small>Active or pickup inside lookahead</small>
                       </button>
                       <div
                         className="available-trucks-kpi-card available-trucks-kpi-static"
@@ -16129,6 +16407,12 @@ function openReportLoadDetails(load) {
 
           {operationsData.activeToday.length === 0 ? (
             <div className="msg">No active shipments today.</div>
+          ) : userPrefs.orderCardView ? (
+            <div className="order-card-grid operations-order-card-grid">
+              {operationsData.activeToday.map((r, i) => (
+                <OperationOrderCard key={`active-card-${r.id || i}`} record={r} index={i} variant="activeToday" />
+              ))}
+            </div>
           ) : (
             <div className="operations-table-wrap">
               <table className="operations-active-today-table">
@@ -16181,6 +16465,12 @@ function openReportLoadDetails(load) {
 
           {operationsData.loadingToday.length === 0 ? (
             <div className="msg">No loads scheduled to load today.</div>
+          ) : userPrefs.orderCardView ? (
+            <div className="order-card-grid operations-order-card-grid">
+              {operationsData.loadingToday.map((r, i) => (
+                <OperationOrderCard key={`loading-card-${r.id || i}`} record={r} index={i} variant="loadingToday" />
+              ))}
+            </div>
           ) : (
             <div className="operations-table-wrap">
               <table>
@@ -16223,6 +16513,12 @@ function openReportLoadDetails(load) {
 
           {operationsData.deliveringToday.length === 0 ? (
             <div className="msg">No deliveries scheduled today.</div>
+          ) : userPrefs.orderCardView ? (
+            <div className="order-card-grid operations-order-card-grid">
+              {operationsData.deliveringToday.map((r, i) => (
+                <OperationOrderCard key={`delivering-card-${r.id || i}`} record={r} index={i} variant="deliveringToday" />
+              ))}
+            </div>
           ) : (
             <div className="operations-table-wrap">
               <table>
@@ -16263,40 +16559,58 @@ function openReportLoadDetails(load) {
         </div>
 
         <div id="operations-loading-next-7" ref={operationsLoadingNext7Ref} className="operations-detail-section">
-          <OperationsSectionHeading>Loading Next 7 Days</OperationsSectionHeading>
+          <OperationsSectionHeading>
+            <button
+              type="button"
+              className="operations-next7-heading-button"
+              onClick={() => setOperationsNext7Open((open) => !open)}
+              aria-expanded={operationsNext7Open}
+            >
+              <span>Loading Next 7 Days</span>
+              <span className="operations-next7-heading-state">{operationsNext7Open ? 'Hide' : 'Show'}</span>
+            </button>
+          </OperationsSectionHeading>
 
-          {operationsData.loadingNext7.length === 0 ? (
-            <div className="msg">No upcoming loads in the next 7 days.</div>
-          ) : (
-            <div className="operations-table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>BOL</th>
-                    <th>Driver</th>
-                    <th>Origin</th>
-                    <th>Destination</th>
-                    <th>Pickup</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {operationsData.loadingNext7.map((r, i) => (
-                    <tr
-                      key={`next7-${r.id || i}`}
-                      onClick={() => loadDetails(r.id, 'basic', r.SourceListId)}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <td>{r.BOL || '-'}</td>
-                      <td>{r.Driver || '-'}</td>
-                      <td>{r.Origin || '-'}</td>
-                      <td>{r.Destination || '-'}</td>
-                      <td>{formatDateOnly(r.PickupDate)}</td>
+          {operationsNext7Open && (
+            operationsData.loadingNext7.length === 0 ? (
+              <div className="msg">No upcoming loads in the next 7 days.</div>
+            ) : userPrefs.orderCardView ? (
+              <div className="order-card-grid operations-order-card-grid">
+                {operationsData.loadingNext7.map((r, i) => (
+                  <OperationOrderCard key={`next7-card-${r.id || i}`} record={r} index={i} variant="loadingNext7" />
+                ))}
+              </div>
+            ) : (
+              <div className="operations-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>BOL</th>
+                      <th>Driver</th>
+                      <th>Origin</th>
+                      <th>Destination</th>
+                      <th>Pickup</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+
+                  <tbody>
+                    {operationsData.loadingNext7.map((r, i) => (
+                      <tr
+                        key={`next7-${r.id || i}`}
+                        onClick={() => loadDetails(r.id, 'basic', r.SourceListId)}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <td>{r.BOL || '-'}</td>
+                        <td>{r.Driver || '-'}</td>
+                        <td>{r.Origin || '-'}</td>
+                        <td>{r.Destination || '-'}</td>
+                        <td>{formatDateOnly(r.PickupDate)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
           )}
         </div>
       </>
@@ -16309,115 +16623,123 @@ function openReportLoadDetails(load) {
 
   {AvailableTrucksPanel()}
 
-  <SalesAndLeadsPanel />
+  {!userPrefs.hideSalesAndLeads && <SalesAndLeadsPanel />}
 
   <DriverSummaryReport />
   </>
 )}
       </div>
 
-      <div className="results-panel">
+      <div className={`results-panel ${userPrefs.orderCardView ? 'order-card-results-panel' : ''}`.trim()}>
         {sortedResults.length > 0 && (
-          <table>
-            <thead>
-              <tr>
-                <SortableHeader field="SourceYear" label="Year" />
-                <SortableHeader field="BOL" label="BOL" />
-                <SortableHeader field="Customer" label="Customer" />
-                <SortableHeader field="Origin" label="Origin" />
-                <SortableHeader field="Destination" label="Destination" />
-                <SortableHeader field="Driver" label="Driver" />
-                <SortableHeader field="Truck" label="Truck" />
-                <SortableHeader field="Status" label="Status" />
-                <th>Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
+          userPrefs.orderCardView ? (
+            <div className="order-card-grid search-order-card-grid">
               {sortedResults.map((r, i) => (
-                <tr
-                  key={`${r.SourceListId || 'current'}-${r.id || i}`}
-                  className={selected?.id === r.id && selected?.SourceListId === r.SourceListId ? 'selected-row' : ''}
-                  onClick={() => loadDetails(r.id, 'basic', r.SourceListId)}
-                >
-                  <td>{r.SourceYear || '-'}</td>
-                  <td>{r.BOL || '-'}</td>
-                  <td>{r.Customer || '-'}</td>
-                  <td>{r.Origin || '-'}</td>
-                  <td>{r.Destination || '-'}</td>
-                  <td>{r.Driver || '-'}</td>
-                  <td>{r.Truck || '-'}</td>
-                  <td>
-                    <span className={getStatusClass(r.Status)}>
-                      {r.Status || '-'}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="row-actions">
-                      <button
-                        className="view-button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          loadDetails(r.id, 'basic', r.SourceListId);
-                        }}
-                      >
-                        Basic
-                      </button>
-
-                      {canShowOrderViews(r.Status) && (
-                        <>
-                          <button
-                            className="view-button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              loadDetails(r.id, 'dispatch', r.SourceListId);
-                            }}
-                          >
-                            Dispatch
-                          </button>
-
-                          <button
-                            className="view-button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              loadDetails(r.id, 'billing', r.SourceListId);
-                            }}
-                          >
-                            Billing
-                          </button>
-
-                          {r.BOL && (
-                            <button
-                              className="view-button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                loadDetails(r.id, 'documents', r.SourceListId);
-                              }}
-                            >
-                              Documents
-                            </button>
-                          )}
-
-                          {r.BOL && hasPermitFolder(r) && (
-                            <button
-                              className="view-button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openPermitFolder(r);
-                              }}
-                              disabled={documentLoading === 'permits'}
-                            >
-                              {documentLoading === 'permits' ? 'Opening...' : 'Permits'}
-                            </button>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
+                <SearchOrderCard key={`${r.SourceListId || 'current'}-${r.id || i}`} record={r} index={i} />
               ))}
-            </tbody>
-          </table>
+            </div>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <SortableHeader field="SourceYear" label="Year" />
+                  <SortableHeader field="BOL" label="BOL" />
+                  <SortableHeader field="Customer" label="Customer" />
+                  <SortableHeader field="Origin" label="Origin" />
+                  <SortableHeader field="Destination" label="Destination" />
+                  <SortableHeader field="Driver" label="Driver" />
+                  <SortableHeader field="Truck" label="Truck" />
+                  <SortableHeader field="Status" label="Status" />
+                  <th>Actions</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {sortedResults.map((r, i) => (
+                  <tr
+                    key={`${r.SourceListId || 'current'}-${r.id || i}`}
+                    className={selected?.id === r.id && selected?.SourceListId === r.SourceListId ? 'selected-row' : ''}
+                    onClick={() => loadDetails(r.id, 'basic', r.SourceListId)}
+                  >
+                    <td>{r.SourceYear || '-'}</td>
+                    <td>{r.BOL || '-'}</td>
+                    <td>{r.Customer || '-'}</td>
+                    <td>{r.Origin || '-'}</td>
+                    <td>{r.Destination || '-'}</td>
+                    <td>{r.Driver || '-'}</td>
+                    <td>{r.Truck || '-'}</td>
+                    <td>
+                      <span className={getStatusClass(r.Status)}>
+                        {r.Status || '-'}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="row-actions">
+                        <button
+                          className="view-button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            loadDetails(r.id, 'basic', r.SourceListId);
+                          }}
+                        >
+                          Basic
+                        </button>
+
+                        {canShowOrderViews(r.Status) && (
+                          <>
+                            <button
+                              className="view-button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                loadDetails(r.id, 'dispatch', r.SourceListId);
+                              }}
+                            >
+                              Dispatch
+                            </button>
+
+                            <button
+                              className="view-button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                loadDetails(r.id, 'billing', r.SourceListId);
+                              }}
+                            >
+                              Billing
+                            </button>
+
+                            {r.BOL && (
+                              <button
+                                className="view-button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  loadDetails(r.id, 'documents', r.SourceListId);
+                                }}
+                              >
+                                Documents
+                              </button>
+                            )}
+
+                            {r.BOL && hasPermitFolder(r) && (
+                              <button
+                                className="view-button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openPermitFolder(r);
+                                }}
+                                disabled={documentLoading === 'permits'}
+                              >
+                                {documentLoading === 'permits' ? 'Opening...' : 'Permits'}
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )
         )}
       </div>
 

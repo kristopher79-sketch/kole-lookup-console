@@ -14899,3 +14899,416 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .monthly-ops-summary-grid .monthly-ops-kpi-card small {
   color: #4338ca;
 }
+
+/* Preference pass: collapsible Next 7 behavior, hide Sales, and compact dashboard mode */
+.operations-next7-heading-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  text-align: left;
+}
+
+.operations-next7-heading-button:hover {
+  background: transparent;
+  color: inherit;
+}
+
+.operations-next7-heading-state {
+  flex: 0 0 auto;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.82;
+}
+
+.preferences-grid {
+  align-items: stretch;
+}
+
+.preference-toggle-row,
+.preference-select-row {
+  align-items: flex-start;
+}
+
+.preference-toggle-row {
+  min-height: 96px;
+  height: 100%;
+}
+
+.preference-toggle-row > div,
+.preference-select-row > div {
+  min-width: 0;
+}
+
+.preference-toggle-row input[type='checkbox'] {
+  margin-top: 2px;
+}
+
+.preference-toggle-row.locked {
+  opacity: 0.64;
+}
+
+.preference-toggle-row.locked input[type='checkbox'] {
+  cursor: not-allowed;
+}
+
+body.compact-dashboard-mode .container {
+  margin-top: 22px;
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+
+body.compact-dashboard-mode .search-card,
+body.compact-dashboard-mode .report-card,
+body.compact-dashboard-mode .feature-accordion-panel {
+  padding: 14px;
+  margin-bottom: 16px;
+}
+
+body.compact-dashboard-mode .operations-grid {
+  gap: 10px;
+  margin-top: 12px;
+}
+
+body.compact-dashboard-mode .operations-card {
+  padding: 12px;
+}
+
+body.compact-dashboard-mode .operations-card strong {
+  font-size: 1.55rem;
+}
+
+body.compact-dashboard-mode th,
+body.compact-dashboard-mode td {
+  padding: 8px 10px;
+}
+
+body.compact-dashboard-mode .operations-detail-section {
+  margin-top: 22px;
+}
+
+body.compact-dashboard-mode .feature-section-header-button,
+body.compact-dashboard-mode .report-accordion-button {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+body.compact-dashboard-mode .detail-item,
+body.compact-dashboard-mode .report-kpi-card,
+body.compact-dashboard-mode .driver-report-totals-grid div {
+  padding: 10px;
+  min-height: auto;
+}
+
+/* Preference modal alignment cleanup: text left, controls aligned on the right in both columns. */
+.preferences-grid {
+  align-items: stretch;
+}
+
+.preference-toggle-row,
+.preference-select-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  justify-content: initial;
+  gap: 16px;
+  text-align: left;
+}
+
+.preference-toggle-row {
+  min-height: 96px;
+  height: 100%;
+}
+
+.preference-toggle-row > span,
+.preference-select-row > span,
+.preference-toggle-row > div,
+.preference-select-row > div {
+  min-width: 0;
+  text-align: left;
+}
+
+.preference-toggle-row input[type='checkbox'] {
+  justify-self: end;
+  align-self: center;
+  margin: 0;
+}
+
+.preference-select-row select {
+  justify-self: end;
+  align-self: center;
+}
+
+@media (max-width: 760px) {
+  .preference-toggle-row,
+  .preference-select-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .preference-select-row {
+    grid-template-columns: 1fr;
+  }
+
+  .preference-select-row select {
+    width: 100%;
+    justify-self: stretch;
+  }
+}
+
+/* Preference pass v4: optional order card view for order-oriented lists. */
+.order-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.operations-order-card-grid {
+  margin-top: 8px;
+}
+
+.order-card-results-panel {
+  padding: 14px;
+}
+
+.order-card {
+  cursor: pointer;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 14px;
+  background: #0b1220;
+  color: #e5e7eb;
+  padding: 14px;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.2);
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.order-card:hover,
+.order-card:focus-visible {
+  border-color: rgba(250, 204, 21, 0.58);
+  background: #111827;
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.selected-order-card {
+  border-color: #facc15;
+  background: #1e3a5f;
+}
+
+.order-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.order-card-header h4 {
+  margin: 2px 0 4px;
+  color: #f8fafc;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.order-card-header p {
+  margin: 0;
+  color: #cbd5e1;
+  line-height: 1.35;
+}
+
+.order-card-eyebrow {
+  display: block;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.order-card-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.035);
+  color: #f8fafc;
+  font-weight: 700;
+}
+
+.order-card-route span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.order-card-route b {
+  color: #facc15;
+}
+
+.order-card-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.order-card-field {
+  min-width: 0;
+}
+
+.order-card-field span {
+  display: block;
+  margin-bottom: 3px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.order-card-field strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 13px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.order-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+
+.operations-order-card-signals {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  max-width: 48%;
+}
+
+.order-card-signal {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.order-card-signal small {
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.order-card-notes-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 0;
+  background: transparent;
+}
+
+.order-card-notes-label {
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+body.compact-dashboard-mode .order-card {
+  padding: 11px;
+}
+
+body.compact-dashboard-mode .order-card-grid {
+  gap: 10px;
+}
+
+body.compact-dashboard-mode .order-card-route {
+  margin: 9px 0;
+  padding: 8px 10px;
+}
+
+:root[data-theme='light'] .order-card {
+  border-color: #cbd5e1;
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.08);
+}
+
+:root[data-theme='light'] .order-card:hover,
+:root[data-theme='light'] .order-card:focus-visible {
+  border-color: #d97706;
+  background: #fffbeb;
+}
+
+:root[data-theme='light'] .selected-order-card {
+  border-color: #d97706;
+  background: #fef3c7;
+}
+
+:root[data-theme='light'] .order-card-header h4,
+:root[data-theme='light'] .order-card-field strong,
+:root[data-theme='light'] .order-card-route {
+  color: #0f172a;
+}
+
+:root[data-theme='light'] .order-card-header p {
+  color: #334155;
+}
+
+:root[data-theme='light'] .order-card-eyebrow,
+:root[data-theme='light'] .order-card-field span,
+:root[data-theme='light'] .order-card-notes-label {
+  color: #64748b;
+}
+
+:root[data-theme='light'] .order-card-route {
+  border-color: #e2e8f0;
+  background: #f8fafc;
+}
+
+:root[data-theme='light'] .order-card-signal {
+  background: #f1f5f9;
+  color: #334155;
+}
+
+@media (max-width: 760px) {
+  .order-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .order-card-header {
+    flex-direction: column;
+  }
+
+  .operations-order-card-signals {
+    justify-content: flex-start;
+    max-width: 100%;
+  }
+}
