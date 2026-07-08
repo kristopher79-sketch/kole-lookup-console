@@ -7797,6 +7797,878 @@ payrollDateLabel: formatDisplayDateParts(payrollDate),
   };
 }
 
+
+// ================================
+// Recruiting app helpers
+// ================================
+
+const RECRUITING_CANDIDATE_STATUS = {
+  PROSPECT: 'Prospect',
+  APPLIED: 'Applied',
+  ACTIVE_QUALIFICATION: 'Active Qualification',
+  READY_TO_QUALIFY: 'Ready to Qualify',
+  QUALIFIED: 'Qualified',
+  DISQUALIFIED: 'Disqualified',
+  WITHDRAWN: 'Withdrawn',
+  DORMANT: 'Dormant'
+};
+
+const RECRUITING_CLOSED_STATUSES = new Set([
+  RECRUITING_CANDIDATE_STATUS.QUALIFIED,
+  RECRUITING_CANDIDATE_STATUS.DISQUALIFIED,
+  RECRUITING_CANDIDATE_STATUS.WITHDRAWN,
+  RECRUITING_CANDIDATE_STATUS.DORMANT
+]);
+
+const RECRUITING_REQUIREMENT_ORDER = [
+  'Background Check',
+  'Drug Screen',
+  'MVR',
+  'Contract',
+  'Previous Employment',
+  'TWIC'
+];
+
+const RECRUITING_ALLOWED_REQUIREMENT_RESULTS = new Set(['Satisfactory', 'Unsatisfactory']);
+
+const RECRUITING_CANDIDATE_FIELD_SELECT = [
+  'Title',
+  'CandidateID',
+  'FirstName',
+  'LastName',
+  'DisplayName',
+  'CandidateStatus',
+  'CandidateType',
+  'TeamID',
+  'PrimaryPhone',
+  'SecondaryPhone',
+  'EmailAddress',
+  'HomeStreetAddress',
+  'HomeCity',
+  'HomeState',
+  'HomeZip',
+  'ApplicationDate',
+  'Source',
+  'RelationshipType',
+  'OwnsTruck',
+  'OwnsTrailer',
+  'LastContactDate',
+  'NextFollowUpDate',
+  'QualifiedDate',
+  'DisqualifiedDate',
+  'DisqualifiedReason',
+  'LinkedDriveRosterTruck',
+  'CandidateFolderPath',
+  'NoteSummary',
+  'ActiveFlag',
+  'QualificationStartedFlag',
+  'RecruitingOwnerLookupId',
+  'Created',
+  'Modified'
+].join(',');
+
+const RECRUITING_REQUIREMENT_FIELD_SELECT = [
+  'Title',
+  'RequirementID',
+  'CandidateID',
+  'CandidateName',
+  'TeamID',
+  'RequirementType',
+  'RequirementStatus',
+  'RequirementResult',
+  'RequiredFlag',
+  'RequestedDate',
+  'ReceivedDate',
+  'CompletedDate',
+  'ExpirationDate',
+  'DocumentURL',
+  'Notes',
+  'ActiveFlag',
+  'Created',
+  'Modified'
+].join(',');
+
+const RECRUITING_NOTE_FIELD_SELECT = [
+  'Title',
+  'NoteID',
+  'CandidateID',
+  'CandidateName',
+  'TeamID',
+  'NoteDate',
+  'NoteType',
+  'NoteBody',
+  'Source',
+  'CreatedByText',
+  'Created',
+  'Modified'
+].join(',');
+
+function getRecruitingSiteId() {
+  return process.env.KOLE_SHAREPOINT_SITE_ID || process.env.SITE_ID || '';
+}
+
+function getRecruitingSiteUrl() {
+  return String(process.env.KOLE_SHAREPOINT_SITE_URL || '').replace(/\/+$/, '');
+}
+
+function getRecruitingApplicantsFolderPath() {
+  return String(process.env.RECRUITING_APPLICANTS_FOLDER_PATH || '/Safety/Recruiting/Applicants').replace(/\/+$/, '');
+}
+
+function encodeSharePointPath(pathValue) {
+  return String(pathValue || '')
+    .split('/')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => encodeURIComponent(part))
+    .join('/');
+}
+
+function getRecruitingFolderUrl(folderPath) {
+  const cleanPath = cleanRecruitingString(folderPath);
+  if (!cleanPath) return '';
+  if (/^https?:\/\//i.test(cleanPath)) return cleanPath;
+
+  const siteUrl = getRecruitingSiteUrl();
+  if (!siteUrl) return '';
+
+  const relativePath = cleanPath.replace(/^\/+|\/+$/g, '');
+  const documentPath = relativePath.toLowerCase().startsWith('shared documents/')
+    ? relativePath
+    : `Shared Documents/${relativePath}`;
+
+  return `${siteUrl}/${encodeSharePointPath(documentPath)}/`;
+}
+
+function getRecruitingListIds() {
+  return {
+    candidates: process.env.RECRUITING_CANDIDATES_LIST_ID || '',
+    requirements: process.env.QUALIFICATION_REQUIREMENTS_LIST_ID || '',
+    notes: process.env.CANDIDATE_NOTES_LIST_ID || ''
+  };
+}
+
+function assertRecruitingConfig() {
+  const siteId = getRecruitingSiteId();
+  const lists = getRecruitingListIds();
+  const missing = [];
+
+  if (!siteId) missing.push('KOLE_SHAREPOINT_SITE_ID or SITE_ID');
+  if (!lists.candidates) missing.push('RECRUITING_CANDIDATES_LIST_ID');
+  if (!lists.requirements) missing.push('QUALIFICATION_REQUIREMENTS_LIST_ID');
+  if (!lists.notes) missing.push('CANDIDATE_NOTES_LIST_ID');
+
+  if (missing.length) {
+    const error = new Error(`Recruiting Graph configuration is missing: ${missing.join(', ')}.`);
+    error.statusCode = 500;
+    throw error;
+  }
+
+  return { siteId, lists };
+}
+
+function getRecruitingListItemsUrl(listId, fieldSelect = '', extraQuery = '') {
+  const { siteId } = assertRecruitingConfig();
+  const expand = fieldSelect ? `fields($select=${fieldSelect})` : 'fields';
+  const query = [`$select=id,createdDateTime,lastModifiedDateTime,webUrl,eTag`, `$expand=${expand}`, '$top=999'];
+  if (extraQuery) query.push(extraQuery.replace(/^\?/, ''));
+  return `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?${query.join('&')}`;
+}
+
+function getRecruitingListItemUrl(listId, itemId, fieldSelect = '') {
+  const { siteId } = assertRecruitingConfig();
+  const expand = fieldSelect ? `fields($select=${fieldSelect})` : 'fields';
+  return `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${encodeURIComponent(itemId)}?$select=id,createdDateTime,lastModifiedDateTime,webUrl,eTag&$expand=${expand}`;
+}
+
+async function graphGetRecruiting(token, url) {
+  return graphGet(token, url, {
+    Prefer: 'HonorNonIndexedQueriesWarningMayFailRandomly'
+  });
+}
+
+async function getAllRecruitingItems(token, listId, fieldSelect = '') {
+  let url = getRecruitingListItemsUrl(listId, fieldSelect);
+  const allItems = [];
+
+  while (url) {
+    const data = await graphGetRecruiting(token, url);
+    allItems.push(...(data.value || []));
+    url = data['@odata.nextLink'] || null;
+  }
+
+  return allItems;
+}
+
+function escapeODataText(value) {
+  return String(value || '').replace(/'/g, "''");
+}
+
+async function findRecruitingItemsByField(token, listId, fieldSelect, fieldName, fieldValue) {
+  const safeValue = escapeODataText(fieldValue);
+  const filter = `$filter=fields/${fieldName} eq '${safeValue}'`;
+  const url = getRecruitingListItemsUrl(listId, fieldSelect, filter);
+
+  try {
+    const data = await graphGetRecruiting(token, url);
+    return data.value || [];
+  } catch (error) {
+    // Non-indexed SharePoint filters can be moody in Graph. The fallback keeps the app useful
+    // while the important fields are being indexed.
+    const allItems = await getAllRecruitingItems(token, listId, fieldSelect);
+    return allItems.filter((item) => String(item?.fields?.[fieldName] || '') === String(fieldValue || ''));
+  }
+}
+
+function cleanRecruitingString(value) {
+  return value == null ? '' : String(value).trim();
+}
+
+function normalizeGraphDateOnly(value) {
+  return value ? String(value).slice(0, 10) : null;
+}
+
+function recruitingBoolean(value, defaultValue = false) {
+  return value == null ? defaultValue : value === true;
+}
+
+function normalizeRecruitingCandidate(item) {
+  const f = item?.fields || {};
+  return {
+    spId: String(item?.id || f.id || ''),
+    webUrl: item?.webUrl || '',
+    etag: item?.eTag || '',
+    title: cleanRecruitingString(f.Title),
+    candidateId: cleanRecruitingString(f.CandidateID),
+    firstName: cleanRecruitingString(f.FirstName),
+    lastName: cleanRecruitingString(f.LastName),
+    displayName: cleanRecruitingString(f.DisplayName),
+    status: cleanRecruitingString(f.CandidateStatus || RECRUITING_CANDIDATE_STATUS.APPLIED),
+    type: cleanRecruitingString(f.CandidateType || 'Unknown'),
+    teamId: cleanRecruitingString(f.TeamID),
+    primaryPhone: cleanRecruitingString(f.PrimaryPhone),
+    secondaryPhone: cleanRecruitingString(f.SecondaryPhone),
+    email: cleanRecruitingString(f.EmailAddress),
+    homeStreet: cleanRecruitingString(f.HomeStreetAddress),
+    homeCity: cleanRecruitingString(f.HomeCity),
+    homeState: cleanRecruitingString(f.HomeState),
+    homeZip: cleanRecruitingString(f.HomeZip),
+    applicationDate: normalizeGraphDateOnly(f.ApplicationDate),
+    source: cleanRecruitingString(f.Source),
+    relationshipType: cleanRecruitingString(f.RelationshipType),
+    ownsTruck: recruitingBoolean(f.OwnsTruck, false),
+    ownsTrailer: recruitingBoolean(f.OwnsTrailer, false),
+    lastContactDate: normalizeGraphDateOnly(f.LastContactDate),
+    nextFollowUpDate: normalizeGraphDateOnly(f.NextFollowUpDate),
+    qualifiedDate: normalizeGraphDateOnly(f.QualifiedDate),
+    disqualifiedDate: normalizeGraphDateOnly(f.DisqualifiedDate),
+    disqualifiedReason: cleanRecruitingString(f.DisqualifiedReason),
+    linkedDriveRosterTruck: cleanRecruitingString(f.LinkedDriveRosterTruck),
+    folderPath: cleanRecruitingString(f.CandidateFolderPath),
+    folderUrl: getRecruitingFolderUrl(f.CandidateFolderPath),
+    noteSummary: cleanRecruitingString(f.NoteSummary),
+    active: recruitingBoolean(f.ActiveFlag, false),
+    qualificationStarted: recruitingBoolean(f.QualificationStartedFlag, false),
+    recruitingOwnerLookupId: cleanRecruitingString(f.RecruitingOwnerLookupId),
+    created: item?.createdDateTime || f.Created || null,
+    modified: item?.lastModifiedDateTime || f.Modified || null
+  };
+}
+
+function normalizeRecruitingRequirement(item) {
+  const f = item?.fields || {};
+  return {
+    spId: String(item?.id || f.id || ''),
+    webUrl: item?.webUrl || '',
+    etag: item?.eTag || '',
+    title: cleanRecruitingString(f.Title),
+    requirementId: cleanRecruitingString(f.RequirementID),
+    candidateId: cleanRecruitingString(f.CandidateID),
+    candidateName: cleanRecruitingString(f.CandidateName),
+    teamId: cleanRecruitingString(f.TeamID),
+    type: cleanRecruitingString(f.RequirementType),
+    status: cleanRecruitingString(f.RequirementStatus),
+    result: cleanRecruitingString(f.RequirementResult),
+    required: recruitingBoolean(f.RequiredFlag, false),
+    active: recruitingBoolean(f.ActiveFlag, false),
+    requestedDate: normalizeGraphDateOnly(f.RequestedDate),
+    receivedDate: normalizeGraphDateOnly(f.ReceivedDate),
+    completedDate: normalizeGraphDateOnly(f.CompletedDate),
+    expirationDate: normalizeGraphDateOnly(f.ExpirationDate),
+    documentUrl: cleanRecruitingString(f.DocumentURL),
+    notes: cleanRecruitingString(f.Notes),
+    created: item?.createdDateTime || f.Created || null,
+    modified: item?.lastModifiedDateTime || f.Modified || null
+  };
+}
+
+function normalizeRecruitingNote(item) {
+  const f = item?.fields || {};
+  return {
+    spId: String(item?.id || f.id || ''),
+    webUrl: item?.webUrl || '',
+    etag: item?.eTag || '',
+    title: cleanRecruitingString(f.Title),
+    noteId: cleanRecruitingString(f.NoteID),
+    candidateId: cleanRecruitingString(f.CandidateID),
+    candidateName: cleanRecruitingString(f.CandidateName),
+    teamId: cleanRecruitingString(f.TeamID),
+    noteDate: normalizeGraphDateOnly(f.NoteDate),
+    noteType: cleanRecruitingString(f.NoteType),
+    noteBody: cleanRecruitingString(f.NoteBody),
+    source: cleanRecruitingString(f.Source),
+    createdByText: cleanRecruitingString(f.CreatedByText),
+    created: item?.createdDateTime || f.Created || null,
+    modified: item?.lastModifiedDateTime || f.Modified || null
+  };
+}
+
+function sortRecruitingCandidates(a, b) {
+  const statusWeight = {
+    [RECRUITING_CANDIDATE_STATUS.READY_TO_QUALIFY]: 0,
+    [RECRUITING_CANDIDATE_STATUS.ACTIVE_QUALIFICATION]: 1,
+    [RECRUITING_CANDIDATE_STATUS.APPLIED]: 2,
+    [RECRUITING_CANDIDATE_STATUS.PROSPECT]: 3,
+    [RECRUITING_CANDIDATE_STATUS.QUALIFIED]: 4,
+    [RECRUITING_CANDIDATE_STATUS.DORMANT]: 5,
+    [RECRUITING_CANDIDATE_STATUS.DISQUALIFIED]: 6,
+    [RECRUITING_CANDIDATE_STATUS.WITHDRAWN]: 7
+  };
+
+  const aWeight = statusWeight[a.status] ?? 99;
+  const bWeight = statusWeight[b.status] ?? 99;
+  if (aWeight !== bWeight) return aWeight - bWeight;
+
+  return String(b.applicationDate || b.created || '').localeCompare(String(a.applicationDate || a.created || '')) ||
+    String(a.displayName || a.title).localeCompare(String(b.displayName || b.title));
+}
+
+function sortRecruitingRequirements(a, b) {
+  const aIndex = RECRUITING_REQUIREMENT_ORDER.indexOf(a.type);
+  const bIndex = RECRUITING_REQUIREMENT_ORDER.indexOf(b.type);
+  return (aIndex === -1 ? 99 : aIndex) - (bIndex === -1 ? 99 : bIndex) ||
+    String(a.type).localeCompare(String(b.type));
+}
+
+function getRecruitingRequirementFreshness(requirement) {
+  const parsed = Date.parse(requirement?.modified || requirement?.completedDate || requirement?.receivedDate || requirement?.requestedDate || requirement?.created || '');
+  if (!Number.isNaN(parsed)) return parsed;
+  const fallbackId = Number(requirement?.spId || 0);
+  return Number.isFinite(fallbackId) ? fallbackId : 0;
+}
+
+function dedupeRecruitingRequirements(requirements = []) {
+  const latestByCandidateAndType = new Map();
+
+  requirements.forEach((requirement) => {
+    const candidateId = cleanRecruitingString(requirement?.candidateId);
+    const type = cleanRecruitingString(requirement?.type || requirement?.requirementId || requirement?.spId);
+    if (!candidateId || !type) return;
+
+    const key = `${candidateId}::${type}`;
+    const current = latestByCandidateAndType.get(key);
+
+    if (!current || getRecruitingRequirementFreshness(requirement) >= getRecruitingRequirementFreshness(current)) {
+      latestByCandidateAndType.set(key, requirement);
+    }
+  });
+
+  return Array.from(latestByCandidateAndType.values()).sort(sortRecruitingRequirements);
+}
+
+function sortRecruitingNotes(a, b) {
+  return String(b.noteDate || b.created || '').localeCompare(String(a.noteDate || a.created || '')) ||
+    String(b.created || '').localeCompare(String(a.created || ''));
+}
+
+function getRecruitingCandidateTitle(lastName, firstName, displayName) {
+  const last = cleanRecruitingString(lastName);
+  const first = cleanRecruitingString(firstName);
+  if (last && first) return `${last}, ${first}`;
+  return cleanRecruitingString(displayName || [first, last].filter(Boolean).join(' ')) || 'New Candidate';
+}
+
+function getRecruitingDisplayName(firstName, lastName, fallback = '') {
+  return cleanRecruitingString([firstName, lastName].map(cleanRecruitingString).filter(Boolean).join(' ')) || cleanRecruitingString(fallback);
+}
+
+function getRecruitingCandidateId(applicationDate, itemId) {
+  const dateKey = isValidDateInput(applicationDate) ? applicationDate.replace(/-/g, '') : formatEasternDate().replace(/-/g, '');
+  return `CAND-${dateKey}-${String(itemId || '').padStart(6, '0')}`;
+}
+
+function getRecruitingFolderPath(displayName) {
+  const name = cleanRecruitingString(displayName).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return name ? `${getRecruitingApplicantsFolderPath()}/${name}/` : '';
+}
+
+function buildRecruitingDashboard(candidates, requirements) {
+  const today = formatEasternDate();
+  const monthPrefix = today.slice(0, 7);
+  const openStatuses = new Set([
+    RECRUITING_CANDIDATE_STATUS.PROSPECT,
+    RECRUITING_CANDIDATE_STATUS.APPLIED,
+    RECRUITING_CANDIDATE_STATUS.ACTIVE_QUALIFICATION,
+    RECRUITING_CANDIDATE_STATUS.READY_TO_QUALIFY
+  ]);
+
+  const readyToQualify = candidates.filter((candidate) => candidate.status === RECRUITING_CANDIDATE_STATUS.READY_TO_QUALIFY);
+  const followUpDue = candidates.filter((candidate) =>
+    candidate.nextFollowUpDate &&
+    candidate.nextFollowUpDate <= today &&
+    !RECRUITING_CLOSED_STATUSES.has(candidate.status)
+  );
+  const candidateIds = new Set(candidates.map((candidate) => candidate.candidateId).filter(Boolean));
+  const currentRequirements = dedupeRecruitingRequirements(requirements);
+  const activeRequirements = currentRequirements.filter((requirement) =>
+    candidateIds.has(requirement.candidateId) && requirement.active && requirement.result !== 'Satisfactory'
+  );
+  const openCandidates = candidates.filter((candidate) => openStatuses.has(candidate.status));
+
+  const byStatus = candidates.reduce((acc, candidate) => {
+    acc[candidate.status || 'Unknown'] = (acc[candidate.status || 'Unknown'] || 0) + 1;
+    return acc;
+  }, {});
+
+  return {
+    totalCandidates: candidates.length,
+    openCandidates: openCandidates.length,
+    readyToQualify: readyToQualify.length,
+    followUpDue: followUpDue.length,
+    activeQualification: byStatus[RECRUITING_CANDIDATE_STATUS.ACTIVE_QUALIFICATION] || 0,
+    applied: byStatus[RECRUITING_CANDIDATE_STATUS.APPLIED] || 0,
+    qualifiedThisMonth: candidates.filter((candidate) => String(candidate.qualifiedDate || '').startsWith(monthPrefix)).length,
+    dormantThisMonth: candidates.filter((candidate) => candidate.status === RECRUITING_CANDIDATE_STATUS.DORMANT && String(candidate.modified || '').startsWith(monthPrefix)).length,
+    openRequirementLines: activeRequirements.length,
+    byStatus
+  };
+}
+
+async function getRecruitingProfile(token, candidateId) {
+  const { lists } = assertRecruitingConfig();
+  const candidateItems = await findRecruitingItemsByField(token, lists.candidates, RECRUITING_CANDIDATE_FIELD_SELECT, 'CandidateID', candidateId);
+
+  if (!candidateItems.length) {
+    const error = new Error(`No recruiting candidate was found for ${candidateId}.`);
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const candidate = normalizeRecruitingCandidate(candidateItems[0]);
+  const [requirementItems, noteItems] = await Promise.all([
+    findRecruitingItemsByField(token, lists.requirements, RECRUITING_REQUIREMENT_FIELD_SELECT, 'CandidateID', candidate.candidateId),
+    findRecruitingItemsByField(token, lists.notes, RECRUITING_NOTE_FIELD_SELECT, 'CandidateID', candidate.candidateId)
+  ]);
+
+  let teamMembers = [];
+  if (candidate.teamId) {
+    const teamItems = await findRecruitingItemsByField(token, lists.candidates, RECRUITING_CANDIDATE_FIELD_SELECT, 'TeamID', candidate.teamId);
+    teamMembers = teamItems
+      .map(normalizeRecruitingCandidate)
+      .filter((member) => member.candidateId !== candidate.candidateId)
+      .sort(sortRecruitingCandidates);
+  }
+
+  return {
+    candidate,
+    requirements: dedupeRecruitingRequirements(requirementItems.map(normalizeRecruitingRequirement)),
+    notes: noteItems.map(normalizeRecruitingNote).sort(sortRecruitingNotes),
+    teamMembers
+  };
+}
+
+function buildRecruitingCandidateFieldsFromBody(body = {}) {
+  const firstName = cleanRecruitingString(body.firstName || body.FirstName);
+  const lastName = cleanRecruitingString(body.lastName || body.LastName);
+  const displayName = getRecruitingDisplayName(firstName, lastName, body.displayName || body.DisplayName);
+  const applicationDate = isValidDateInput(body.applicationDate || body.ApplicationDate)
+    ? String(body.applicationDate || body.ApplicationDate)
+    : formatEasternDate();
+  const fields = {
+    Title: getRecruitingCandidateTitle(lastName, firstName, displayName),
+    FirstName: firstName,
+    LastName: lastName,
+    DisplayName: displayName,
+    CandidateStatus: RECRUITING_CANDIDATE_STATUS.APPLIED,
+    CandidateType: cleanRecruitingString(body.candidateType || body.CandidateType || 'Solo') || 'Solo',
+    PrimaryPhone: cleanRecruitingString(body.primaryPhone || body.PrimaryPhone),
+    SecondaryPhone: cleanRecruitingString(body.secondaryPhone || body.SecondaryPhone),
+    EmailAddress: cleanRecruitingString(body.email || body.emailAddress || body.EmailAddress),
+    HomeStreetAddress: cleanRecruitingString(body.homeStreet || body.homeStreetAddress || body.HomeStreetAddress),
+    HomeCity: cleanRecruitingString(body.homeCity || body.HomeCity),
+    HomeState: cleanRecruitingString(body.homeState || body.HomeState).toUpperCase(),
+    HomeZip: cleanRecruitingString(body.homeZip || body.HomeZip),
+    ApplicationDate: applicationDate,
+    Source: cleanRecruitingString(body.source || body.Source || 'Referral') || 'Referral',
+    RelationshipType: cleanRecruitingString(body.relationshipType || body.RelationshipType || 'Percentage') || 'Percentage',
+    OwnsTruck: body.ownsTruck !== false,
+    OwnsTrailer: body.ownsTrailer === true,
+    ActiveFlag: true,
+    QualificationStartedFlag: false
+  };
+
+  const teamId = cleanRecruitingString(body.teamId || body.TeamID);
+  if (teamId) fields.TeamID = teamId;
+
+  return fields;
+}
+
+function buildRecruitingCandidatePatchFromBody(body = {}) {
+  const allowedFields = {
+    firstName: 'FirstName',
+    lastName: 'LastName',
+    displayName: 'DisplayName',
+    status: 'CandidateStatus',
+    candidateType: 'CandidateType',
+    teamId: 'TeamID',
+    primaryPhone: 'PrimaryPhone',
+    secondaryPhone: 'SecondaryPhone',
+    email: 'EmailAddress',
+    homeStreet: 'HomeStreetAddress',
+    homeCity: 'HomeCity',
+    homeState: 'HomeState',
+    homeZip: 'HomeZip',
+    source: 'Source',
+    relationshipType: 'RelationshipType',
+    disqualifiedReason: 'DisqualifiedReason',
+    linkedDriveRosterTruck: 'LinkedDriveRosterTruck',
+    noteSummary: 'NoteSummary'
+  };
+  const dateFields = {
+    lastContactDate: 'LastContactDate',
+    nextFollowUpDate: 'NextFollowUpDate'
+  };
+  const patch = {};
+
+  Object.entries(allowedFields).forEach(([inputKey, fieldName]) => {
+    if (Object.prototype.hasOwnProperty.call(body, inputKey)) {
+      patch[fieldName] = cleanRecruitingString(body[inputKey]);
+    }
+  });
+
+  Object.entries(dateFields).forEach(([inputKey, fieldName]) => {
+    if (Object.prototype.hasOwnProperty.call(body, inputKey)) {
+      const value = cleanRecruitingString(body[inputKey]);
+      patch[fieldName] = value || null;
+    }
+  });
+
+  if (Object.prototype.hasOwnProperty.call(body, 'ownsTruck')) patch.OwnsTruck = body.ownsTruck === true;
+  if (Object.prototype.hasOwnProperty.call(body, 'ownsTrailer')) patch.OwnsTrailer = body.ownsTrailer === true;
+  if (Object.prototype.hasOwnProperty.call(body, 'active')) patch.ActiveFlag = body.active === true;
+
+  if (patch.FirstName || patch.LastName || patch.DisplayName) {
+    const firstName = patch.FirstName || cleanRecruitingString(body.currentFirstName);
+    const lastName = patch.LastName || cleanRecruitingString(body.currentLastName);
+    const displayName = patch.DisplayName || getRecruitingDisplayName(firstName, lastName);
+    patch.DisplayName = displayName;
+    patch.Title = getRecruitingCandidateTitle(lastName, firstName, displayName);
+  }
+
+  return patch;
+}
+
+function buildCandidateNoteFields(candidate, body = {}) {
+  const noteBody = cleanRecruitingString(body.noteBody || body.body || body.NoteBody);
+  const noteType = cleanRecruitingString(body.noteType || body.NoteType || 'Internal') || 'Internal';
+  const noteDate = isValidDateInput(body.noteDate || body.NoteDate) ? String(body.noteDate || body.NoteDate) : formatEasternDate();
+
+  if (!noteBody) {
+    const error = new Error('Enter a candidate note before saving.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const candidateName = candidate.title || getRecruitingCandidateTitle(candidate.lastName, candidate.firstName, candidate.displayName);
+  const noteId = `CN-KC-${formatEasternTimestampText().replace(/[-: ]/g, '')}-${candidate.candidateId}`;
+
+  return {
+    Title: `${candidateName} - ${noteDate} - ${noteType}`,
+    NoteID: noteId,
+    CandidateID: candidate.candidateId,
+    CandidateName: candidateName,
+    TeamID: candidate.teamId || '',
+    NoteDate: noteDate,
+    NoteType: noteType,
+    NoteBody: noteBody,
+    Source: 'Kole Connect',
+    CreatedByText: cleanRecruitingString(body.createdByText || 'Kole Connect') || 'Kole Connect'
+  };
+}
+
+function buildRequirementPatchFromBody(body = {}) {
+  const patch = {};
+  const status = cleanRecruitingString(body.status || body.RequirementStatus);
+  const result = cleanRecruitingString(body.result || body.RequirementResult);
+
+  if (status) patch.RequirementStatus = status;
+  if (result) {
+    if (!RECRUITING_ALLOWED_REQUIREMENT_RESULTS.has(result)) {
+      const error = new Error('Requirement result must be Satisfactory or Unsatisfactory.');
+      error.statusCode = 400;
+      throw error;
+    }
+    patch.RequirementResult = result;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'required')) patch.RequiredFlag = body.required === true;
+  if (Object.prototype.hasOwnProperty.call(body, 'active')) patch.ActiveFlag = body.active === true;
+  if (Object.prototype.hasOwnProperty.call(body, 'requestedDate')) patch.RequestedDate = cleanRecruitingString(body.requestedDate);
+  if (Object.prototype.hasOwnProperty.call(body, 'receivedDate')) patch.ReceivedDate = cleanRecruitingString(body.receivedDate);
+  if (Object.prototype.hasOwnProperty.call(body, 'completedDate')) patch.CompletedDate = cleanRecruitingString(body.completedDate);
+  if (Object.prototype.hasOwnProperty.call(body, 'expirationDate')) patch.ExpirationDate = cleanRecruitingString(body.expirationDate);
+  if (Object.prototype.hasOwnProperty.call(body, 'documentUrl')) patch.DocumentURL = cleanRecruitingString(body.documentUrl);
+  if (Object.prototype.hasOwnProperty.call(body, 'notes')) patch.Notes = cleanRecruitingString(body.notes);
+
+  return patch;
+}
+
+app.get('/recruiting/dashboard', requireLookupAccess, async (req, res) => {
+  try {
+    const { lists } = assertRecruitingConfig();
+    const token = await getGraphToken();
+    const [candidateItems, requirementItems] = await Promise.all([
+      getAllRecruitingItems(token, lists.candidates, RECRUITING_CANDIDATE_FIELD_SELECT),
+      getAllRecruitingItems(token, lists.requirements, RECRUITING_REQUIREMENT_FIELD_SELECT)
+    ]);
+
+    const candidates = candidateItems.map(normalizeRecruitingCandidate).sort(sortRecruitingCandidates);
+    const requirements = requirementItems.map(normalizeRecruitingRequirement).sort(sortRecruitingRequirements);
+    const currentRequirements = dedupeRecruitingRequirements(requirements);
+    const candidateIds = new Set(candidates.map((candidate) => candidate.candidateId).filter(Boolean));
+    const summary = buildRecruitingDashboard(candidates, currentRequirements);
+    const today = formatEasternDate();
+
+    res.json({
+      success: true,
+      generatedAt: `${formatEasternTimestamp()} Eastern`,
+      summary,
+      candidates,
+      readyToQualify: candidates.filter((candidate) => candidate.status === RECRUITING_CANDIDATE_STATUS.READY_TO_QUALIFY),
+      followUpDue: candidates.filter((candidate) =>
+        candidate.nextFollowUpDate && candidate.nextFollowUpDate <= today && !RECRUITING_CLOSED_STATUSES.has(candidate.status)
+      ),
+      openRequirements: currentRequirements.filter((requirement) =>
+        candidateIds.has(requirement.candidateId) && requirement.active && requirement.result !== 'Satisfactory'
+      )
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to load recruiting dashboard.'
+    });
+  }
+});
+
+app.get('/recruiting/candidates', requireLookupAccess, async (req, res) => {
+  try {
+    const { lists } = assertRecruitingConfig();
+    const token = await getGraphToken();
+    const items = await getAllRecruitingItems(token, lists.candidates, RECRUITING_CANDIDATE_FIELD_SELECT);
+    let candidates = items.map(normalizeRecruitingCandidate).sort(sortRecruitingCandidates);
+    const status = cleanRecruitingString(req.query.status);
+    const search = cleanRecruitingString(req.query.search).toLowerCase();
+
+    if (status && status !== 'All') {
+      candidates = candidates.filter((candidate) => candidate.status === status);
+    }
+
+    if (search) {
+      candidates = candidates.filter((candidate) => [
+        candidate.candidateId,
+        candidate.displayName,
+        candidate.title,
+        candidate.email,
+        candidate.primaryPhone,
+        candidate.teamId
+      ].some((value) => String(value || '').toLowerCase().includes(search)));
+    }
+
+    res.json({ success: true, count: candidates.length, candidates });
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Unable to load recruiting candidates.' });
+  }
+});
+
+app.get('/recruiting/candidates/:candidateId/profile', requireLookupAccess, async (req, res) => {
+  try {
+    const candidateId = cleanRecruitingString(req.params.candidateId);
+    if (!candidateId) return res.status(400).json({ success: false, error: 'CandidateID is required.' });
+
+    const token = await getGraphToken();
+    const profile = await getRecruitingProfile(token, candidateId);
+    res.json({ success: true, ...profile });
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Unable to load candidate profile.' });
+  }
+});
+
+app.post('/recruiting/candidates', requireLookupAccess, async (req, res) => {
+  try {
+    const { siteId, lists } = assertRecruitingConfig();
+    const token = await getGraphToken();
+    const fields = buildRecruitingCandidateFieldsFromBody(req.body);
+
+    if (!fields.FirstName && !fields.LastName && !fields.DisplayName) {
+      return res.status(400).json({ success: false, error: 'Enter at least a first name, last name, or display name.' });
+    }
+
+    const createdItem = await graphPost(token, `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${lists.candidates}/items`, { fields });
+    const itemId = createdItem.id || createdItem?.fields?.id;
+    const candidateId = getRecruitingCandidateId(fields.ApplicationDate, itemId);
+    const folderPath = getRecruitingFolderPath(fields.DisplayName);
+
+    await graphPatch(token, `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${lists.candidates}/items/${encodeURIComponent(itemId)}/fields`, {
+      CandidateID: candidateId,
+      CandidateFolderPath: folderPath
+    });
+
+    const refreshed = await graphGetRecruiting(token, getRecruitingListItemUrl(lists.candidates, itemId, RECRUITING_CANDIDATE_FIELD_SELECT));
+
+    res.status(201).json({
+      success: true,
+      message: `${fields.DisplayName || fields.Title} added to Recruiting Candidates.`,
+      candidate: normalizeRecruitingCandidate(refreshed)
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Unable to create recruiting candidate.' });
+  }
+});
+
+app.patch('/recruiting/candidates/:candidateId', requireLookupAccess, async (req, res) => {
+  try {
+    const { siteId, lists } = assertRecruitingConfig();
+    const candidateId = cleanRecruitingString(req.params.candidateId);
+    const token = await getGraphToken();
+    const profile = await getRecruitingProfile(token, candidateId);
+    const patch = buildRecruitingCandidatePatchFromBody({
+      ...req.body,
+      currentFirstName: profile.candidate.firstName,
+      currentLastName: profile.candidate.lastName
+    });
+
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ success: false, error: 'No candidate fields were provided to update.' });
+    }
+
+    await graphPatch(token, `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${lists.candidates}/items/${encodeURIComponent(profile.candidate.spId)}/fields`, patch);
+    const updatedProfile = await getRecruitingProfile(token, candidateId);
+    res.json({ success: true, message: 'Candidate updated.', ...updatedProfile });
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Unable to update recruiting candidate.' });
+  }
+});
+
+app.post('/recruiting/candidates/:candidateId/start-qualification', requireLookupAccess, async (req, res) => {
+  try {
+    const { siteId, lists } = assertRecruitingConfig();
+    const candidateId = cleanRecruitingString(req.params.candidateId);
+    const token = await getGraphToken();
+    const profile = await getRecruitingProfile(token, candidateId);
+
+    if (RECRUITING_CLOSED_STATUSES.has(profile.candidate.status)) {
+      return res.status(400).json({ success: false, error: 'Closed candidates cannot be moved to Active Qualification.' });
+    }
+
+    await graphPatch(token, `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${lists.candidates}/items/${encodeURIComponent(profile.candidate.spId)}/fields`, {
+      CandidateStatus: RECRUITING_CANDIDATE_STATUS.ACTIVE_QUALIFICATION,
+      ActiveFlag: true,
+      LastContactDate: formatEasternDate()
+    });
+
+    const updatedProfile = await getRecruitingProfile(token, candidateId);
+    res.json({ success: true, message: 'Candidate moved to Active Qualification. Power Automate will seed qualification requirements.', ...updatedProfile });
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Unable to start candidate qualification.' });
+  }
+});
+
+app.post('/recruiting/candidates/:candidateId/mark-qualified', requireLookupAccess, async (req, res) => {
+  try {
+    const { siteId, lists } = assertRecruitingConfig();
+    const candidateId = cleanRecruitingString(req.params.candidateId);
+    const token = await getGraphToken();
+    const profile = await getRecruitingProfile(token, candidateId);
+
+    if (profile.candidate.status !== RECRUITING_CANDIDATE_STATUS.READY_TO_QUALIFY) {
+      return res.status(400).json({ success: false, error: 'Only Ready to Qualify candidates can be marked Qualified from the app.' });
+    }
+
+    await graphPatch(token, `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${lists.candidates}/items/${encodeURIComponent(profile.candidate.spId)}/fields`, {
+      CandidateStatus: RECRUITING_CANDIDATE_STATUS.QUALIFIED
+    });
+
+    const updatedProfile = await getRecruitingProfile(token, candidateId);
+    res.json({ success: true, message: 'Candidate marked Qualified. Power Automate will complete the qualification closeout.', ...updatedProfile });
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Unable to mark candidate Qualified.' });
+  }
+});
+
+app.post('/recruiting/candidates/:candidateId/notes', requireLookupAccess, async (req, res) => {
+  try {
+    const { siteId, lists } = assertRecruitingConfig();
+    const candidateId = cleanRecruitingString(req.params.candidateId);
+    const token = await getGraphToken();
+    const profile = await getRecruitingProfile(token, candidateId);
+    const fields = buildCandidateNoteFields(profile.candidate, req.body);
+    const createdItem = await graphPost(token, `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${lists.notes}/items`, { fields });
+    const refreshedProfile = await getRecruitingProfile(token, candidateId);
+
+    res.status(201).json({
+      success: true,
+      message: 'Candidate note added.',
+      note: normalizeRecruitingNote(createdItem),
+      ...refreshedProfile
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Unable to add candidate note.' });
+  }
+});
+
+app.patch('/recruiting/requirements/:id', requireLookupAccess, async (req, res) => {
+  try {
+    const { siteId, lists } = assertRecruitingConfig();
+    const itemId = cleanRecruitingString(req.params.id);
+    if (!itemId) return res.status(400).json({ success: false, error: 'Requirement item ID is required.' });
+
+    const token = await getGraphToken();
+    const currentItem = await graphGetRecruiting(token, getRecruitingListItemUrl(lists.requirements, itemId, RECRUITING_REQUIREMENT_FIELD_SELECT));
+    const currentRequirement = normalizeRecruitingRequirement(currentItem);
+    const candidateProfile = await getRecruitingProfile(token, currentRequirement.candidateId);
+
+    const ownerOverride = req.body?.ownerOverride === true;
+    if (candidateProfile.candidate.status === RECRUITING_CANDIDATE_STATUS.QUALIFIED) {
+      return res.status(400).json({ success: false, error: 'Qualified candidates have a closed checklist. Reopen the candidate before changing qualification rows.' });
+    }
+
+    if (RECRUITING_CLOSED_STATUSES.has(candidateProfile.candidate.status) && !ownerOverride) {
+      return res.status(400).json({ success: false, error: 'Qualification rows are read-only after the candidate is closed unless Owner Override is enabled.' });
+    }
+
+    const patch = buildRequirementPatchFromBody(req.body);
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ success: false, error: 'No requirement fields were provided to update.' });
+    }
+
+    await graphPatch(token, `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${lists.requirements}/items/${encodeURIComponent(itemId)}/fields`, patch);
+    const updatedProfile = await getRecruitingProfile(token, currentRequirement.candidateId);
+
+    res.json({ success: true, message: 'Qualification requirement updated.', ...updatedProfile });
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Unable to update qualification requirement.' });
+  }
+});
+
 app.get('/', (req, res) => {
   res.send('Kole Lookup API is running');
 });

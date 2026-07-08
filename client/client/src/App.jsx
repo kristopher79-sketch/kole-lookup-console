@@ -23,6 +23,63 @@ const ORDER_NOTES_CLIENT_CACHE_MS = 60 * 1000;
 const ORDER_NOTE_MAX_LENGTH = 20000;
 const ORDER_NOTE_TYPE_OPTIONS = ['Dispatch', 'Paperwork', 'Permits', 'Billing', 'Operations'];
 const DRIVER_TIME_OFF_REASON_OPTIONS = ['Home Time', 'Repairs'];
+const RECRUITING_CANDIDATE_STATUS_OPTIONS = [
+  'Heads-Up',
+  'All',
+  'Follow-Up Due',
+  'Open QR Lines',
+  'Prospect',
+  'Applied',
+  'Active Qualification',
+  'Ready to Qualify',
+  'Qualified',
+  'Disqualified',
+  'Withdrawn',
+  'Dormant'
+];
+const RECRUITING_CLOSED_STATUSES = ['Qualified', 'Disqualified', 'Withdrawn', 'Dormant'];
+const RECRUITING_HEADS_UP_STATUSES = ['Prospect', 'Applied', 'Active Qualification', 'Ready to Qualify'];
+const RECRUITING_CANDIDATE_TYPE_OPTIONS = ['Solo', 'Team', 'Co-Driver', 'Unknown'];
+const RECRUITING_SOURCE_OPTIONS = ['Website', 'Referral', 'Call-In', 'Facebook', 'Returning', 'Indeed', 'LinkedIn', 'Other'];
+const RECRUITING_RELATIONSHIP_OPTIONS = ['Percentage', 'Company', 'Per Mile Solo', 'Absentee Owner Percentage', 'Unknown'];
+const RECRUITING_NOTE_TYPE_OPTIONS = ['Call', 'Email', 'Follow-Up', 'Application', 'Qualification', 'Disqualification', 'Internal', 'System', 'Other'];
+const RECRUITING_REQUIREMENT_RESULT_OPTIONS = ['Satisfactory', 'Unsatisfactory'];
+const RECRUITING_CORE_REQUIREMENT_ORDER = ['Background Check', 'Drug Screen', 'MVR', 'Contract', 'Previous Employment', 'TWIC'];
+
+function createRecruitingCandidateDraft() {
+  return {
+    firstName: '',
+    lastName: '',
+    candidateType: 'Solo',
+    teamId: '',
+    primaryPhone: '',
+    secondaryPhone: '',
+    email: '',
+    homeStreet: '',
+    homeCity: '',
+    homeState: '',
+    homeZip: '',
+    applicationDate: getEasternDateInputValue(),
+    source: 'Referral',
+    relationshipType: 'Percentage',
+    ownsTruck: true,
+    ownsTrailer: false
+  };
+}
+
+function getRecruitingStatusClass(status) {
+  const normalized = String(status || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  return `recruiting-status-pill ${normalized || 'unknown'}`;
+}
+
+function isRecruitingCandidateClosed(candidate) {
+  return RECRUITING_CLOSED_STATUSES.includes(candidate?.status);
+}
+
+function getRequirementSortIndex(type) {
+  const index = RECRUITING_CORE_REQUIREMENT_ORDER.indexOf(type);
+  return index === -1 ? 999 : index;
+}
 
 function normalizeDriverTimeOffReason(value) {
   const normalized = String(value || '').trim().toLowerCase();
@@ -55,6 +112,8 @@ const DEFAULT_KOLE_USER_PREFERENCES = {
   hideYearlyProjection: false,
   hideOnThisDay: false,
   hideWeeklySettlementReport: false,
+  hideRecruiting: false,
+  recruitingDefaultOpen: true,
   skipStartupSplash: false
 };
 
@@ -997,6 +1056,25 @@ export default function App() {
   const [availableTruckDrilldown, setAvailableTruckDrilldown] = useState(null);
   const [reportsSectionOpen, setReportsSectionOpen] = useState(() => userPrefs.reportsDefaultOpen);
   const [salesAndLeadsSectionOpen, setSalesAndLeadsSectionOpen] = useState(() => userPrefs.salesAndLeadsDefaultOpen);
+  const [recruitingSectionOpen, setRecruitingSectionOpen] = useState(() => userPrefs.recruitingDefaultOpen && !userPrefs.hideRecruiting);
+  const [recruitingData, setRecruitingData] = useState(null);
+  const [recruitingLoading, setRecruitingLoading] = useState(false);
+  const [recruitingError, setRecruitingError] = useState('');
+  const [recruitingStatusFilter, setRecruitingStatusFilter] = useState('Heads-Up');
+  const [recruitingSearch, setRecruitingSearch] = useState('');
+  const [selectedRecruitingProfile, setSelectedRecruitingProfile] = useState(null);
+  const [recruitingProfileLoading, setRecruitingProfileLoading] = useState(false);
+  const [recruitingProfileError, setRecruitingProfileError] = useState('');
+  const [recruitingActionLoading, setRecruitingActionLoading] = useState('');
+  const [recruitingActionMessage, setRecruitingActionMessage] = useState('');
+  const [recruitingActionError, setRecruitingActionError] = useState('');
+  const [recruitingCreateModalOpen, setRecruitingCreateModalOpen] = useState(false);
+  const [recruitingCandidateDraft, setRecruitingCandidateDraft] = useState(createRecruitingCandidateDraft);
+  const [recruitingCandidateCreating, setRecruitingCandidateCreating] = useState(false);
+  const [recruitingNoteDraft, setRecruitingNoteDraft] = useState('');
+  const [recruitingNoteType, setRecruitingNoteType] = useState('Internal');
+  const [recruitingFollowUpDate, setRecruitingFollowUpDate] = useState('');
+  const [recruitingOwnerOverride, setRecruitingOwnerOverride] = useState(false);
 
   const isAnyModalOpen = Boolean(
     preferencesModalOpen ||
@@ -1025,6 +1103,8 @@ export default function App() {
     customerTrendModalOpen ||
     selectedCustomerTrend ||
     selectedSalesLead ||
+    selectedRecruitingProfile ||
+    recruitingCreateModalOpen ||
     availableTruckDistributionInactiveModalOpen ||
     availableTruckDrilldown ||
     startupSplashVisible
@@ -1402,6 +1482,7 @@ export default function App() {
     setAvailableTrucksSectionOpen(nextPrefs.availableTrucksDefaultOpen);
     setOperationsNext7Open(!nextPrefs.operationsNext7DefaultClosed);
     setSalesAndLeadsSectionOpen(nextPrefs.hideSalesAndLeads ? false : nextPrefs.salesAndLeadsDefaultOpen);
+    setRecruitingSectionOpen(nextPrefs.hideRecruiting ? false : nextPrefs.recruitingDefaultOpen);
     setReportsSectionOpen(nextPrefs.reportsDefaultOpen);
 
     if (!nextPrefs.intelliTrackDefaultOpen) {
@@ -1414,6 +1495,10 @@ export default function App() {
 
     if (!nextPrefs.salesAndLeadsDefaultOpen || nextPrefs.hideSalesAndLeads) {
       closeSalesAndLeadsSubsections();
+    }
+
+    if (!nextPrefs.recruitingDefaultOpen || nextPrefs.hideRecruiting) {
+      closeRecruitingSubsections();
     }
 
     if (!nextPrefs.reportsDefaultOpen) {
@@ -1453,6 +1538,11 @@ export default function App() {
       if (!value || userPrefs.hideSalesAndLeads) closeSalesAndLeadsSubsections();
     }
 
+    if (key === 'recruitingDefaultOpen') {
+      setRecruitingSectionOpen(userPrefs.hideRecruiting ? false : Boolean(value));
+      if (!value || userPrefs.hideRecruiting) closeRecruitingSubsections();
+    }
+
     if (key === 'operationsNext7DefaultClosed') {
       setOperationsNext7Open(!Boolean(value));
     }
@@ -1466,6 +1556,15 @@ export default function App() {
         }
       } else if (userPrefs.salesAndLeadsDefaultOpen) {
         setSalesAndLeadsSectionOpen(true);
+      }
+    }
+
+    if (key === 'hideRecruiting') {
+      if (value) {
+        setRecruitingSectionOpen(false);
+        closeRecruitingSubsections();
+      } else if (userPrefs.recruitingDefaultOpen) {
+        setRecruitingSectionOpen(true);
       }
     }
 
@@ -1624,6 +1723,13 @@ export default function App() {
                   onChange={(checked) => updateUserPreference('reportsDefaultOpen', checked)}
                 />
                 <PreferenceSwitch
+                  label="Recruiting starts open"
+                  description={userPrefs.hideRecruiting ? 'Unavailable while Recruiting is hidden.' : 'Open the recruiting pipeline automatically.'}
+                  checked={userPrefs.recruitingDefaultOpen && !userPrefs.hideRecruiting}
+                  onChange={(checked) => updateUserPreference('recruitingDefaultOpen', checked)}
+                  locked={userPrefs.hideRecruiting}
+                />
+                <PreferenceSwitch
                   label="Sales & Leads starts open"
                   description={userPrefs.hideSalesAndLeads ? 'Unavailable while Sales & Leads is hidden.' : 'Open customer cards and sales reports automatically.'}
                   checked={userPrefs.salesAndLeadsDefaultOpen && !userPrefs.hideSalesAndLeads}
@@ -1660,6 +1766,12 @@ export default function App() {
                   description="Removes the Sales and Leads section from the main dashboard on this device."
                   checked={userPrefs.hideSalesAndLeads}
                   onChange={(checked) => updateUserPreference('hideSalesAndLeads', checked)}
+                />
+                <PreferenceSwitch
+                  label="Hide Recruiting"
+                  description="Removes the Recruiting section from the main dashboard on this device."
+                  checked={userPrefs.hideRecruiting}
+                  onChange={(checked) => updateUserPreference('hideRecruiting', checked)}
                 />
                 <PreferenceSwitch
                   label="Compact dashboard mode"
@@ -1841,6 +1953,8 @@ export default function App() {
         setDriverHistoryModalOpen(false);
         setSelectedDriverRoster(null);
         setSelectedSalesLead(null);
+        setSelectedRecruitingProfile(null);
+        setRecruitingCreateModalOpen(false);
         setAvailableTruckDrilldown(null);
       }
     }
@@ -1923,6 +2037,7 @@ export default function App() {
     loadIntelliTrack();
     loadAvailableTrucks();
     loadAvailableTruckDistributionList({ silent: true });
+    loadRecruitingDashboard({ silent: true });
     loadReportActionAlerts({ silent: true });
 
     const interval = window.setInterval(() => {
@@ -1932,6 +2047,7 @@ export default function App() {
       loadIntelliTrack({ silent: true });
       loadAvailableTrucks({ silent: true });
       loadAvailableTruckDistributionList({ silent: true });
+      loadRecruitingDashboard({ silent: true });
       loadReportActionAlerts({ silent: true });
 
       operationsRefresh.then((operationsSucceeded) => {
@@ -2072,6 +2188,13 @@ export default function App() {
     setAvailableTruckDistributionInactiveModalOpen(false);
   }
 
+  function closeRecruitingSubsections() {
+    setSelectedRecruitingProfile(null);
+    setRecruitingCreateModalOpen(false);
+    setRecruitingProfileError('');
+    setRecruitingActionError('');
+  }
+
   function toggleIntelliTrackSubsection(sectionName) {
     const sectionMap = {
       current: { isOpen: intelliTrackOpen, setter: setIntelliTrackOpen },
@@ -2127,6 +2250,11 @@ export default function App() {
       closeSalesAndLeadsSubsections();
     }
 
+    if (except !== 'recruiting') {
+      setRecruitingSectionOpen(false);
+      closeRecruitingSubsections();
+    }
+
     if (except !== 'reports') {
       setReportsSectionOpen(false);
       closeReportSubsections();
@@ -2165,6 +2293,21 @@ export default function App() {
     }
 
     setUploadDigestSectionOpen(willOpen);
+  }
+
+  function toggleRecruitingSection() {
+    const willOpen = !recruitingSectionOpen;
+
+    if (willOpen) {
+      closeMainFeatureSections('recruiting');
+      if (!recruitingData && !recruitingLoading) {
+        loadRecruitingDashboard();
+      }
+    } else {
+      closeRecruitingSubsections();
+    }
+
+    setRecruitingSectionOpen(willOpen);
   }
 
   function resetAppState() {
@@ -2248,6 +2391,25 @@ export default function App() {
     orderNotesRequestRef.current += 1;
     setReportsSectionOpen(false);
     setSalesAndLeadsSectionOpen(false);
+    setRecruitingSectionOpen(false);
+    setRecruitingData(null);
+    setRecruitingLoading(false);
+    setRecruitingError('');
+    setRecruitingStatusFilter('Heads-Up');
+    setRecruitingSearch('');
+    setSelectedRecruitingProfile(null);
+    setRecruitingProfileLoading(false);
+    setRecruitingProfileError('');
+    setRecruitingActionLoading('');
+    setRecruitingActionMessage('');
+    setRecruitingActionError('');
+    setRecruitingCreateModalOpen(false);
+    setRecruitingCandidateDraft(createRecruitingCandidateDraft());
+    setRecruitingCandidateCreating(false);
+    setRecruitingNoteDraft('');
+    setRecruitingNoteType('Internal');
+    setRecruitingFollowUpDate('');
+    setRecruitingOwnerOverride(false);
     setOpenReportGroups([]);
     setActiveReportPanel('');
     setOpenGrossRevenueQuarters([]);
@@ -11598,7 +11760,7 @@ function openReportLoadDetails(load) {
                       </span>
           {showAvailableTrucksStatusPill && (
             <span className={`feature-section-status-pill ${currentCount > 0 ? 'has-items' : 'is-zero'} ${availableTrucksLoading ? 'is-loading' : ''}`}>
-              {availableTrucksLoading ? 'Loading...' : `${currentCount} current`}
+              {availableTrucksLoading ? '...' : formatReportNumber(currentCount)}
             </span>
           )}
           <span className="feature-section-chevron">{availableTrucksSectionOpen ? '▲' : '▼'}</span>
@@ -12170,7 +12332,7 @@ function openReportLoadDetails(load) {
                       </span>
           {showIntelliTrackStatusPill && (
             <span className={`feature-section-status-pill ${count > 0 ? 'has-items' : 'is-zero'} ${intelliTrackLoading ? 'is-loading' : ''}`}>
-              {intelliTrackLoading ? 'Loading...' : `${count} tracking`}
+              {intelliTrackLoading ? '...' : formatReportNumber(count)}
             </span>
           )}
           <span className="feature-section-chevron">{intelliTrackSectionOpen ? '▲' : '▼'}</span>
@@ -12429,7 +12591,7 @@ function openReportLoadDetails(load) {
           </span>
           {showUploadDigestStatusPill && (
             <span className={`feature-section-status-pill ${count > 0 ? 'has-items' : 'is-zero'} ${uploadDigestLoading ? 'is-loading' : ''}`}>
-              {uploadDigestLoading ? 'Loading...' : `${count} logged`}
+              {uploadDigestLoading ? '...' : formatReportNumber(count)}
             </span>
           )}
           <span className="feature-section-chevron">{uploadDigestSectionOpen ? '▲' : '▼'}</span>
@@ -14691,6 +14853,685 @@ function openReportLoadDetails(load) {
     );
   }
 
+
+  async function loadRecruitingDashboard(options = {}) {
+    if (!options.silent) {
+      setRecruitingLoading(true);
+    }
+    setRecruitingError('');
+
+    try {
+      const res = await authedFetch(`${API}/recruiting/dashboard`);
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Unable to load recruiting dashboard.');
+      setRecruitingData(data);
+      return true;
+    } catch (err) {
+      if (!options.silent) setRecruitingError(err.message || 'Unable to load recruiting dashboard.');
+      return false;
+    } finally {
+      if (!options.silent) setRecruitingLoading(false);
+    }
+  }
+
+  async function openRecruitingCandidateProfile(candidateId) {
+    if (!candidateId) return;
+    setRecruitingProfileLoading(true);
+    setRecruitingProfileError('');
+    setRecruitingActionError('');
+    setRecruitingActionMessage('');
+
+    try {
+      const res = await authedFetch(`${API}/recruiting/candidates/${encodeURIComponent(candidateId)}/profile`);
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Unable to load candidate profile.');
+      setSelectedRecruitingProfile(data);
+      setRecruitingNoteDraft('');
+      setRecruitingNoteType('Internal');
+      setRecruitingFollowUpDate(data.candidate?.nextFollowUpDate || '');
+      setRecruitingOwnerOverride(false);
+    } catch (err) {
+      setRecruitingProfileError(err.message || 'Unable to load candidate profile.');
+    } finally {
+      setRecruitingProfileLoading(false);
+    }
+  }
+
+  function closeRecruitingProfileModal() {
+    setSelectedRecruitingProfile(null);
+    setRecruitingProfileError('');
+    setRecruitingActionError('');
+    setRecruitingActionMessage('');
+    setRecruitingNoteDraft('');
+    setRecruitingNoteType('Internal');
+    setRecruitingFollowUpDate('');
+    setRecruitingOwnerOverride(false);
+  }
+
+  function updateRecruitingProfileFromResponse(data) {
+    setSelectedRecruitingProfile({
+      candidate: data.candidate,
+      requirements: data.requirements || [],
+      notes: data.notes || [],
+      teamMembers: data.teamMembers || []
+    });
+    setRecruitingFollowUpDate(data.candidate?.nextFollowUpDate || '');
+  }
+
+  async function runRecruitingProfileAction(actionKey, endpoint, options = {}) {
+    const candidateId = selectedRecruitingProfile?.candidate?.candidateId;
+    if (!candidateId) return;
+
+    setRecruitingActionLoading(actionKey);
+    setRecruitingActionError('');
+    setRecruitingActionMessage('');
+
+    try {
+      const res = await authedFetch(endpoint, {
+        method: options.method || 'POST',
+        headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
+        body: options.body ? JSON.stringify(options.body) : undefined
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Recruiting action failed.');
+      updateRecruitingProfileFromResponse(data);
+      setRecruitingActionMessage(data.message || 'Recruiting record updated.');
+      await loadRecruitingDashboard({ silent: true });
+    } catch (err) {
+      setRecruitingActionError(err.message || 'Recruiting action failed.');
+    } finally {
+      setRecruitingActionLoading('');
+    }
+  }
+
+  async function startRecruitingQualification() {
+    const candidateId = selectedRecruitingProfile?.candidate?.candidateId;
+    await runRecruitingProfileAction(
+      'startQualification',
+      `${API}/recruiting/candidates/${encodeURIComponent(candidateId)}/start-qualification`
+    );
+  }
+
+  async function markRecruitingCandidateQualified() {
+    const candidateId = selectedRecruitingProfile?.candidate?.candidateId;
+    await runRecruitingProfileAction(
+      'markQualified',
+      `${API}/recruiting/candidates/${encodeURIComponent(candidateId)}/mark-qualified`
+    );
+  }
+
+  async function saveRecruitingFollowUp(nextDate = recruitingFollowUpDate) {
+    const candidateId = selectedRecruitingProfile?.candidate?.candidateId;
+    if (!candidateId) return;
+
+    await runRecruitingProfileAction(
+      nextDate ? 'saveFollowUp' : 'clearFollowUp',
+      `${API}/recruiting/candidates/${encodeURIComponent(candidateId)}`,
+      {
+        method: 'PATCH',
+        body: { nextFollowUpDate: nextDate || '' }
+      }
+    );
+  }
+
+  function openRecruitingCandidateFolder(candidate) {
+    const url = candidate?.folderUrl;
+    if (url) {
+      openExternalLink(url);
+    }
+  }
+
+  async function updateRecruitingRequirementResult(requirement, result) {
+    if (!requirement?.spId || !result) return;
+    const today = getEasternDateInputValue();
+    await runRecruitingProfileAction(
+      `requirement-${requirement.spId}`,
+      `${API}/recruiting/requirements/${encodeURIComponent(requirement.spId)}`,
+      {
+        method: 'PATCH',
+        body: {
+          result,
+          status: 'Complete',
+          receivedDate: requirement.receivedDate || today,
+          completedDate: today,
+          active: false,
+          ownerOverride: recruitingOwnerOverride === true
+        }
+      }
+    );
+  }
+
+  async function addRecruitingCandidateNote() {
+    const candidateId = selectedRecruitingProfile?.candidate?.candidateId;
+    if (!candidateId || !recruitingNoteDraft.trim()) return;
+
+    await runRecruitingProfileAction(
+      'addNote',
+      `${API}/recruiting/candidates/${encodeURIComponent(candidateId)}/notes`,
+      {
+        method: 'POST',
+        body: {
+          noteType: recruitingNoteType,
+          noteBody: recruitingNoteDraft
+        }
+      }
+    );
+
+    setRecruitingNoteDraft('');
+    setRecruitingNoteType('Internal');
+  }
+
+  function updateRecruitingCandidateDraft(field, value) {
+    setRecruitingCandidateDraft((draft) => ({
+      ...draft,
+      [field]: value
+    }));
+  }
+
+  async function createRecruitingCandidate() {
+    setRecruitingCandidateCreating(true);
+    setRecruitingActionError('');
+    setRecruitingActionMessage('');
+
+    try {
+      const res = await authedFetch(`${API}/recruiting/candidates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(recruitingCandidateDraft)
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Unable to add candidate.');
+
+      setRecruitingActionMessage(data.message || 'Candidate added.');
+      setRecruitingCreateModalOpen(false);
+      setRecruitingCandidateDraft(createRecruitingCandidateDraft());
+      await loadRecruitingDashboard({ silent: true });
+      if (data.candidate?.candidateId) {
+        await openRecruitingCandidateProfile(data.candidate.candidateId);
+      }
+    } catch (err) {
+      setRecruitingActionError(err.message || 'Unable to add candidate.');
+    } finally {
+      setRecruitingCandidateCreating(false);
+    }
+  }
+
+  function RecruitingCreateCandidateModal() {
+    if (!recruitingCreateModalOpen) return null;
+
+    return (
+      <div className="modal-overlay" role="presentation">
+        <div className="detail-modal recruiting-create-modal" role="dialog" aria-modal="true" aria-labelledby="recruiting-create-title">
+          <div className="detail-header">
+            <div>
+              <h2 id="recruiting-create-title">Add Recruiting Candidate</h2>
+              <p>Creates the Applied candidate row. Starting qualification stays a separate action.</p>
+            </div>
+            <button type="button" className="close-button" onClick={() => setRecruitingCreateModalOpen(false)}>Close</button>
+          </div>
+
+          <div className="modal-body recruiting-create-body">
+            <div className="recruiting-form-grid">
+              <label>
+                <span>First Name</span>
+                <input value={recruitingCandidateDraft.firstName} onChange={(e) => updateRecruitingCandidateDraft('firstName', e.target.value)} />
+              </label>
+              <label>
+                <span>Last Name</span>
+                <input value={recruitingCandidateDraft.lastName} onChange={(e) => updateRecruitingCandidateDraft('lastName', e.target.value)} />
+              </label>
+              <label>
+                <span>Candidate Type</span>
+                <select value={recruitingCandidateDraft.candidateType} onChange={(e) => updateRecruitingCandidateDraft('candidateType', e.target.value)}>
+                  {RECRUITING_CANDIDATE_TYPE_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>TeamID</span>
+                <input value={recruitingCandidateDraft.teamId} onChange={(e) => updateRecruitingCandidateDraft('teamId', e.target.value)} placeholder="Optional" />
+              </label>
+              <label>
+                <span>Primary Phone</span>
+                <input value={recruitingCandidateDraft.primaryPhone} onChange={(e) => updateRecruitingCandidateDraft('primaryPhone', e.target.value)} />
+              </label>
+              <label>
+                <span>Email</span>
+                <input value={recruitingCandidateDraft.email} onChange={(e) => updateRecruitingCandidateDraft('email', e.target.value)} />
+              </label>
+              <label className="wide-field">
+                <span>Street Address</span>
+                <input value={recruitingCandidateDraft.homeStreet} onChange={(e) => updateRecruitingCandidateDraft('homeStreet', e.target.value)} />
+              </label>
+              <label>
+                <span>City</span>
+                <input value={recruitingCandidateDraft.homeCity} onChange={(e) => updateRecruitingCandidateDraft('homeCity', e.target.value)} />
+              </label>
+              <label>
+                <span>State</span>
+                <input value={recruitingCandidateDraft.homeState} onChange={(e) => updateRecruitingCandidateDraft('homeState', e.target.value)} maxLength={2} />
+              </label>
+              <label>
+                <span>Zip</span>
+                <input value={recruitingCandidateDraft.homeZip} onChange={(e) => updateRecruitingCandidateDraft('homeZip', e.target.value)} />
+              </label>
+              <label>
+                <span>Application Date</span>
+                <input type="date" value={recruitingCandidateDraft.applicationDate} onChange={(e) => updateRecruitingCandidateDraft('applicationDate', e.target.value)} />
+              </label>
+              <label>
+                <span>Source</span>
+                <select value={recruitingCandidateDraft.source} onChange={(e) => updateRecruitingCandidateDraft('source', e.target.value)}>
+                  {RECRUITING_SOURCE_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>Relationship</span>
+                <select value={recruitingCandidateDraft.relationshipType} onChange={(e) => updateRecruitingCandidateDraft('relationshipType', e.target.value)}>
+                  {RECRUITING_RELATIONSHIP_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </label>
+            </div>
+
+            <div className="recruiting-checkbox-row">
+              <label><input type="checkbox" checked={recruitingCandidateDraft.ownsTruck} onChange={(e) => updateRecruitingCandidateDraft('ownsTruck', e.target.checked)} /> Owns truck</label>
+              <label><input type="checkbox" checked={recruitingCandidateDraft.ownsTrailer} onChange={(e) => updateRecruitingCandidateDraft('ownsTrailer', e.target.checked)} /> Owns trailer</label>
+            </div>
+
+            {recruitingActionError && <div className="msg error">{recruitingActionError}</div>}
+
+            <div className="recruiting-modal-actions">
+              <button type="button" className="secondary-button" onClick={() => setRecruitingCreateModalOpen(false)}>Cancel</button>
+              <button type="button" onClick={createRecruitingCandidate} disabled={recruitingCandidateCreating}>
+                {recruitingCandidateCreating ? 'Adding...' : 'Add Candidate'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function RecruitingProfileModal() {
+    if (!selectedRecruitingProfile) return null;
+
+    const candidate = selectedRecruitingProfile.candidate || {};
+    const requirements = [...(selectedRecruitingProfile.requirements || [])]
+      .sort((a, b) => getRequirementSortIndex(a.type) - getRequirementSortIndex(b.type));
+    const notes = selectedRecruitingProfile.notes || [];
+    const teamMembers = selectedRecruitingProfile.teamMembers || [];
+    const candidateClosed = isRecruitingCandidateClosed(candidate);
+    const canStartQualification = ['Prospect', 'Applied'].includes(candidate.status);
+    const canMarkQualified = candidate.status === 'Ready to Qualify';
+    const canUseOwnerOverride = candidate.status && candidate.status !== 'Qualified';
+    const checklistOverrideActive = canUseOwnerOverride && recruitingOwnerOverride;
+
+    return (
+      <div className="modal-overlay" role="presentation">
+        <div className="detail-modal recruiting-profile-modal" role="dialog" aria-modal="true" aria-labelledby="recruiting-profile-title">
+          <div className="detail-header recruiting-profile-header">
+            <div>
+              <h2 id="recruiting-profile-title">{candidate.displayName || candidate.title || 'Candidate'}</h2>
+              <p>{candidate.candidateId} · {candidate.type || 'Unknown'}{candidate.teamId ? ` · ${candidate.teamId}` : ''}</p>
+            </div>
+            <button type="button" className="close-button" onClick={closeRecruitingProfileModal}>Close</button>
+          </div>
+
+          <div className="modal-body recruiting-profile-body">
+            {recruitingActionMessage && <div className="msg success-message">{recruitingActionMessage}</div>}
+            {recruitingActionError && <div className="msg error">{recruitingActionError}</div>}
+
+            <section className="recruiting-profile-summary-card">
+              <div>
+                <span className={getRecruitingStatusClass(candidate.status)}>{candidate.status || 'Unknown'}</span>
+                <h3>{candidate.title || candidate.displayName}</h3>
+                <p>{candidate.email || 'No email'} · {formatPhone(candidate.primaryPhone)}</p>
+              </div>
+              <div className="recruiting-profile-actions">
+                {canStartQualification && (
+                  <button type="button" onClick={startRecruitingQualification} disabled={Boolean(recruitingActionLoading)}>
+                    {recruitingActionLoading === 'startQualification' ? 'Starting...' : 'Start Qualification'}
+                  </button>
+                )}
+                {canMarkQualified && (
+                  <button type="button" onClick={markRecruitingCandidateQualified} disabled={Boolean(recruitingActionLoading)}>
+                    {recruitingActionLoading === 'markQualified' ? 'Marking...' : 'Mark Qualified'}
+                  </button>
+                )}
+              </div>
+            </section>
+
+            <section className="recruiting-profile-grid">
+              <div className="recruiting-info-card">
+                <h3>Overview</h3>
+                <dl>
+                  <div><dt>Application</dt><dd>{formatDateOnly(candidate.applicationDate)}</dd></div>
+                  <div><dt>Last Contact</dt><dd>{formatDateOnly(candidate.lastContactDate)}</dd></div>
+                  <div><dt>Next Follow-Up</dt><dd>{formatDateOnly(candidate.nextFollowUpDate)}</dd></div>
+                  <div><dt>Source</dt><dd>{candidate.source || '-'}</dd></div>
+                  <div><dt>Relationship</dt><dd>{candidate.relationshipType || '-'}</dd></div>
+                  <div><dt>Equipment</dt><dd>{candidate.ownsTruck ? 'Owns truck' : 'No truck'} · {candidate.ownsTrailer ? 'Owns trailer' : 'No trailer'}</dd></div>
+                  <div className="recruiting-folder-row"><dt>Folder</dt><dd>{candidate.folderPath ? (
+                    <button
+                      type="button"
+                      className="secondary-button recruiting-folder-button"
+                      onClick={() => openRecruitingCandidateFolder(candidate)}
+                      disabled={!candidate.folderUrl}
+                      title={candidate.folderPath}
+                    >
+                      Open Candidate Folder
+                    </button>
+                  ) : '-'}</dd></div>
+                </dl>
+                <div className="recruiting-followup-control">
+                  <label>
+                    <span>Follow-Up Date</span>
+                    <input
+                      type="date"
+                      value={recruitingFollowUpDate}
+                      onChange={(e) => setRecruitingFollowUpDate(e.target.value)}
+                      disabled={candidateClosed || Boolean(recruitingActionLoading)}
+                    />
+                  </label>
+                  <div className="recruiting-followup-actions">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => saveRecruitingFollowUp(recruitingFollowUpDate)}
+                      disabled={candidateClosed || !recruitingFollowUpDate || Boolean(recruitingActionLoading)}
+                    >
+                      {recruitingActionLoading === 'saveFollowUp' ? 'Saving...' : 'Set Follow-Up'}
+                    </button>
+                    {candidate.nextFollowUpDate && (
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => saveRecruitingFollowUp('')}
+                        disabled={candidateClosed || Boolean(recruitingActionLoading)}
+                      >
+                        {recruitingActionLoading === 'clearFollowUp' ? 'Clearing...' : 'Clear'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="recruiting-info-card">
+                <h3>Address</h3>
+                <p>{candidate.homeStreet || '-'}</p>
+                <p>{[candidate.homeCity, candidate.homeState, candidate.homeZip].filter(Boolean).join(', ') || '-'}</p>
+              </div>
+            </section>
+
+            <section className="recruiting-section-card">
+              <div className="recruiting-section-card-header">
+                <div>
+                  <h3>Qualification Checklist</h3>
+                  <p>{candidate.status === 'Qualified' ? 'Qualified candidates are closed.' : checklistOverrideActive ? 'Override is enabled for checklist changes.' : 'Update final requirement outcomes here.'}</p>
+                </div>
+                {canUseOwnerOverride && (
+                  <label className="recruiting-owner-override-toggle">
+                    <input
+                      type="checkbox"
+                      checked={recruitingOwnerOverride}
+                      onChange={(e) => setRecruitingOwnerOverride(e.target.checked)}
+                    />
+                    <span>Override</span>
+                  </label>
+                )}
+              </div>
+
+              <div className="recruiting-requirements-list">
+                {requirements.length === 0 ? (
+                  <div className="msg">No qualification requirements have been created yet.</div>
+                ) : requirements.map((requirement) => {
+                  const rowLocked = candidate.status === 'Qualified' || ((candidateClosed || requirement.active === false) && !checklistOverrideActive);
+                  const dateLabel = formatDateOnly(requirement.completedDate || requirement.receivedDate || requirement.requestedDate);
+                  return (
+                    <div key={requirement.spId} className={`recruiting-requirement-row ${rowLocked ? 'locked' : ''}`.trim()}>
+                      <div className="recruiting-requirement-main">
+                        <strong>{requirement.type}</strong>
+                        <small>
+                          {[requirement.status || 'No status', requirement.required ? 'Required' : 'Not required', dateLabel]
+                            .filter((value) => value && value !== '-')
+                            .join(' · ')}
+                        </small>
+                      </div>
+                      <div className="recruiting-requirement-result-control">
+                        {rowLocked ? (
+                          <span className={getRecruitingStatusClass(requirement.result || 'Pending')}>{requirement.result || 'Pending'}</span>
+                        ) : (
+                          <select
+                            value={requirement.result || ''}
+                            onChange={(e) => updateRecruitingRequirementResult(requirement, e.target.value)}
+                            disabled={Boolean(recruitingActionLoading)}
+                            aria-label={`Set result for ${requirement.type}`}
+                          >
+                            <option value="">Set result...</option>
+                            {RECRUITING_REQUIREMENT_RESULT_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                          </select>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            {teamMembers.length > 0 && (
+              <section className="recruiting-section-card">
+                <h3>Team</h3>
+                <div className="recruiting-team-list">
+                  {teamMembers.map((member) => (
+                    <button key={member.candidateId} type="button" onClick={() => openRecruitingCandidateProfile(member.candidateId)}>
+                      <span>{member.displayName || member.title}</span>
+                      <span className={getRecruitingStatusClass(member.status)}>{member.status}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            <section className="recruiting-section-card">
+              <div className="recruiting-section-card-header">
+                <div>
+                  <h3>Timeline Notes</h3>
+                  <p>{notes.length} note{notes.length === 1 ? '' : 's'}</p>
+                </div>
+              </div>
+
+              <div className="recruiting-note-composer">
+                <select value={recruitingNoteType} onChange={(e) => setRecruitingNoteType(e.target.value)}>
+                  {RECRUITING_NOTE_TYPE_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+                <textarea
+                  value={recruitingNoteDraft}
+                  onChange={(e) => setRecruitingNoteDraft(e.target.value)}
+                  placeholder="Add a recruiting note..."
+                  rows={3}
+                />
+                <button type="button" onClick={addRecruitingCandidateNote} disabled={!recruitingNoteDraft.trim() || Boolean(recruitingActionLoading)}>
+                  {recruitingActionLoading === 'addNote' ? 'Saving...' : 'Add Note'}
+                </button>
+              </div>
+
+              <div className="recruiting-notes-list">
+                {notes.length === 0 ? (
+                  <div className="msg">No candidate notes yet.</div>
+                ) : notes.map((note) => (
+                  <article key={note.spId || note.noteId} className="recruiting-note-card">
+                    <header>
+                      <strong>{note.noteType || 'Note'}</strong>
+                      <span>{formatDateOnly(note.noteDate)}</span>
+                    </header>
+                    <p>{note.noteBody}</p>
+                    <small>{note.source || 'Source unknown'} · {note.createdByText || 'Unknown'}</small>
+                  </article>
+                ))}
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function RecruitingPanel() {
+    const summary = recruitingData?.summary || {};
+    const sourceCandidates = recruitingData?.candidates || [];
+    const sourceCandidateIds = new Set(sourceCandidates.map((candidate) => candidate.candidateId).filter(Boolean));
+    const openRequirementCandidateIds = new Set(
+      (recruitingData?.openRequirements || [])
+        .map((requirement) => requirement.candidateId)
+        .filter((candidateId) => candidateId && sourceCandidateIds.has(candidateId))
+    );
+    const openRequirementLineCount = (recruitingData?.openRequirements || [])
+      .filter((requirement) => requirement.candidateId && sourceCandidateIds.has(requirement.candidateId))
+      .length;
+    const today = getEasternDateInputValue();
+    const isFollowUpDueCandidate = (candidate) =>
+      Boolean(candidate.nextFollowUpDate) &&
+      candidate.nextFollowUpDate <= today &&
+      !RECRUITING_CLOSED_STATUSES.includes(candidate.status);
+    const matchesRecruitingView = (candidate) => {
+      if (recruitingStatusFilter === 'Heads-Up') return RECRUITING_HEADS_UP_STATUSES.includes(candidate.status);
+      if (recruitingStatusFilter === 'All') return true;
+      if (recruitingStatusFilter === 'Follow-Up Due') return isFollowUpDueCandidate(candidate);
+      if (recruitingStatusFilter === 'Open QR Lines') return openRequirementCandidateIds.has(candidate.candidateId);
+      return candidate.status === recruitingStatusFilter;
+    };
+    const filteredCandidates = sourceCandidates.filter((candidate) => {
+      const searchText = recruitingSearch.trim().toLowerCase();
+      const searchMatch = !searchText || [
+        candidate.displayName,
+        candidate.title,
+        candidate.candidateId,
+        candidate.email,
+        candidate.primaryPhone,
+        candidate.teamId
+      ].some((value) => String(value || '').toLowerCase().includes(searchText));
+      return matchesRecruitingView(candidate) && searchMatch;
+    });
+    const alertCount = Number(summary.readyToQualify || 0) + Number(summary.followUpDue || 0);
+    const showRecruitingPill = !recruitingSectionOpen || recruitingLoading;
+    const setRecruitingTileView = (view) => {
+      setRecruitingStatusFilter(view);
+      setRecruitingSearch('');
+    };
+
+    return (
+      <div className="search-card feature-accordion-panel recruiting-panel">
+        <button
+          type="button"
+          className="feature-section-header-button recruiting-section-header-button"
+          onClick={toggleRecruitingSection}
+          aria-expanded={recruitingSectionOpen}
+        >
+          <span className="feature-section-title-block">
+            <span className="feature-section-title">Recruiting</span>
+          </span>
+          {showRecruitingPill && (
+            <span className={`feature-section-status-pill ${alertCount > 0 ? 'has-items' : 'is-zero'} ${recruitingLoading ? 'is-loading' : ''}`}>
+              {recruitingLoading ? '...' : formatReportNumber(alertCount)}
+            </span>
+          )}
+          <span className="feature-section-chevron">{recruitingSectionOpen ? '▲' : '▼'}</span>
+        </button>
+
+        {recruitingError && <div className="msg error">{recruitingError}</div>}
+        {recruitingActionMessage && !selectedRecruitingProfile && <div className="msg success-message">{recruitingActionMessage}</div>}
+        {recruitingActionError && !selectedRecruitingProfile && <div className="msg error">{recruitingActionError}</div>}
+        {recruitingProfileError && <div className="msg error">{recruitingProfileError}</div>}
+
+        {recruitingSectionOpen && (
+          <div className="feature-section-body recruiting-body">
+            <div className="recruiting-toolbar">
+              <div>
+                <h3>Recruiting Pipeline</h3>
+                <p>{recruitingData?.generatedAt || 'Pipeline snapshot'}</p>
+              </div>
+              <div className="recruiting-toolbar-actions">
+                <button type="button" className="secondary-button" onClick={() => loadRecruitingDashboard()} disabled={recruitingLoading}>
+                  {recruitingLoading ? 'Refreshing...' : 'Refresh'}
+                </button>
+                <button type="button" onClick={() => setRecruitingCreateModalOpen(true)}>Add Candidate</button>
+              </div>
+            </div>
+
+            <div className="recruiting-kpi-grid" aria-label="Recruiting quick filters">
+              <button type="button" className={`recruiting-kpi-card ${recruitingStatusFilter === 'Applied' ? 'active' : ''}`} onClick={() => setRecruitingTileView('Applied')}>
+                <strong>{formatReportNumber(summary.applied || 0)}</strong><span>Applied</span>
+              </button>
+              <button type="button" className={`recruiting-kpi-card ${recruitingStatusFilter === 'Active Qualification' ? 'active' : ''}`} onClick={() => setRecruitingTileView('Active Qualification')}>
+                <strong>{formatReportNumber(summary.activeQualification || 0)}</strong><span>Active Qualification</span>
+              </button>
+              <button type="button" className={`recruiting-kpi-card ${recruitingStatusFilter === 'Ready to Qualify' ? 'active' : ''}`} onClick={() => setRecruitingTileView('Ready to Qualify')}>
+                <strong>{formatReportNumber(summary.readyToQualify || 0)}</strong><span>Ready to Qualify</span>
+              </button>
+              <button type="button" className={`recruiting-kpi-card ${recruitingStatusFilter === 'Follow-Up Due' ? 'active' : ''}`} onClick={() => setRecruitingTileView('Follow-Up Due')}>
+                <strong>{formatReportNumber(summary.followUpDue || 0)}</strong><span>Follow-Up Due</span>
+              </button>
+              <button
+                type="button"
+                className={`recruiting-kpi-card ${recruitingStatusFilter === 'Open QR Lines' ? 'active' : ''}`}
+                onClick={() => setRecruitingTileView('Open QR Lines')}
+                title={`${formatReportNumber(openRequirementLineCount)} open QR line${openRequirementLineCount === 1 ? '' : 's'} across ${formatReportNumber(openRequirementCandidateIds.size)} candidate${openRequirementCandidateIds.size === 1 ? '' : 's'}`}
+              >
+                <strong>{formatReportNumber(openRequirementCandidateIds.size)}</strong><span>Open QR</span>
+              </button>
+            </div>
+
+            <div className="recruiting-filters">
+              <input
+                value={recruitingSearch}
+                onChange={(e) => setRecruitingSearch(e.target.value)}
+                placeholder="Search candidates, email, phone, TeamID..."
+              />
+              <select value={recruitingStatusFilter} onChange={(e) => setRecruitingStatusFilter(e.target.value)}>
+                {RECRUITING_CANDIDATE_STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}
+              </select>
+            </div>
+
+            {recruitingLoading && !recruitingData ? (
+              <div className="msg">Loading recruiting pipeline...</div>
+            ) : filteredCandidates.length === 0 ? (
+              <div className="msg">No recruiting candidates match this view.</div>
+            ) : (
+              <div className="recruiting-table-wrap">
+                <table className="recruiting-candidate-table">
+                  <thead>
+                    <tr>
+                      <th>Candidate</th>
+                      <th>Status</th>
+                      <th>Type</th>
+                      <th>Contact</th>
+                      <th>Application</th>
+                      <th>Follow-Up</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredCandidates.map((candidate) => (
+                      <tr key={candidate.candidateId || candidate.spId} onClick={() => openRecruitingCandidateProfile(candidate.candidateId)}>
+                        <td>
+                          <strong>{candidate.displayName || candidate.title}</strong>
+                          <small>{candidate.candidateId}{candidate.teamId ? ` · ${candidate.teamId}` : ''}</small>
+                        </td>
+                        <td><span className={getRecruitingStatusClass(candidate.status)}>{candidate.status}</span></td>
+                        <td>{candidate.type || '-'}</td>
+                        <td>{candidate.email || formatPhone(candidate.primaryPhone)}</td>
+                        <td>{formatDateOnly(candidate.applicationDate)}</td>
+                        <td>{formatDateOnly(candidate.nextFollowUpDate)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function SalesAndLeadsPanel() {
     const isCustomerTrendsOpen = activeReportPanel === 'customerBookingTrends';
     const isSalesActivityOpen = activeReportPanel === 'salesActivity';
@@ -14719,7 +15560,7 @@ function openReportLoadDetails(load) {
              </span>
           {showSalesAndLeadsPill && (
             <span className="feature-section-status-pill sales-and-leads-status-pill has-items">
-              {formatReportNumber(salesAndLeadsPillCount)} {salesAndLeadsPillLabel}
+              {formatReportNumber(salesAndLeadsPillCount)}
             </span>
           )}
           <span className="feature-section-chevron">{salesAndLeadsSectionOpen ? '▲' : '▼'}</span>
@@ -14856,10 +15697,10 @@ function openReportLoadDetails(load) {
               title={reportActionAlertSummary}
             >
               {reportActionAlertsLoading && !reportActionAlerts
-                ? 'Checking...'
+                ? '...'
                 : reportActionAlertCounts.total > 0
-                  ? `${formatReportNumber(reportActionAlertCounts.total)} ${reportActionAlertCounts.total === 1 ? 'Alert' : 'Alerts'}`
-                  : 'Clear'}
+                  ? formatReportNumber(reportActionAlertCounts.total)
+                  : '0'}
             </span>
           )}
           <span className="feature-section-chevron">{reportsSectionOpen ? '▲' : '▼'}</span>
@@ -16225,6 +17066,8 @@ function openReportLoadDetails(load) {
   return (
     <>
       {renderPreferencesModal()}
+      {RecruitingProfileModal()}
+      {RecruitingCreateCandidateModal()}
 
       {startupSplashVisible && (
         <KoleStartupSplash
@@ -16622,6 +17465,8 @@ function openReportLoadDetails(load) {
   {IntelliTrackPanel()}
 
   {AvailableTrucksPanel()}
+
+  {!userPrefs.hideRecruiting && RecruitingPanel()}
 
   {!userPrefs.hideSalesAndLeads && <SalesAndLeadsPanel />}
 
