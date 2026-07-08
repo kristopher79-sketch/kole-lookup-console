@@ -7820,6 +7820,8 @@ const RECRUITING_CLOSED_STATUSES = new Set([
   RECRUITING_CANDIDATE_STATUS.DORMANT
 ]);
 
+const RECRUITING_ALLOWED_CANDIDATE_STATUSES = new Set(Object.values(RECRUITING_CANDIDATE_STATUS));
+
 const RECRUITING_FOLDER_ACTIVE_STATUSES = new Set([
   RECRUITING_CANDIDATE_STATUS.PROSPECT,
   RECRUITING_CANDIDATE_STATUS.APPLIED,
@@ -8429,6 +8431,36 @@ function buildRecruitingCandidatePatchFromBody(body = {}) {
   if (Object.prototype.hasOwnProperty.call(body, 'ownsTrailer')) patch.OwnsTrailer = body.ownsTrailer === true;
   if (Object.prototype.hasOwnProperty.call(body, 'active')) patch.ActiveFlag = body.active === true;
 
+  if (patch.CandidateStatus) {
+    if (!RECRUITING_ALLOWED_CANDIDATE_STATUSES.has(patch.CandidateStatus)) {
+      const error = new Error('Candidate status is not allowed.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (RECRUITING_CLOSED_STATUSES.has(patch.CandidateStatus)) {
+      patch.ActiveFlag = false;
+      patch.QualificationStartedFlag = false;
+      patch.NextFollowUpDate = null;
+
+      if (patch.CandidateStatus === RECRUITING_CANDIDATE_STATUS.DISQUALIFIED) {
+        patch.DisqualifiedDate = patch.DisqualifiedDate || formatEasternDate();
+        patch.DisqualifiedReason = patch.DisqualifiedReason || 'Manually disqualified in Kole Connect';
+      }
+    } else {
+      patch.ActiveFlag = true;
+
+      if (patch.CandidateStatus === RECRUITING_CANDIDATE_STATUS.ACTIVE_QUALIFICATION) {
+        patch.QualificationStartedFlag = true;
+      }
+
+      if (patch.CandidateStatus !== RECRUITING_CANDIDATE_STATUS.DISQUALIFIED) {
+        patch.DisqualifiedDate = null;
+        patch.DisqualifiedReason = '';
+      }
+    }
+  }
+
   if (patch.FirstName || patch.LastName || patch.DisplayName) {
     const firstName = patch.FirstName || cleanRecruitingString(body.currentFirstName);
     const lastName = patch.LastName || cleanRecruitingString(body.currentLastName);
@@ -8438,6 +8470,19 @@ function buildRecruitingCandidatePatchFromBody(body = {}) {
   }
 
   return patch;
+}
+
+
+async function inactivateRecruitingRequirementsForCandidate(token, siteId, listId, requirements = []) {
+  const activeRequirements = (requirements || []).filter((requirement) => requirement?.spId && requirement.active !== false);
+
+  await Promise.all(activeRequirements.map((requirement) => graphPatch(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${encodeURIComponent(requirement.spId)}/fields`,
+    { ActiveFlag: false }
+  )));
+
+  return activeRequirements.length;
 }
 
 function buildCandidateNoteFields(candidate, body = {}) {
@@ -8712,8 +8757,17 @@ app.patch('/recruiting/candidates/:candidateId', requireLookupAccess, async (req
     }
 
     await graphPatch(token, `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${lists.candidates}/items/${encodeURIComponent(profile.candidate.spId)}/fields`, patch);
+
+    let closedRequirementCount = 0;
+    if (patch.CandidateStatus && RECRUITING_CLOSED_STATUSES.has(patch.CandidateStatus)) {
+      closedRequirementCount = await inactivateRecruitingRequirementsForCandidate(token, siteId, lists.requirements, profile.requirements);
+    }
+
     const updatedProfile = await getRecruitingProfile(token, candidateId);
-    res.json({ success: true, message: 'Candidate updated.', ...updatedProfile });
+    const message = patch.CandidateStatus
+      ? `${updatedProfile.candidate.displayName || updatedProfile.candidate.title || 'Candidate'} moved to ${patch.CandidateStatus}.${closedRequirementCount ? ` ${closedRequirementCount} open qualification row${closedRequirementCount === 1 ? '' : 's'} inactivated.` : ''}`
+      : 'Candidate updated.';
+    res.json({ success: true, message, ...updatedProfile });
   } catch (error) {
     console.error(error);
     res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Unable to update recruiting candidate.' });

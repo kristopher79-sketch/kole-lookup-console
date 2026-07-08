@@ -45,6 +45,9 @@ const RECRUITING_RELATIONSHIP_OPTIONS = ['Percentage', 'Company', 'Per Mile Solo
 const RECRUITING_NOTE_TYPE_OPTIONS = ['Call', 'Email', 'Follow-Up', 'Application', 'Qualification', 'Disqualification', 'Internal', 'System', 'Other'];
 const RECRUITING_REQUIREMENT_RESULT_OPTIONS = ['Satisfactory', 'Unsatisfactory'];
 const RECRUITING_CORE_REQUIREMENT_ORDER = ['Background Check', 'Drug Screen', 'MVR', 'Contract', 'Previous Employment', 'TWIC'];
+const RECRUITING_PREVIEW_ROW_LIMIT = 8;
+const RECRUITING_MANUAL_STATUS_OPTIONS = ['Prospect', 'Applied', 'Active Qualification', 'Disqualified', 'Withdrawn', 'Dormant'];
+const RECRUITING_MANUAL_CLOSED_STATUS_OPTIONS = ['Disqualified', 'Withdrawn', 'Dormant'];
 
 function getRecruitingCandidateDisplayName(firstName = '', lastName = '') {
   return [firstName, lastName]
@@ -111,6 +114,10 @@ const DEFAULT_KOLE_USER_PREFERENCES = {
   uploadDigestDefaultOpen: false,
   intelliTrackDefaultOpen: false,
   availableTrucksDefaultOpen: false,
+  hideOperationsToday: false,
+  hideUploadDigest: false,
+  hideIntelliTrack: false,
+  hideAvailableTrucks: false,
   salesAndLeadsDefaultOpen: false,
   operationsNext7DefaultClosed: false,
   reportsDefaultOpen: false,
@@ -1020,8 +1027,8 @@ export default function App() {
   const [uploadDigestLoading, setUploadDigestLoading] = useState(false);
   const [uploadDigestError, setUploadDigestError] = useState('');
   const [uploadDigestActionError, setUploadDigestActionError] = useState('');
-  const [uploadDigestSectionOpen, setUploadDigestSectionOpen] = useState(() => userPrefs.uploadDigestDefaultOpen);
-  const [intelliTrackSectionOpen, setIntelliTrackSectionOpen] = useState(() => userPrefs.intelliTrackDefaultOpen);
+  const [uploadDigestSectionOpen, setUploadDigestSectionOpen] = useState(() => userPrefs.uploadDigestDefaultOpen && !userPrefs.hideUploadDigest);
+  const [intelliTrackSectionOpen, setIntelliTrackSectionOpen] = useState(() => userPrefs.intelliTrackDefaultOpen && !userPrefs.hideIntelliTrack);
   const [intelliTrackOpen, setIntelliTrackOpen] = useState(false);
   const [intelliTrackActionOpen, setIntelliTrackActionOpen] = useState(false);
   const [intelliTrackData, setIntelliTrackData] = useState(null);
@@ -1036,7 +1043,7 @@ export default function App() {
   const [intelliTrackActionLoading, setIntelliTrackActionLoading] = useState('');
   const [intelliTrackPendingBol, setIntelliTrackPendingBol] = useState('');
   const [intelliTrackSuppressedBols, setIntelliTrackSuppressedBols] = useState([]);
-  const [availableTrucksSectionOpen, setAvailableTrucksSectionOpen] = useState(() => userPrefs.availableTrucksDefaultOpen);
+  const [availableTrucksSectionOpen, setAvailableTrucksSectionOpen] = useState(() => userPrefs.availableTrucksDefaultOpen && !userPrefs.hideAvailableTrucks);
   const [availableTrucksCurrentOpen, setAvailableTrucksCurrentOpen] = useState(false);
   const [availableTrucksOpen, setAvailableTrucksOpen] = useState(false);
   const [availableTrucksActionOpen, setAvailableTrucksActionOpen] = useState(false);
@@ -1082,6 +1089,9 @@ export default function App() {
   const [recruitingNoteDraft, setRecruitingNoteDraft] = useState('');
   const [recruitingNoteType, setRecruitingNoteType] = useState('Internal');
   const [recruitingFollowUpDate, setRecruitingFollowUpDate] = useState('');
+  const [recruitingStatusDraft, setRecruitingStatusDraft] = useState('');
+  const [recruitingStatusReason, setRecruitingStatusReason] = useState('');
+  const [recruitingStatusPickerOpen, setRecruitingStatusPickerOpen] = useState(false);
   const [recruitingOwnerOverride, setRecruitingOwnerOverride] = useState(false);
 
   const isAnyModalOpen = Boolean(
@@ -1485,19 +1495,24 @@ export default function App() {
     setDriverRosterAccordionOpen(nextPrefs.driverRosterDefaultOpen);
     setDriverTimeOffAccordionOpen(nextPrefs.driverTimeOffDefaultOpen);
     setDriverTimeOffPaneFilter(nextPrefs.driverTimeOffDefaultPane);
-    setUploadDigestSectionOpen(nextPrefs.uploadDigestDefaultOpen);
-    setIntelliTrackSectionOpen(nextPrefs.intelliTrackDefaultOpen);
-    setAvailableTrucksSectionOpen(nextPrefs.availableTrucksDefaultOpen);
-    setOperationsNext7Open(!nextPrefs.operationsNext7DefaultClosed);
+    setUploadDigestSectionOpen(nextPrefs.hideUploadDigest ? false : nextPrefs.uploadDigestDefaultOpen);
+    setIntelliTrackSectionOpen(nextPrefs.hideIntelliTrack ? false : nextPrefs.intelliTrackDefaultOpen);
+    setAvailableTrucksSectionOpen(nextPrefs.hideAvailableTrucks ? false : nextPrefs.availableTrucksDefaultOpen);
+    setOperationsNext7Open(nextPrefs.hideOperationsToday ? false : !nextPrefs.operationsNext7DefaultClosed);
+
+    if (nextPrefs.hideOperationsToday) {
+      setDriverRosterAccordionOpen(false);
+      setDriverTimeOffAccordionOpen(false);
+    }
     setSalesAndLeadsSectionOpen(nextPrefs.hideSalesAndLeads ? false : nextPrefs.salesAndLeadsDefaultOpen);
     setRecruitingSectionOpen(nextPrefs.hideRecruiting ? false : nextPrefs.recruitingDefaultOpen);
     setReportsSectionOpen(nextPrefs.reportsDefaultOpen);
 
-    if (!nextPrefs.intelliTrackDefaultOpen) {
+    if (!nextPrefs.intelliTrackDefaultOpen || nextPrefs.hideIntelliTrack) {
       closeIntelliTrackSubsections();
     }
 
-    if (!nextPrefs.availableTrucksDefaultOpen) {
+    if (!nextPrefs.availableTrucksDefaultOpen || nextPrefs.hideAvailableTrucks) {
       closeAvailableTruckSubsections();
     }
 
@@ -1528,17 +1543,17 @@ export default function App() {
     }
 
     if (key === 'uploadDigestDefaultOpen') {
-      setUploadDigestSectionOpen(Boolean(value));
+      setUploadDigestSectionOpen(userPrefs.hideUploadDigest ? false : Boolean(value));
     }
 
     if (key === 'intelliTrackDefaultOpen') {
-      setIntelliTrackSectionOpen(Boolean(value));
-      if (!value) closeIntelliTrackSubsections();
+      setIntelliTrackSectionOpen(userPrefs.hideIntelliTrack ? false : Boolean(value));
+      if (!value || userPrefs.hideIntelliTrack) closeIntelliTrackSubsections();
     }
 
     if (key === 'availableTrucksDefaultOpen') {
-      setAvailableTrucksSectionOpen(Boolean(value));
-      if (!value) closeAvailableTruckSubsections();
+      setAvailableTrucksSectionOpen(userPrefs.hideAvailableTrucks ? false : Boolean(value));
+      if (!value || userPrefs.hideAvailableTrucks) closeAvailableTruckSubsections();
     }
 
     if (key === 'salesAndLeadsDefaultOpen') {
@@ -1552,7 +1567,45 @@ export default function App() {
     }
 
     if (key === 'operationsNext7DefaultClosed') {
-      setOperationsNext7Open(!Boolean(value));
+      setOperationsNext7Open(userPrefs.hideOperationsToday ? false : !Boolean(value));
+    }
+
+    if (key === 'hideOperationsToday') {
+      if (value) {
+        setOperationsNext7Open(false);
+        setDriverRosterAccordionOpen(false);
+        setDriverTimeOffAccordionOpen(false);
+      } else {
+        setOperationsNext7Open(!userPrefs.operationsNext7DefaultClosed);
+        setDriverRosterAccordionOpen(userPrefs.driverRosterDefaultOpen);
+        setDriverTimeOffAccordionOpen(userPrefs.driverTimeOffDefaultOpen);
+      }
+    }
+
+    if (key === 'hideUploadDigest') {
+      if (value) {
+        setUploadDigestSectionOpen(false);
+      } else if (userPrefs.uploadDigestDefaultOpen) {
+        setUploadDigestSectionOpen(true);
+      }
+    }
+
+    if (key === 'hideIntelliTrack') {
+      if (value) {
+        setIntelliTrackSectionOpen(false);
+        closeIntelliTrackSubsections();
+      } else if (userPrefs.intelliTrackDefaultOpen) {
+        setIntelliTrackSectionOpen(true);
+      }
+    }
+
+    if (key === 'hideAvailableTrucks') {
+      if (value) {
+        setAvailableTrucksSectionOpen(false);
+        closeAvailableTruckSubsections();
+      } else if (userPrefs.availableTrucksDefaultOpen) {
+        setAvailableTrucksSectionOpen(true);
+      }
     }
 
     if (key === 'hideSalesAndLeads') {
@@ -1690,39 +1743,45 @@ export default function App() {
               <div className="preferences-grid">
                 <PreferenceSwitch
                   label="Driver Roster starts open"
-                  description="Keeps the roster visible without a fresh click each session."
-                  checked={userPrefs.driverRosterDefaultOpen}
+                  description={userPrefs.hideOperationsToday ? 'Unavailable while Operations Today is hidden.' : 'Keeps the roster visible without a fresh click each session.'}
+                  checked={userPrefs.driverRosterDefaultOpen && !userPrefs.hideOperationsToday}
                   onChange={(checked) => updateUserPreference('driverRosterDefaultOpen', checked)}
+                  locked={userPrefs.hideOperationsToday}
                 />
                 <PreferenceSwitch
                   label="Current Driver Time Off starts open"
-                  description="Pairs well with roster if you read both together."
-                  checked={userPrefs.driverTimeOffDefaultOpen}
+                  description={userPrefs.hideOperationsToday ? 'Unavailable while Operations Today is hidden.' : 'Pairs well with roster if you read both together.'}
+                  checked={userPrefs.driverTimeOffDefaultOpen && !userPrefs.hideOperationsToday}
                   onChange={(checked) => updateUserPreference('driverTimeOffDefaultOpen', checked)}
+                  locked={userPrefs.hideOperationsToday}
                 />
                 <PreferenceSwitch
-                  label="Upload Digest starts open"
-                  description="Open today's pickup and delivery uploads automatically."
-                  checked={userPrefs.uploadDigestDefaultOpen}
+                  label="Job Photo Uploads starts open"
+                  description={userPrefs.hideUploadDigest ? 'Unavailable while Job Photo Uploads is hidden.' : "Open today's pickup and delivery uploads automatically."}
+                  checked={userPrefs.uploadDigestDefaultOpen && !userPrefs.hideUploadDigest}
                   onChange={(checked) => updateUserPreference('uploadDigestDefaultOpen', checked)}
+                  locked={userPrefs.hideUploadDigest}
                 />
                 <PreferenceSwitch
                   label="IntelliTrack starts open"
-                  description="Open active tracking tools at startup."
-                  checked={userPrefs.intelliTrackDefaultOpen}
+                  description={userPrefs.hideIntelliTrack ? 'Unavailable while IntelliTrack is hidden.' : 'Open active tracking tools at startup.'}
+                  checked={userPrefs.intelliTrackDefaultOpen && !userPrefs.hideIntelliTrack}
                   onChange={(checked) => updateUserPreference('intelliTrackDefaultOpen', checked)}
+                  locked={userPrefs.hideIntelliTrack}
                 />
                 <PreferenceSwitch
-                  label="Available Trucks starts open"
-                  description="Open availability analysis and posting tools at startup."
-                  checked={userPrefs.availableTrucksDefaultOpen}
+                  label="Available Equipment starts open"
+                  description={userPrefs.hideAvailableTrucks ? 'Unavailable while Available Equipment is hidden.' : 'Open availability analysis and posting tools at startup.'}
+                  checked={userPrefs.availableTrucksDefaultOpen && !userPrefs.hideAvailableTrucks}
                   onChange={(checked) => updateUserPreference('availableTrucksDefaultOpen', checked)}
+                  locked={userPrefs.hideAvailableTrucks}
                 />
                 <PreferenceSwitch
                   label="Start Loading Next 7 Days closed"
-                  description="Default is open; turn this on only when you want the forward-looking table collapsed on launch."
-                  checked={userPrefs.operationsNext7DefaultClosed}
+                  description={userPrefs.hideOperationsToday ? 'Unavailable while Operations Today is hidden.' : 'Default is open; turn this on only when you want the forward-looking table collapsed on launch.'}
+                  checked={userPrefs.operationsNext7DefaultClosed && !userPrefs.hideOperationsToday}
                   onChange={(checked) => updateUserPreference('operationsNext7DefaultClosed', checked)}
+                  locked={userPrefs.hideOperationsToday}
                 />
                 <PreferenceSwitch
                   label="Reports starts open"
@@ -1769,6 +1828,30 @@ export default function App() {
               </div>
 
               <div className="preferences-grid">
+                <PreferenceSwitch
+                  label="Hide Operations Today"
+                  description="Removes the Operations Today block, including current driver time off and active roster, from the main dashboard on this device."
+                  checked={userPrefs.hideOperationsToday}
+                  onChange={(checked) => updateUserPreference('hideOperationsToday', checked)}
+                />
+                <PreferenceSwitch
+                  label="Hide Job Photo Uploads"
+                  description="Removes the pickup and delivery photo upload digest from the main dashboard on this device."
+                  checked={userPrefs.hideUploadDigest}
+                  onChange={(checked) => updateUserPreference('hideUploadDigest', checked)}
+                />
+                <PreferenceSwitch
+                  label="Hide IntelliTrack"
+                  description="Removes active tracking tools from the main dashboard on this device."
+                  checked={userPrefs.hideIntelliTrack}
+                  onChange={(checked) => updateUserPreference('hideIntelliTrack', checked)}
+                />
+                <PreferenceSwitch
+                  label="Hide Available Equipment"
+                  description="Removes availability analysis and posting tools from the main dashboard on this device."
+                  checked={userPrefs.hideAvailableTrucks}
+                  onChange={(checked) => updateUserPreference('hideAvailableTrucks', checked)}
+                />
                 <PreferenceSwitch
                   label="Hide Sales & Leads"
                   description="Removes the Sales and Leads section from the main dashboard on this device."
@@ -2417,6 +2500,8 @@ export default function App() {
     setRecruitingNoteDraft('');
     setRecruitingNoteType('Internal');
     setRecruitingFollowUpDate('');
+    setRecruitingStatusDraft('');
+    setRecruitingStatusReason('');
     setRecruitingOwnerOverride(false);
     setOpenReportGroups([]);
     setActiveReportPanel('');
@@ -14897,6 +14982,9 @@ function openReportLoadDetails(load) {
       setRecruitingNoteDraft('');
       setRecruitingNoteType('Internal');
       setRecruitingFollowUpDate(data.candidate?.nextFollowUpDate || '');
+      setRecruitingStatusDraft(data.candidate?.status || '');
+      setRecruitingStatusReason('');
+      setRecruitingStatusPickerOpen(false);
       setRecruitingOwnerOverride(false);
     } catch (err) {
       setRecruitingProfileError(err.message || 'Unable to load candidate profile.');
@@ -14913,6 +15001,9 @@ function openReportLoadDetails(load) {
     setRecruitingNoteDraft('');
     setRecruitingNoteType('Internal');
     setRecruitingFollowUpDate('');
+    setRecruitingStatusDraft('');
+    setRecruitingStatusReason('');
+    setRecruitingStatusPickerOpen(false);
     setRecruitingOwnerOverride(false);
   }
 
@@ -14924,6 +15015,9 @@ function openReportLoadDetails(load) {
       teamMembers: data.teamMembers || []
     });
     setRecruitingFollowUpDate(data.candidate?.nextFollowUpDate || '');
+    setRecruitingStatusDraft(data.candidate?.status || '');
+    setRecruitingStatusReason('');
+    setRecruitingStatusPickerOpen(false);
   }
 
   async function runRecruitingProfileAction(actionKey, endpoint, options = {}) {
@@ -14965,6 +15059,46 @@ function openReportLoadDetails(load) {
     await runRecruitingProfileAction(
       'markQualified',
       `${API}/recruiting/candidates/${encodeURIComponent(candidateId)}/mark-qualified`
+    );
+  }
+
+  function selectRecruitingStatusDraft(nextStatus) {
+    const cleanStatus = String(nextStatus || '').trim();
+    if (!cleanStatus) return;
+
+    setRecruitingStatusDraft(cleanStatus);
+    setRecruitingStatusReason('');
+    setRecruitingStatusPickerOpen(false);
+    setRecruitingActionError('');
+    setRecruitingActionMessage('');
+  }
+
+  async function saveRecruitingCandidateStatus() {
+    const candidateId = selectedRecruitingProfile?.candidate?.candidateId;
+    const candidate = selectedRecruitingProfile?.candidate || {};
+    const nextStatus = String(recruitingStatusDraft || '').trim();
+    if (!candidateId || !nextStatus || nextStatus === candidate.status) return;
+
+    if (RECRUITING_MANUAL_CLOSED_STATUS_OPTIONS.includes(nextStatus)) {
+      const candidateName = candidate.displayName || candidate.title || 'this candidate';
+      const confirmed = window.confirm(
+        `Move ${candidateName} to ${nextStatus}? This closes the candidate and inactivates open qualification rows.`
+      );
+      if (!confirmed) return;
+    }
+
+    const body = { status: nextStatus };
+    if (nextStatus === 'Disqualified') {
+      body.disqualifiedReason = recruitingStatusReason.trim() || candidate.disqualifiedReason || 'Manually disqualified in Kole Connect';
+    }
+
+    await runRecruitingProfileAction(
+      'statusChange',
+      `${API}/recruiting/candidates/${encodeURIComponent(candidateId)}`,
+      {
+        method: 'PATCH',
+        body
+      }
     );
   }
 
@@ -15235,8 +15369,40 @@ function openReportLoadDetails(load) {
             {recruitingActionError && <div className="msg error">{recruitingActionError}</div>}
 
             <section className="recruiting-profile-summary-card">
-              <div>
-                <span className={getRecruitingStatusClass(candidate.status)}>{candidate.status || 'Unknown'}</span>
+              <div className="recruiting-profile-title-block">
+                <div className="recruiting-status-picker-wrap">
+                  <button
+                    type="button"
+                    className={`${getRecruitingStatusClass(candidate.status)} recruiting-status-pill-button`}
+                    onClick={() => setRecruitingStatusPickerOpen((open) => !open)}
+                    disabled={Boolean(recruitingActionLoading)}
+                    aria-expanded={recruitingStatusPickerOpen}
+                    title="Change candidate status"
+                  >
+                    <span>{candidate.status || 'Unknown'}</span>
+                    <span className="recruiting-status-pill-caret" aria-hidden="true">▾</span>
+                  </button>
+
+                  {recruitingStatusPickerOpen && (
+                    <div className="recruiting-status-picker-menu" role="listbox" aria-label="Candidate status options">
+                      {candidate.status && !RECRUITING_MANUAL_STATUS_OPTIONS.includes(candidate.status) && (
+                        <button type="button" className="current" disabled>
+                          {candidate.status} · current
+                        </button>
+                      )}
+                      {RECRUITING_MANUAL_STATUS_OPTIONS.map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          className={option === (recruitingStatusDraft || candidate.status) ? 'selected' : ''}
+                          onClick={() => selectRecruitingStatusDraft(option)}
+                        >
+                          {option}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <h3>{candidate.title || candidate.displayName}</h3>
                 <p>{candidate.email || 'No email'} · {formatPhone(candidate.primaryPhone)}</p>
               </div>
@@ -15250,6 +15416,27 @@ function openReportLoadDetails(load) {
                   <button type="button" onClick={markRecruitingCandidateQualified} disabled={Boolean(recruitingActionLoading)}>
                     {recruitingActionLoading === 'markQualified' ? 'Marking...' : 'Mark Qualified'}
                   </button>
+                )}
+                {recruitingStatusDraft && recruitingStatusDraft !== candidate.status && (
+                  <div className="recruiting-status-save-strip">
+                    <span>Change to <strong>{recruitingStatusDraft}</strong></span>
+                    {recruitingStatusDraft === 'Disqualified' && (
+                      <input
+                        value={recruitingStatusReason}
+                        onChange={(e) => setRecruitingStatusReason(e.target.value)}
+                        placeholder="DQ reason / quick note"
+                        disabled={Boolean(recruitingActionLoading)}
+                      />
+                    )}
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={saveRecruitingCandidateStatus}
+                      disabled={Boolean(recruitingActionLoading) || !recruitingStatusDraft || recruitingStatusDraft === candidate.status}
+                    >
+                      {recruitingActionLoading === 'statusChange' ? 'Saving...' : 'Save Status'}
+                    </button>
+                  </div>
                 )}
               </div>
             </section>
@@ -15469,6 +15656,8 @@ function openReportLoadDetails(load) {
       ].some((value) => String(value || '').toLowerCase().includes(searchText));
       return matchesRecruitingView(candidate) && searchMatch;
     });
+    const previewCandidates = filteredCandidates.slice(0, RECRUITING_PREVIEW_ROW_LIMIT);
+    const hiddenPreviewCount = Math.max(filteredCandidates.length - previewCandidates.length, 0);
     const alertCount = Number(summary.readyToQualify || 0) + Number(summary.followUpDue || 0);
     const showRecruitingPill = !recruitingSectionOpen || recruitingLoading;
     const setRecruitingTileView = (view) => {
@@ -15567,7 +15756,7 @@ function openReportLoadDetails(load) {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredCandidates.map((candidate) => (
+                    {previewCandidates.map((candidate) => (
                       <tr key={candidate.candidateId || candidate.spId} onClick={() => openRecruitingCandidateProfile(candidate.candidateId)}>
                         <td>
                           <strong>{candidate.displayName || candidate.title}</strong>
@@ -15582,6 +15771,11 @@ function openReportLoadDetails(load) {
                     ))}
                   </tbody>
                 </table>
+                {hiddenPreviewCount > 0 && (
+                  <div className="recruiting-preview-limit-note">
+                    Showing first {formatReportNumber(previewCandidates.length)} of {formatReportNumber(filteredCandidates.length)}. Use search or the status filter to narrow this view.
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -17258,6 +17452,7 @@ function openReportLoadDetails(load) {
         )}
 {!hasSearched && (
   <>
+  {!userPrefs.hideOperationsToday && (
   <div className="search-card operations-panel">
     <div className="operations-header-bar">
       <div>
@@ -17517,12 +17712,13 @@ function openReportLoadDetails(load) {
       </>
     )}
   </div>
+  )}
 
-  <UploadDigestPanel />
+  {!userPrefs.hideUploadDigest && <UploadDigestPanel />}
 
-  {IntelliTrackPanel()}
+  {!userPrefs.hideIntelliTrack && IntelliTrackPanel()}
 
-  {AvailableTrucksPanel()}
+  {!userPrefs.hideAvailableTrucks && AvailableTrucksPanel()}
 
   {!userPrefs.hideRecruiting && RecruitingPanel()}
 

@@ -15981,3 +15981,261 @@ body.compact-dashboard-mode .order-card-route {
     justify-content: flex-start;
   }
 }
+
+/* Cohesive dashboard header rail pass: make Operations, time off, and roster use the same visual language as the main banners. */
+.operations-header-bar,
+.driver-time-off-header,
+.driver-position-header-button {
+  padding: 14px 16px !important;
+  border: 1px solid var(--kole-border) !important;
+  border-left: 4px solid var(--kole-gold) !important;
+  border-radius: 12px !important;
+  background: linear-gradient(180deg, var(--kole-surface), #121b2e) !important;
+  color: var(--kole-text) !important;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.18) !important;
+}
+
+.operations-header-bar {
+  margin-bottom: 18px !important;
+}
+
+.driver-time-off-header,
+.driver-position-header-button {
+  margin: 0 !important;
+}
+
+.operations-header-bar h2,
+.driver-time-off-header h3,
+.driver-position-header-button h3 {
+  color: var(--kole-gold-bright) !important;
+}
+
+.driver-time-off-header-main,
+.driver-time-off-header-main:hover {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.operations-panel > div > h3,
+.operations-next7-heading-button {
+  border-left-color: var(--kole-gold) !important;
+}
+
+:root[data-theme='light'] .operations-header-bar,
+:root[data-theme='light'] .driver-time-off-header,
+:root[data-theme='light'] .driver-position-header-button,
+:root[data-theme='light'] .operations-panel > div > h3 {
+  background: linear-gradient(180deg, #ffffff, #f3f6fb) !important;
+  border-color: #cbd5e1 !important;
+  border-left-color: #2563eb !important;
+  color: #0f172a !important;
+  box-shadow:
+    0 10px 24px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 #ffffff !important;
+}
+
+:root[data-theme='light'] .operations-header-bar:hover,
+:root[data-theme='light'] .driver-time-off-header:hover,
+:root[data-theme='light'] .driver-position-header-button:hover {
+  background: linear-gradient(180deg, #ffffff, #eaf2ff) !important;
+  border-color: #bfdbfe !important;
+  border-left-color: #1d4ed8 !important;
+}
+
+:root[data-theme='light'] .operations-header-bar h2,
+:root[data-theme='light'] .driver-time-off-header h3,
+:root[data-theme='light'] .driver-position-header-button h3 {
+  color: #0f172a !important;
+}
+
+.recruiting-status-change-control {
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) minmax(190px, 1.2fr) auto;
+  align-items: end;
+  gap: 0.55rem;
+  min-width: min(100%, 560px);
+}
+
+.recruiting-status-change-control label {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.recruiting-status-change-control label span {
+  color: var(--kole-muted, #94a3b8);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.recruiting-status-change-control input,
+.recruiting-status-change-control select {
+  width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .recruiting-status-change-control {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+}
+
+/* Recruiting status picker: make the status pill itself the control instead of a bolted-on select row. */
+.recruiting-profile-title-block {
+  position: relative;
+  min-width: 0;
+}
+
+.recruiting-status-picker-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 0.35rem;
+  z-index: 5;
+}
+
+.recruiting-status-pill-button {
+  min-height: 0;
+  gap: 0.35rem;
+  padding: 0.28rem 0.65rem !important;
+  border-radius: 999px !important;
+  background: rgba(148, 163, 184, 0.12);
+  color: inherit;
+  line-height: 1.1;
+  box-shadow: none;
+}
+
+.recruiting-status-pill-button:hover,
+.recruiting-status-pill-button[aria-expanded='true'] {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+}
+
+.recruiting-status-pill-caret {
+  font-size: 0.72rem;
+  opacity: 0.74;
+}
+
+.recruiting-status-picker-menu {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  width: min(230px, 78vw);
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.45rem;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 12px;
+  background: #0f172a;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.34);
+}
+
+.recruiting-status-picker-menu button {
+  width: 100%;
+  min-height: 34px;
+  padding: 0.45rem 0.65rem;
+  border-radius: 9px;
+  background: transparent;
+  color: #e5e7eb;
+  text-align: left;
+  box-shadow: none;
+}
+
+.recruiting-status-picker-menu button:hover:not(:disabled),
+.recruiting-status-picker-menu button.selected {
+  background: rgba(250, 204, 21, 0.12);
+  color: #fde68a;
+}
+
+.recruiting-status-picker-menu button.current {
+  color: #94a3b8;
+  opacity: 0.75;
+}
+
+.recruiting-status-save-strip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  max-width: 100%;
+  padding: 0.45rem 0.5rem 0.45rem 0.7rem;
+  border: 1px solid rgba(250, 204, 21, 0.26);
+  border-radius: 999px;
+  background: rgba(250, 204, 21, 0.08);
+  color: var(--kole-text, #e5e7eb);
+}
+
+.recruiting-status-save-strip > span {
+  font-size: 0.82rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.recruiting-status-save-strip input {
+  width: min(260px, 36vw);
+  min-height: 34px;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.42);
+  color: var(--kole-text, #e5e7eb);
+  font-size: 0.84rem;
+}
+
+.recruiting-preview-limit-note {
+  padding: 0.65rem 0.75rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+  color: var(--kole-muted, #94a3b8);
+  font-size: 0.84rem;
+  font-weight: 650;
+  text-align: center;
+}
+
+:root[data-theme='light'] .recruiting-status-picker-menu {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: 0 18px 46px rgba(15, 23, 42, 0.16);
+}
+
+:root[data-theme='light'] .recruiting-status-picker-menu button {
+  color: #0f172a;
+}
+
+:root[data-theme='light'] .recruiting-status-picker-menu button:hover:not(:disabled),
+:root[data-theme='light'] .recruiting-status-picker-menu button.selected {
+  background: rgba(185, 133, 13, 0.10);
+  color: #78350f;
+}
+
+:root[data-theme='light'] .recruiting-status-save-strip {
+  background: rgba(185, 133, 13, 0.08);
+  border-color: rgba(185, 133, 13, 0.30);
+  color: #0f172a;
+}
+
+:root[data-theme='light'] .recruiting-status-save-strip input {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+:root[data-theme='light'] .recruiting-preview-limit-note {
+  border-top-color: #cbd5e1;
+  color: #64748b;
+}
+
+@media (max-width: 760px) {
+  .recruiting-status-save-strip {
+    width: 100%;
+    border-radius: 14px;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .recruiting-status-save-strip input {
+    width: 100%;
+  }
+}
