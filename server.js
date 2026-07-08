@@ -8249,6 +8249,17 @@ function getRecruitingDisplayName(firstName, lastName, fallback = '') {
   return cleanRecruitingString([firstName, lastName].map(cleanRecruitingString).filter(Boolean).join(' ')) || cleanRecruitingString(fallback);
 }
 
+function getRecruitingPayloadValue(body = {}, ...keys) {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) {
+      const value = cleanRecruitingString(body[key]);
+      if (value) return value;
+    }
+  }
+
+  return '';
+}
+
 function getRecruitingCandidateId(applicationDate, itemId) {
   const dateKey = isValidDateInput(applicationDate) ? applicationDate.replace(/-/g, '') : formatEasternDate().replace(/-/g, '');
   return `CAND-${dateKey}-${String(itemId || '').padStart(6, '0')}`;
@@ -8335,9 +8346,13 @@ async function getRecruitingProfile(token, candidateId) {
 }
 
 function buildRecruitingCandidateFieldsFromBody(body = {}) {
-  const firstName = cleanRecruitingString(body.firstName || body.FirstName);
-  const lastName = cleanRecruitingString(body.lastName || body.LastName);
-  const displayName = getRecruitingDisplayName(firstName, lastName, body.displayName || body.DisplayName);
+  const firstName = cleanRecruitingString(getRecruitingPayloadValue(body, 'firstName', 'FirstName'));
+  const lastName = cleanRecruitingString(getRecruitingPayloadValue(body, 'lastName', 'LastName'));
+  const displayName = getRecruitingDisplayName(
+    firstName,
+    lastName,
+    getRecruitingPayloadValue(body, 'displayName', 'DisplayName')
+  );
   const applicationDate = isValidDateInput(body.applicationDate || body.ApplicationDate)
     ? String(body.applicationDate || body.ApplicationDate)
     : formatEasternDate();
@@ -8663,6 +8678,7 @@ app.post('/recruiting/candidates', requireLookupAccess, async (req, res) => {
 
     await graphPatch(token, `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${lists.candidates}/items/${encodeURIComponent(itemId)}/fields`, {
       CandidateID: candidateId,
+      DisplayName: fields.DisplayName,
       CandidateFolderPath: folderPath
     });
 

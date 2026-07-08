@@ -46,10 +46,18 @@ const RECRUITING_NOTE_TYPE_OPTIONS = ['Call', 'Email', 'Follow-Up', 'Application
 const RECRUITING_REQUIREMENT_RESULT_OPTIONS = ['Satisfactory', 'Unsatisfactory'];
 const RECRUITING_CORE_REQUIREMENT_ORDER = ['Background Check', 'Drug Screen', 'MVR', 'Contract', 'Previous Employment', 'TWIC'];
 
+function getRecruitingCandidateDisplayName(firstName = '', lastName = '') {
+  return [firstName, lastName]
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+    .join(' ');
+}
+
 function createRecruitingCandidateDraft() {
   return {
     firstName: '',
     lastName: '',
+    displayName: '',
     candidateType: 'Solo',
     teamId: '',
     primaryPhone: '',
@@ -15046,10 +15054,18 @@ function openReportLoadDetails(load) {
   }
 
   function updateRecruitingCandidateDraft(field, value) {
-    setRecruitingCandidateDraft((draft) => ({
-      ...draft,
-      [field]: value
-    }));
+    setRecruitingCandidateDraft((draft) => {
+      const nextDraft = {
+        ...draft,
+        [field]: value
+      };
+
+      if (field === 'firstName' || field === 'lastName') {
+        nextDraft.displayName = getRecruitingCandidateDisplayName(nextDraft.firstName, nextDraft.lastName);
+      }
+
+      return nextDraft;
+    });
   }
 
   async function createRecruitingCandidate() {
@@ -15058,10 +15074,17 @@ function openReportLoadDetails(load) {
     setRecruitingActionMessage('');
 
     try {
+      const displayName = getRecruitingCandidateDisplayName(
+        recruitingCandidateDraft.firstName,
+        recruitingCandidateDraft.lastName
+      );
       const res = await authedFetch(`${API}/recruiting/candidates`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(recruitingCandidateDraft)
+        body: JSON.stringify({
+          ...recruitingCandidateDraft,
+          displayName
+        })
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'Unable to add candidate.');
