@@ -15188,6 +15188,13 @@ function openReportLoadDetails(load) {
     const canMarkQualified = candidate.status === 'Ready to Qualify';
     const canUseOwnerOverride = candidate.status && candidate.status !== 'Qualified';
     const checklistOverrideActive = canUseOwnerOverride && recruitingOwnerOverride;
+    const candidateFolderActive = Boolean(candidate.folderPath) && (
+      candidate.folderActive === true ||
+      (candidate.folderActive === undefined && RECRUITING_HEADS_UP_STATUSES.includes(candidate.status))
+    );
+    const candidateFolderClosedCopy = candidate.status === 'Qualified'
+      ? 'Recruiting folder closed. Driver documents should now live with the driver record.'
+      : 'Recruiting folder no longer active for this candidate.';
 
     return (
       <div className="modal-overlay" role="presentation">
@@ -15235,15 +15242,19 @@ function openReportLoadDetails(load) {
                   <div><dt>Relationship</dt><dd>{candidate.relationshipType || '-'}</dd></div>
                   <div><dt>Equipment</dt><dd>{candidate.ownsTruck ? 'Owns truck' : 'No truck'} · {candidate.ownsTrailer ? 'Owns trailer' : 'No trailer'}</dd></div>
                   <div className="recruiting-folder-row"><dt>Folder</dt><dd>{candidate.folderPath ? (
-                    <button
-                      type="button"
-                      className="secondary-button recruiting-folder-button"
-                      onClick={() => openRecruitingCandidateFolder(candidate)}
-                      disabled={!candidate.folderUrl}
-                      title={candidate.folderPath}
-                    >
-                      Open Candidate Folder
-                    </button>
+                    candidateFolderActive ? (
+                      <button
+                        type="button"
+                        className="secondary-button recruiting-folder-button"
+                        onClick={() => openRecruitingCandidateFolder(candidate)}
+                        disabled={!candidate.folderUrl}
+                        title={candidate.folderPath}
+                      >
+                        Open Candidate Folder
+                      </button>
+                    ) : (
+                      <span className="recruiting-folder-inactive-note">{candidateFolderClosedCopy}</span>
+                    )
                   ) : '-'}</dd></div>
                 </dl>
                 <div className="recruiting-followup-control">

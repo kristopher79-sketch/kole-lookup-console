@@ -15867,6 +15867,21 @@ body.compact-dashboard-mode .order-card-route {
   white-space: nowrap;
 }
 
+
+.recruiting-folder-inactive-note {
+  display: inline-block;
+  max-width: 32rem;
+  color: var(--kole-muted, #94a3b8);
+  font-size: 0.84rem;
+  font-weight: 650;
+  line-height: 1.35;
+  text-align: left;
+}
+
+:root[data-theme='light'] .recruiting-folder-inactive-note {
+  color: #64748b;
+}
+
 .recruiting-followup-control {
   display: grid;
   grid-template-columns: minmax(170px, 220px) auto;

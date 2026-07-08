@@ -7820,6 +7820,17 @@ const RECRUITING_CLOSED_STATUSES = new Set([
   RECRUITING_CANDIDATE_STATUS.DORMANT
 ]);
 
+const RECRUITING_FOLDER_ACTIVE_STATUSES = new Set([
+  RECRUITING_CANDIDATE_STATUS.PROSPECT,
+  RECRUITING_CANDIDATE_STATUS.APPLIED,
+  RECRUITING_CANDIDATE_STATUS.ACTIVE_QUALIFICATION,
+  RECRUITING_CANDIDATE_STATUS.READY_TO_QUALIFY
+]);
+
+function isRecruitingFolderActiveStatus(status) {
+  return RECRUITING_FOLDER_ACTIVE_STATUSES.has(cleanRecruitingString(status));
+}
+
 const RECRUITING_REQUIREMENT_ORDER = [
   'Background Check',
   'Drug Screen',
@@ -7936,20 +7947,49 @@ function encodeSharePointPath(pathValue) {
     .join('/');
 }
 
+function getRecruitingOneDriveHost() {
+  const explicitHost = cleanRecruitingString(process.env.RECRUITING_ONEDRIVE_HOST);
+  if (explicitHost) return explicitHost.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+
+  const siteUrl = getRecruitingSiteUrl();
+  try {
+    const host = new URL(siteUrl).hostname;
+    if (host.endsWith('.sharepoint.com')) {
+      return host.replace('.sharepoint.com', '-my.sharepoint.com');
+    }
+  } catch (_) {
+    // Fall through to KOLE default.
+  }
+
+  return 'netorgft3137173-my.sharepoint.com';
+}
+
+function getRecruitingOneDriveDocumentsRoot() {
+  return cleanRecruitingString(
+    process.env.RECRUITING_ONEDRIVE_DOCUMENTS_ROOT ||
+    '/personal/dispatch_koletrucking_com/Documents'
+  ).replace(/\/+$/, '');
+}
+
 function getRecruitingFolderUrl(folderPath) {
   const cleanPath = cleanRecruitingString(folderPath);
   if (!cleanPath) return '';
   if (/^https?:\/\//i.test(cleanPath)) return cleanPath;
 
-  const siteUrl = getRecruitingSiteUrl();
-  if (!siteUrl) return '';
+  // Recruiting folders live in the Dispatch OneDrive, not the KOLE team-site
+  // Shared Documents library. CandidateFolderPath is stored as a plain text path
+  // such as /Safety/Recruiting/Applicants/Kristopher Michalsky/. Build the
+  // OneDrive web URL from the personal Documents root instead of the team site.
+  const oneDriveHost = getRecruitingOneDriveHost();
+  const documentsRoot = getRecruitingOneDriveDocumentsRoot();
+  if (!oneDriveHost || !documentsRoot) return '';
 
-  const relativePath = cleanPath.replace(/^\/+|\/+$/g, '');
-  const documentPath = relativePath.toLowerCase().startsWith('shared documents/')
-    ? relativePath
-    : `Shared Documents/${relativePath}`;
+  const normalizedPath = cleanPath.replace(/^\/+|\/+$/g, '');
+  const oneDrivePath = normalizedPath.toLowerCase().startsWith('personal/')
+    ? `/${normalizedPath}`
+    : `${documentsRoot}/${normalizedPath}`;
 
-  return `${siteUrl}/${encodeSharePointPath(documentPath)}/`;
+  return `https://${oneDriveHost}/my?id=${encodeURIComponent(oneDrivePath)}`;
 }
 
 function getRecruitingListIds() {
@@ -8046,6 +8086,10 @@ function recruitingBoolean(value, defaultValue = false) {
 
 function normalizeRecruitingCandidate(item) {
   const f = item?.fields || {};
+  const status = cleanRecruitingString(f.CandidateStatus || RECRUITING_CANDIDATE_STATUS.APPLIED);
+  const folderPath = cleanRecruitingString(f.CandidateFolderPath);
+  const folderActive = Boolean(folderPath) && isRecruitingFolderActiveStatus(status);
+
   return {
     spId: String(item?.id || f.id || ''),
     webUrl: item?.webUrl || '',
@@ -8055,7 +8099,7 @@ function normalizeRecruitingCandidate(item) {
     firstName: cleanRecruitingString(f.FirstName),
     lastName: cleanRecruitingString(f.LastName),
     displayName: cleanRecruitingString(f.DisplayName),
-    status: cleanRecruitingString(f.CandidateStatus || RECRUITING_CANDIDATE_STATUS.APPLIED),
+    status,
     type: cleanRecruitingString(f.CandidateType || 'Unknown'),
     teamId: cleanRecruitingString(f.TeamID),
     primaryPhone: cleanRecruitingString(f.PrimaryPhone),
@@ -8076,8 +8120,9 @@ function normalizeRecruitingCandidate(item) {
     disqualifiedDate: normalizeGraphDateOnly(f.DisqualifiedDate),
     disqualifiedReason: cleanRecruitingString(f.DisqualifiedReason),
     linkedDriveRosterTruck: cleanRecruitingString(f.LinkedDriveRosterTruck),
-    folderPath: cleanRecruitingString(f.CandidateFolderPath),
-    folderUrl: getRecruitingFolderUrl(f.CandidateFolderPath),
+    folderPath,
+    folderUrl: folderActive ? getRecruitingFolderUrl(folderPath) : '',
+    folderActive,
     noteSummary: cleanRecruitingString(f.NoteSummary),
     active: recruitingBoolean(f.ActiveFlag, false),
     qualificationStarted: recruitingBoolean(f.QualificationStartedFlag, false),
