@@ -7830,6 +7830,18 @@ const RECRUITING_REQUIREMENT_ORDER = [
 ];
 
 const RECRUITING_ALLOWED_REQUIREMENT_RESULTS = new Set(['Satisfactory', 'Unsatisfactory']);
+const RECRUITING_REQUIREMENT_RESULT = {
+  SATISFACTORY: 'Satisfactory',
+  UNSATISFACTORY: 'Unsatisfactory'
+};
+const RECRUITING_REQUIREMENT_STATUS = {
+  NOT_STARTED: 'Not Started',
+  REQUESTED: 'Requested',
+  RECEIVED: 'Received',
+  COMPLETE: 'Complete',
+  FAILED: 'Failed'
+};
+const RECRUITING_CORE_REQUIREMENTS = new Set(RECRUITING_REQUIREMENT_ORDER);
 
 const RECRUITING_CANDIDATE_FIELD_SELECT = [
   'Title',
@@ -8396,29 +8408,112 @@ function buildCandidateNoteFields(candidate, body = {}) {
   };
 }
 
-function buildRequirementPatchFromBody(body = {}) {
+
+function hasOwnRecruitingField(body, key) {
+  return Object.prototype.hasOwnProperty.call(body || {}, key);
+}
+
+function getRequestedRequirementResult(body = {}) {
+  if (hasOwnRecruitingField(body, 'result')) {
+    return { provided: true, value: cleanRecruitingString(body.result) };
+  }
+  if (hasOwnRecruitingField(body, 'RequirementResult')) {
+    return { provided: true, value: cleanRecruitingString(body.RequirementResult) };
+  }
+  return { provided: false, value: '' };
+}
+
+function getReopenedRequirementStatus(currentRequirement, patch = {}) {
+  if (patch.ReceivedDate || currentRequirement.receivedDate) return RECRUITING_REQUIREMENT_STATUS.RECEIVED;
+  if (patch.RequestedDate || currentRequirement.requestedDate) return RECRUITING_REQUIREMENT_STATUS.REQUESTED;
+  return RECRUITING_REQUIREMENT_STATUS.NOT_STARTED;
+}
+
+function getBigSixDisqualifiedReason(requirementType, body = {}) {
+  return cleanRecruitingString(body.disqualifiedReason || body.DisqualifiedReason) || `Unsatisfactory ${requirementType || 'qualification requirement'}`;
+}
+
+function getCandidatePatchForRequirementState(candidate, currentRequirement, requestedResult, body = {}) {
+  const isCoreRequirement = RECRUITING_CORE_REQUIREMENTS.has(currentRequirement.type);
+  if (!isCoreRequirement || !requestedResult.provided) return null;
+
+  if (requestedResult.value === RECRUITING_REQUIREMENT_RESULT.UNSATISFACTORY) {
+    return {
+      CandidateStatus: RECRUITING_CANDIDATE_STATUS.DISQUALIFIED,
+      DisqualifiedDate: formatEasternDate(),
+      DisqualifiedReason: getBigSixDisqualifiedReason(currentRequirement.type, body),
+      ActiveFlag: false,
+      QualificationStartedFlag: false
+    };
+  }
+
+  if (requestedResult.value === '') {
+    const shouldReopen = [
+      RECRUITING_CANDIDATE_STATUS.READY_TO_QUALIFY,
+      RECRUITING_CANDIDATE_STATUS.DISQUALIFIED
+    ].includes(candidate.status);
+
+    if (!shouldReopen) return null;
+
+    const patch = {
+      CandidateStatus: RECRUITING_CANDIDATE_STATUS.ACTIVE_QUALIFICATION,
+      ActiveFlag: true,
+      QualificationStartedFlag: true
+    };
+
+    if (candidate.status === RECRUITING_CANDIDATE_STATUS.DISQUALIFIED) {
+      patch.DisqualifiedDate = null;
+      patch.DisqualifiedReason = '';
+    }
+
+    return patch;
+  }
+
+  return null;
+}
+
+function buildRequirementPatchFromBody(body = {}, currentRequirement = null) {
   const patch = {};
   const status = cleanRecruitingString(body.status || body.RequirementStatus);
-  const result = cleanRecruitingString(body.result || body.RequirementResult);
+  const requestedResult = getRequestedRequirementResult(body);
 
   if (status) patch.RequirementStatus = status;
-  if (result) {
-    if (!RECRUITING_ALLOWED_REQUIREMENT_RESULTS.has(result)) {
-      const error = new Error('Requirement result must be Satisfactory or Unsatisfactory.');
+
+  if (requestedResult.provided) {
+    const result = requestedResult.value;
+    if (result && !RECRUITING_ALLOWED_REQUIREMENT_RESULTS.has(result)) {
+      const error = new Error('Requirement result must be blank, Satisfactory, or Unsatisfactory.');
       error.statusCode = 400;
       throw error;
     }
-    patch.RequirementResult = result;
+    patch.RequirementResult = result || null;
   }
 
   if (Object.prototype.hasOwnProperty.call(body, 'required')) patch.RequiredFlag = body.required === true;
   if (Object.prototype.hasOwnProperty.call(body, 'active')) patch.ActiveFlag = body.active === true;
-  if (Object.prototype.hasOwnProperty.call(body, 'requestedDate')) patch.RequestedDate = cleanRecruitingString(body.requestedDate);
-  if (Object.prototype.hasOwnProperty.call(body, 'receivedDate')) patch.ReceivedDate = cleanRecruitingString(body.receivedDate);
-  if (Object.prototype.hasOwnProperty.call(body, 'completedDate')) patch.CompletedDate = cleanRecruitingString(body.completedDate);
-  if (Object.prototype.hasOwnProperty.call(body, 'expirationDate')) patch.ExpirationDate = cleanRecruitingString(body.expirationDate);
+  if (Object.prototype.hasOwnProperty.call(body, 'requestedDate')) patch.RequestedDate = cleanRecruitingString(body.requestedDate) || null;
+  if (Object.prototype.hasOwnProperty.call(body, 'receivedDate')) patch.ReceivedDate = cleanRecruitingString(body.receivedDate) || null;
+  if (Object.prototype.hasOwnProperty.call(body, 'completedDate')) patch.CompletedDate = cleanRecruitingString(body.completedDate) || null;
+  if (Object.prototype.hasOwnProperty.call(body, 'expirationDate')) patch.ExpirationDate = cleanRecruitingString(body.expirationDate) || null;
   if (Object.prototype.hasOwnProperty.call(body, 'documentUrl')) patch.DocumentURL = cleanRecruitingString(body.documentUrl);
   if (Object.prototype.hasOwnProperty.call(body, 'notes')) patch.Notes = cleanRecruitingString(body.notes);
+
+  if (currentRequirement && RECRUITING_CORE_REQUIREMENTS.has(currentRequirement.type) && requestedResult.provided) {
+    if (requestedResult.value === '') {
+      patch.RequirementResult = null;
+      patch.RequirementStatus = getReopenedRequirementStatus(currentRequirement, patch);
+      patch.CompletedDate = null;
+      patch.ActiveFlag = true;
+    } else if (requestedResult.value === RECRUITING_REQUIREMENT_RESULT.UNSATISFACTORY) {
+      patch.RequirementStatus = RECRUITING_REQUIREMENT_STATUS.FAILED;
+      patch.ActiveFlag = false;
+      if (!patch.CompletedDate) patch.CompletedDate = formatEasternDate();
+    } else if (requestedResult.value === RECRUITING_REQUIREMENT_RESULT.SATISFACTORY) {
+      patch.RequirementStatus = RECRUITING_REQUIREMENT_STATUS.COMPLETE;
+      patch.ActiveFlag = false;
+      if (!patch.CompletedDate) patch.CompletedDate = formatEasternDate();
+    }
+  }
 
   return patch;
 }
@@ -8654,15 +8749,31 @@ app.patch('/recruiting/requirements/:id', requireLookupAccess, async (req, res) 
       return res.status(400).json({ success: false, error: 'Qualification rows are read-only after the candidate is closed unless Owner Override is enabled.' });
     }
 
-    const patch = buildRequirementPatchFromBody(req.body);
-    if (Object.keys(patch).length === 0) {
+    const requestedResult = getRequestedRequirementResult(req.body);
+    const patch = buildRequirementPatchFromBody(req.body, currentRequirement);
+    const candidatePatch = getCandidatePatchForRequirementState(candidateProfile.candidate, currentRequirement, requestedResult, req.body);
+
+    if (Object.keys(patch).length === 0 && !candidatePatch) {
       return res.status(400).json({ success: false, error: 'No requirement fields were provided to update.' });
     }
 
-    await graphPatch(token, `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${lists.requirements}/items/${encodeURIComponent(itemId)}/fields`, patch);
-    const updatedProfile = await getRecruitingProfile(token, currentRequirement.candidateId);
+    if (Object.keys(patch).length) {
+      await graphPatch(token, `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${lists.requirements}/items/${encodeURIComponent(itemId)}/fields`, patch);
+    }
 
-    res.json({ success: true, message: 'Qualification requirement updated.', ...updatedProfile });
+    if (candidatePatch) {
+      await graphPatch(token, `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${lists.candidates}/items/${encodeURIComponent(candidateProfile.candidate.spId)}/fields`, candidatePatch);
+    }
+
+    const updatedProfile = await getRecruitingProfile(token, currentRequirement.candidateId);
+    let message = 'Qualification requirement updated.';
+    if (candidatePatch?.CandidateStatus === RECRUITING_CANDIDATE_STATUS.ACTIVE_QUALIFICATION) {
+      message = 'Requirement result cleared. Candidate moved back to Active Qualification.';
+    } else if (candidatePatch?.CandidateStatus === RECRUITING_CANDIDATE_STATUS.DISQUALIFIED) {
+      message = `${currentRequirement.type} marked Unsatisfactory. Candidate moved to Disqualified.`;
+    }
+
+    res.json({ success: true, message, ...updatedProfile });
   } catch (error) {
     console.error(error);
     res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Unable to update qualification requirement.' });

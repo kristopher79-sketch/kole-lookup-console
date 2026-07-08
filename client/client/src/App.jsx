@@ -14982,21 +14982,45 @@ function openReportLoadDetails(load) {
   }
 
   async function updateRecruitingRequirementResult(requirement, result) {
-    if (!requirement?.spId || !result) return;
+    if (!requirement?.spId) return;
+
+    const normalizedResult = String(result || '');
+    if (!normalizedResult && recruitingOwnerOverride !== true) return;
+
     const today = getEasternDateInputValue();
-    await runRecruitingProfileAction(
-      `requirement-${requirement.spId}`,
-      `${API}/recruiting/requirements/${encodeURIComponent(requirement.spId)}`,
-      {
-        method: 'PATCH',
-        body: {
-          result,
-          status: 'Complete',
+    const isCoreRequirement = RECRUITING_CORE_REQUIREMENT_ORDER.includes(requirement.type);
+
+    if (isCoreRequirement && normalizedResult === 'Unsatisfactory') {
+      const candidateName = selectedRecruitingProfile?.candidate?.displayName || selectedRecruitingProfile?.candidate?.title || 'this candidate';
+      const confirmed = window.confirm(
+        `Marking ${requirement.type} as Unsatisfactory will disqualify ${candidateName}. Continue?`
+      );
+      if (!confirmed) return;
+    }
+
+    const body = normalizedResult
+      ? {
+          result: normalizedResult,
+          status: normalizedResult === 'Unsatisfactory' ? 'Failed' : 'Complete',
           receivedDate: requirement.receivedDate || today,
           completedDate: today,
           active: false,
           ownerOverride: recruitingOwnerOverride === true
         }
+      : {
+          result: '',
+          status: requirement.receivedDate ? 'Received' : requirement.requestedDate ? 'Requested' : 'Not Started',
+          completedDate: '',
+          active: true,
+          ownerOverride: recruitingOwnerOverride === true
+        };
+
+    await runRecruitingProfileAction(
+      `requirement-${requirement.spId}`,
+      `${API}/recruiting/requirements/${encodeURIComponent(requirement.spId)}`,
+      {
+        method: 'PATCH',
+        body
       }
     );
   }
@@ -15266,7 +15290,7 @@ function openReportLoadDetails(load) {
               <div className="recruiting-section-card-header">
                 <div>
                   <h3>Qualification Checklist</h3>
-                  <p>{candidate.status === 'Qualified' ? 'Qualified candidates are closed.' : checklistOverrideActive ? 'Override is enabled for checklist changes.' : 'Update final requirement outcomes here.'}</p>
+                  <p>{candidate.status === 'Qualified' ? 'Qualified candidates are closed.' : checklistOverrideActive ? 'Override is enabled. Blank can reopen a mistaken result.' : 'Update final requirement outcomes here.'}</p>
                 </div>
                 {canUseOwnerOverride && (
                   <label className="recruiting-owner-override-toggle">
@@ -15306,7 +15330,7 @@ function openReportLoadDetails(load) {
                             disabled={Boolean(recruitingActionLoading)}
                             aria-label={`Set result for ${requirement.type}`}
                           >
-                            <option value="">Set result...</option>
+                            <option value="" disabled={!checklistOverrideActive}>{checklistOverrideActive ? 'No Result / Reopen' : 'Set result...'}</option>
                             {RECRUITING_REQUIREMENT_RESULT_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
                           </select>
                         )}
