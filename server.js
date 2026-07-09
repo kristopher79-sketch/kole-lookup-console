@@ -6535,8 +6535,31 @@ function assertDriverRosterConfig() {
   return { siteId, listId };
 }
 
+const DRIVER_ROSTER_UNIT_MAX_LENGTH = 17;
+
 function cleanDriverRosterDraftText(value) {
   return value == null ? '' : String(value).replace(/\s+/g, ' ').trim();
+}
+
+function limitDriverRosterUnitText(value) {
+  return cleanDriverRosterDraftText(value).slice(0, DRIVER_ROSTER_UNIT_MAX_LENGTH);
+}
+
+function getDefaultTrailerUnitNumberForTruck(truck = '') {
+  const cleanTruck = limitDriverRosterUnitText(truck);
+  if (!cleanTruck) return '';
+
+  const baseTruck = cleanTruck.length >= DRIVER_ROSTER_UNIT_MAX_LENGTH
+    ? cleanTruck.slice(0, DRIVER_ROSTER_UNIT_MAX_LENGTH - 1)
+    : cleanTruck;
+
+  return `${baseTruck}A`.slice(0, DRIVER_ROSTER_UNIT_MAX_LENGTH);
+}
+
+function normalizeDriverRosterDriverType(value = '') {
+  const cleanValue = cleanDriverRosterDraftText(value);
+  if (cleanValue.toLowerCase() === 'percentage') return '%';
+  return cleanValue;
 }
 
 function getDriverRosterDraftValue(body = {}, ...keys) {
@@ -6586,7 +6609,7 @@ function buildDriverRosterFieldsFromRecruitingCandidate(candidate = {}, body = {
   const candidateTitle = cleanDriverRosterDraftText(candidate.title || candidateDisplayName);
   const tmsName = getDriverRosterDraftText(body, 'tmsName', 'TMSName') || candidateDisplayName || candidateTitle;
   const operatorTeamName = getDriverRosterDraftText(body, 'operatorTeamName', 'OperatorTeamName', 'operator_x002f_teamName') || candidateTitle || tmsName;
-  const truck = getDriverRosterDraftText(body, 'truck', 'Trucks', 'truckNumber');
+  const truck = limitDriverRosterUnitText(getDriverRosterDraftValue(body, 'truck', 'Trucks', 'truckNumber'));
 
   if (!truck) {
     const error = new Error('Truck number is required before creating a Driver Roster record.');
@@ -6615,7 +6638,7 @@ function buildDriverRosterFieldsFromRecruitingCandidate(candidate = {}, body = {
   setRosterTextField(fields, 'CellPhone2', getDriverRosterDraftText(body, 'cellPhone2', 'CellPhone2') || candidate.secondaryPhone);
   setRosterTextField(fields, 'EmailAddress1', getDriverRosterDraftText(body, 'emailAddress1', 'EmailAddress1') || candidate.email);
   setRosterTextField(fields, 'EmailAddress2', getDriverRosterDraftText(body, 'emailAddress2', 'EmailAddress2'));
-  setRosterTextField(fields, 'DriverType', getDriverRosterDraftText(body, 'driverType', 'DriverType') || candidate.relationshipType);
+  setRosterTextField(fields, 'DriverType', normalizeDriverRosterDriverType(getDriverRosterDraftText(body, 'driverType', 'DriverType') || candidate.relationshipType));
   setRosterTextField(fields, 'SoloorTeam', getDriverRosterDraftText(body, 'soloOrTeam', 'SoloorTeam') || candidate.type);
   setRosterTextField(fields, 'BOLLetterPrefix', getDriverRosterDraftText(body, 'bolLetterPrefix', 'BOLLetterPrefix').toUpperCase());
   setRosterTextField(fields, 'TrailerType', getDriverRosterDraftText(body, 'trailerType', 'TrailerType'));
@@ -6627,7 +6650,7 @@ function buildDriverRosterFieldsFromRecruitingCandidate(candidate = {}, body = {
   setRosterTextField(fields, 'TractorOwner', getDriverRosterDraftText(body, 'tractorOwner', 'TractorOwner'));
   setRosterTextField(fields, 'TractorRegisteredState', getDriverRosterDraftText(body, 'tractorRegisteredState', 'TractorRegisteredState').toUpperCase());
 
-  setRosterTextField(fields, 'TrailerUnitNumber', getDriverRosterDraftText(body, 'trailerUnitNumber', 'TrailerUnitNumber'));
+  setRosterTextField(fields, 'TrailerUnitNumber', getDefaultTrailerUnitNumberForTruck(fields.Trucks));
   setRosterTextField(fields, 'TrailerLength', getDriverRosterDraftText(body, 'trailerLength', 'TrailerLength'));
   setRosterTextField(fields, 'TrailerPlate', getDriverRosterDraftText(body, 'trailerPlate', 'TrailerPlate').toUpperCase());
   setRosterTextField(fields, 'TrailerRegisteredState', getDriverRosterDraftText(body, 'trailerRegisteredState', 'TrailerRegisteredState').toUpperCase());

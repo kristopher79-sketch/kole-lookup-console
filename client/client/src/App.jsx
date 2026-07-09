@@ -52,7 +52,23 @@ const RECRUITING_MANUAL_STATUS_OPTIONS = ['Prospect', 'Applied', 'Active Qualifi
 const RECRUITING_MANUAL_CLOSED_STATUS_OPTIONS = ['Disqualified', 'Withdrawn', 'Dormant'];
 const DRIVER_ROSTER_PORT_STATUS_OPTIONS = ['Active', 'Inactive'];
 const DRIVER_ROSTER_PORT_SOLO_TEAM_OPTIONS = ['Solo', 'Team'];
-const DRIVER_ROSTER_PORT_DRIVER_TYPE_OPTIONS = ['Percentage', 'Company', 'Per Mile Solo', 'Absentee Owner Percentage', 'Unknown'];
+const DRIVER_ROSTER_PORT_DRIVER_TYPE_OPTIONS = ['%', 'Company', 'Per Mile Solo', 'Absentee Owner Percentage', 'Unknown'];
+const DRIVER_ROSTER_PORT_TRAILER_TYPE_OPTIONS = [
+  '',
+  "53' Conestoga Stepdeck (Team)",
+  "53' Conestoga Stepdeck (Solo)",
+  "48' Conestoga Stepdeck (Solo)",
+  "48' Conestoga Stepdeck (Team)",
+  "48' RGN",
+  "53' Stepdeck (Solo)",
+  "53' Stepdeck (Team)",
+  "53' Stepdeck Low Profile (Solo)",
+  "53' Stepdeck Low Profile (Team)",
+  "50' Stepdeck (Solo)",
+  "48' Stepdeck (Solo)",
+  "48' Stepdeck (Team)"
+];
+const DRIVER_ROSTER_PORT_UNIT_MAX_LENGTH = 17;
 const RECRUITING_ROSTER_HANDOFF_STATUS = {
   NOT_NEEDED: 'Not Needed',
   PENDING: 'Pending',
@@ -97,17 +113,40 @@ function getRecruitingDriverRosterSoloOrTeam(candidateType = '') {
   return 'Solo';
 }
 
+function limitDriverRosterPortUnitValue(value = '') {
+  return String(value || '').slice(0, DRIVER_ROSTER_PORT_UNIT_MAX_LENGTH);
+}
+
+function getRecruitingDriverRosterPortTrailerUnitNumber(truck = '') {
+  const cleanTruck = limitDriverRosterPortUnitValue(truck).trim();
+  if (!cleanTruck) return '';
+
+  const baseTruck = cleanTruck.length >= DRIVER_ROSTER_PORT_UNIT_MAX_LENGTH
+    ? cleanTruck.slice(0, DRIVER_ROSTER_PORT_UNIT_MAX_LENGTH - 1)
+    : cleanTruck;
+
+  return `${baseTruck}A`.slice(0, DRIVER_ROSTER_PORT_UNIT_MAX_LENGTH);
+}
+
+function normalizeDriverRosterPortDriverType(value = '') {
+  const cleanValue = String(value || '').trim();
+  if (cleanValue.toLowerCase() === 'percentage') return '%';
+  return cleanValue;
+}
+
 function createRecruitingDriverRosterPortDraft(candidate = {}) {
   const displayName = candidate.displayName || getRecruitingCandidateDisplayName(candidate.firstName, candidate.lastName) || candidate.title || '';
   const operatorTeamName = candidate.title || displayName;
-  const driverType = DRIVER_ROSTER_PORT_DRIVER_TYPE_OPTIONS.includes(candidate.relationshipType)
-    ? candidate.relationshipType
-    : (candidate.relationshipType || 'Percentage');
+  const truck = limitDriverRosterPortUnitValue(candidate.linkedDriveRosterTruck || '');
+  const candidateDriverType = normalizeDriverRosterPortDriverType(candidate.relationshipType);
+  const driverType = DRIVER_ROSTER_PORT_DRIVER_TYPE_OPTIONS.includes(candidateDriverType)
+    ? candidateDriverType
+    : (candidateDriverType || '%');
 
   return {
     operatorTeamName,
     tmsName: displayName || operatorTeamName,
-    truck: candidate.linkedDriveRosterTruck || '',
+    truck,
     pin: '',
     cellPhone1: candidate.primaryPhone || '',
     cellPhone2: candidate.secondaryPhone || '',
@@ -127,7 +166,7 @@ function createRecruitingDriverRosterPortDraft(candidate = {}) {
     tractorOwner: displayName || operatorTeamName,
     tractorAxles: '',
     tractorRegisteredState: String(candidate.homeState || '').trim().toUpperCase(),
-    trailerUnitNumber: '',
+    trailerUnitNumber: getRecruitingDriverRosterPortTrailerUnitNumber(truck),
     trailerLength: '',
     trailerPlate: '',
     trailerRegisteredState: String(candidate.homeState || '').trim().toUpperCase(),
@@ -15167,10 +15206,35 @@ function openReportLoadDetails(load) {
   }
 
   function updateRecruitingDriverRosterPortDraft(field, value) {
-    setDriverRosterPortDraft((draft) => ({
-      ...draft,
-      [field]: value
-    }));
+    setDriverRosterPortDraft((draft) => {
+      if (field === 'truck') {
+        const truck = limitDriverRosterPortUnitValue(value);
+        return {
+          ...draft,
+          truck,
+          trailerUnitNumber: getRecruitingDriverRosterPortTrailerUnitNumber(truck)
+        };
+      }
+
+      if (field === 'trailerUnitNumber') {
+        return {
+          ...draft,
+          trailerUnitNumber: limitDriverRosterPortUnitValue(value)
+        };
+      }
+
+      if (field === 'driverType') {
+        return {
+          ...draft,
+          driverType: normalizeDriverRosterPortDriverType(value)
+        };
+      }
+
+      return {
+        ...draft,
+        [field]: value
+      };
+    });
     setDriverRosterPortError('');
   }
 
@@ -15188,6 +15252,13 @@ function openReportLoadDetails(load) {
       return;
     }
 
+    const portPayload = {
+      ...driverRosterPortDraft,
+      truck: limitDriverRosterPortUnitValue(driverRosterPortDraft.truck),
+      trailerUnitNumber: getRecruitingDriverRosterPortTrailerUnitNumber(driverRosterPortDraft.truck),
+      driverType: normalizeDriverRosterPortDriverType(driverRosterPortDraft.driverType)
+    };
+
     setDriverRosterPortSaving(true);
     setDriverRosterPortError('');
 
@@ -15195,7 +15266,7 @@ function openReportLoadDetails(load) {
       const res = await authedFetch(`${API}/recruiting/candidates/${encodeURIComponent(candidateId)}/driver-roster`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(driverRosterPortDraft)
+        body: JSON.stringify(portPayload)
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'Unable to create the Driver Roster record.');
@@ -15538,6 +15609,8 @@ function openReportLoadDetails(load) {
           onChange={(e) => updateRecruitingDriverRosterPortDraft(field, options.uppercase ? e.target.value.toUpperCase() : e.target.value)}
           placeholder={options.placeholder || ''}
           disabled={driverRosterPortSaving || options.disabled}
+          readOnly={options.readOnly}
+          maxLength={options.maxLength}
           required={options.required}
         />
       </label>
@@ -15582,7 +15655,7 @@ function openReportLoadDetails(load) {
               <div className="driver-roster-port-grid">
                 {renderPortInput('tmsName', 'TMS Name', { required: true })}
                 {renderPortInput('operatorTeamName', 'Operator / Team Name', { required: true })}
-                {renderPortInput('truck', 'Truck Number', { required: true, placeholder: '4-digit truck # or unit' })}
+                {renderPortInput('truck', 'Truck Number', { required: true, placeholder: '4-digit truck # or unit', maxLength: DRIVER_ROSTER_PORT_UNIT_MAX_LENGTH })}
                 {renderPortInput('pin', 'Driver PIN')}
                 {renderPortInput('cellPhone1', 'Cell Phone 1')}
                 {renderPortInput('cellPhone2', 'Cell Phone 2')}
@@ -15599,7 +15672,7 @@ function openReportLoadDetails(load) {
                 {renderPortSelect('soloOrTeam', 'Solo / Team', DRIVER_ROSTER_PORT_SOLO_TEAM_OPTIONS)}
                 {renderPortInput('startDate', 'Start Date', { type: 'date' })}
                 {renderPortInput('bolLetterPrefix', 'BOL Letter Prefix', { uppercase: true, placeholder: 'A, B, C...' })}
-                {renderPortInput('trailerType', 'Trailer Type', { placeholder: 'Stepdeck, RGN, etc.' })}
+                {renderPortSelect('trailerType', 'Trailer Type', DRIVER_ROSTER_PORT_TRAILER_TYPE_OPTIONS)}
                 {renderPortInput('registeredWeight', 'Registered Weight')}
               </div>
             </section>
@@ -15620,7 +15693,7 @@ function openReportLoadDetails(load) {
             <section className="driver-roster-port-section">
               <h3>Trailer</h3>
               <div className="driver-roster-port-grid">
-                {renderPortInput('trailerUnitNumber', 'Trailer Unit')}
+                {renderPortInput('trailerUnitNumber', 'Trailer Unit', { readOnly: true, maxLength: DRIVER_ROSTER_PORT_UNIT_MAX_LENGTH })}
                 {renderPortInput('trailerLength', 'Length')}
                 {renderPortInput('trailerMake', 'Make')}
                 {renderPortInput('trailerYear', 'Year')}
