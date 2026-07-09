@@ -15454,7 +15454,9 @@ body.compact-dashboard-mode .order-card-route {
 }
 
 .recruiting-status-pill.ready-to-qualify,
-.recruiting-status-pill.satisfactory {
+.recruiting-status-pill.satisfactory,
+.recruiting-status-pill.satisfactory-waived,
+.recruiting-status-pill.waived {
   border-color: rgba(34, 197, 94, 0.48);
   background: rgba(34, 197, 94, 0.14);
 }
@@ -16238,4 +16240,303 @@ body.compact-dashboard-mode .order-card-route {
   .recruiting-status-save-strip input {
     width: 100%;
   }
+}
+
+/* Recruiting → Driver Roster bridge */
+.driver-roster-port-overlay {
+  z-index: 1300;
+}
+
+.driver-roster-port-modal {
+  width: min(1180px, 94vw);
+  max-height: 92vh;
+}
+
+.driver-roster-port-header h2 {
+  color: #facc15;
+}
+
+body.light .driver-roster-port-header h2 {
+  color: #111827;
+}
+
+.driver-roster-port-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.driver-roster-port-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border: 1px solid rgba(250, 204, 21, 0.25);
+  border-radius: 14px;
+  padding: 14px 16px;
+  background: rgba(250, 204, 21, 0.08);
+  color: #f8fafc;
+}
+
+.driver-roster-port-intro span {
+  color: #cbd5e1;
+  line-height: 1.45;
+}
+
+body.light .driver-roster-port-intro {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #111827;
+}
+
+body.light .driver-roster-port-intro span {
+  color: #475569;
+}
+
+.driver-roster-port-section {
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.72);
+}
+
+body.light .driver-roster-port-section {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.driver-roster-port-section h3 {
+  margin: 0 0 14px;
+  color: #facc15;
+  font-size: 16px;
+}
+
+body.light .driver-roster-port-section h3 {
+  color: #111827;
+}
+
+.driver-roster-port-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.driver-roster-port-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.driver-roster-port-grid label.wide {
+  grid-column: span 2;
+}
+
+.driver-roster-port-grid span {
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+body.light .driver-roster-port-grid span {
+  color: #475569;
+}
+
+.driver-roster-port-grid input,
+.driver-roster-port-grid select {
+  width: 100%;
+  padding: 11px 12px;
+  border-radius: 9px;
+  border: 1px solid #334155;
+  background: #020617;
+  color: #e5e7eb;
+  font-size: 14px;
+  outline: none;
+}
+
+.driver-roster-port-grid input:focus,
+.driver-roster-port-grid select:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.22);
+}
+
+body.light .driver-roster-port-grid input,
+body.light .driver-roster-port-grid select {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  color: #111827;
+}
+
+.driver-roster-port-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+@media (max-width: 1000px) {
+  .driver-roster-port-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .driver-roster-port-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .driver-roster-port-grid label.wide {
+    grid-column: span 1;
+  }
+
+  .driver-roster-port-actions {
+    flex-direction: column;
+  }
+}
+
+/* Recruiting roster handoff: only surface go-forward pending work, with a tucked-away admin escape hatch. */
+.recruiting-roster-link-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.12);
+  color: #bbf7d0;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.recruiting-admin-actions {
+  position: relative;
+  min-width: 180px;
+}
+
+.recruiting-admin-actions summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.64);
+  color: #cbd5e1;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.recruiting-admin-actions summary::-webkit-details-marker {
+  display: none;
+}
+
+.recruiting-admin-actions[open] summary {
+  background: #1f2937;
+  color: #f8fafc;
+}
+
+.recruiting-admin-actions > div {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 15;
+  width: min(330px, 80vw);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #334155;
+  border-radius: 14px;
+  background: #020617;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.30);
+}
+
+.recruiting-admin-actions small {
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+/* Light-mode specific polish for the Recruiting → Driver Roster bridge. */
+:root[data-theme='light'] .driver-roster-port-modal {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #111827 !important;
+}
+
+:root[data-theme='light'] .driver-roster-port-header {
+  background: linear-gradient(180deg, #ffffff, #f1f5f9) !important;
+  border-bottom-color: #cbd5e1 !important;
+  color: #111827 !important;
+}
+
+:root[data-theme='light'] .driver-roster-port-header h2,
+:root[data-theme='light'] .driver-roster-port-section h3 {
+  color: #1e293b !important;
+}
+
+:root[data-theme='light'] .driver-roster-port-header p,
+:root[data-theme='light'] .driver-roster-port-grid span,
+:root[data-theme='light'] .driver-roster-port-intro span,
+:root[data-theme='light'] .recruiting-admin-actions small {
+  color: #475569 !important;
+}
+
+:root[data-theme='light'] .driver-roster-port-body {
+  background: #ffffff !important;
+  color: #111827 !important;
+}
+
+:root[data-theme='light'] .driver-roster-port-intro {
+  background: #fffbeb !important;
+  border-color: #fcd34d !important;
+  color: #1e293b !important;
+}
+
+:root[data-theme='light'] .driver-roster-port-section {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  color: #111827 !important;
+}
+
+:root[data-theme='light'] .driver-roster-port-grid input,
+:root[data-theme='light'] .driver-roster-port-grid select {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #111827 !important;
+  color-scheme: light !important;
+}
+
+:root[data-theme='light'] .driver-roster-port-grid input::placeholder {
+  color: #64748b !important;
+}
+
+:root[data-theme='light'] .recruiting-roster-link-pill {
+  background: #dcfce7 !important;
+  border-color: #86efac !important;
+  color: #166534 !important;
+}
+
+:root[data-theme='light'] .recruiting-admin-actions summary {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  color: #334155 !important;
+}
+
+:root[data-theme='light'] .recruiting-admin-actions[open] summary {
+  background: #eef2f7 !important;
+  color: #111827 !important;
+}
+
+:root[data-theme='light'] .recruiting-admin-actions > div {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.14) !important;
 }

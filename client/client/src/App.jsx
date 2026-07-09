@@ -44,10 +44,22 @@ const RECRUITING_SOURCE_OPTIONS = ['Website', 'Referral', 'Call-In', 'Facebook',
 const RECRUITING_RELATIONSHIP_OPTIONS = ['Percentage', 'Company', 'Per Mile Solo', 'Absentee Owner Percentage', 'Unknown'];
 const RECRUITING_NOTE_TYPE_OPTIONS = ['Call', 'Email', 'Follow-Up', 'Application', 'Qualification', 'Disqualification', 'Internal', 'System', 'Other'];
 const RECRUITING_REQUIREMENT_RESULT_OPTIONS = ['Satisfactory', 'Unsatisfactory'];
+const RECRUITING_TWIC_WAIVER_RESULT_OPTION = 'Satisfactory waived';
+const RECRUITING_TWIC_WAIVER_STATUS = 'Waived';
 const RECRUITING_CORE_REQUIREMENT_ORDER = ['Background Check', 'Drug Screen', 'MVR', 'Contract', 'Previous Employment', 'TWIC'];
 const RECRUITING_PREVIEW_ROW_LIMIT = 8;
 const RECRUITING_MANUAL_STATUS_OPTIONS = ['Prospect', 'Applied', 'Active Qualification', 'Disqualified', 'Withdrawn', 'Dormant'];
 const RECRUITING_MANUAL_CLOSED_STATUS_OPTIONS = ['Disqualified', 'Withdrawn', 'Dormant'];
+const DRIVER_ROSTER_PORT_STATUS_OPTIONS = ['Active', 'Inactive'];
+const DRIVER_ROSTER_PORT_SOLO_TEAM_OPTIONS = ['Solo', 'Team'];
+const DRIVER_ROSTER_PORT_DRIVER_TYPE_OPTIONS = ['Percentage', 'Company', 'Per Mile Solo', 'Absentee Owner Percentage', 'Unknown'];
+const RECRUITING_ROSTER_HANDOFF_STATUS = {
+  NOT_NEEDED: 'Not Needed',
+  PENDING: 'Pending',
+  CREATED: 'Created',
+  LINKED_EXISTING: 'Linked Existing',
+  SKIPPED: 'Skipped'
+};
 
 function getRecruitingCandidateDisplayName(firstName = '', lastName = '') {
   return [firstName, lastName]
@@ -78,6 +90,63 @@ function createRecruitingCandidateDraft() {
   };
 }
 
+function getRecruitingDriverRosterSoloOrTeam(candidateType = '') {
+  const cleanType = String(candidateType || '').trim();
+
+  if (cleanType === 'Team' || cleanType === 'Co-Driver') return 'Team';
+  return 'Solo';
+}
+
+function createRecruitingDriverRosterPortDraft(candidate = {}) {
+  const displayName = candidate.displayName || getRecruitingCandidateDisplayName(candidate.firstName, candidate.lastName) || candidate.title || '';
+  const operatorTeamName = candidate.title || displayName;
+  const driverType = DRIVER_ROSTER_PORT_DRIVER_TYPE_OPTIONS.includes(candidate.relationshipType)
+    ? candidate.relationshipType
+    : (candidate.relationshipType || 'Percentage');
+
+  return {
+    operatorTeamName,
+    tmsName: displayName || operatorTeamName,
+    truck: candidate.linkedDriveRosterTruck || '',
+    pin: '',
+    cellPhone1: candidate.primaryPhone || '',
+    cellPhone2: candidate.secondaryPhone || '',
+    emailAddress1: candidate.email || '',
+    emailAddress2: '',
+    status: 'Active',
+    driverType,
+    soloOrTeam: getRecruitingDriverRosterSoloOrTeam(candidate.type),
+    bolLetterPrefix: '',
+    trailerType: '',
+    registeredWeight: '',
+    startDate: getEasternDateInputValue(),
+    tractorPlate: '',
+    tractorYear: '',
+    tractorMake: '',
+    tractorVin: '',
+    tractorOwner: displayName || operatorTeamName,
+    tractorAxles: '',
+    tractorRegisteredState: String(candidate.homeState || '').trim().toUpperCase(),
+    trailerUnitNumber: '',
+    trailerLength: '',
+    trailerPlate: '',
+    trailerRegisteredState: String(candidate.homeState || '').trim().toUpperCase(),
+    trailerYear: '',
+    trailerMake: '',
+    trailerVin: '',
+    trailerOwner: candidate.ownsTrailer ? (displayName || operatorTeamName) : '',
+    trailerAxles: '',
+    emptyWeight: '',
+    steerAxleWeight: '',
+    spacing1to2: '',
+    spacing2to3: '',
+    spacing3to4: '',
+    spacing4to5: '',
+    overallLength: '',
+    lowestDeckHeight: ''
+  };
+}
+
 function getRecruitingStatusClass(status) {
   const normalized = String(status || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
   return `recruiting-status-pill ${normalized || 'unknown'}`;
@@ -91,6 +160,26 @@ function getRequirementSortIndex(type) {
   const index = RECRUITING_CORE_REQUIREMENT_ORDER.indexOf(type);
   return index === -1 ? 999 : index;
 }
+
+function isRecruitingTwicRequirement(requirement) {
+  return String(requirement?.type || '').trim().toLowerCase() === 'twic';
+}
+
+function isRecruitingTwicWaiverSelection(value) {
+  return String(value || '').trim() === RECRUITING_TWIC_WAIVER_RESULT_OPTION;
+}
+
+function getRecruitingRequirementResultLabel(requirement) {
+  const result = String(requirement?.result || '').trim();
+  const status = String(requirement?.status || '').trim();
+
+  if (isRecruitingTwicRequirement(requirement) && (status === RECRUITING_TWIC_WAIVER_STATUS || (result === 'Satisfactory' && requirement?.required === false))) {
+    return RECRUITING_TWIC_WAIVER_STATUS;
+  }
+
+  return result || status || 'Pending';
+}
+
 
 function normalizeDriverTimeOffReason(value) {
   const normalized = String(value || '').trim().toLowerCase();
@@ -1093,6 +1182,11 @@ export default function App() {
   const [recruitingStatusReason, setRecruitingStatusReason] = useState('');
   const [recruitingStatusPickerOpen, setRecruitingStatusPickerOpen] = useState(false);
   const [recruitingOwnerOverride, setRecruitingOwnerOverride] = useState(false);
+  const [driverRosterPortModalOpen, setDriverRosterPortModalOpen] = useState(false);
+  const [driverRosterPortCandidate, setDriverRosterPortCandidate] = useState(null);
+  const [driverRosterPortDraft, setDriverRosterPortDraft] = useState(() => createRecruitingDriverRosterPortDraft());
+  const [driverRosterPortSaving, setDriverRosterPortSaving] = useState(false);
+  const [driverRosterPortError, setDriverRosterPortError] = useState('');
 
   const isAnyModalOpen = Boolean(
     preferencesModalOpen ||
@@ -1123,6 +1217,7 @@ export default function App() {
     selectedSalesLead ||
     selectedRecruitingProfile ||
     recruitingCreateModalOpen ||
+    driverRosterPortModalOpen ||
     availableTruckDistributionInactiveModalOpen ||
     availableTruckDrilldown ||
     startupSplashVisible
@@ -15005,6 +15100,10 @@ function openReportLoadDetails(load) {
     setRecruitingStatusReason('');
     setRecruitingStatusPickerOpen(false);
     setRecruitingOwnerOverride(false);
+    setDriverRosterPortModalOpen(false);
+    setDriverRosterPortCandidate(null);
+    setDriverRosterPortDraft(createRecruitingDriverRosterPortDraft());
+    setDriverRosterPortError('');
   }
 
   function updateRecruitingProfileFromResponse(data) {
@@ -15038,11 +15137,79 @@ function openReportLoadDetails(load) {
       if (!data.success) throw new Error(data.error || 'Recruiting action failed.');
       updateRecruitingProfileFromResponse(data);
       setRecruitingActionMessage(data.message || 'Recruiting record updated.');
+      if (typeof options.onSuccess === 'function') {
+        options.onSuccess(data);
+      }
       await loadRecruitingDashboard({ silent: true });
     } catch (err) {
       setRecruitingActionError(err.message || 'Recruiting action failed.');
     } finally {
       setRecruitingActionLoading('');
+    }
+  }
+
+  function openRecruitingDriverRosterPort(candidate = selectedRecruitingProfile?.candidate) {
+    if (!candidate) return;
+
+    setDriverRosterPortCandidate(candidate);
+    setDriverRosterPortDraft(createRecruitingDriverRosterPortDraft(candidate));
+    setDriverRosterPortError('');
+    setDriverRosterPortModalOpen(true);
+  }
+
+  function closeRecruitingDriverRosterPortModal() {
+    if (driverRosterPortSaving) return;
+
+    setDriverRosterPortModalOpen(false);
+    setDriverRosterPortCandidate(null);
+    setDriverRosterPortDraft(createRecruitingDriverRosterPortDraft());
+    setDriverRosterPortError('');
+  }
+
+  function updateRecruitingDriverRosterPortDraft(field, value) {
+    setDriverRosterPortDraft((draft) => ({
+      ...draft,
+      [field]: value
+    }));
+    setDriverRosterPortError('');
+  }
+
+  async function submitRecruitingDriverRosterPort() {
+    const candidateId = driverRosterPortCandidate?.candidateId || selectedRecruitingProfile?.candidate?.candidateId;
+    if (!candidateId) return;
+
+    if (!String(driverRosterPortDraft.truck || '').trim()) {
+      setDriverRosterPortError('Enter the new driver roster truck number before creating the record.');
+      return;
+    }
+
+    if (!String(driverRosterPortDraft.tmsName || driverRosterPortDraft.operatorTeamName || '').trim()) {
+      setDriverRosterPortError('Enter at least a TMS name or Operator / Team name.');
+      return;
+    }
+
+    setDriverRosterPortSaving(true);
+    setDriverRosterPortError('');
+
+    try {
+      const res = await authedFetch(`${API}/recruiting/candidates/${encodeURIComponent(candidateId)}/driver-roster`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(driverRosterPortDraft)
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Unable to create the Driver Roster record.');
+
+      if (data.candidate) updateRecruitingProfileFromResponse(data);
+      setRecruitingActionMessage(data.message || 'Driver Roster record created.');
+      setDriverRosterPortModalOpen(false);
+      setDriverRosterPortCandidate(null);
+      setDriverRosterPortDraft(createRecruitingDriverRosterPortDraft());
+      await loadRecruitingDashboard({ silent: true });
+    } catch (err) {
+      setDriverRosterPortError(err.message || 'Unable to create the Driver Roster record.');
+    } finally {
+      setDriverRosterPortSaving(false);
     }
   }
 
@@ -15058,7 +15225,21 @@ function openReportLoadDetails(load) {
     const candidateId = selectedRecruitingProfile?.candidate?.candidateId;
     await runRecruitingProfileAction(
       'markQualified',
-      `${API}/recruiting/candidates/${encodeURIComponent(candidateId)}/mark-qualified`
+      `${API}/recruiting/candidates/${encodeURIComponent(candidateId)}/mark-qualified`,
+      {
+        onSuccess: (data) => {
+          const candidate = data.candidate || {};
+          const handoffStatus = String(candidate.rosterHandoffStatus || '').trim();
+          const shouldOpenRosterHandoff =
+            candidate.status === 'Qualified' &&
+            !String(candidate.linkedDriveRosterTruck || '').trim() &&
+            (!handoffStatus || handoffStatus === RECRUITING_ROSTER_HANDOFF_STATUS.PENDING);
+
+          if (shouldOpenRosterHandoff) {
+            openRecruitingDriverRosterPort(candidate);
+          }
+        }
+      }
     );
   }
 
@@ -15126,7 +15307,9 @@ function openReportLoadDetails(load) {
   async function updateRecruitingRequirementResult(requirement, result) {
     if (!requirement?.spId) return;
 
-    const normalizedResult = String(result || '');
+    const selectedResult = String(result || '');
+    const twicWaiverSelected = isRecruitingTwicRequirement(requirement) && isRecruitingTwicWaiverSelection(selectedResult);
+    const normalizedResult = twicWaiverSelected ? 'Satisfactory' : selectedResult;
     if (!normalizedResult && recruitingOwnerOverride !== true) return;
 
     const today = getEasternDateInputValue();
@@ -15143,18 +15326,22 @@ function openReportLoadDetails(load) {
     const body = normalizedResult
       ? {
           result: normalizedResult,
-          status: normalizedResult === 'Unsatisfactory' ? 'Failed' : 'Complete',
+          status: twicWaiverSelected ? RECRUITING_TWIC_WAIVER_STATUS : normalizedResult === 'Unsatisfactory' ? 'Failed' : 'Complete',
+          waived: twicWaiverSelected,
           receivedDate: requirement.receivedDate || today,
           completedDate: today,
           active: false,
-          ownerOverride: recruitingOwnerOverride === true
+          ownerOverride: recruitingOwnerOverride === true,
+          ...(isRecruitingTwicRequirement(requirement) ? { required: !twicWaiverSelected } : {})
         }
       : {
           result: '',
           status: requirement.receivedDate ? 'Received' : requirement.requestedDate ? 'Requested' : 'Not Started',
+          waived: false,
           completedDate: '',
           active: true,
-          ownerOverride: recruitingOwnerOverride === true
+          ownerOverride: recruitingOwnerOverride === true,
+          ...(isRecruitingTwicRequirement(requirement) ? { required: true } : {})
         };
 
     await runRecruitingProfileAction(
@@ -15212,13 +15399,16 @@ function openReportLoadDetails(load) {
         recruitingCandidateDraft.firstName,
         recruitingCandidateDraft.lastName
       );
+      const candidatePayload = {
+        ...recruitingCandidateDraft,
+        displayName,
+        DisplayName: displayName
+      };
+
       const res = await authedFetch(`${API}/recruiting/candidates`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...recruitingCandidateDraft,
-          displayName
-        })
+        body: JSON.stringify(candidatePayload)
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'Unable to add candidate.');
@@ -15332,6 +15522,146 @@ function openReportLoadDetails(load) {
     );
   }
 
+  function RecruitingDriverRosterPortModal() {
+    if (!driverRosterPortModalOpen) return null;
+
+    const candidate = driverRosterPortCandidate || selectedRecruitingProfile?.candidate || {};
+    const candidateName = candidate.displayName || candidate.title || 'Qualified driver';
+    const draft = driverRosterPortDraft || createRecruitingDriverRosterPortDraft(candidate);
+
+    const renderPortInput = (field, label, options = {}) => (
+      <label className={options.wide ? 'wide' : ''}>
+        <span>{label}</span>
+        <input
+          type={options.type || 'text'}
+          value={draft[field] || ''}
+          onChange={(e) => updateRecruitingDriverRosterPortDraft(field, options.uppercase ? e.target.value.toUpperCase() : e.target.value)}
+          placeholder={options.placeholder || ''}
+          disabled={driverRosterPortSaving || options.disabled}
+          required={options.required}
+        />
+      </label>
+    );
+
+    const renderPortSelect = (field, label, options = []) => (
+      <label>
+        <span>{label}</span>
+        <select
+          value={draft[field] || ''}
+          onChange={(e) => updateRecruitingDriverRosterPortDraft(field, e.target.value)}
+          disabled={driverRosterPortSaving}
+        >
+          {options.map((option) => (
+            <option key={option} value={option}>{option || 'Blank'}</option>
+          ))}
+        </select>
+      </label>
+    );
+
+    return (
+      <div className="modal-overlay driver-roster-port-overlay" role="presentation">
+        <div className="detail-modal driver-roster-port-modal" role="dialog" aria-modal="true" aria-labelledby="driver-roster-port-title">
+          <div className="detail-header driver-roster-port-header">
+            <div>
+              <h2 id="driver-roster-port-title">Create Driver Roster Record</h2>
+              <p>{candidateName} · {candidate.candidateId || 'Qualified candidate'} · prefilled from Recruiting</p>
+            </div>
+            <button type="button" className="close-button" onClick={closeRecruitingDriverRosterPortModal} disabled={driverRosterPortSaving}>Close</button>
+          </div>
+
+          <div className="modal-body driver-roster-port-body">
+            <div className="driver-roster-port-intro">
+              <strong>Port recruiting info into Driver Roster</strong>
+              <span>Candidate contact info is prefilled. Add additional operational pieces: truck, BOL prefix, roster status, equipment, plates, VINs, weights, and dimensions.</span>
+            </div>
+
+            {driverRosterPortError && <div className="msg error">{driverRosterPortError}</div>}
+
+            <section className="driver-roster-port-section">
+              <h3>Driver / Contact</h3>
+              <div className="driver-roster-port-grid">
+                {renderPortInput('tmsName', 'TMS Name', { required: true })}
+                {renderPortInput('operatorTeamName', 'Operator / Team Name', { required: true })}
+                {renderPortInput('truck', 'Truck Number', { required: true, placeholder: '4-digit truck # or unit' })}
+                {renderPortInput('pin', 'Driver PIN')}
+                {renderPortInput('cellPhone1', 'Cell Phone 1')}
+                {renderPortInput('cellPhone2', 'Cell Phone 2')}
+                {renderPortInput('emailAddress1', 'Email Address 1', { wide: true })}
+                {renderPortInput('emailAddress2', 'Email Address 2', { wide: true })}
+              </div>
+            </section>
+
+            <section className="driver-roster-port-section">
+              <h3>Roster Setup</h3>
+              <div className="driver-roster-port-grid">
+                {renderPortSelect('status', 'Status', DRIVER_ROSTER_PORT_STATUS_OPTIONS)}
+                {renderPortSelect('driverType', 'Driver Type', DRIVER_ROSTER_PORT_DRIVER_TYPE_OPTIONS)}
+                {renderPortSelect('soloOrTeam', 'Solo / Team', DRIVER_ROSTER_PORT_SOLO_TEAM_OPTIONS)}
+                {renderPortInput('startDate', 'Start Date', { type: 'date' })}
+                {renderPortInput('bolLetterPrefix', 'BOL Letter Prefix', { uppercase: true, placeholder: 'A, B, C...' })}
+                {renderPortInput('trailerType', 'Trailer Type', { placeholder: 'Stepdeck, RGN, etc.' })}
+                {renderPortInput('registeredWeight', 'Registered Weight')}
+              </div>
+            </section>
+
+            <section className="driver-roster-port-section">
+              <h3>Tractor</h3>
+              <div className="driver-roster-port-grid">
+                {renderPortInput('tractorMake', 'Make')}
+                {renderPortInput('tractorYear', 'Year')}
+                {renderPortInput('tractorPlate', 'Plate')}
+                {renderPortInput('tractorRegisteredState', 'Registered State', { uppercase: true })}
+                {renderPortInput('tractorVin', 'VIN', { uppercase: true, wide: true })}
+                {renderPortInput('tractorOwner', 'Owner', { wide: true })}
+                {renderPortInput('tractorAxles', 'Axles')}
+              </div>
+            </section>
+
+            <section className="driver-roster-port-section">
+              <h3>Trailer</h3>
+              <div className="driver-roster-port-grid">
+                {renderPortInput('trailerUnitNumber', 'Trailer Unit')}
+                {renderPortInput('trailerLength', 'Length')}
+                {renderPortInput('trailerMake', 'Make')}
+                {renderPortInput('trailerYear', 'Year')}
+                {renderPortInput('trailerPlate', 'Plate')}
+                {renderPortInput('trailerRegisteredState', 'Registered State', { uppercase: true })}
+                {renderPortInput('trailerVin', 'VIN', { uppercase: true, wide: true })}
+                {renderPortInput('trailerOwner', 'Owner', { wide: true })}
+                {renderPortInput('trailerAxles', 'Axles')}
+              </div>
+            </section>
+
+            <section className="driver-roster-port-section">
+              <h3>Weight / Dimensions</h3>
+              <div className="driver-roster-port-grid">
+                {renderPortInput('emptyWeight', 'Empty Weight')}
+                {renderPortInput('steerAxleWeight', 'Steer Axle Weight')}
+                {renderPortInput('overallLength', 'Overall Length')}
+                {renderPortInput('lowestDeckHeight', 'Lowest Deck Height')}
+                {renderPortInput('spacing1to2', 'Spacing 1 to 2')}
+                {renderPortInput('spacing2to3', 'Spacing 2 to 3')}
+                {renderPortInput('spacing3to4', 'Spacing 3 to 4')}
+                {renderPortInput('spacing4to5', 'Spacing 4 to 5')}
+              </div>
+            </section>
+
+            <div className="driver-roster-port-actions">
+              <button type="button" className="secondary-button" onClick={closeRecruitingDriverRosterPortModal} disabled={driverRosterPortSaving}>Cancel</button>
+              <button
+                type="button"
+                onClick={submitRecruitingDriverRosterPort}
+                disabled={driverRosterPortSaving || !String(draft.truck || '').trim() || !String(draft.tmsName || draft.operatorTeamName || '').trim()}
+              >
+                {driverRosterPortSaving ? 'Creating...' : 'Create Driver Roster Record'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function RecruitingProfileModal() {
     if (!selectedRecruitingProfile) return null;
 
@@ -15352,6 +15682,15 @@ function openReportLoadDetails(load) {
     const candidateFolderClosedCopy = candidate.status === 'Qualified'
       ? 'Recruiting folder closed. Driver documents should now live with the driver record.'
       : 'Recruiting folder no longer active for this candidate.';
+    const rosterHandoffStatus = String(candidate.rosterHandoffStatus || '').trim();
+    const linkedDriverRosterTruck = String(candidate.linkedDriveRosterTruck || '').trim();
+    const hasLinkedDriverRosterTruck = Boolean(linkedDriverRosterTruck);
+    const canCreatePendingDriverRosterRecord = candidate.status === 'Qualified'
+      && rosterHandoffStatus === RECRUITING_ROSTER_HANDOFF_STATUS.PENDING
+      && !hasLinkedDriverRosterTruck;
+    const canUseAdminDriverRosterAction = candidate.status === 'Qualified'
+      && !canCreatePendingDriverRosterRecord
+      && !hasLinkedDriverRosterTruck;
 
     return (
       <div className="modal-overlay" role="presentation">
@@ -15417,6 +15756,37 @@ function openReportLoadDetails(load) {
                     {recruitingActionLoading === 'markQualified' ? 'Marking...' : 'Mark Qualified'}
                   </button>
                 )}
+                {canCreatePendingDriverRosterRecord && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => openRecruitingDriverRosterPort(candidate)}
+                    disabled={Boolean(recruitingActionLoading) || driverRosterPortSaving}
+                  >
+                    Create Driver Roster Record
+                  </button>
+                )}
+                {hasLinkedDriverRosterTruck && candidate.status === 'Qualified' && (
+                  <span className="recruiting-roster-link-pill" title="Recruiting candidate is linked to Driver Roster">
+                    Driver Roster: {linkedDriverRosterTruck}
+                  </span>
+                )}
+                {canUseAdminDriverRosterAction && (
+                  <details className="recruiting-admin-actions">
+                    <summary>Admin Actions</summary>
+                    <div>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => openRecruitingDriverRosterPort(candidate)}
+                        disabled={Boolean(recruitingActionLoading) || driverRosterPortSaving}
+                      >
+                        Create Driver Roster Record
+                      </button>
+                      <small>Use only for a go-forward candidate who still needs a roster row. Historical qualified records should usually stay untouched.</small>
+                    </div>
+                  </details>
+                )}
                 {recruitingStatusDraft && recruitingStatusDraft !== candidate.status && (
                   <div className="recruiting-status-save-strip">
                     <span>Change to <strong>{recruitingStatusDraft}</strong></span>
@@ -15451,6 +15821,9 @@ function openReportLoadDetails(load) {
                   <div><dt>Source</dt><dd>{candidate.source || '-'}</dd></div>
                   <div><dt>Relationship</dt><dd>{candidate.relationshipType || '-'}</dd></div>
                   <div><dt>Equipment</dt><dd>{candidate.ownsTruck ? 'Owns truck' : 'No truck'} · {candidate.ownsTrailer ? 'Owns trailer' : 'No trailer'}</dd></div>
+                  {candidate.status === 'Qualified' && (
+                    <div><dt>Driver Roster</dt><dd>{hasLinkedDriverRosterTruck ? linkedDriverRosterTruck : (rosterHandoffStatus || 'Historical / outside recruiting')}</dd></div>
+                  )}
                   <div className="recruiting-folder-row"><dt>Folder</dt><dd>{candidate.folderPath ? (
                     candidateFolderActive ? (
                       <button
@@ -15531,28 +15904,32 @@ function openReportLoadDetails(load) {
                 ) : requirements.map((requirement) => {
                   const rowLocked = candidate.status === 'Qualified' || ((candidateClosed || requirement.active === false) && !checklistOverrideActive);
                   const dateLabel = formatDateOnly(requirement.completedDate || requirement.receivedDate || requirement.requestedDate);
+                  const resultLabel = getRecruitingRequirementResultLabel(requirement);
+                  const requirementSelectValue = isRecruitingTwicRequirement(requirement) && requirement.result === 'Satisfactory' && (requirement.status === RECRUITING_TWIC_WAIVER_STATUS || requirement.required === false)
+                    ? RECRUITING_TWIC_WAIVER_RESULT_OPTION
+                    : requirement.result || '';
+                  const resultOptions = isRecruitingTwicRequirement(requirement)
+                    ? [...RECRUITING_REQUIREMENT_RESULT_OPTIONS, RECRUITING_TWIC_WAIVER_RESULT_OPTION]
+                    : RECRUITING_REQUIREMENT_RESULT_OPTIONS;
+
                   return (
                     <div key={requirement.spId} className={`recruiting-requirement-row ${rowLocked ? 'locked' : ''}`.trim()}>
                       <div className="recruiting-requirement-main">
                         <strong>{requirement.type}</strong>
-                        <small>
-                          {[requirement.status || 'No status', requirement.required ? 'Required' : 'Not required', dateLabel]
-                            .filter((value) => value && value !== '-')
-                            .join(' · ')}
-                        </small>
+                        {dateLabel && <small>{dateLabel}</small>}
                       </div>
                       <div className="recruiting-requirement-result-control">
                         {rowLocked ? (
-                          <span className={getRecruitingStatusClass(requirement.result || 'Pending')}>{requirement.result || 'Pending'}</span>
+                          <span className={getRecruitingStatusClass(resultLabel)}>{resultLabel}</span>
                         ) : (
                           <select
-                            value={requirement.result || ''}
+                            value={requirementSelectValue}
                             onChange={(e) => updateRecruitingRequirementResult(requirement, e.target.value)}
                             disabled={Boolean(recruitingActionLoading)}
                             aria-label={`Set result for ${requirement.type}`}
                           >
                             <option value="" disabled={!checklistOverrideActive}>{checklistOverrideActive ? 'No Result / Reopen' : 'Set result...'}</option>
-                            {RECRUITING_REQUIREMENT_RESULT_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                            {resultOptions.map((option) => <option key={option} value={option}>{option}</option>)}
                           </select>
                         )}
                       </div>
@@ -17319,6 +17696,7 @@ function openReportLoadDetails(load) {
     <>
       {renderPreferencesModal()}
       {RecruitingProfileModal()}
+      {RecruitingDriverRosterPortModal()}
       {RecruitingCreateCandidateModal()}
 
       {startupSplashVisible && (

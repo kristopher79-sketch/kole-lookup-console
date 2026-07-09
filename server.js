@@ -6514,6 +6514,165 @@ async function getDriverRosterItems(token) {
   return items.map(cleanDriverRosterItem);
 }
 
+function getDriverRosterSiteId() {
+  return process.env.DRIVER_ROSTER_SITE_ID || process.env.SITE_ID || '';
+}
+
+function assertDriverRosterConfig() {
+  const siteId = getDriverRosterSiteId();
+  const listId = process.env.DRIVER_ROSTER_LIST_ID || '';
+  const missing = [];
+
+  if (!siteId) missing.push('DRIVER_ROSTER_SITE_ID or SITE_ID');
+  if (!listId) missing.push('DRIVER_ROSTER_LIST_ID');
+
+  if (missing.length) {
+    const error = new Error(`Driver Roster Graph configuration is missing: ${missing.join(', ')}.`);
+    error.statusCode = 500;
+    throw error;
+  }
+
+  return { siteId, listId };
+}
+
+function cleanDriverRosterDraftText(value) {
+  return value == null ? '' : String(value).replace(/\s+/g, ' ').trim();
+}
+
+function getDriverRosterDraftValue(body = {}, ...keys) {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) return body[key];
+  }
+
+  return '';
+}
+
+function getDriverRosterDraftText(body = {}, ...keys) {
+  return cleanDriverRosterDraftText(getDriverRosterDraftValue(body, ...keys));
+}
+
+function getDriverRosterDraftDate(body = {}, ...keys) {
+  const value = getDriverRosterDraftText(body, ...keys);
+  return isValidDateInput(value) ? value : null;
+}
+
+function getDriverRosterDraftNumber(body = {}, fieldLabel, ...keys) {
+  const value = getDriverRosterDraftText(body, ...keys);
+  if (!value) return null;
+
+  const normalized = value.replace(/,/g, '');
+  const number = Number(normalized);
+
+  if (!Number.isFinite(number)) {
+    const error = new Error(`${fieldLabel} must be a number.`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return number;
+}
+
+function setRosterTextField(fields, fieldName, value) {
+  const clean = cleanDriverRosterDraftText(value);
+  if (clean) fields[fieldName] = clean;
+}
+
+function setRosterNumberField(fields, fieldName, value) {
+  if (value !== null && value !== undefined && value !== '') fields[fieldName] = value;
+}
+
+function buildDriverRosterFieldsFromRecruitingCandidate(candidate = {}, body = {}) {
+  const candidateDisplayName = cleanDriverRosterDraftText(candidate.displayName || [candidate.firstName, candidate.lastName].filter(Boolean).join(' '));
+  const candidateTitle = cleanDriverRosterDraftText(candidate.title || candidateDisplayName);
+  const tmsName = getDriverRosterDraftText(body, 'tmsName', 'TMSName') || candidateDisplayName || candidateTitle;
+  const operatorTeamName = getDriverRosterDraftText(body, 'operatorTeamName', 'OperatorTeamName', 'operator_x002f_teamName') || candidateTitle || tmsName;
+  const truck = getDriverRosterDraftText(body, 'truck', 'Trucks', 'truckNumber');
+
+  if (!truck) {
+    const error = new Error('Truck number is required before creating a Driver Roster record.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!tmsName && !operatorTeamName) {
+    const error = new Error('TMS Name or Operator / Team Name is required before creating a Driver Roster record.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const fields = {
+    Title: operatorTeamName || tmsName,
+    Operator_x002f_TeamName: operatorTeamName || tmsName,
+    TMSName: tmsName || operatorTeamName,
+    Trucks: truck,
+    Status: getDriverRosterDraftText(body, 'status', 'Status') || 'Active',
+    StartDate: getDriverRosterDraftDate(body, 'startDate', 'StartDate') || formatEasternDate(),
+    OrdersTaggedforInactive: false
+  };
+
+  setRosterTextField(fields, 'PIN', getDriverRosterDraftText(body, 'pin', 'PIN'));
+  setRosterTextField(fields, 'CellPhone1', getDriverRosterDraftText(body, 'cellPhone1', 'CellPhone1') || candidate.primaryPhone);
+  setRosterTextField(fields, 'CellPhone2', getDriverRosterDraftText(body, 'cellPhone2', 'CellPhone2') || candidate.secondaryPhone);
+  setRosterTextField(fields, 'EmailAddress1', getDriverRosterDraftText(body, 'emailAddress1', 'EmailAddress1') || candidate.email);
+  setRosterTextField(fields, 'EmailAddress2', getDriverRosterDraftText(body, 'emailAddress2', 'EmailAddress2'));
+  setRosterTextField(fields, 'DriverType', getDriverRosterDraftText(body, 'driverType', 'DriverType') || candidate.relationshipType);
+  setRosterTextField(fields, 'SoloorTeam', getDriverRosterDraftText(body, 'soloOrTeam', 'SoloorTeam') || candidate.type);
+  setRosterTextField(fields, 'BOLLetterPrefix', getDriverRosterDraftText(body, 'bolLetterPrefix', 'BOLLetterPrefix').toUpperCase());
+  setRosterTextField(fields, 'TrailerType', getDriverRosterDraftText(body, 'trailerType', 'TrailerType'));
+
+  setRosterTextField(fields, 'TractorPlate', getDriverRosterDraftText(body, 'tractorPlate', 'TractorPlate').toUpperCase());
+  setRosterTextField(fields, 'TractorYear', getDriverRosterDraftText(body, 'tractorYear', 'TractorYear'));
+  setRosterTextField(fields, 'TractorMake', getDriverRosterDraftText(body, 'tractorMake', 'TractorMake'));
+  setRosterTextField(fields, 'TractorVIN', getDriverRosterDraftText(body, 'tractorVin', 'TractorVIN').toUpperCase());
+  setRosterTextField(fields, 'TractorOwner', getDriverRosterDraftText(body, 'tractorOwner', 'TractorOwner'));
+  setRosterTextField(fields, 'TractorRegisteredState', getDriverRosterDraftText(body, 'tractorRegisteredState', 'TractorRegisteredState').toUpperCase());
+
+  setRosterTextField(fields, 'TrailerUnitNumber', getDriverRosterDraftText(body, 'trailerUnitNumber', 'TrailerUnitNumber'));
+  setRosterTextField(fields, 'TrailerLength', getDriverRosterDraftText(body, 'trailerLength', 'TrailerLength'));
+  setRosterTextField(fields, 'TrailerPlate', getDriverRosterDraftText(body, 'trailerPlate', 'TrailerPlate').toUpperCase());
+  setRosterTextField(fields, 'TrailerRegisteredState', getDriverRosterDraftText(body, 'trailerRegisteredState', 'TrailerRegisteredState').toUpperCase());
+  setRosterTextField(fields, 'TrailerMake', getDriverRosterDraftText(body, 'trailerMake', 'TrailerMake'));
+  setRosterTextField(fields, 'TrailerVIN', getDriverRosterDraftText(body, 'trailerVin', 'TrailerVIN').toUpperCase());
+  setRosterTextField(fields, 'TrailerOwner', getDriverRosterDraftText(body, 'trailerOwner', 'TrailerOwner'));
+
+  setRosterNumberField(fields, 'RegisteredWeight', getDriverRosterDraftNumber(body, 'Registered weight', 'registeredWeight', 'RegisteredWeight'));
+  setRosterNumberField(fields, 'TractorAxles', getDriverRosterDraftNumber(body, 'Tractor axles', 'tractorAxles', 'TractorAxles'));
+  setRosterNumberField(fields, 'TrailerYear', getDriverRosterDraftNumber(body, 'Trailer year', 'trailerYear', 'TrailerYear'));
+  setRosterNumberField(fields, 'TrailerAxles', getDriverRosterDraftNumber(body, 'Trailer axles', 'trailerAxles', 'TrailerAxles'));
+  setRosterNumberField(fields, 'EmptyWeight', getDriverRosterDraftNumber(body, 'Empty weight', 'emptyWeight', 'EmptyWeight'));
+  setRosterNumberField(fields, 'SteerAxleWeight', getDriverRosterDraftNumber(body, 'Steer axle weight', 'steerAxleWeight', 'SteerAxleWeight'));
+  setRosterNumberField(fields, 'Spacing1to2', getDriverRosterDraftNumber(body, 'Spacing 1 to 2', 'spacing1to2', 'Spacing1to2'));
+  setRosterNumberField(fields, 'Spacing2to3', getDriverRosterDraftNumber(body, 'Spacing 2 to 3', 'spacing2to3', 'Spacing2to3'));
+  setRosterNumberField(fields, 'Spacing3to4', getDriverRosterDraftNumber(body, 'Spacing 3 to 4', 'spacing3to4', 'Spacing3to4'));
+  setRosterNumberField(fields, 'Spacing4to5', getDriverRosterDraftNumber(body, 'Spacing 4 to 5', 'spacing4to5', 'Spacing4to5'));
+  setRosterNumberField(fields, 'OverallLength', getDriverRosterDraftNumber(body, 'Overall length', 'overallLength', 'OverallLength'));
+  setRosterNumberField(fields, 'LowestDeckHeight', getDriverRosterDraftNumber(body, 'Lowest deck height', 'lowestDeckHeight', 'LowestDeckHeight'));
+
+  return fields;
+}
+
+async function findActiveDriverRosterMatchByTruck(token, truck) {
+  const truckKey = normalizeTruckKey(truck);
+  if (!truckKey) return null;
+
+  const rosterItems = await getDriverRosterItems(token);
+  return rosterItems.find((item) => {
+    if (normalizeTruckKey(item.truck) !== truckKey) return false;
+    if (item.termDate) return false;
+
+    const status = normalizeSearchValue(item.status);
+    return status !== 'inactive' && status !== 'terminated';
+  }) || null;
+}
+
+async function getDriverRosterItemById(token, itemId) {
+  const { siteId, listId } = assertDriverRosterConfig();
+  return graphGet(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${encodeURIComponent(itemId)}?$select=id,webUrl,eTag&$expand=fields($select=${getDriverRosterFieldSelect()})`
+  );
+}
+
 
 
 function normalizeDriverSnapshotTruckKey(value) {
@@ -7821,6 +7980,14 @@ const RECRUITING_CLOSED_STATUSES = new Set([
 ]);
 
 const RECRUITING_ALLOWED_CANDIDATE_STATUSES = new Set(Object.values(RECRUITING_CANDIDATE_STATUS));
+const RECRUITING_ROSTER_HANDOFF_STATUS = {
+  NOT_NEEDED: 'Not Needed',
+  PENDING: 'Pending',
+  CREATED: 'Created',
+  LINKED_EXISTING: 'Linked Existing',
+  SKIPPED: 'Skipped'
+};
+const RECRUITING_ALLOWED_ROSTER_HANDOFF_STATUSES = new Set(Object.values(RECRUITING_ROSTER_HANDOFF_STATUS));
 
 const RECRUITING_FOLDER_ACTIVE_STATUSES = new Set([
   RECRUITING_CANDIDATE_STATUS.PROSPECT,
@@ -7852,7 +8019,8 @@ const RECRUITING_REQUIREMENT_STATUS = {
   REQUESTED: 'Requested',
   RECEIVED: 'Received',
   COMPLETE: 'Complete',
-  FAILED: 'Failed'
+  FAILED: 'Failed',
+  WAIVED: 'Waived'
 };
 const RECRUITING_CORE_REQUIREMENTS = new Set(RECRUITING_REQUIREMENT_ORDER);
 
@@ -7883,6 +8051,7 @@ const RECRUITING_CANDIDATE_FIELD_SELECT = [
   'DisqualifiedDate',
   'DisqualifiedReason',
   'LinkedDriveRosterTruck',
+  'RosterHandoffStatus',
   'CandidateFolderPath',
   'NoteSummary',
   'ActiveFlag',
@@ -8122,6 +8291,7 @@ function normalizeRecruitingCandidate(item) {
     disqualifiedDate: normalizeGraphDateOnly(f.DisqualifiedDate),
     disqualifiedReason: cleanRecruitingString(f.DisqualifiedReason),
     linkedDriveRosterTruck: cleanRecruitingString(f.LinkedDriveRosterTruck),
+    rosterHandoffStatus: cleanRecruitingString(f.RosterHandoffStatus),
     folderPath,
     folderUrl: folderActive ? getRecruitingFolderUrl(folderPath) : '',
     folderActive,
@@ -8406,6 +8576,7 @@ function buildRecruitingCandidatePatchFromBody(body = {}) {
     relationshipType: 'RelationshipType',
     disqualifiedReason: 'DisqualifiedReason',
     linkedDriveRosterTruck: 'LinkedDriveRosterTruck',
+    rosterHandoffStatus: 'RosterHandoffStatus',
     noteSummary: 'NoteSummary'
   };
   const dateFields = {
@@ -8459,6 +8630,12 @@ function buildRecruitingCandidatePatchFromBody(body = {}) {
         patch.DisqualifiedReason = '';
       }
     }
+  }
+
+  if (patch.RosterHandoffStatus && !RECRUITING_ALLOWED_ROSTER_HANDOFF_STATUSES.has(patch.RosterHandoffStatus)) {
+    const error = new Error('Roster handoff status is not allowed.');
+    error.statusCode = 400;
+    throw error;
   }
 
   if (patch.FirstName || patch.LastName || patch.DisplayName) {
@@ -8526,6 +8703,25 @@ function getRequestedRequirementResult(body = {}) {
     return { provided: true, value: cleanRecruitingString(body.RequirementResult) };
   }
   return { provided: false, value: '' };
+}
+
+function isRecruitingTwicRequirementType(value) {
+  return cleanRecruitingString(value).toLowerCase() === 'twic';
+}
+
+function isRecruitingTwicWaiverRequest(body = {}, currentRequirement = null, patch = {}) {
+  if (!isRecruitingTwicRequirementType(currentRequirement?.type)) return false;
+
+  const requestedStatus = cleanRecruitingString(body.status || body.RequirementStatus);
+
+  return (
+    body.waived === true ||
+    body.isWaived === true ||
+    body.waiver === true ||
+    requestedStatus === RECRUITING_REQUIREMENT_STATUS.WAIVED ||
+    patch.RequirementStatus === RECRUITING_REQUIREMENT_STATUS.WAIVED ||
+    patch.RequiredFlag === false
+  );
 }
 
 function getReopenedRequirementStatus(currentRequirement, patch = {}) {
@@ -8609,13 +8805,18 @@ function buildRequirementPatchFromBody(body = {}, currentRequirement = null) {
       patch.RequirementStatus = getReopenedRequirementStatus(currentRequirement, patch);
       patch.CompletedDate = null;
       patch.ActiveFlag = true;
+      if (isRecruitingTwicRequirementType(currentRequirement.type)) patch.RequiredFlag = true;
     } else if (requestedResult.value === RECRUITING_REQUIREMENT_RESULT.UNSATISFACTORY) {
       patch.RequirementStatus = RECRUITING_REQUIREMENT_STATUS.FAILED;
       patch.ActiveFlag = false;
       if (!patch.CompletedDate) patch.CompletedDate = formatEasternDate();
     } else if (requestedResult.value === RECRUITING_REQUIREMENT_RESULT.SATISFACTORY) {
-      patch.RequirementStatus = RECRUITING_REQUIREMENT_STATUS.COMPLETE;
+      const isTwicWaiver = isRecruitingTwicWaiverRequest(body, currentRequirement, patch);
+      patch.RequirementStatus = isTwicWaiver
+        ? RECRUITING_REQUIREMENT_STATUS.WAIVED
+        : RECRUITING_REQUIREMENT_STATUS.COMPLETE;
       patch.ActiveFlag = false;
+      if (isTwicWaiver) patch.RequiredFlag = false;
       if (!patch.CompletedDate) patch.CompletedDate = formatEasternDate();
     }
   }
@@ -8711,6 +8912,9 @@ app.post('/recruiting/candidates', requireLookupAccess, async (req, res) => {
     const { siteId, lists } = assertRecruitingConfig();
     const token = await getGraphToken();
     const fields = buildRecruitingCandidateFieldsFromBody(req.body);
+    const displayName = getRecruitingDisplayName(fields.FirstName, fields.LastName, fields.DisplayName);
+    fields.DisplayName = displayName;
+    fields.Title = getRecruitingCandidateTitle(fields.LastName, fields.FirstName, displayName);
 
     if (!fields.FirstName && !fields.LastName && !fields.DisplayName) {
       return res.status(400).json({ success: false, error: 'Enter at least a first name, last name, or display name.' });
@@ -8719,11 +8923,11 @@ app.post('/recruiting/candidates', requireLookupAccess, async (req, res) => {
     const createdItem = await graphPost(token, `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${lists.candidates}/items`, { fields });
     const itemId = createdItem.id || createdItem?.fields?.id;
     const candidateId = getRecruitingCandidateId(fields.ApplicationDate, itemId);
-    const folderPath = getRecruitingFolderPath(fields.DisplayName);
+    const folderPath = getRecruitingFolderPath(displayName);
 
     await graphPatch(token, `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${lists.candidates}/items/${encodeURIComponent(itemId)}/fields`, {
       CandidateID: candidateId,
-      DisplayName: fields.DisplayName,
+      DisplayName: displayName,
       CandidateFolderPath: folderPath
     });
 
@@ -8731,7 +8935,7 @@ app.post('/recruiting/candidates', requireLookupAccess, async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: `${fields.DisplayName || fields.Title} added to Recruiting Candidates.`,
+      message: `${displayName || fields.Title} added to Recruiting Candidates.`,
       candidate: normalizeRecruitingCandidate(refreshed)
     });
   } catch (error) {
@@ -8811,14 +9015,90 @@ app.post('/recruiting/candidates/:candidateId/mark-qualified', requireLookupAcce
     }
 
     await graphPatch(token, `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${lists.candidates}/items/${encodeURIComponent(profile.candidate.spId)}/fields`, {
-      CandidateStatus: RECRUITING_CANDIDATE_STATUS.QUALIFIED
+      CandidateStatus: RECRUITING_CANDIDATE_STATUS.QUALIFIED,
+      RosterHandoffStatus: RECRUITING_ROSTER_HANDOFF_STATUS.PENDING,
+      QualifiedDate: profile.candidate.qualifiedDate || formatEasternDate(),
+      LastContactDate: formatEasternDate(),
+      ActiveFlag: false,
+      QualificationStartedFlag: false,
+      NextFollowUpDate: null
     });
 
     const updatedProfile = await getRecruitingProfile(token, candidateId);
-    res.json({ success: true, message: 'Candidate marked Qualified. Power Automate will complete the qualification closeout.', ...updatedProfile });
+    res.json({ success: true, message: 'Candidate marked Qualified. Driver Roster handoff is pending.', ...updatedProfile });
   } catch (error) {
     console.error(error);
     res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Unable to mark candidate Qualified.' });
+  }
+});
+
+app.post('/recruiting/candidates/:candidateId/driver-roster', requireLookupAccess, async (req, res) => {
+  try {
+    const { siteId: recruitingSiteId, lists } = assertRecruitingConfig();
+    const { siteId: rosterSiteId, listId: driverRosterListId } = assertDriverRosterConfig();
+    const candidateId = cleanRecruitingString(req.params.candidateId);
+    const token = await getGraphToken();
+    const profile = await getRecruitingProfile(token, candidateId);
+
+    if (profile.candidate.status !== RECRUITING_CANDIDATE_STATUS.QUALIFIED) {
+      return res.status(400).json({ success: false, error: 'Only Qualified candidates can be ported to Driver Roster.' });
+    }
+
+    const fields = buildDriverRosterFieldsFromRecruitingCandidate(profile.candidate, req.body);
+    const existingRoster = await findActiveDriverRosterMatchByTruck(token, fields.Trucks);
+
+    if (existingRoster) {
+      return res.status(409).json({
+        success: false,
+        error: `Truck ${fields.Trucks} already has an active Driver Roster record for ${existingRoster.tmsName || existingRoster.operatorTeamName || 'another driver'}.`
+      });
+    }
+
+    const createdItem = await graphPost(
+      token,
+      `https://graph.microsoft.com/v1.0/sites/${rosterSiteId}/lists/${driverRosterListId}/items`,
+      { fields }
+    );
+    const createdItemId = createdItem.id || createdItem?.fields?.id;
+    const refreshedRosterItem = createdItemId
+      ? await getDriverRosterItemById(token, createdItemId)
+      : createdItem;
+
+    await graphPatch(token, `https://graph.microsoft.com/v1.0/sites/${recruitingSiteId}/lists/${lists.candidates}/items/${encodeURIComponent(profile.candidate.spId)}/fields`, {
+      LinkedDriveRosterTruck: fields.Trucks,
+      RosterHandoffStatus: RECRUITING_ROSTER_HANDOFF_STATUS.CREATED,
+      ActiveFlag: false,
+      QualificationStartedFlag: false,
+      NextFollowUpDate: null,
+      QualifiedDate: profile.candidate.qualifiedDate || formatEasternDate()
+    });
+
+    try {
+      await graphPost(token, `https://graph.microsoft.com/v1.0/sites/${recruitingSiteId}/lists/${lists.notes}/items`, {
+        fields: buildCandidateNoteFields(profile.candidate, {
+          noteType: 'System',
+          noteBody: `Created Driver Roster record for truck ${fields.Trucks}. TMS Name: ${fields.TMSName || '-'}; Operator / Team: ${fields.Operator_x002f_TeamName || '-'}.`,
+          noteDate: formatEasternDate()
+        })
+      });
+    } catch (noteError) {
+      console.warn('Driver Roster port note could not be written.', noteError);
+    }
+
+    const updatedProfile = await getRecruitingProfile(token, candidateId);
+
+    res.status(201).json({
+      success: true,
+      message: `${updatedProfile.candidate.displayName || updatedProfile.candidate.title || 'Candidate'} was ported to Driver Roster as truck ${fields.Trucks}.`,
+      roster: cleanDriverRosterItem(refreshedRosterItem),
+      ...updatedProfile
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to create Driver Roster record from recruiting candidate.'
+    });
   }
 });
 
