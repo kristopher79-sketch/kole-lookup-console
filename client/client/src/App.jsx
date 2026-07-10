@@ -1226,6 +1226,11 @@ export default function App() {
   const [driverRosterPortDraft, setDriverRosterPortDraft] = useState(() => createRecruitingDriverRosterPortDraft());
   const [driverRosterPortSaving, setDriverRosterPortSaving] = useState(false);
   const [driverRosterPortError, setDriverRosterPortError] = useState('');
+  const [recruitingSnapshotModalOpen, setRecruitingSnapshotModalOpen] = useState(false);
+  const [recruitingSnapshotReport, setRecruitingSnapshotReport] = useState(null);
+  const [recruitingSnapshotLoading, setRecruitingSnapshotLoading] = useState(false);
+  const [recruitingSnapshotError, setRecruitingSnapshotError] = useState('');
+  const [recruitingSnapshotView, setRecruitingSnapshotView] = useState('solo');
 
   const isAnyModalOpen = Boolean(
     preferencesModalOpen ||
@@ -1256,6 +1261,7 @@ export default function App() {
     selectedSalesLead ||
     selectedRecruitingProfile ||
     recruitingCreateModalOpen ||
+    recruitingSnapshotModalOpen ||
     driverRosterPortModalOpen ||
     availableTruckDistributionInactiveModalOpen ||
     availableTruckDrilldown ||
@@ -2416,8 +2422,10 @@ export default function App() {
   function closeRecruitingSubsections() {
     setSelectedRecruitingProfile(null);
     setRecruitingCreateModalOpen(false);
+    setRecruitingSnapshotModalOpen(false);
     setRecruitingProfileError('');
     setRecruitingActionError('');
+    setRecruitingSnapshotError('');
   }
 
   function toggleIntelliTrackSubsection(sectionName) {
@@ -2631,6 +2639,11 @@ export default function App() {
     setRecruitingCreateModalOpen(false);
     setRecruitingCandidateDraft(createRecruitingCandidateDraft());
     setRecruitingCandidateCreating(false);
+    setRecruitingSnapshotModalOpen(false);
+    setRecruitingSnapshotReport(null);
+    setRecruitingSnapshotLoading(false);
+    setRecruitingSnapshotError('');
+    setRecruitingSnapshotView('solo');
     setRecruitingNoteDraft('');
     setRecruitingNoteType('Internal');
     setRecruitingFollowUpDate('');
@@ -15101,6 +15114,67 @@ function openReportLoadDetails(load) {
     }
   }
 
+
+  async function loadRecruitingSnapshot(options = {}) {
+    setRecruitingSnapshotLoading(true);
+    setRecruitingSnapshotError('');
+
+    try {
+      const res = await authedFetch(`${API}/recruiting/snapshot?months=12`);
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Unable to load Recruiting Snapshot.');
+      setRecruitingSnapshotReport(data);
+
+      const preferredView = (data.segments || []).find((segment) => segment.key === recruitingSnapshotView && segment.metrics?.loadCount > 0)
+        ? recruitingSnapshotView
+        : ((data.segments || []).find((segment) => segment.metrics?.loadCount > 0)?.key || 'solo');
+      setRecruitingSnapshotView(preferredView);
+
+      if (options.open !== false) setRecruitingSnapshotModalOpen(true);
+      return true;
+    } catch (err) {
+      setRecruitingSnapshotError(err.message || 'Unable to load Recruiting Snapshot.');
+      if (options.open !== false) setRecruitingSnapshotModalOpen(true);
+      return false;
+    } finally {
+      setRecruitingSnapshotLoading(false);
+    }
+  }
+
+  function openRecruitingSnapshot() {
+    setRecruitingSnapshotModalOpen(true);
+    if (!recruitingSnapshotReport && !recruitingSnapshotLoading) {
+      loadRecruitingSnapshot({ open: true });
+    }
+  }
+
+  function closeRecruitingSnapshotModal() {
+    setRecruitingSnapshotModalOpen(false);
+    setRecruitingSnapshotError('');
+  }
+
+  function printRecruitingSnapshot() {
+    const snapshotBody = document.querySelector('.recruiting-snapshot-body');
+    const snapshotOverlay = document.querySelector('.recruiting-snapshot-overlay');
+
+    if (snapshotBody) snapshotBody.scrollTop = 0;
+    if (snapshotOverlay) snapshotOverlay.scrollTop = 0;
+
+    document.body.classList.add('recruiting-snapshot-printing');
+
+    const clearPrintMode = () => {
+      document.body.classList.remove('recruiting-snapshot-printing');
+      window.removeEventListener('afterprint', clearPrintMode);
+    };
+
+    window.addEventListener('afterprint', clearPrintMode);
+
+    window.setTimeout(() => {
+      window.print();
+      window.setTimeout(clearPrintMode, 600);
+    }, 75);
+  }
+
   async function openRecruitingCandidateProfile(candidateId) {
     if (!candidateId) return;
     setRecruitingProfileLoading(true);
@@ -15496,6 +15570,159 @@ function openReportLoadDetails(load) {
     } finally {
       setRecruitingCandidateCreating(false);
     }
+  }
+
+
+  function RecruitingSnapshotModal() {
+    if (!recruitingSnapshotModalOpen) return null;
+
+    const report = recruitingSnapshotReport || null;
+    const segments = report?.segments || [];
+    const selectedSegment = segments.find((segment) => segment.key === recruitingSnapshotView) || segments[0] || null;
+    const allDriversSegment = segments.find((segment) => segment.key === 'all') || selectedSegment || null;
+    const metrics = selectedSegment?.metrics || {};
+    const sample = selectedSegment?.sample || {};
+    const allDriverMetrics = allDriversSegment?.metrics || metrics;
+    const unknownLoads = Number(report?.unknownSegment?.metrics?.loadCount || 0);
+    const localLoadedMileMax = Number(report?.window?.localLoadedMileMax || sample.localLoadedMileMax || 300);
+    const allDriverAllMileRate = Number(allDriverMetrics.revenuePerAllMile || 0);
+    const allDriverShareMileRate = Number(allDriverMetrics.driverSharePerAllMile || allDriverAllMileRate * 0.8);
+
+    const renderSnapshotMetric = (label, value, detail) => (
+      <div className="recruiting-snapshot-metric-card">
+        <span>{label}</span>
+        <strong>{value}</strong>
+        {detail && <small>{detail}</small>}
+      </div>
+    );
+
+    const renderSegmentMoney = (segment, field) => formatReportMoney(segment?.metrics?.[field] || 0);
+    const renderSegmentNumber = (segment, field, digits = 0) => formatReportNumber(segment?.metrics?.[field] || 0, digits);
+
+    return (
+      <div className="modal-overlay recruiting-snapshot-overlay" role="presentation" onClick={closeRecruitingSnapshotModal}>
+        <div className="detail-modal recruiting-snapshot-modal" role="dialog" aria-modal="true" aria-labelledby="recruiting-snapshot-title" onClick={(e) => e.stopPropagation()}>
+          <div className="detail-header recruiting-snapshot-header">
+            <div>
+              <h2 id="recruiting-snapshot-title">Recruiting Snapshot</h2>
+              <p>{report?.window?.label || 'Rolling 12 full months'}</p>
+            </div>
+            <div className="recruiting-snapshot-header-actions">
+              <button type="button" className="secondary-button recruiting-snapshot-print-button" onClick={printRecruitingSnapshot} disabled={!report}>Print / PDF</button>
+              <button type="button" className="secondary-button" onClick={() => loadRecruitingSnapshot({ open: true })} disabled={recruitingSnapshotLoading}>
+                {recruitingSnapshotLoading ? 'Refreshing...' : 'Refresh Snapshot'}
+              </button>
+              <button type="button" className="close-button" onClick={closeRecruitingSnapshotModal}>Close</button>
+            </div>
+          </div>
+
+          <div className="modal-body recruiting-snapshot-body">
+            {recruitingSnapshotLoading && !report && <div className="msg">Building recruiting snapshot...</div>}
+
+            {recruitingSnapshotError && (
+              <div className="report-alert error">
+                <h4>Snapshot could not be loaded.</h4>
+                <p>{recruitingSnapshotError}</p>
+              </div>
+            )}
+
+            {report && (
+              <>
+                <div className="recruiting-snapshot-intro recruiting-snapshot-meta-strip">
+                  <span>{report.generatedAt || '-'} · {formatReportNumber(report.counts?.usableLoads || 0)} won loads analyzed · locals ≤ {formatReportNumber(localLoadedMileMax)} loaded mi excluded from rate math</span>
+                </div>
+
+                <div className="recruiting-snapshot-tabs" role="tablist" aria-label="Recruiting snapshot views">
+                  {segments.map((segment) => (
+                    <button
+                      key={segment.key}
+                      type="button"
+                      className={segment.key === selectedSegment?.key ? 'active' : ''}
+                      onClick={() => setRecruitingSnapshotView(segment.key)}
+                    >
+                      <strong>{segment.label}</strong>
+                      <span>{formatReportNumber(segment.metrics?.loadCount || 0)} loads · {formatReportNumber(segment.metrics?.trucks || 0)} trucks</span>
+                    </button>
+                  ))}
+                </div>
+
+                {selectedSegment && (
+                  <>
+                    <div className="recruiting-snapshot-talk-track">
+                      <span>Phone talk-track</span>
+                      <p>{selectedSegment.talkTrack}</p>
+                    </div>
+
+                    <div className="recruiting-snapshot-metric-grid">
+                      {renderSnapshotMetric('Avg Active Month Gross', formatReportMoney(metrics.averageMonthlyGross), `${formatReportNumber(sample.activeTruckMonths || 0)} active truck-month samples · locals included`)}
+                      {renderSnapshotMetric('Avg Net Driver Pay', formatReportMoney(metrics.averageMonthlyDriverPay), sample.driverPayTruckMonths ? `${formatReportNumber(sample.driverPayTruckMonths)} settlement-backed truck-month samples` : 'No settlement pay samples in this view')}
+                      {renderSnapshotMetric('Median Active Month', formatReportMoney(metrics.medianMonthlyGross), 'Middle truck-month, less skewed by outliers')}
+                      {renderSnapshotMetric('Top Quartile Month', formatReportMoney(metrics.topQuartileMonthlyGross), '75th percentile active truck-month')}
+                      {renderSnapshotMetric('Loads / Active Month', formatReportNumber(metrics.averageLoadsPerActiveMonth, 1), `${formatReportNumber(sample.loads || 0)} total loads · ${formatReportNumber(metrics.linehaulLoadCount || 0)} linehaul`)}
+                      {renderSnapshotMetric('$ / All Miles', formatReportMoney(allDriverAllMileRate), `All drivers · linehaul only · ${formatReportNumber(allDriverMetrics.linehaulTotalMiles || 0)} total miles`)}
+                      {renderSnapshotMetric('Driver Share $ / Mile', formatReportMoney(allDriverShareMileRate), '80% of all-driver all-mile linehaul rate')}
+                      {renderSnapshotMetric('Median Deadhead', `${formatReportNumber(metrics.medianDeadhead || 0)} mi`, `Linehaul only · ${formatPercent(metrics.deadheadUnder150Percent)} at 150 mi or less`)}
+                      {renderSnapshotMetric('75th % Deadhead', `${formatReportNumber(metrics.p75Deadhead || 0)} mi`, `Linehaul only · ${formatPercent(metrics.deadheadOver300Percent)} at 300 mi or more`)}
+                      
+                    </div>
+                  </>
+                )}
+
+                <section className="recruiting-snapshot-section">
+                  <div className="recruiting-section-card-header">
+                    <div>
+                      <h3>Solo / Team Comparison</h3>
+                      <p>Gross includes local/day-work. Rate figures are linehaul only.</p>
+                    </div>
+                  </div>
+
+                  <div className="report-table-wrap recruiting-snapshot-table-wrap">
+                    <table className="recruiting-snapshot-table">
+                      <thead>
+                        <tr>
+                          <th>View</th>
+                          <th>Trucks</th>
+                          <th>Loads</th>
+                          <th>Linehaul</th>
+                          <th>Avg Mo Gross</th>
+                          <th>All $/Mi</th>
+                          <th>Driver Share $/Mi</th>
+                          <th>Median DH</th>
+                          <th>Loads/Mo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {segments.map((segment) => (
+                          <tr key={segment.key}>
+                            <td><strong>{segment.label}</strong></td>
+                            <td>{formatReportNumber(segment.metrics?.trucks || 0)}</td>
+                            <td>{formatReportNumber(segment.metrics?.loadCount || 0)}</td>
+                            <td>{formatReportNumber(segment.metrics?.linehaulLoadCount || 0)}</td>
+                            <td>{renderSegmentMoney(segment, 'averageMonthlyGross')}</td>
+                            <td>{renderSegmentMoney(segment, 'revenuePerAllMile')}</td>
+                            <td>{renderSegmentMoney(segment, 'driverSharePerAllMile')}</td>
+                            <td>{renderSegmentNumber(segment, 'medianDeadhead')} mi</td>
+                            <td>{renderSegmentNumber(segment, 'averageLoadsPerActiveMonth', 1)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+
+
+                <div className="recruiting-snapshot-disclaimer">
+                  <strong>Recruiting use only.</strong>
+                  <span>{report.window?.note || 'Historical performance is not a guarantee. Results vary by availability, lane acceptance, equipment, repairs, home time, and market conditions.'}</span>
+                  
+                  {unknownLoads > 0 && <span>{formatReportNumber(unknownLoads)} loads are visible in the unclassified bucket because Solo/Team could not be matched from Driver Roster.</span>}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   function RecruitingCreateCandidateModal() {
@@ -16149,6 +16376,9 @@ function openReportLoadDetails(load) {
               <div className="recruiting-toolbar-actions">
                 <button type="button" className="secondary-button" onClick={() => loadRecruitingDashboard()} disabled={recruitingLoading}>
                   {recruitingLoading ? 'Refreshing...' : 'Refresh'}
+                </button>
+                <button type="button" className="secondary-button recruiting-snapshot-button" onClick={openRecruitingSnapshot} disabled={recruitingSnapshotLoading}>
+                  {recruitingSnapshotLoading ? 'Loading Snapshot...' : 'Recruiting Snapshot'}
                 </button>
                 <button type="button" onClick={() => setRecruitingCreateModalOpen(true)}>Add Candidate</button>
               </div>
@@ -17769,6 +17999,7 @@ function openReportLoadDetails(load) {
     <>
       {renderPreferencesModal()}
       {RecruitingProfileModal()}
+      {RecruitingSnapshotModal()}
       {RecruitingDriverRosterPortModal()}
       {RecruitingCreateCandidateModal()}
 

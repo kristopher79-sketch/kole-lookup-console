@@ -2739,6 +2739,462 @@ function buildDriverSummaryResponse(items, sourceList, year, month) {
   };
 }
 
+
+const RECRUITING_SNAPSHOT_LOCAL_LOADED_MILE_MAX = Number(process.env.RECRUITING_SNAPSHOT_LOCAL_LOADED_MILE_MAX || 300);
+
+function getRecruitingSnapshotLocalLoadedMileMax() {
+  const configured = Number(RECRUITING_SNAPSHOT_LOCAL_LOADED_MILE_MAX);
+  return Number.isFinite(configured) && configured > 0 ? configured : 300;
+}
+
+function isRecruitingSnapshotLocalLoad(load) {
+  const loadedMiles = Number(load?.LoadedMiles || 0);
+  return loadedMiles > 0 && loadedMiles <= getRecruitingSnapshotLocalLoadedMileMax();
+}
+
+function createRecruitingSnapshotTotals() {
+  return {
+    loadCount: 0,
+    revenue: 0,
+    driverPay: 0,
+    loadedMiles: 0,
+    emptyMiles: 0,
+    totalMiles: 0
+  };
+}
+
+function addRecruitingSnapshotLoadToTotals(target, load) {
+  target.loadCount += 1;
+  target.revenue += Number(load?.QuotedTotal || 0);
+  target.driverPay += Number(load?.DriverPay || 0);
+  target.loadedMiles += Number(load?.LoadedMiles || 0);
+  target.emptyMiles += Number(load?.EmptyMiles || 0);
+  target.totalMiles += Number(load?.TotalMiles || 0);
+  return target;
+}
+
+function getRecruitingSnapshotWindow(months = 12) {
+  const cleanMonths = Math.min(Math.max(Number(months) || 12, 3), 24);
+  const eastern = getEasternParts();
+  const endExclusive = new Date(Date.UTC(eastern.year, eastern.month - 1, 1));
+  const startDate = new Date(endExclusive);
+  startDate.setUTCMonth(startDate.getUTCMonth() - cleanMonths);
+  const endInclusive = new Date(endExclusive);
+  endInclusive.setUTCDate(endInclusive.getUTCDate() - 1);
+
+  return {
+    months: cleanMonths,
+    startDate,
+    endExclusive,
+    startDateKey: startDate.toISOString().slice(0, 10),
+    endDateKey: endInclusive.toISOString().slice(0, 10),
+    label: `${getShortMonthName(startDate.getUTCMonth() + 1)} ${startDate.getUTCFullYear()} - ${getShortMonthName(endInclusive.getUTCMonth() + 1)} ${endInclusive.getUTCFullYear()}`
+  };
+}
+
+function getRecruitingSnapshotWindowYears(windowDef) {
+  const years = new Set();
+  const cursor = new Date(Date.UTC(windowDef.startDate.getUTCFullYear(), windowDef.startDate.getUTCMonth(), 1));
+
+  while (cursor < windowDef.endExclusive) {
+    years.add(cursor.getUTCFullYear());
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+
+  return years;
+}
+
+function getRecruitingSnapshotMonthKey(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+function isDateInRecruitingSnapshotWindow(value, windowDef) {
+  if (!value) return false;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  return date >= windowDef.startDate && date < windowDef.endExclusive;
+}
+
+function getRecruitingSnapshotSourceLists(allLists, windowDef) {
+  const years = getRecruitingSnapshotWindowYears(windowDef);
+  const currentEasternYear = getEasternParts().year;
+
+  return (allLists || []).filter((list) => {
+    if (list.label === 'Bid Listing') return years.has(currentEasternYear);
+    const year = Number(list.year);
+    return years.has(year);
+  });
+}
+
+function buildRecruitingSnapshotRosterMap(rosterItems = []) {
+  const rosterByTruck = new Map();
+
+  rosterItems.forEach((roster) => {
+    const key = normalizeTruckKey(roster.truck);
+    if (!key) return;
+
+    const existing = rosterByTruck.get(key);
+    const rosterActive = normalizeText(roster.status) === 'active';
+    const existingActive = normalizeText(existing?.status) === 'active';
+
+    if (!existing || (rosterActive && !existingActive)) {
+      rosterByTruck.set(key, roster);
+    }
+  });
+
+  return rosterByTruck;
+}
+
+function getRecruitingSnapshotSegmentKey(roster) {
+  const soloOrTeam = normalizeText(roster?.soloOrTeam);
+
+  if (soloOrTeam.includes('team') || soloOrTeam.includes('co driver') || soloOrTeam.includes('co-driver')) return 'team';
+  if (soloOrTeam.includes('solo')) return 'solo';
+
+  return 'unknown';
+}
+
+function getRecruitingSnapshotAverage(values = []) {
+  const cleanValues = values.map(Number).filter((value) => Number.isFinite(value));
+  if (cleanValues.length === 0) return 0;
+  return cleanValues.reduce((sum, value) => sum + value, 0) / cleanValues.length;
+}
+
+function getRecruitingSnapshotPercentile(values = [], percentile = 0.5) {
+  const cleanValues = values.map(Number).filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (cleanValues.length === 0) return 0;
+  if (cleanValues.length === 1) return cleanValues[0];
+
+  const index = (cleanValues.length - 1) * Math.min(Math.max(percentile, 0), 1);
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+
+  if (lower === upper) return cleanValues[lower];
+
+  const weight = index - lower;
+  return cleanValues[lower] * (1 - weight) + cleanValues[upper] * weight;
+}
+
+function buildRecruitingSnapshotSegment(key, label, loads = [], windowDef) {
+  const truckSet = new Set();
+  const truckMonthMap = new Map();
+  const localTruckMonthMap = new Map();
+  const linehaulDeadheadSamples = [];
+
+  const totals = createRecruitingSnapshotTotals();
+  const linehaulTotals = createRecruitingSnapshotTotals();
+  const localTotals = createRecruitingSnapshotTotals();
+
+  loads.forEach((load) => {
+    const truckKey = normalizeTruckKey(load.Truck);
+    const monthKey = getRecruitingSnapshotMonthKey(load.PickupDate);
+    const truckMonthKey = `${truckKey || load.Truck || 'unknown'}|${monthKey}`;
+    const isLocal = isRecruitingSnapshotLocalLoad(load);
+
+    if (truckKey) truckSet.add(truckKey);
+
+    addRecruitingSnapshotLoadToTotals(totals, load);
+    addRecruitingSnapshotLoadToTotals(isLocal ? localTotals : linehaulTotals, load);
+
+    if (monthKey) {
+      if (!truckMonthMap.has(truckMonthKey)) {
+        truckMonthMap.set(truckMonthKey, {
+          truck: load.Truck || '',
+          monthKey,
+          loadCount: 0,
+          revenue: 0,
+          driverPay: 0,
+          loadedMiles: 0,
+          emptyMiles: 0,
+          totalMiles: 0,
+          localLoadCount: 0,
+          localRevenue: 0,
+          linehaulLoadCount: 0,
+          linehaulRevenue: 0
+        });
+      }
+
+      const truckMonth = truckMonthMap.get(truckMonthKey);
+      truckMonth.loadCount += 1;
+      truckMonth.revenue += load.QuotedTotal;
+      truckMonth.driverPay += load.DriverPay;
+      truckMonth.loadedMiles += load.LoadedMiles;
+      truckMonth.emptyMiles += load.EmptyMiles;
+      truckMonth.totalMiles += load.TotalMiles;
+
+      if (isLocal) {
+        truckMonth.localLoadCount += 1;
+        truckMonth.localRevenue += load.QuotedTotal;
+
+        if (!localTruckMonthMap.has(truckMonthKey)) {
+          localTruckMonthMap.set(truckMonthKey, {
+            truck: load.Truck || '',
+            monthKey,
+            loadCount: 0,
+            revenue: 0
+          });
+        }
+        const localTruckMonth = localTruckMonthMap.get(truckMonthKey);
+        localTruckMonth.loadCount += 1;
+        localTruckMonth.revenue += load.QuotedTotal;
+      } else {
+        truckMonth.linehaulLoadCount += 1;
+        truckMonth.linehaulRevenue += load.QuotedTotal;
+      }
+    }
+
+    if (!isLocal && Number.isFinite(load.EmptyMiles)) {
+      linehaulDeadheadSamples.push(load.EmptyMiles);
+    }
+  });
+
+  const truckMonthRows = Array.from(truckMonthMap.values());
+  const localTruckMonthRows = Array.from(localTruckMonthMap.values());
+  const monthlyGrossSamples = truckMonthRows.map((row) => row.revenue).filter((value) => value > 0);
+  const monthlyDriverPaySamples = truckMonthRows.map((row) => row.driverPay).filter((value) => value > 0);
+  const monthlyLoadSamples = truckMonthRows.map((row) => row.loadCount).filter((value) => value > 0);
+  const monthlyLocalRevenueSamples = localTruckMonthRows.map((row) => row.revenue).filter((value) => value > 0);
+  const monthlyLocalLoadSamples = localTruckMonthRows.map((row) => row.loadCount).filter((value) => value > 0);
+  const deadheadUnder150Count = linehaulDeadheadSamples.filter((value) => value <= 150).length;
+  const deadheadOver300Count = linehaulDeadheadSamples.filter((value) => value >= 300).length;
+
+  const localLoadPercent = totals.loadCount > 0 ? localTotals.loadCount / totals.loadCount : 0;
+  const localRevenuePercent = totals.revenue > 0 ? localTotals.revenue / totals.revenue : 0;
+
+  const metrics = {
+    trucks: truckSet.size,
+    activeTruckMonths: truckMonthRows.length,
+    loadCount: totals.loadCount,
+    revenue: totals.revenue,
+    driverPay: totals.driverPay,
+    loadedMiles: totals.loadedMiles,
+    emptyMiles: totals.emptyMiles,
+    totalMiles: totals.totalMiles,
+    linehaulLoadCount: linehaulTotals.loadCount,
+    linehaulRevenue: linehaulTotals.revenue,
+    linehaulDriverPay: linehaulTotals.driverPay,
+    linehaulLoadedMiles: linehaulTotals.loadedMiles,
+    linehaulEmptyMiles: linehaulTotals.emptyMiles,
+    linehaulTotalMiles: linehaulTotals.totalMiles,
+    localLoadCount: localTotals.loadCount,
+    localRevenue: localTotals.revenue,
+    localDriverPay: localTotals.driverPay,
+    localLoadedMiles: localTotals.loadedMiles,
+    localEmptyMiles: localTotals.emptyMiles,
+    localTotalMiles: localTotals.totalMiles,
+    localLoadPercent,
+    localRevenuePercent,
+    averageMonthlyGross: getRecruitingSnapshotAverage(monthlyGrossSamples),
+    averageMonthlyDriverPay: getRecruitingSnapshotAverage(monthlyDriverPaySamples),
+    medianMonthlyGross: getRecruitingSnapshotPercentile(monthlyGrossSamples, 0.5),
+    topQuartileMonthlyGross: getRecruitingSnapshotPercentile(monthlyGrossSamples, 0.75),
+    averageLoadsPerActiveMonth: getRecruitingSnapshotAverage(monthlyLoadSamples),
+    averageMonthlyLocalRevenue: getRecruitingSnapshotAverage(monthlyLocalRevenueSamples),
+    averageLocalLoadsPerActiveLocalMonth: getRecruitingSnapshotAverage(monthlyLocalLoadSamples),
+    averageLocalRevenuePerLoad: localTotals.loadCount > 0 ? localTotals.revenue / localTotals.loadCount : 0,
+    revenuePerLoadedMile: linehaulTotals.loadedMiles > 0 ? linehaulTotals.revenue / linehaulTotals.loadedMiles : 0,
+    revenuePerAllMile: linehaulTotals.totalMiles > 0 ? linehaulTotals.revenue / linehaulTotals.totalMiles : 0,
+    driverSharePerAllMile: linehaulTotals.totalMiles > 0 ? (linehaulTotals.revenue / linehaulTotals.totalMiles) * 0.8 : 0,
+    averageDeadhead: getRecruitingSnapshotAverage(linehaulDeadheadSamples),
+    medianDeadhead: getRecruitingSnapshotPercentile(linehaulDeadheadSamples, 0.5),
+    p75Deadhead: getRecruitingSnapshotPercentile(linehaulDeadheadSamples, 0.75),
+    deadheadUnder150Percent: linehaulDeadheadSamples.length > 0 ? deadheadUnder150Count / linehaulDeadheadSamples.length : 0,
+    deadheadOver300Percent: linehaulDeadheadSamples.length > 0 ? deadheadOver300Count / linehaulDeadheadSamples.length : 0
+  };
+
+  return {
+    key,
+    label,
+    windowLabel: windowDef.label,
+    metrics,
+    sample: {
+      loads: totals.loadCount,
+      linehaulLoads: linehaulTotals.loadCount,
+      localLoads: localTotals.loadCount,
+      trucks: truckSet.size,
+      activeTruckMonths: truckMonthRows.length,
+      localTruckMonths: localTruckMonthRows.length,
+      deadheadSamples: linehaulDeadheadSamples.length,
+      driverPayTruckMonths: monthlyDriverPaySamples.length,
+      localLoadedMileMax: getRecruitingSnapshotLocalLoadedMileMax()
+    }
+  };
+}
+
+function buildRecruitingSnapshotTalkTrack(segment, benchmarkSegment = segment) {
+  const metrics = segment?.metrics || {};
+  const sample = segment?.sample || {};
+  const benchmarkMetrics = benchmarkSegment?.metrics || metrics;
+  const benchmarkSample = benchmarkSegment?.sample || sample;
+  const label = String(segment?.label || 'driver').toLowerCase();
+  const localMax = sample.localLoadedMileMax || getRecruitingSnapshotLocalLoadedMileMax();
+
+  if (!metrics.loadCount) {
+    return `No usable ${label} loads were found in this window. Use the all-driver view before quoting figures.`;
+  }
+
+  const grossPart = `Active ${label} trucks average ${formatCurrencyValue(metrics.averageMonthlyGross)} gross per active month`;
+  const payPart = metrics.averageMonthlyDriverPay > 0
+    ? `; settlement-backed net driver pay averages ${formatCurrencyValue(metrics.averageMonthlyDriverPay)}`
+    : '';
+
+  if ((benchmarkMetrics.linehaulLoadCount || 0) <= 0) {
+    return `${grossPart}${payPart}. No linehaul loads are available in the all-driver benchmark, so rate and deadhead figures are blank.`;
+  }
+
+  const allMileRate = Number(benchmarkMetrics.revenuePerAllMile || 0);
+  const driverShareRate = Number(benchmarkMetrics.driverSharePerAllMile || allMileRate * 0.8);
+  const totalMileSample = Number(benchmarkMetrics.linehaulTotalMiles || 0);
+
+  return `${grossPart}${payPart}. All-driver linehaul averages ${formatCurrencyValue(allMileRate)}/all mile; estimated 80% driver share is ${formatCurrencyValue(driverShareRate)}/mile. Median linehaul deadhead is ${Math.round(metrics.medianDeadhead || 0).toLocaleString('en-US')} miles. Local/day-work stays in gross but is excluded from rate math.`;
+}
+
+function buildRecruitingSnapshotReport(itemsWithSource = [], sourceLists = [], rosterItems = [], rosterWarning = '', windowDef = getRecruitingSnapshotWindow()) {
+  const rosterByTruck = buildRecruitingSnapshotRosterMap(rosterItems);
+  const loads = itemsWithSource
+    .map((entry) => {
+      const load = getDriverSummaryItem(entry.item, entry.sourceList);
+      const status = normalizeText(load.Status);
+      if (status !== 'won') return null;
+      if (!isDateInRecruitingSnapshotWindow(load.PickupDate, windowDef)) return null;
+      if (!load.Truck || normalizeText(load.Truck) === 'unassigned truck') return null;
+
+      const roster = rosterByTruck.get(normalizeTruckKey(load.Truck));
+      const segmentKey = getRecruitingSnapshotSegmentKey(roster);
+
+      const isLocal = isRecruitingSnapshotLocalLoad(load);
+
+      return {
+        ...load,
+        IsRecruitingLocal: isLocal,
+        SegmentKey: segmentKey,
+        RosterSoloOrTeam: roster?.soloOrTeam || '',
+        RosterStatus: roster?.status || '',
+        RosterTrailerType: roster?.trailerType || ''
+      };
+    })
+    .filter(Boolean);
+
+  const segmentDefinitions = [
+    { key: 'solo', label: 'Solo' },
+    { key: 'team', label: 'Team' },
+    { key: 'all', label: 'All Drivers' }
+  ];
+
+  const segmentsWithoutTalkTrack = segmentDefinitions.map((segmentDef) => {
+    const segmentLoads = segmentDef.key === 'all'
+      ? loads
+      : loads.filter((load) => load.SegmentKey === segmentDef.key);
+    return buildRecruitingSnapshotSegment(segmentDef.key, segmentDef.label, segmentLoads, windowDef);
+  });
+  const allDriversBenchmark = segmentsWithoutTalkTrack.find((segment) => segment.key === 'all') || segmentsWithoutTalkTrack[0] || null;
+  const segments = segmentsWithoutTalkTrack.map((segment) => ({
+    ...segment,
+    talkTrack: buildRecruitingSnapshotTalkTrack(segment, allDriversBenchmark)
+  }));
+
+  const unknownSegment = buildRecruitingSnapshotSegment(
+    'unknown',
+    'Unclassified',
+    loads.filter((load) => load.SegmentKey === 'unknown'),
+    windowDef
+  );
+
+  return {
+    success: true,
+    reportType: 'recruitingSnapshot',
+    reportLabel: 'Recruiting Snapshot',
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    dataSource: sourceLists.map((list) => list.label).join(', ') || 'Bid Listing',
+    window: {
+      months: windowDef.months,
+      label: windowDef.label,
+      startDate: windowDef.startDateKey,
+      endDate: windowDef.endDateKey,
+      anchorDate: 'Pickup Offer Date',
+      includedStatuses: ['Won'],
+      localRule: `Loads <= ${getRecruitingSnapshotLocalLoadedMileMax().toLocaleString('en-US')} loaded miles are local/day-work and excluded from rate/deadhead math.`,
+      localLoadedMileMax: getRecruitingSnapshotLocalLoadedMileMax(),
+      note: 'Historical won-load gross revenue only. All-mile and driver-share rates use linehaul work only; local/day-work remains in gross but is excluded from rate and deadhead metrics. Not a settlement guarantee.'
+    },
+    segments,
+    unknownSegment,
+    warnings: [
+      rosterWarning,
+      unknownSegment.metrics.loadCount > 0
+        ? `${unknownSegment.metrics.loadCount.toLocaleString('en-US')} load(s) were not classified as Solo or Team because the truck was not matched to Driver Roster Solo/Team data.`
+        : ''
+    ].filter(Boolean),
+    counts: {
+      sourceLists: sourceLists.length,
+      scannedRecords: itemsWithSource.length,
+      usableLoads: loads.length,
+      linehaulLoads: loads.filter((load) => !load.IsRecruitingLocal).length,
+      localLoads: loads.filter((load) => load.IsRecruitingLocal).length,
+      unclassifiedLoads: unknownSegment.metrics.loadCount
+    }
+  };
+}
+
+async function getRecruitingSnapshotReportPayload(options = {}) {
+  const windowDef = getRecruitingSnapshotWindow(options.months || 12);
+  const token = await getGraphToken();
+  const allLists = await getSearchableBidLists(token);
+  const sourceLists = getRecruitingSnapshotSourceLists(allLists, windowDef);
+
+  if (sourceLists.length === 0) {
+    const error = new Error(`No Bid Listing source list was found for ${windowDef.label}.`);
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const settled = await Promise.allSettled(
+    sourceLists.map(async (sourceList) => {
+      const items = await getAllListItemsWithFields(
+        token,
+        sourceList.listId,
+        getDriverSummaryFieldSelect()
+      );
+
+      return items.map((item) => ({ item, sourceList }));
+    })
+  );
+
+  const successfulItems = settled
+    .filter((result) => result.status === 'fulfilled')
+    .flatMap((result) => result.value);
+
+  const listWarnings = settled
+    .map((result, index) => ({ result, list: sourceLists[index] }))
+    .filter((entry) => entry.result.status === 'rejected')
+    .map((entry) => `${entry.list.label}: ${entry.result.reason?.message || 'Unable to load list.'}`);
+
+  let rosterItems = [];
+  let rosterWarning = '';
+
+  try {
+    rosterItems = await getDriverRosterItems(token);
+  } catch (error) {
+    rosterWarning = error.message || 'Driver Roster could not be loaded, so Solo/Team classification may be incomplete.';
+  }
+
+  const report = buildRecruitingSnapshotReport(
+    successfulItems,
+    sourceLists,
+    rosterItems,
+    rosterWarning,
+    windowDef
+  );
+
+  return {
+    ...report,
+    warnings: [...(report.warnings || []), ...listWarnings]
+  };
+}
+
 function getCustomerBookingTrendsListId() {
   return process.env.CUSTOMER_BOOKING_TRENDS_LIST_ID || DEFAULT_CUSTOMER_BOOKING_TRENDS_LIST_ID;
 }
@@ -8881,6 +9337,22 @@ app.get('/recruiting/dashboard', requireLookupAccess, async (req, res) => {
     res.status(error.statusCode || 500).json({
       success: false,
       error: error.message || 'Unable to load recruiting dashboard.'
+    });
+  }
+});
+
+
+app.get('/recruiting/snapshot', requireLookupAccess, async (req, res) => {
+  try {
+    const report = await getRecruitingSnapshotReportPayload({
+      months: req.query.months
+    });
+    res.json(report);
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to load Recruiting Snapshot.'
     });
   }
 });
