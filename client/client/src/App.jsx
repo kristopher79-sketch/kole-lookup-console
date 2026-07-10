@@ -15585,6 +15585,8 @@ function openReportLoadDetails(load) {
     const allDriverMetrics = allDriversSegment?.metrics || metrics;
     const unknownLoads = Number(report?.unknownSegment?.metrics?.loadCount || 0);
     const localLoadedMileMax = Number(report?.window?.localLoadedMileMax || sample.localLoadedMileMax || 300);
+    const soloSettlementMinLoads = Number(report?.window?.soloSettlementMinLoads || sample.soloSettlementMinLoads || 8);
+    const teamSettlementMinLoads = Number(report?.window?.teamSettlementMinLoads || sample.teamSettlementMinLoads || 10);
     const allDriverAllMileRate = Number(allDriverMetrics.revenuePerAllMile || 0);
     const allDriverShareMileRate = Number(allDriverMetrics.driverSharePerAllMile || allDriverAllMileRate * 0.8);
 
@@ -15629,7 +15631,7 @@ function openReportLoadDetails(load) {
             {report && (
               <>
                 <div className="recruiting-snapshot-intro recruiting-snapshot-meta-strip">
-                  <span>{report.generatedAt || '-'} · {formatReportNumber(report.counts?.usableLoads || 0)} won loads analyzed · locals ≤ {formatReportNumber(localLoadedMileMax)} loaded mi excluded from rate math</span>
+                  <span>{report.generatedAt || '-'} · {formatReportNumber(report.counts?.usableLoads || 0)} won loads analyzed · settlement month: {formatReportNumber(soloSettlementMinLoads)}+ solo / {formatReportNumber(teamSettlementMinLoads)}+ team loads</span>
                 </div>
 
                 <div className="recruiting-snapshot-tabs" role="tablist" aria-label="Recruiting snapshot views">
@@ -15654,11 +15656,11 @@ function openReportLoadDetails(load) {
                     </div>
 
                     <div className="recruiting-snapshot-metric-grid">
-                      {renderSnapshotMetric('Avg Active Month Gross', formatReportMoney(metrics.averageMonthlyGross), `${formatReportNumber(sample.activeTruckMonths || 0)} active truck-month samples · locals included`)}
-                      {renderSnapshotMetric('Avg Contractor Net Pay', formatReportMoney(metrics.averageMonthlyDriverPay), sample.driverPayTruckMonths ? `${formatReportNumber(sample.driverPayTruckMonths)} contractor settlement truck-month samples` : 'No contractor settlement pay samples in this view')}
-                      {renderSnapshotMetric('Median Active Month', formatReportMoney(metrics.medianMonthlyGross), 'Middle truck-month, less skewed by outliers')}
-                      {renderSnapshotMetric('Top Quartile Month', formatReportMoney(metrics.topQuartileMonthlyGross), '75th percentile active truck-month')}
-                      {renderSnapshotMetric('Loads / Active Month', formatReportNumber(metrics.averageLoadsPerActiveMonth, 1), `${formatReportNumber(sample.loads || 0)} total loads · ${formatReportNumber(metrics.linehaulLoadCount || 0)} linehaul`)}
+                      {renderSnapshotMetric('Avg Settlement Month Gross', formatReportMoney(metrics.averageMonthlyGross), `${formatReportNumber(sample.settlementTruckMonths || 0)} settlement-month samples · ${formatReportNumber(sample.excludedPartialTruckMonths || 0)} partial month(s) excluded`)}
+                      {renderSnapshotMetric('Avg Contractor Net Pay', formatReportMoney(metrics.averageMonthlyDriverPay), sample.driverPayTruckMonths ? `${formatReportNumber(sample.driverPayTruckMonths)} contractor settlement-month samples` : 'No contractor settlement pay samples in this view')}
+                      {renderSnapshotMetric('Median Settlement Month', formatReportMoney(metrics.medianMonthlyGross), 'Middle qualifying truck-month')}
+                      {renderSnapshotMetric('Top Quartile Month', formatReportMoney(metrics.topQuartileMonthlyGross), '75th percentile qualifying truck-month')}
+                      {renderSnapshotMetric('Loads / Settlement Month', formatReportNumber(metrics.averageLoadsPerActiveMonth, 1), `${formatReportNumber(sample.settlementTruckMonths || 0)} qualifying month(s) · ${formatReportNumber(metrics.linehaulLoadCount || 0)} linehaul loads`)}
                       {renderSnapshotMetric('$ / All Miles', formatReportMoney(allDriverAllMileRate), `All drivers · linehaul only · ${formatReportNumber(allDriverMetrics.linehaulTotalMiles || 0)} total miles`)}
                       {renderSnapshotMetric('Driver Share $ / Mile', formatReportMoney(allDriverShareMileRate), '80% of all-driver all-mile linehaul rate')}
                       {renderSnapshotMetric('Median Deadhead', `${formatReportNumber(metrics.medianDeadhead || 0)} mi`, `Linehaul only · ${formatPercent(metrics.deadheadUnder150Percent)} at 150 mi or less`)}
@@ -15672,7 +15674,7 @@ function openReportLoadDetails(load) {
                   <div className="recruiting-section-card-header">
                     <div>
                       <h3>Solo / Team Comparison</h3>
-                      <p>Gross includes local/day-work. Rate figures are linehaul only. Contractor net pay excludes company trucks.</p>
+                      <p>Monthly figures use settlement-month thresholds. Rate figures are linehaul only. Contractor net pay excludes company trucks.</p>
                     </div>
                   </div>
 
@@ -15684,11 +15686,11 @@ function openReportLoadDetails(load) {
                           <th>Trucks</th>
                           <th>Loads</th>
                           <th>Linehaul</th>
-                          <th>Avg Mo Gross</th>
+                          <th>Avg Settlement Gross</th>
                           <th>All $/Mi</th>
                           <th>Driver Share $/Mi</th>
                           <th>Median DH</th>
-                          <th>Loads/Mo</th>
+                          <th>Loads/Settlement Mo</th>
                         </tr>
                       </thead>
                       <tbody>

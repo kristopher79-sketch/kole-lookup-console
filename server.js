@@ -2858,6 +2858,19 @@ function getRecruitingSnapshotSegmentKey(roster) {
 }
 
 const RECRUITING_SNAPSHOT_NET_PAY_EXCLUDED_TRUCKS = new Set(['1161', '1123']);
+const RECRUITING_SNAPSHOT_SOLO_SETTLEMENT_MIN_LOADS = Number(process.env.RECRUITING_SNAPSHOT_SOLO_SETTLEMENT_MIN_LOADS || 8);
+const RECRUITING_SNAPSHOT_TEAM_SETTLEMENT_MIN_LOADS = Number(process.env.RECRUITING_SNAPSHOT_TEAM_SETTLEMENT_MIN_LOADS || 10);
+
+function getRecruitingSnapshotSettlementMonthMinLoads(segmentKey = '') {
+  const key = String(segmentKey || '').trim().toLowerCase();
+  if (key === 'team') return RECRUITING_SNAPSHOT_TEAM_SETTLEMENT_MIN_LOADS;
+  return RECRUITING_SNAPSHOT_SOLO_SETTLEMENT_MIN_LOADS;
+}
+
+function isRecruitingSnapshotSettlementMonth(row = {}) {
+  const requiredLoads = getRecruitingSnapshotSettlementMonthMinLoads(row.segmentKey);
+  return Number(row.loadCount || 0) >= requiredLoads;
+}
 
 function isRecruitingSnapshotCompanyDriverType(value = '') {
   const normalized = normalizeText(value).replace(/[^a-z0-9]+/g, ' ').trim();
@@ -2922,6 +2935,7 @@ function buildRecruitingSnapshotSegment(key, label, loads = [], windowDef) {
         truckMonthMap.set(truckMonthKey, {
           truck: load.Truck || '',
           monthKey,
+          segmentKey: load.SegmentKey || key || '',
           loadCount: 0,
           revenue: 0,
           driverPay: 0,
@@ -2976,12 +2990,13 @@ function buildRecruitingSnapshotSegment(key, label, loads = [], windowDef) {
   });
 
   const truckMonthRows = Array.from(truckMonthMap.values());
+  const settlementTruckMonthRows = truckMonthRows.filter(isRecruitingSnapshotSettlementMonth);
   const localTruckMonthRows = Array.from(localTruckMonthMap.values());
-  const monthlyGrossSamples = truckMonthRows.map((row) => row.revenue).filter((value) => value > 0);
-  const monthlyDriverPaySamples = truckMonthRows
+  const monthlyGrossSamples = settlementTruckMonthRows.map((row) => row.revenue).filter((value) => value > 0);
+  const monthlyDriverPaySamples = settlementTruckMonthRows
     .filter((row) => row.driverPaySampleEligible && row.driverPay > 0)
     .map((row) => row.driverPay);
-  const monthlyLoadSamples = truckMonthRows.map((row) => row.loadCount).filter((value) => value > 0);
+  const monthlyLoadSamples = settlementTruckMonthRows.map((row) => row.loadCount).filter((value) => value > 0);
   const monthlyLocalRevenueSamples = localTruckMonthRows.map((row) => row.revenue).filter((value) => value > 0);
   const monthlyLocalLoadSamples = localTruckMonthRows.map((row) => row.loadCount).filter((value) => value > 0);
   const deadheadUnder150Count = linehaulDeadheadSamples.filter((value) => value <= 150).length;
@@ -2993,6 +3008,8 @@ function buildRecruitingSnapshotSegment(key, label, loads = [], windowDef) {
   const metrics = {
     trucks: truckSet.size,
     activeTruckMonths: truckMonthRows.length,
+    settlementTruckMonths: settlementTruckMonthRows.length,
+    excludedPartialTruckMonths: Math.max(truckMonthRows.length - settlementTruckMonthRows.length, 0),
     loadCount: totals.loadCount,
     revenue: totals.revenue,
     driverPay: totals.driverPay,
@@ -3042,9 +3059,13 @@ function buildRecruitingSnapshotSegment(key, label, loads = [], windowDef) {
       localLoads: localTotals.loadCount,
       trucks: truckSet.size,
       activeTruckMonths: truckMonthRows.length,
+      settlementTruckMonths: settlementTruckMonthRows.length,
+      excludedPartialTruckMonths: Math.max(truckMonthRows.length - settlementTruckMonthRows.length, 0),
       localTruckMonths: localTruckMonthRows.length,
       deadheadSamples: linehaulDeadheadSamples.length,
       driverPayTruckMonths: monthlyDriverPaySamples.length,
+      soloSettlementMinLoads: RECRUITING_SNAPSHOT_SOLO_SETTLEMENT_MIN_LOADS,
+      teamSettlementMinLoads: RECRUITING_SNAPSHOT_TEAM_SETTLEMENT_MIN_LOADS,
       localLoadedMileMax: getRecruitingSnapshotLocalLoadedMileMax()
     }
   };
@@ -3062,7 +3083,10 @@ function buildRecruitingSnapshotTalkTrack(segment, benchmarkSegment = segment) {
     return `No usable ${label} loads were found in this window. Use the all-driver view before quoting figures.`;
   }
 
-  const grossPart = `Active ${label} trucks average ${formatCurrencyValue(metrics.averageMonthlyGross)} gross per active month`;
+  const settlementRule = `${RECRUITING_SNAPSHOT_SOLO_SETTLEMENT_MIN_LOADS}+ solo loads / ${RECRUITING_SNAPSHOT_TEAM_SETTLEMENT_MIN_LOADS}+ team loads`;
+  const grossPart = metrics.averageMonthlyGross > 0
+    ? `Representative ${label} settlement months average ${formatCurrencyValue(metrics.averageMonthlyGross)} gross`
+    : `No representative ${label} settlement months met the ${settlementRule} benchmark in this window`;
   const payPart = metrics.averageMonthlyDriverPay > 0
     ? `; contractor net pay averages ${formatCurrencyValue(metrics.averageMonthlyDriverPay)} where settlement pay is tracked`
     : '';
@@ -3144,8 +3168,11 @@ function buildRecruitingSnapshotReport(itemsWithSource = [], sourceLists = [], r
       anchorDate: 'Pickup Offer Date',
       includedStatuses: ['Won'],
       localRule: `Loads <= ${getRecruitingSnapshotLocalLoadedMileMax().toLocaleString('en-US')} loaded miles are local/day-work and excluded from rate/deadhead math.`,
+      settlementMonthRule: `Settlement-month averages use truck-months with ${RECRUITING_SNAPSHOT_SOLO_SETTLEMENT_MIN_LOADS}+ solo loads or ${RECRUITING_SNAPSHOT_TEAM_SETTLEMENT_MIN_LOADS}+ team loads.`,
+      soloSettlementMinLoads: RECRUITING_SNAPSHOT_SOLO_SETTLEMENT_MIN_LOADS,
+      teamSettlementMinLoads: RECRUITING_SNAPSHOT_TEAM_SETTLEMENT_MIN_LOADS,
       localLoadedMileMax: getRecruitingSnapshotLocalLoadedMileMax(),
-      note: 'Historical won-load gross revenue only. All-mile and driver-share rates use linehaul work only; local/day-work remains in gross but is excluded from rate and deadhead metrics. Contractor net-pay averages exclude company trucks 1161 and 1123 plus any truck-months without tracked settlement pay. Not a settlement guarantee.'
+      note: `Historical won-load gross revenue only. Settlement-month averages use ${RECRUITING_SNAPSHOT_SOLO_SETTLEMENT_MIN_LOADS}+ solo loads or ${RECRUITING_SNAPSHOT_TEAM_SETTLEMENT_MIN_LOADS}+ team loads. All-mile and driver-share rates use linehaul work only; local/day-work remains in gross but is excluded from rate and deadhead metrics. Contractor net-pay averages exclude company trucks 1161 and 1123 plus any truck-months without tracked settlement pay. Not a settlement guarantee.`
     },
     segments,
     unknownSegment,
