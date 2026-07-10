@@ -2857,6 +2857,24 @@ function getRecruitingSnapshotSegmentKey(roster) {
   return 'unknown';
 }
 
+const RECRUITING_SNAPSHOT_NET_PAY_EXCLUDED_TRUCKS = new Set(['1161', '1123']);
+
+function isRecruitingSnapshotCompanyDriverType(value = '') {
+  const normalized = normalizeText(value).replace(/[^a-z0-9]+/g, ' ').trim();
+  return normalized === 'company' || normalized.includes('company truck');
+}
+
+function isRecruitingSnapshotNetPayExcludedTruck(truck = '') {
+  const truckKey = normalizeTruckKey(truck);
+  return Boolean(truckKey && RECRUITING_SNAPSHOT_NET_PAY_EXCLUDED_TRUCKS.has(truckKey));
+}
+
+function isRecruitingSnapshotDriverPayEligibleLoad(load) {
+  if (isRecruitingSnapshotNetPayExcludedTruck(load?.Truck)) return false;
+  if (isRecruitingSnapshotCompanyDriverType(load?.RosterDriverType)) return false;
+  return Number(load?.DriverPay || 0) > 0;
+}
+
 function getRecruitingSnapshotAverage(values = []) {
   const cleanValues = values.map(Number).filter((value) => Number.isFinite(value));
   if (cleanValues.length === 0) return 0;
@@ -2907,6 +2925,8 @@ function buildRecruitingSnapshotSegment(key, label, loads = [], windowDef) {
           loadCount: 0,
           revenue: 0,
           driverPay: 0,
+          driverPayLoadCount: 0,
+          driverPaySampleEligible: false,
           loadedMiles: 0,
           emptyMiles: 0,
           totalMiles: 0,
@@ -2920,7 +2940,11 @@ function buildRecruitingSnapshotSegment(key, label, loads = [], windowDef) {
       const truckMonth = truckMonthMap.get(truckMonthKey);
       truckMonth.loadCount += 1;
       truckMonth.revenue += load.QuotedTotal;
-      truckMonth.driverPay += load.DriverPay;
+      if (isRecruitingSnapshotDriverPayEligibleLoad(load)) {
+        truckMonth.driverPay += load.DriverPay;
+        truckMonth.driverPayLoadCount += 1;
+        truckMonth.driverPaySampleEligible = true;
+      }
       truckMonth.loadedMiles += load.LoadedMiles;
       truckMonth.emptyMiles += load.EmptyMiles;
       truckMonth.totalMiles += load.TotalMiles;
@@ -2954,7 +2978,9 @@ function buildRecruitingSnapshotSegment(key, label, loads = [], windowDef) {
   const truckMonthRows = Array.from(truckMonthMap.values());
   const localTruckMonthRows = Array.from(localTruckMonthMap.values());
   const monthlyGrossSamples = truckMonthRows.map((row) => row.revenue).filter((value) => value > 0);
-  const monthlyDriverPaySamples = truckMonthRows.map((row) => row.driverPay).filter((value) => value > 0);
+  const monthlyDriverPaySamples = truckMonthRows
+    .filter((row) => row.driverPaySampleEligible && row.driverPay > 0)
+    .map((row) => row.driverPay);
   const monthlyLoadSamples = truckMonthRows.map((row) => row.loadCount).filter((value) => value > 0);
   const monthlyLocalRevenueSamples = localTruckMonthRows.map((row) => row.revenue).filter((value) => value > 0);
   const monthlyLocalLoadSamples = localTruckMonthRows.map((row) => row.loadCount).filter((value) => value > 0);
@@ -3038,7 +3064,7 @@ function buildRecruitingSnapshotTalkTrack(segment, benchmarkSegment = segment) {
 
   const grossPart = `Active ${label} trucks average ${formatCurrencyValue(metrics.averageMonthlyGross)} gross per active month`;
   const payPart = metrics.averageMonthlyDriverPay > 0
-    ? `; settlement-backed net driver pay averages ${formatCurrencyValue(metrics.averageMonthlyDriverPay)}`
+    ? `; contractor net pay averages ${formatCurrencyValue(metrics.averageMonthlyDriverPay)} where settlement pay is tracked`
     : '';
 
   if ((benchmarkMetrics.linehaulLoadCount || 0) <= 0) {
@@ -3072,6 +3098,7 @@ function buildRecruitingSnapshotReport(itemsWithSource = [], sourceLists = [], r
         IsRecruitingLocal: isLocal,
         SegmentKey: segmentKey,
         RosterSoloOrTeam: roster?.soloOrTeam || '',
+        RosterDriverType: roster?.driverType || '',
         RosterStatus: roster?.status || '',
         RosterTrailerType: roster?.trailerType || ''
       };
@@ -3118,7 +3145,7 @@ function buildRecruitingSnapshotReport(itemsWithSource = [], sourceLists = [], r
       includedStatuses: ['Won'],
       localRule: `Loads <= ${getRecruitingSnapshotLocalLoadedMileMax().toLocaleString('en-US')} loaded miles are local/day-work and excluded from rate/deadhead math.`,
       localLoadedMileMax: getRecruitingSnapshotLocalLoadedMileMax(),
-      note: 'Historical won-load gross revenue only. All-mile and driver-share rates use linehaul work only; local/day-work remains in gross but is excluded from rate and deadhead metrics. Not a settlement guarantee.'
+      note: 'Historical won-load gross revenue only. All-mile and driver-share rates use linehaul work only; local/day-work remains in gross but is excluded from rate and deadhead metrics. Contractor net-pay averages exclude company trucks 1161 and 1123 plus any truck-months without tracked settlement pay. Not a settlement guarantee.'
     },
     segments,
     unknownSegment,

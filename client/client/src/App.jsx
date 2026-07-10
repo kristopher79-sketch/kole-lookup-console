@@ -15655,7 +15655,7 @@ function openReportLoadDetails(load) {
 
                     <div className="recruiting-snapshot-metric-grid">
                       {renderSnapshotMetric('Avg Active Month Gross', formatReportMoney(metrics.averageMonthlyGross), `${formatReportNumber(sample.activeTruckMonths || 0)} active truck-month samples · locals included`)}
-                      {renderSnapshotMetric('Avg Net Driver Pay', formatReportMoney(metrics.averageMonthlyDriverPay), sample.driverPayTruckMonths ? `${formatReportNumber(sample.driverPayTruckMonths)} settlement-backed truck-month samples` : 'No settlement pay samples in this view')}
+                      {renderSnapshotMetric('Avg Contractor Net Pay', formatReportMoney(metrics.averageMonthlyDriverPay), sample.driverPayTruckMonths ? `${formatReportNumber(sample.driverPayTruckMonths)} contractor settlement truck-month samples` : 'No contractor settlement pay samples in this view')}
                       {renderSnapshotMetric('Median Active Month', formatReportMoney(metrics.medianMonthlyGross), 'Middle truck-month, less skewed by outliers')}
                       {renderSnapshotMetric('Top Quartile Month', formatReportMoney(metrics.topQuartileMonthlyGross), '75th percentile active truck-month')}
                       {renderSnapshotMetric('Loads / Active Month', formatReportNumber(metrics.averageLoadsPerActiveMonth, 1), `${formatReportNumber(sample.loads || 0)} total loads · ${formatReportNumber(metrics.linehaulLoadCount || 0)} linehaul`)}
@@ -15672,7 +15672,7 @@ function openReportLoadDetails(load) {
                   <div className="recruiting-section-card-header">
                     <div>
                       <h3>Solo / Team Comparison</h3>
-                      <p>Gross includes local/day-work. Rate figures are linehaul only.</p>
+                      <p>Gross includes local/day-work. Rate figures are linehaul only. Contractor net pay excludes company trucks.</p>
                     </div>
                   </div>
 
