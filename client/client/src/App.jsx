@@ -22,6 +22,50 @@ const ON_THIS_DAY_CLIENT_CACHE_LIMIT = 10;
 const ORDER_NOTES_CLIENT_CACHE_MS = 60 * 1000;
 const ORDER_NOTE_MAX_LENGTH = 20000;
 const ORDER_NOTE_TYPE_OPTIONS = ['Dispatch', 'Paperwork', 'Permits', 'Billing', 'Operations'];
+const ORDER_EDIT_STATUS_OPTIONS = ['-', 'Won', 'Lost', 'CAN', 'TONU'];
+const ORDER_EDIT_TERMINAL_STATUSES = new Set(['CAN', 'TONU']);
+const ORDER_EDIT_DATE_FIELDS = new Set(['PickupDate', 'DeliveryDate']);
+const ORDER_EDIT_YES_NO_FIELDS = new Set(['TeamRequired', 'AircraftRelated']);
+const ORDER_EDIT_FIELD_KEYS = [
+  'Status',
+  'Requestor',
+  'Freight',
+  'Origin',
+  'Destination',
+  'PickupDate',
+  'PickupTime',
+  'PickupAMPM',
+  'DeliveryDate',
+  'DeliveryTime',
+  'DeliveryAMPM',
+  'Length',
+  'Width',
+  'Height',
+  'TeamRequired',
+  'AircraftRelated',
+  'Pickup1Name',
+  'Pickup1Address1',
+  'Pickup1City',
+  'Pickup1State',
+  'Pickup1Zip',
+  'Pickup1ContactName',
+  'Pickup1ContactNumber',
+  'Delivery1Name',
+  'Delivery1Address1',
+  'Delivery1City',
+  'Delivery1State',
+  'Delivery1Zip',
+  'Delivery1ContactName',
+  'Delivery1ContactNumber',
+  'Item1QTY',
+  'Item1Description',
+  'Item1Serial',
+  'Item1Dimensions',
+  'EstimatedWeight',
+  'TotalPieces',
+  'ShipperNumber',
+  'Contract'
+];
 const DRIVER_TIME_OFF_REASON_OPTIONS = ['Home Time', 'Repairs'];
 const RECRUITING_CANDIDATE_STATUS_OPTIONS = [
   'Heads-Up',
@@ -225,6 +269,79 @@ function normalizeDriverTimeOffReason(value) {
 
   if (normalized.includes('repair')) return 'Repairs';
   return 'Home Time';
+}
+
+function getOrderEditDateInputValue(value) {
+  const raw = String(value || '').trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : '';
+}
+
+function getOrderEditYesNoValue(value) {
+  if (value === true) return 'Yes';
+  if (value === false) return 'No';
+
+  const cleanValue = String(value ?? '').trim();
+  const normalized = cleanValue.toLowerCase();
+
+  if (['true', 'yes', '1'].includes(normalized)) return 'Yes';
+  if (['false', 'no', '0'].includes(normalized)) return 'No';
+  return cleanValue;
+}
+
+function getOrderEditDraftValue(record, field) {
+  if (ORDER_EDIT_DATE_FIELDS.has(field)) return getOrderEditDateInputValue(record?.[field]);
+  if (ORDER_EDIT_YES_NO_FIELDS.has(field)) return getOrderEditYesNoValue(record?.[field]);
+  return String(record?.[field] ?? '');
+}
+
+function createOrderEditDraft(record = {}) {
+  return Object.fromEntries(
+    ORDER_EDIT_FIELD_KEYS.map((field) => [field, getOrderEditDraftValue(record, field)])
+  );
+}
+
+function getOrderEditChanges(record = {}, draft = {}) {
+  const changes = {};
+
+  ORDER_EDIT_FIELD_KEYS.forEach((field) => {
+    const currentValue = getOrderEditDraftValue(record, field);
+    const draftValue = String(draft?.[field] ?? '');
+
+    if (currentValue !== draftValue) {
+      changes[field] = draftValue;
+    }
+  });
+
+  return changes;
+}
+
+function isOrderEditTruthy(value) {
+  if (value === true) return true;
+  return ['true', 'yes', '1'].includes(String(value || '').trim().toLowerCase());
+}
+
+function getOrderEditAvailability(record = {}) {
+  const isCurrent = record?.SourceYear === 'Current' || record?.SourceList === 'Bid Listing';
+  const isSettled = isOrderEditTruthy(record?.Processed) || isOrderEditTruthy(record?.FinalSettleSent);
+
+  if (!record?.id) {
+    return { canEdit: false, isCurrent, isSettled, reason: 'This order does not have a Bid Listing item ID.' };
+  }
+
+  if (!isCurrent) {
+    return { canEdit: false, isCurrent, isSettled, reason: 'Archived Bid Listing records are read-only in Kole Connect.' };
+  }
+
+  if (isSettled) {
+    return { canEdit: false, isCurrent, isSettled, reason: 'This order has been final settled and is locked from editing.' };
+  }
+
+  return { canEdit: true, isCurrent, isSettled, reason: '' };
+}
+
+function isOrderEditTerminalStatus(status) {
+  return ORDER_EDIT_TERMINAL_STATUSES.has(String(status || '').trim().toUpperCase());
 }
 
 const STARTUP_SPLASH_MIN_MS = 5000;
@@ -940,6 +1057,11 @@ export default function App() {
   const [orderNoteSaving, setOrderNoteSaving] = useState(false);
   const [orderNoteSaveMessage, setOrderNoteSaveMessage] = useState('');
   const [orderNoteSaveError, setOrderNoteSaveError] = useState('');
+  const [orderEditDraft, setOrderEditDraft] = useState(null);
+  const [orderEditSaving, setOrderEditSaving] = useState(false);
+  const [orderEditError, setOrderEditError] = useState('');
+  const [orderEditMessage, setOrderEditMessage] = useState('');
+  const [orderEditNoteWarning, setOrderEditNoteWarning] = useState('');
   const [operationsData, setOperationsData] = useState(null);
   const [operationsLoading, setOperationsLoading] = useState(false);
   const [operationsError, setOperationsError] = useState('');
@@ -4075,6 +4197,11 @@ function getPositionStatusLabel(position) {
     setOrderNotesError('');
     setOrderNotesTypeFilter('All');
     resetOrderNoteComposer();
+    setOrderEditDraft(null);
+    setOrderEditSaving(false);
+    setOrderEditError('');
+    setOrderEditMessage('');
+    setOrderEditNoteWarning('');
     orderNotesRequestRef.current += 1;
     setLoadingDetail(true);
     setError('');
@@ -4290,6 +4417,11 @@ function getPositionStatusLabel(position) {
     setOrderNotesError('');
     setOrderNotesTypeFilter('All');
     resetOrderNoteComposer();
+    setOrderEditDraft(null);
+    setOrderEditSaving(false);
+    setOrderEditError('');
+    setOrderEditMessage('');
+    setOrderEditNoteWarning('');
     orderNotesRequestRef.current += 1;
     setDriverLookupError('');
 
@@ -7025,6 +7157,7 @@ function openReportLoadDetails(load) {
     if (selectedView === 'billing') return 'Billing Info';
     if (selectedView === 'documents') return 'Documents';
     if (selectedView === 'notes') return 'Order Notes';
+    if (selectedView === 'edit') return 'Selective Order Edit';
     return 'Basic Load Info';
   }
 
@@ -7856,6 +7989,331 @@ function openReportLoadDetails(load) {
           <OrderCardField label="Destination" value={record.Destination} />
         </div>
       </article>
+    );
+  }
+
+  function openOrderEditor() {
+    const availability = getOrderEditAvailability(selected);
+
+    setOrderEditError('');
+    setOrderEditMessage('');
+    setOrderEditNoteWarning('');
+
+    if (!availability.canEdit) {
+      setOrderEditError(availability.reason || 'This order cannot be edited in Kole Connect.');
+      return;
+    }
+
+    setOrderEditDraft(createOrderEditDraft(selected));
+    setSelectedView('edit');
+  }
+
+  function updateOrderEditDraft(field, value) {
+    setOrderEditDraft((current) => ({
+      ...(current || createOrderEditDraft(selected)),
+      [field]: value
+    }));
+    setOrderEditError('');
+    setOrderEditMessage('');
+    setOrderEditNoteWarning('');
+  }
+
+  function cancelOrderEditing() {
+    setOrderEditDraft(createOrderEditDraft(selected));
+    setOrderEditError('');
+    setOrderEditMessage('');
+    setOrderEditNoteWarning('');
+    setSelectedView('basic');
+  }
+
+  async function saveOrderEdits() {
+    const availability = getOrderEditAvailability(selected);
+
+    if (!availability.canEdit) {
+      setOrderEditError(availability.reason || 'This order cannot be edited in Kole Connect.');
+      return;
+    }
+
+    const changes = getOrderEditChanges(selected, orderEditDraft || createOrderEditDraft(selected));
+    const changedFields = Object.keys(changes);
+
+    if (changedFields.length === 0) {
+      setOrderEditError('No order values changed.');
+      return;
+    }
+
+    const pickupDate = Object.prototype.hasOwnProperty.call(changes, 'PickupDate')
+      ? changes.PickupDate
+      : getOrderEditDateInputValue(selected.PickupDate);
+    const deliveryDate = Object.prototype.hasOwnProperty.call(changes, 'DeliveryDate')
+      ? changes.DeliveryDate
+      : getOrderEditDateInputValue(selected.DeliveryDate);
+
+    if (pickupDate && deliveryDate && deliveryDate < pickupDate) {
+      setOrderEditError('Delivery date cannot be earlier than pickup date.');
+      return;
+    }
+
+    const nextStatus = Object.prototype.hasOwnProperty.call(changes, 'Status')
+      ? String(changes.Status || '').trim().toUpperCase()
+      : '';
+    const terminalWarning = ORDER_EDIT_TERMINAL_STATUSES.has(nextStatus)
+      ? `\n\n${nextStatus} is a deliberate terminal status in Kole Connect. Its Status cannot be changed again here.`
+      : '';
+    const confirmed = window.confirm(
+      `Save ${changedFields.length} change${changedFields.length === 1 ? '' : 's'} to ${selected.BOL || selected.BidID || 'this order'}?${terminalWarning}`
+    );
+
+    if (!confirmed) return;
+
+    setOrderEditSaving(true);
+    setOrderEditError('');
+    setOrderEditMessage('');
+    setOrderEditNoteWarning('');
+
+    try {
+      const res = await authedFetch(`${API}/record/${encodeURIComponent(selected.id)}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          changes,
+          expectedModified: selected.LastModifiedDateTime || ''
+        })
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Unable to update this order.');
+      }
+
+      const updatedRecord = data.record || selected;
+      setSelected(updatedRecord);
+      setOrderEditDraft(null);
+      setOrderEditMessage('');
+      setOrderEditNoteWarning('');
+      setOrderNotesData(null);
+      setOrderNotesError('');
+      orderNotesCacheRef.current.clear();
+      searchCacheRef.current.clear();
+
+      setResults((current) => current.map((record) => (
+        record.id === updatedRecord.id &&
+        (!record.SourceListId || record.SourceListId === updatedRecord.SourceListId)
+          ? {
+              ...record,
+              Status: updatedRecord.Status,
+              Origin: updatedRecord.Origin,
+              Destination: updatedRecord.Destination,
+              PickupDate: updatedRecord.PickupDate,
+              DeliveryDate: updatedRecord.DeliveryDate,
+              Customer: updatedRecord.Customer,
+              BOL: updatedRecord.BOL,
+              BidID: updatedRecord.BidID,
+              IsProcessed: isOrderEditTruthy(updatedRecord.Processed),
+              IsSettled: isOrderEditTruthy(updatedRecord.Processed) || isOrderEditTruthy(updatedRecord.FinalSettleSent)
+            }
+          : record
+      )));
+
+      setSelectedView('basic');
+
+      if (data.noteWarning) {
+        window.alert(`Order changes were saved, but the Operations audit note needs attention: ${data.noteWarning}`);
+      }
+
+      void loadOperationsDashboard({ silent: true, forceRefresh: true }).catch(() => {});
+    } catch (err) {
+      setOrderEditError(err.message || 'Unable to update this order.');
+    } finally {
+      setOrderEditSaving(false);
+    }
+  }
+
+  function renderOrderEditInput({ field, label, type = 'text', wide = false, full = false, placeholder = '', min, step }) {
+    const value = orderEditDraft?.[field] ?? getOrderEditDraftValue(selected, field);
+
+    return (
+      <label className={`order-edit-field ${wide ? 'wide' : ''} ${full ? 'full' : ''}`}>
+        <span>{label}</span>
+        <input
+          type={type}
+          value={value}
+          placeholder={placeholder}
+          min={min}
+          step={step}
+          onChange={(event) => updateOrderEditDraft(field, event.target.value)}
+          disabled={orderEditSaving}
+        />
+      </label>
+    );
+  }
+
+  function renderOrderEditSelect({ field, label, options = [], disabled = false, wide = false }) {
+    const value = orderEditDraft?.[field] ?? getOrderEditDraftValue(selected, field);
+    const mergedOptions = value && !options.includes(value) ? [value, ...options] : options;
+
+    return (
+      <label className={`order-edit-field ${wide ? 'wide' : ''}`}>
+        <span>{label}</span>
+        <select
+          value={value}
+          onChange={(event) => updateOrderEditDraft(field, event.target.value)}
+          disabled={disabled || orderEditSaving}
+        >
+          {mergedOptions.map((option) => (
+            <option key={option || '(blank)'} value={option}>{option || '(blank)'}</option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
+  function renderOrderEditTextarea({ field, label, full = false, rows = 3 }) {
+    return (
+      <label className={`order-edit-field ${full ? 'full' : ''}`}>
+        <span>{label}</span>
+        <textarea
+          rows={rows}
+          value={orderEditDraft?.[field] ?? getOrderEditDraftValue(selected, field)}
+          onChange={(event) => updateOrderEditDraft(field, event.target.value)}
+          disabled={orderEditSaving}
+        />
+      </label>
+    );
+  }
+
+  function renderOrderEditView() {
+    const availability = getOrderEditAvailability(selected);
+    const terminalStatusLocked = isOrderEditTerminalStatus(selected?.Status);
+    const changes = getOrderEditChanges(selected, orderEditDraft || createOrderEditDraft(selected));
+    const changedCount = Object.keys(changes).length;
+
+    if (!availability.canEdit) {
+      return (
+        <div className="order-edit-locked-card">
+          <strong>Order editing is locked.</strong>
+          <p>{availability.reason}</p>
+          <button type="button" className="view-button" onClick={() => setSelectedView('basic')}>Return to order</button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="order-edit-shell">
+        <div className="order-edit-governance-card">
+          <div>
+            <strong>Selective operational edit</strong>
+            <p>Only the fields shown below can be patched. Customer, BOL, driver, truck, mileage, billing, settlement and system fields remain untouched.</p>
+          </div>
+          <span>{changedCount} unsaved change{changedCount === 1 ? '' : 's'}</span>
+        </div>
+
+        {terminalStatusLocked && (
+          <div className="order-edit-terminal-banner">
+            <strong>{selected.Status} is a terminal status.</strong>
+            <span>Operational details may be corrected, but Status cannot be changed in Kole Connect.</span>
+          </div>
+        )}
+
+        {orderEditMessage && <div className="order-edit-success">{orderEditMessage}</div>}
+        {orderEditNoteWarning && <div className="order-edit-warning">Saved, but the audit note needs attention: {orderEditNoteWarning}</div>}
+        {orderEditError && <div className="msg error order-edit-error">{orderEditError}</div>}
+
+        <div className="order-edit-section">
+          <div className="order-edit-section-title">Load overview</div>
+          <div className="order-edit-grid">
+            {renderOrderEditSelect({
+              field: 'Status',
+              label: 'Status',
+              options: ORDER_EDIT_STATUS_OPTIONS,
+              disabled: terminalStatusLocked
+            })}
+            {renderOrderEditInput({ field: 'Requestor', label: 'Requestor' })}
+            {renderOrderEditSelect({ field: 'TeamRequired', label: 'Team Required', options: ['', 'Yes', 'No'] })}
+            {renderOrderEditSelect({ field: 'AircraftRelated', label: 'Aircraft Related', options: ['', 'Yes', 'No'] })}
+            {renderOrderEditTextarea({ field: 'Freight', label: 'Freight Description', full: true, rows: 3 })}
+          </div>
+        </div>
+
+        <div className="order-edit-section">
+          <div className="order-edit-section-title">Route & schedule</div>
+          <div className="order-edit-grid">
+            {renderOrderEditInput({ field: 'Origin', label: 'Origin', wide: true })}
+            {renderOrderEditInput({ field: 'Destination', label: 'Destination', wide: true })}
+            {renderOrderEditInput({ field: 'PickupDate', label: 'Pickup Date', type: 'date' })}
+            {renderOrderEditInput({ field: 'PickupTime', label: 'Pickup Time', placeholder: '8:00' })}
+            {renderOrderEditSelect({ field: 'PickupAMPM', label: 'Pickup AM/PM', options: ['', 'AM', 'PM'] })}
+            {renderOrderEditInput({ field: 'DeliveryDate', label: 'Delivery Date', type: 'date' })}
+            {renderOrderEditInput({ field: 'DeliveryTime', label: 'Delivery Time', placeholder: '3:30' })}
+            {renderOrderEditSelect({ field: 'DeliveryAMPM', label: 'Delivery AM/PM', options: ['', 'AM', 'PM'] })}
+          </div>
+        </div>
+
+        <div className="order-edit-section">
+          <div className="order-edit-section-title">Overall dimensions</div>
+          <div className="order-edit-grid three-column">
+            {renderOrderEditInput({ field: 'Length', label: 'Length', type: 'number', min: '0', step: 'any' })}
+            {renderOrderEditInput({ field: 'Width', label: 'Width', type: 'number', min: '0', step: 'any' })}
+            {renderOrderEditInput({ field: 'Height', label: 'Height', type: 'number', min: '0', step: 'any' })}
+          </div>
+        </div>
+
+        <div className="order-edit-section">
+          <div className="order-edit-section-title">Pickup</div>
+          <div className="order-edit-grid">
+            {renderOrderEditInput({ field: 'Pickup1Name', label: 'Pickup Location', wide: true })}
+            {renderOrderEditInput({ field: 'Pickup1Address1', label: 'Pickup Address', wide: true })}
+            {renderOrderEditInput({ field: 'Pickup1City', label: 'Pickup City' })}
+            {renderOrderEditInput({ field: 'Pickup1State', label: 'Pickup State' })}
+            {renderOrderEditInput({ field: 'Pickup1Zip', label: 'Pickup ZIP' })}
+            {renderOrderEditInput({ field: 'Pickup1ContactName', label: 'Pickup Contact' })}
+            {renderOrderEditInput({ field: 'Pickup1ContactNumber', label: 'Pickup Contact Number' })}
+          </div>
+        </div>
+
+        <div className="order-edit-section">
+          <div className="order-edit-section-title">Delivery</div>
+          <div className="order-edit-grid">
+            {renderOrderEditInput({ field: 'Delivery1Name', label: 'Delivery Location', wide: true })}
+            {renderOrderEditInput({ field: 'Delivery1Address1', label: 'Delivery Address', wide: true })}
+            {renderOrderEditInput({ field: 'Delivery1City', label: 'Delivery City' })}
+            {renderOrderEditInput({ field: 'Delivery1State', label: 'Delivery State' })}
+            {renderOrderEditInput({ field: 'Delivery1Zip', label: 'Delivery ZIP' })}
+            {renderOrderEditInput({ field: 'Delivery1ContactName', label: 'Delivery Contact' })}
+            {renderOrderEditInput({ field: 'Delivery1ContactNumber', label: 'Delivery Contact Number' })}
+          </div>
+        </div>
+
+        <div className="order-edit-section">
+          <div className="order-edit-section-title">Freight details</div>
+          <div className="order-edit-grid">
+            {renderOrderEditInput({ field: 'Item1QTY', label: 'Item Quantity', type: 'number', min: '0', step: 'any' })}
+            {renderOrderEditInput({ field: 'TotalPieces', label: 'Total Pieces', type: 'number', min: '0', step: 'any' })}
+            {renderOrderEditInput({ field: 'EstimatedWeight', label: 'Estimated Weight', type: 'number', min: '0', step: 'any' })}
+            {renderOrderEditInput({ field: 'ShipperNumber', label: 'Shipper #' })}
+            {renderOrderEditInput({ field: 'Contract', label: 'Contract' })}
+            {renderOrderEditInput({ field: 'Item1Serial', label: 'Serial Number' })}
+            {renderOrderEditInput({ field: 'Item1Dimensions', label: 'Item Dimensions', wide: true })}
+            {renderOrderEditTextarea({ field: 'Item1Description', label: 'Freight Item Description', full: true, rows: 3 })}
+          </div>
+        </div>
+
+        <div className="order-edit-actions">
+          <div>
+            <strong>{changedCount} pending change{changedCount === 1 ? '' : 's'}</strong>
+            <span>Saving also writes an Operations audit note with before-and-after values.</span>
+          </div>
+          <div>
+            <button type="button" className="close-button" onClick={cancelOrderEditing} disabled={orderEditSaving}>Discard</button>
+            <button type="button" onClick={saveOrderEdits} disabled={orderEditSaving || changedCount === 0}>
+              {orderEditSaving ? 'Saving...' : 'Save Order Changes'}
+            </button>
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -19094,6 +19552,17 @@ function openReportLoadDetails(load) {
                 </>
               )}
 
+              {getOrderEditAvailability(selected).isCurrent && (
+                <button
+                  className={selectedView === 'edit' ? 'active-tab' : ''}
+                  onClick={openOrderEditor}
+                  disabled={!getOrderEditAvailability(selected).canEdit}
+                  title={getOrderEditAvailability(selected).reason || 'Edit permitted order fields'}
+                >
+                  {getOrderEditAvailability(selected).canEdit ? 'Edit Order' : 'Edit Locked'}
+                </button>
+              )}
+
               <button
                 className={selectedView === 'notes' ? 'active-tab' : ''}
                 onClick={openOrderNotesTab}
@@ -19107,6 +19576,7 @@ function openReportLoadDetails(load) {
               {selectedView === 'dispatch' && <DispatchView />}
               {selectedView === 'billing' && <BillingView />}
               {selectedView === 'documents' && <DocumentsView />}
+              {selectedView === 'edit' && renderOrderEditView()}
               {selectedView === 'notes' && renderOrderNotesView()}
             </div>
           </div>

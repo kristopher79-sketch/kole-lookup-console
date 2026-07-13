@@ -160,12 +160,13 @@ async function graphGet(token, url, extraHeaders = {}) {
   return data;
 }
 
-async function graphPatch(token, url, body) {
+async function graphPatch(token, url, body, extraHeaders = {}) {
   const response = await fetch(url, {
     method: 'PATCH',
     headers: {
       Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      ...extraHeaders
     },
     body: JSON.stringify(body)
   });
@@ -782,16 +783,16 @@ function buildRecordResponse(data, sourceList) {
     PickupAMPM: f.Pickup1AMorPM || '',
     DeliveryTime: f.Delivery1Time || '',
     DeliveryAMPM: f.Delivery1AMorPM || '',
-    AircraftRelated: f.Aircraft_x0020_Related_x003f_ || '',
-    TeamRequired: f.Team_x0020_Required || '',
+    AircraftRelated: f.Aircraft_x0020_Related_x003f_ ?? '',
+    TeamRequired: f.Team_x0020_Required ?? '',
     Route: f.Route || '',
     OperatorInactive: f.OperatorInactive ?? false,
 
     Pickup1Name: f.Pickup1Name || '',
     Pickup1Address1: f.Pickup1Address1 || '',
     Pickup1City: f.Pickup1City || '',
-    Pickup1State: f.Pickup1State || '',
-    Pickup1Zip: f.Pickup1Zip || '',
+    Pickup1State: f.Pickup2State || '',
+    Pickup1Zip: f.Pickup2Zip || '',
     Pickup1ContactName: f.Pickup1ContactName || '',
     Pickup1ContactNumber: f.Pickup1ContactNumber || '',
     Pickup1TimeSnapshot: f.Pickup1TimeSnapshot || '',
@@ -833,9 +834,183 @@ function buildRecordResponse(data, sourceList) {
     CustomerCode: f.CustomerCode || '',
     TMSName: f.TMSName || '',
     WrittentoExcel: f.WrittentoExcel ?? '',
-    ExcelWriteStatus: f.ExcelWriteStatus || ''
+    ExcelWriteStatus: f.ExcelWriteStatus || '',
+    LastModifiedDateTime: data.lastModifiedDateTime || '',
+    ETag: data.eTag || data['@odata.etag'] || ''
   };
 }
+
+const ORDER_EDIT_STATUS_VALUES = new Map([
+  ['-', '-'],
+  ['QUOTE', 'Quote'],
+  ['WON', 'Won'],
+  ['LOST', 'Lost'],
+  ['CAN', 'CAN'],
+  ['TONU', 'TONU']
+]);
+
+const ORDER_EDIT_TERMINAL_STATUSES = new Set(['CAN', 'TONU']);
+
+const ORDER_EDIT_FIELD_DEFINITIONS = {
+  Status: { field: 'Status', label: 'Status', type: 'status' },
+  Requestor: { field: 'Requestor', label: 'Requestor', type: 'text' },
+  Freight: { field: 'Freight_x0020_Description', label: 'Freight', type: 'text' },
+  Origin: { field: 'Shipment_x0020_Origin', label: 'Origin', type: 'text' },
+  Destination: { field: 'Shipment_x0020_Destination', label: 'Destination', type: 'text' },
+  PickupDate: { field: 'Pickup_x0020_Offer_x0020_Date', label: 'Pickup date', type: 'date' },
+  PickupTime: { field: 'Pickup1PickupTime', label: 'Pickup time', type: 'text' },
+  PickupAMPM: { field: 'Pickup1AMorPM', label: 'Pickup AM/PM', type: 'ampm' },
+  DeliveryDate: { field: 'Expected_x0020_Delivery_x0020_Da', label: 'Delivery date', type: 'date' },
+  DeliveryTime: { field: 'Delivery1Time', label: 'Delivery time', type: 'text' },
+  DeliveryAMPM: { field: 'Delivery1AMorPM', label: 'Delivery AM/PM', type: 'ampm' },
+  Length: { field: 'Length', label: 'Length', type: 'number' },
+  Width: { field: 'Width', label: 'Width', type: 'number' },
+  Height: { field: 'Height', label: 'Height', type: 'number' },
+  TeamRequired: { field: 'Team_x0020_Required', label: 'Team required', type: 'yesNo' },
+  AircraftRelated: { field: 'Aircraft_x0020_Related_x003f_', label: 'Aircraft related', type: 'yesNo' },
+  Pickup1Name: { field: 'Pickup1Name', label: 'Pickup location', type: 'text' },
+  Pickup1Address1: { field: 'Pickup1Address1', label: 'Pickup address', type: 'text' },
+  Pickup1City: { field: 'Pickup1City', label: 'Pickup city', type: 'text' },
+  Pickup1State: { field: 'Pickup2State', label: 'Pickup state', type: 'text' },
+  Pickup1Zip: { field: 'Pickup2Zip', label: 'Pickup ZIP', type: 'text' },
+  Pickup1ContactName: { field: 'Pickup1ContactName', label: 'Pickup contact', type: 'text' },
+  Pickup1ContactNumber: { field: 'Pickup1ContactNumber', label: 'Pickup contact number', type: 'text' },
+  Delivery1Name: { field: 'Delivery1Name', label: 'Delivery location', type: 'text' },
+  Delivery1Address1: { field: 'Deliver1Address1', label: 'Delivery address', type: 'text' },
+  Delivery1City: { field: 'Delivery1City', label: 'Delivery city', type: 'text' },
+  Delivery1State: { field: 'Delivery1State', label: 'Delivery state', type: 'text' },
+  Delivery1Zip: { field: 'Delivery1Zip', label: 'Delivery ZIP', type: 'text' },
+  Delivery1ContactName: { field: 'Delivery1ContactName', label: 'Delivery contact', type: 'text' },
+  Delivery1ContactNumber: { field: 'Delivery1ContactNumber', label: 'Delivery contact number', type: 'text' },
+  Item1QTY: { field: 'Item1QTY', label: 'Freight quantity', type: 'number' },
+  Item1Description: { field: 'Item1Description', label: 'Freight item description', type: 'text' },
+  Item1Serial: { field: 'Item1Serial', label: 'Serial number', type: 'text' },
+  Item1Dimensions: { field: 'Item1Dimensions', label: 'Item dimensions', type: 'text' },
+  EstimatedWeight: { field: 'EstimatedWeight', label: 'Estimated weight', type: 'number' },
+  TotalPieces: { field: 'TotalPieces', label: 'Total pieces', type: 'number' },
+  ShipperNumber: { field: 'ShipperNumber', label: 'Shipper number', type: 'text' },
+  Contract: { field: 'Contract', label: 'Contract', type: 'text' }
+};
+
+function normalizeOrderEditStatus(value) {
+  return String(getFlexibleFieldValue(value) || value || '').trim().toUpperCase();
+}
+
+function isOrderEditSettled(fields = {}) {
+  return parseBoolean(fields.Processed) || parseBoolean(fields.FinalSettleSent);
+}
+
+function getOrderEditDateOnly(value) {
+  const raw = String(value || '').trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : '';
+}
+
+function normalizeOrderEditValue(definition, value, currentValue) {
+  if (definition.type === 'status') {
+    const normalized = normalizeOrderEditStatus(value);
+    if (!ORDER_EDIT_STATUS_VALUES.has(normalized)) {
+      const error = new Error('That status is not available for Kole Connect order editing.');
+      error.statusCode = 400;
+      throw error;
+    }
+    return ORDER_EDIT_STATUS_VALUES.get(normalized);
+  }
+
+  if (definition.type === 'date') {
+    const cleanDate = getOrderEditDateOnly(value);
+    if (!String(value || '').trim()) return null;
+    if (!cleanDate) {
+      const error = new Error(`${definition.label} must be a valid date.`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const currentDateText = String(currentValue || '').trim();
+    const currentTimeSuffix = currentDateText.match(/^\d{4}-\d{2}-\d{2}(T.+)$/)?.[1] || 'T12:00:00Z';
+    return `${cleanDate}${currentTimeSuffix}`;
+  }
+
+  if (definition.type === 'number') {
+    const isBlank = value === null || value === undefined || String(value).trim() === '';
+    if (isBlank) return typeof currentValue === 'string' ? '' : null;
+
+    const cleanNumberText = String(value).replace(/,/g, '').trim();
+    const number = Number(cleanNumberText);
+    if (!Number.isFinite(number) || number < 0) {
+      const error = new Error(`${definition.label} must be zero or greater.`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    return typeof currentValue === 'string' ? cleanNumberText : number;
+  }
+
+  if (definition.type === 'ampm') {
+    const cleanValue = String(value || '').trim().toUpperCase();
+    if (!['', 'AM', 'PM'].includes(cleanValue)) {
+      const error = new Error(`${definition.label} must be AM or PM.`);
+      error.statusCode = 400;
+      throw error;
+    }
+    return cleanValue;
+  }
+
+  if (definition.type === 'yesNo') {
+    const cleanValue = String(value ?? '').trim();
+    const normalized = cleanValue.toLowerCase();
+
+    if (typeof currentValue === 'boolean') {
+      if (['yes', 'true', '1'].includes(normalized)) return true;
+      if (['no', 'false', '0', ''].includes(normalized)) return false;
+
+      const error = new Error(`${definition.label} must be Yes or No.`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    return cleanValue;
+  }
+
+  const cleanValue = String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  if (cleanValue.length > 20000) {
+    const error = new Error(`${definition.label} is too long.`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return cleanValue;
+}
+
+function orderEditValuesMatch(definition, a, b) {
+  if (definition.type === 'date') return getOrderEditDateOnly(a) === getOrderEditDateOnly(b);
+  if (definition.type === 'number') {
+    const aBlank = a === null || a === undefined || a === '';
+    const bBlank = b === null || b === undefined || b === '';
+    if (aBlank && bBlank) return true;
+    return Number(a) === Number(b);
+  }
+  if (definition.type === 'yesNo' && (typeof a === 'boolean' || typeof b === 'boolean')) {
+    return parseBoolean(a) === parseBoolean(b);
+  }
+  return String(getFlexibleFieldValue(a) ?? a ?? '').trim() === String(getFlexibleFieldValue(b) ?? b ?? '').trim();
+}
+
+function formatOrderEditAuditValue(value) {
+  if (value === null || value === undefined || value === '') return '(blank)';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  const dateOnly = getOrderEditDateOnly(value);
+  if (dateOnly && String(value).includes('T')) return dateOnly;
+  return String(getFlexibleFieldValue(value) ?? value).trim() || '(blank)';
+}
+
+function clearOrderEditCaches() {
+  cachedBidItemsByList.clear();
+  cachedOperationsToday = null;
+  cachedOperationsTodayAt = 0;
+  cachedOnThisDayItemsBySource.clear();
+  cachedOnThisDayReports.clear();
+}
+
 function formatEasternDate(date = new Date()) {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/New_York',
@@ -10423,6 +10598,159 @@ app.get('/record/:id', requireLookupAccess, async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.patch('/record/:id', requireLookupAccess, async (req, res) => {
+  try {
+    const orderId = String(req.params.id || '').trim();
+    const requestedChanges = req.body?.changes;
+    const expectedModified = String(req.body?.expectedModified || '').trim();
+
+    if (!orderId) {
+      return res.status(400).json({ success: false, error: 'A Bid Listing item ID is required.' });
+    }
+
+    if (!requestedChanges || typeof requestedChanges !== 'object' || Array.isArray(requestedChanges)) {
+      return res.status(400).json({ success: false, error: 'No permitted order changes were supplied.' });
+    }
+
+    const requestedKeys = Object.keys(requestedChanges);
+    const unknownKeys = requestedKeys.filter((key) => !ORDER_EDIT_FIELD_DEFINITIONS[key]);
+
+    if (unknownKeys.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Kole Connect cannot edit: ${unknownKeys.join(', ')}.`
+      });
+    }
+
+    const token = await getGraphToken();
+    const lists = await getSearchableBidLists(token);
+    const currentList = lists.find((list) => list.label === 'Bid Listing');
+
+    if (!currentList) {
+      return res.status(404).json({ success: false, error: 'Bid Listing was not found.' });
+    }
+
+    const readUrl = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}/items/${orderId}?$expand=fields`;
+    const currentItem = await graphGet(token, readUrl);
+    const currentFields = currentItem.fields || {};
+    const currentRecord = buildRecordResponse(currentItem, currentList);
+
+    if (expectedModified && currentItem.lastModifiedDateTime && expectedModified !== currentItem.lastModifiedDateTime) {
+      return res.status(409).json({
+        success: false,
+        code: 'ORDER_CHANGED',
+        error: 'This order changed after it was opened. Close and reopen it before saving.'
+      });
+    }
+
+    if (isOrderEditSettled(currentFields)) {
+      return res.status(423).json({
+        success: false,
+        code: 'ORDER_SETTLED_LOCK',
+        error: 'This order has been final settled and is locked from Kole Connect editing.'
+      });
+    }
+
+    const patch = {};
+    const changedRows = [];
+
+    for (const key of requestedKeys) {
+      const definition = ORDER_EDIT_FIELD_DEFINITIONS[key];
+      const currentValue = currentFields[definition.field];
+      const normalizedValue = normalizeOrderEditValue(definition, requestedChanges[key], currentValue);
+
+      if (orderEditValuesMatch(definition, currentValue, normalizedValue)) continue;
+
+      if (key === 'Status' && ORDER_EDIT_TERMINAL_STATUSES.has(normalizeOrderEditStatus(currentFields.Status))) {
+        return res.status(423).json({
+          success: false,
+          code: 'ORDER_TERMINAL_STATUS_LOCK',
+          error: `${getFlexibleFieldValue(currentFields.Status) || currentFields.Status} is a deliberate terminal status. Its Status cannot be changed in Kole Connect.`
+        });
+      }
+
+      patch[definition.field] = normalizedValue;
+      changedRows.push({
+        key,
+        label: definition.label,
+        before: currentValue,
+        after: normalizedValue
+      });
+    }
+
+    if (changedRows.length === 0) {
+      return res.status(400).json({ success: false, error: 'No order values changed.' });
+    }
+
+    const effectivePickupDate = Object.prototype.hasOwnProperty.call(requestedChanges, 'PickupDate')
+      ? getOrderEditDateOnly(requestedChanges.PickupDate)
+      : getOrderEditDateOnly(currentFields.Pickup_x0020_Offer_x0020_Date);
+    const effectiveDeliveryDate = Object.prototype.hasOwnProperty.call(requestedChanges, 'DeliveryDate')
+      ? getOrderEditDateOnly(requestedChanges.DeliveryDate)
+      : getOrderEditDateOnly(currentFields.Expected_x0020_Delivery_x0020_Da);
+
+    if (effectivePickupDate && effectiveDeliveryDate && effectiveDeliveryDate < effectivePickupDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'Delivery date cannot be earlier than pickup date.'
+      });
+    }
+
+    const patchUrl = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}/items/${orderId}/fields`;
+    await graphPatch(token, patchUrl, patch, {
+      'If-Match': currentItem.eTag || currentItem['@odata.etag'] || '*'
+    });
+
+    clearOrderEditCaches();
+
+    const updatedItem = await graphGet(token, readUrl);
+    const updatedRecord = buildRecordResponse(updatedItem, currentList);
+    let auditNote = null;
+    let noteWarning = '';
+
+    try {
+      auditNote = await createOrderNote(token, {
+        bidId: updatedRecord.BidID || currentRecord.BidID,
+        bol: updatedRecord.BOL || currentRecord.BOL,
+        noteType: 'Operations',
+        noteBody: [
+          'Order edited in Kole Connect:',
+          ...changedRows.map((row) => `- ${row.label}: ${formatOrderEditAuditValue(row.before)} → ${formatOrderEditAuditValue(row.after)}`)
+        ].join('\n'),
+        customerName: updatedRecord.Customer || currentRecord.Customer,
+        customerNumber: updatedRecord.CustomerCode || currentRecord.CustomerCode,
+        truckNumber: updatedRecord.Truck || currentRecord.Truck,
+        operatorTeam: updatedRecord.TMSName || updatedRecord.Driver || currentRecord.TMSName || currentRecord.Driver,
+        createdBy: 'Kole Connect Order Editor'
+      });
+    } catch (noteError) {
+      noteWarning = noteError.message || 'The order was saved, but its audit note could not be created.';
+      console.error('Order edit audit note failed:', noteError);
+    }
+
+    res.json({
+      success: true,
+      message: `Saved ${changedRows.length} order change${changedRows.length === 1 ? '' : 's'}.`,
+      changedFields: changedRows.map((row) => row.key),
+      record: updatedRecord,
+      auditNote,
+      noteWarning
+    });
+  } catch (error) {
+    console.error(error);
+    const rawMessage = error.message || 'Unable to update this order.';
+    const conflict = /412|precondition/i.test(rawMessage);
+
+    res.status(conflict ? 409 : (error.statusCode || 500)).json({
+      success: false,
+      code: conflict ? 'ORDER_CHANGED' : undefined,
+      error: conflict
+        ? 'This order changed while it was being saved. Reopen it and try again.'
+        : rawMessage
+    });
   }
 });
 
