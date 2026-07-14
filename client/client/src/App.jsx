@@ -347,10 +347,183 @@ function isOrderEditTerminalStatus(status) {
 const STARTUP_SPLASH_MIN_MS = 5000;
 const STARTUP_SPLASH_EXIT_MS = 420;
 const STARTUP_SPLASH_FAKE_LIGHTS_COMPLETE_MS = 4600;
+const DASHBOARD_REFRESH_TICK_MS = 30 * 1000;
+const DASHBOARD_REFRESH_CADENCE_MS = {
+  operations: 2 * 60 * 1000,
+  driverPositions: 2 * 60 * 1000,
+  intelliTrack: 2 * 60 * 1000,
+  uploadDigest: 3 * 60 * 1000,
+  actionAlerts: 3 * 60 * 1000,
+  availableTrucks: 5 * 60 * 1000,
+  recruiting: 10 * 60 * 1000,
+  availableTruckDistribution: 10 * 60 * 1000
+};
 const KOLE_THEME_STORAGE_KEY = 'koleConnectTheme';
 const KOLE_USER_PREFS_STORAGE_KEY = 'koleConnectUserPreferences';
+const KOLE_SEASON_RECHECK_MS = 30 * 60 * 1000;
 const DRIVER_TIME_OFF_PANE_OPTIONS = ['current', 'ended', 'starting-soon'];
 const SALES_AND_LEADS_PANEL_KEYS = ['customerBookingTrends', 'salesActivity', 'leadSuppression', 'salesLeads'];
+
+const KOLE_SEASON_THEME_OPTIONS = [
+  {
+    value: 'auto',
+    label: 'Automatic schedule',
+    description: 'Moves through seasonal palettes automatically, with short holiday windows.'
+  },
+  {
+    value: 'off',
+    label: 'Original Kole',
+    description: 'Keeps the standard Kole Connect palette year-round.'
+  },
+  {
+    value: 'winter',
+    label: 'Winter Frost',
+    description: 'Calm navy, blue, and cyan for a crisp operational feel.',
+    colors: ['#0b1120', '#eff6ff', '#2563eb', '#0891b2', '#e0f2fe']
+  },
+  {
+    value: 'valentine',
+    label: 'Valentine Rose',
+    description: 'A restrained rose and plum palette that stays professional.',
+    colors: ['#1f0a14', '#fff1f2', '#be123c', '#7e22ce', '#ffe4e6']
+  },
+  {
+    value: 'spring',
+    label: 'Spring Garden',
+    description: 'Emerald and fresh green for renewal and growth.',
+    colors: ['#071a14', '#f0fdf4', '#047857', '#4d7c0f', '#d1fae5']
+  },
+  {
+    value: 'summer',
+    label: 'Summer Coast',
+    description: 'Clear ocean blue and teal with an energetic light surface.',
+    colors: ['#082f49', '#f0f9ff', '#0369a1', '#0f766e', '#e0f2fe']
+  },
+  {
+    value: 'americana',
+    label: 'Americana',
+    description: 'A controlled red, white, and blue treatment around July.',
+    colors: ['#172554', '#f8fafc', '#1d4ed8', '#b91c1c', '#dbeafe']
+  },
+  {
+    value: 'harvest',
+    label: 'Harvest',
+    description: 'Grounded amber, rust, and cream for early and late fall.',
+    colors: ['#1c1917', '#fffbeb', '#b45309', '#7c2d12', '#fef3c7']
+  },
+  {
+    value: 'halloween',
+    label: 'Halloween',
+    description: 'Charcoal and burnt orange with a controlled violet accent.',
+    colors: ['#0c0a09', '#fff7ed', '#c2410c', '#6d28d9', '#ffedd5']
+  },
+  {
+    value: 'holiday',
+    label: 'Evergreen Holiday',
+    description: 'Evergreen, restrained red, and warm cream for December.',
+    colors: ['#052e2b', '#f0fdf4', '#047857', '#b91c1c', '#fef3c7']
+  },
+  {
+    value: 'aurora',
+    label: 'New Year Aurora',
+    description: 'Polished indigo and teal for the turn of the year.',
+    colors: ['#0f172a', '#eef2ff', '#4338ca', '#0f766e', '#e0e7ff']
+  }
+];
+
+const KOLE_SEASON_THEME_VALUES = new Set(KOLE_SEASON_THEME_OPTIONS.map((option) => option.value));
+const KOLE_SEASON_PALETTE_VALUES = new Set(
+  KOLE_SEASON_THEME_OPTIONS
+    .filter((option) => Array.isArray(option.colors))
+    .map((option) => option.value)
+);
+
+const KOLE_SEASON_BRAND_MOTIFS = Object.freeze({
+  winter: ['sock', 'coffee'],
+  valentine: ['envelopeOpen', 'heart'],
+  spring: ['bird', 'plant'],
+  summer: ['sailboat', 'island'],
+  americana: ['flag', 'confetti'],
+  harvest: ['acorn', 'leaf'],
+  halloween: ['skull', 'flask'],
+  holiday: ['evergreen', 'starFour'],
+  aurora: ['discoBall', 'sparkle']
+});
+
+const KOLE_SEASON_BRAND_ICON_PATHS = Object.freeze({
+  sock: [
+    { d: 'M200,112v33.37a16,16,0,0,1-4.69,11.32l-33,33A48,48,0,0,1,200,112Zm-8-88H104a8,8,0,0,0-8,8V56H200V32A8,8,0,0,0,192,24Z', opacity: 0.2 },
+    { d: 'M192,16H104A16,16,0,0,0,88,32v76.69L49.25,147.43a58.92,58.92,0,0,0,83.32,83.32L201,162.34a23.85,23.85,0,0,0,7-17V32A16,16,0,0,0,192,16Zm0,16h0V48H104V32ZM121.25,219.43a42.91,42.91,0,1,1-60.68-60.68l41.09-41.09A8,8,0,0,0,104,112V64h88v40.58A56.09,56.09,0,0,0,144,160a55.4,55.4,0,0,0,7.93,28.76ZM189.66,151l-25.91,25.91A39.6,39.6,0,0,1,160,160a40.05,40.05,0,0,1,32-39.19v24.56A8,8,0,0,1,189.66,151Z' }
+  ],
+  coffee: [
+    { d: 'M208,88v48a88,88,0,0,1-51.3,80H83.3A88,88,0,0,1,32,136V88Z', opacity: 0.2 },
+    { d: 'M80,56V24a8,8,0,0,1,16,0V56a8,8,0,0,1-16,0Zm40,8a8,8,0,0,0,8-8V24a8,8,0,0,0-16,0V56A8,8,0,0,0,120,64Zm32,0a8,8,0,0,0,8-8V24a8,8,0,0,0-16,0V56A8,8,0,0,0,152,64Zm96,56v8a40,40,0,0,1-37.51,39.91,96.59,96.59,0,0,1-27,40.09H208a8,8,0,0,1,0,16H32a8,8,0,0,1,0-16H56.54A96.3,96.3,0,0,1,24,136V88a8,8,0,0,1,8-8H208A40,40,0,0,1,248,120ZM200,96H40v40a80.27,80.27,0,0,0,45.12,72h69.76A80.27,80.27,0,0,0,200,136Zm32,24a24,24,0,0,0-16-22.62V136a95.78,95.78,0,0,1-1.2,15A24,24,0,0,0,232,128Z' }
+  ],
+  envelopeOpen: [
+    { d: 'M224,96l-78.55,56h-34.9L32,96l96-64Z', opacity: 0.2 },
+    { d: 'M228.44,89.34l-96-64a8,8,0,0,0-8.88,0l-96,64A8,8,0,0,0,24,96V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V96A8,8,0,0,0,228.44,89.34ZM96.72,152,40,192V111.53Zm16.37,8h29.82l56.63,40H56.46Zm46.19-8L216,111.53V192ZM128,41.61l81.91,54.61-67,47.78H113.11l-67-47.78Z' }
+  ],
+  heart: [
+    { d: 'M232,102c0,66-104,122-104,122S24,168,24,102A54,54,0,0,1,78,48c22.59,0,41.94,12.31,50,32,8.06-19.69,27.41-32,50-32A54,54,0,0,1,232,102Z', opacity: 0.2 },
+    { d: 'M178,40c-20.65,0-38.73,8.88-50,23.89C116.73,48.88,98.65,40,78,40a62.07,62.07,0,0,0-62,62c0,70,103.79,126.66,108.21,129a8,8,0,0,0,7.58,0C136.21,228.66,240,172,240,102A62.07,62.07,0,0,0,178,40ZM128,214.8C109.74,204.16,32,155.69,32,102A46.06,46.06,0,0,1,78,56c19.45,0,35.78,10.36,42.6,27a8,8,0,0,0,14.8,0c6.82-16.67,23.15-27,42.6-27a46.06,46.06,0,0,1,46,46C224,155.61,146.24,204.15,128,214.8Z' }
+  ],
+  bird: [
+    { d: 'M232,80,208,96v24a96,96,0,0,1-96,96H24a8,8,0,0,1-6.25-13L104,99.52V76.89c0-28.77,23-52.75,51.74-52.89a52,52,0,0,1,50.59,38.89Z', opacity: 0.2 },
+    { d: 'M176,68a12,12,0,1,1-12-12A12,12,0,0,1,176,68Zm64,12a8,8,0,0,1-3.56,6.66L216,100.28V120A104.11,104.11,0,0,1,112,224H24a16,16,0,0,1-12.49-26l.1-.12L96,96.63V76.89C96,43.47,122.79,16.16,155.71,16H156a60,60,0,0,1,57.21,41.86l23.23,15.48A8,8,0,0,1,240,80Zm-22.42,0L201.9,69.54a8,8,0,0,1-3.31-4.64A44,44,0,0,0,156,32h-.22C131.64,32.12,112,52.25,112,76.89V99.52a8,8,0,0,1-1.85,5.13L24,208h26.9l70.94-85.12a8,8,0,1,1,12.29,10.24L71.75,208H112a88.1,88.1,0,0,0,88-88V96a8,8,0,0,1,3.56-6.66Z' }
+  ],
+  plant: [
+    { d: 'M138.54,149.46C106.62,96.25,149.18,43.05,239.63,48.37,245,138.82,191.75,181.39,138.54,149.46ZM16.26,88.26c-3.8,64.61,34.21,95,72.21,72.21C111.27,122.47,80.87,84.46,16.26,88.26Z', opacity: 0.2 },
+    { d: 'M247.63,47.89a8,8,0,0,0-7.52-7.52c-51.76-3-93.32,12.74-111.18,42.22-11.8,19.48-11.78,43.16-.16,65.74a71.37,71.37,0,0,0-14.17,26.95L98.33,159c7.82-16.33,7.52-33.36-1-47.49C84.09,89.73,53.62,78,15.79,80.27a8,8,0,0,0-7.52,7.52c-2.23,37.83,9.46,68.3,31.25,81.5A45.82,45.82,0,0,0,63.44,176,54.58,54.58,0,0,0,87,170.33l25,25V224a8,8,0,0,0,16,0V194.51a55.61,55.61,0,0,1,12.27-35,73.91,73.91,0,0,0,33.31,8.4,60.9,60.9,0,0,0,31.83-8.86C234.89,141.21,250.67,99.65,247.63,47.89ZM86.06,146.74l-24.41-24.4a8,8,0,0,0-11.31,11.31l24.41,24.41c-9.61,3.18-18.93,2.39-26.94-2.46C32.47,146.31,23.79,124.32,24,96c28.31-.25,50.31,8.47,59.6,23.81C88.45,127.82,89.24,137.14,86.06,146.74Zm111.06-1.36c-13.4,8.11-29.15,8.73-45.15,2l53.69-53.7a8,8,0,0,0-11.31-11.32L140.65,136c-6.76-16-6.15-31.76,2-45.15,13.94-23,47-35.8,89.33-34.83C232.94,98.34,220.14,131.44,197.12,145.38Z' }
+  ],
+  sailboat: [
+    { d: 'M240,176l-29.6,37a8,8,0,0,1-6.24,3H51.84a8,8,0,0,1-6.24-3L16,176ZM136,8,32,136H136Z', opacity: 0.2 },
+    { d: 'M247.21,172.53A8,8,0,0,0,240,168H144V144h72a8,8,0,0,0,5.92-13.38L144,44.91V8a8,8,0,0,0-14.21-5l-104,128A8,8,0,0,0,32,144h96v24H16a8,8,0,0,0-6.25,13l29.6,37a15.93,15.93,0,0,0,12.49,6H204.16a15.93,15.93,0,0,0,12.49-6l29.6-37A8,8,0,0,0,247.21,172.53ZM197.92,128H144V68.69ZM48.81,128,128,30.53V128Zm155.35,80H51.84l-19.2-24H223.36Z' }
+  ],
+  island: [
+    { d: 'M32,140a20,20,0,1,1,20,20A20,20,0,0,1,32,140Zm96,52c-64,0-104,32-104,32H232S192,192,128,192Z', opacity: 0.2 },
+    { d: 'M238.25,229A8,8,0,0,1,227,230.25c-.37-.3-38.82-30.25-99-30.25S29.36,230,29,230.26a8,8,0,0,1-10-12.51c1.63-1.3,38.52-30.26,98.29-33.45A119.94,119.94,0,0,1,114,146.37c1.74-21.71,10.92-50.63,43-72.48a66.19,66.19,0,0,0-15-1.87l-1.67,0c-19,.62-30.94,11.71-36.5,33.92A8,8,0,0,1,96,112a7.64,7.64,0,0,1-1.94-.24,8,8,0,0,1-5.82-9.7c9.25-36.95,33.11-45.42,51.5-46a81.48,81.48,0,0,1,21.68,2.45c-3.83-6.33-9.43-12.93-17.21-16.25-10-4.24-22.17-2.39-36.31,5.51a8,8,0,0,1-7.8-14c18.74-10.45,35.72-12.54,50.48-6.2,12.49,5.36,20.73,15.78,25.87,25,6.18-9.64,13.88-16.17,22.39-18.94,11.86-3.87,24.64-.72,38,9.37a8,8,0,0,1-9.64,12.76c-8.91-6.73-16.77-9.06-23.35-6.93-7.29,2.35-12.87,10-16.37,16.61A70.46,70.46,0,0,1,208,73.07c14.61,8.35,32,26.05,32,62.94a8,8,0,0,1-16,0c0-23.46-8.07-40-24-49a50.49,50.49,0,0,0-5.75-2.8,55.64,55.64,0,0,1,5.06,33.06,59.41,59.41,0,0,1-8.86,23.41,8,8,0,0,1-13.09-9.2c.74-1.09,16.33-24.38-3.26-49.37-27,15.21-41.89,37.25-44.16,65.59a104.27,104.27,0,0,0,3.83,36.44c62.65,1.81,101.52,32.33,103.2,33.66A8,8,0,0,1,238.25,229ZM24,140a28,28,0,1,1,28,28A28,28,0,0,1,24,140Zm16,0a12,12,0,1,0,12-12A12,12,0,0,0,40,140Z' }
+  ],
+  flag: [
+    { d: 'M224,56V176c-64,55.43-112-55.43-176,0V56C112,.57,160,111.43,224,56Z', opacity: 0.2 },
+    { d: 'M42.76,50A8,8,0,0,0,40,56V224a8,8,0,0,0,16,0V179.77c26.79-21.16,49.87-9.75,76.45,3.41,16.4,8.11,34.06,16.85,53,16.85,13.93,0,28.54-4.75,43.82-18a8,8,0,0,0,2.76-6V56A8,8,0,0,0,218.76,50c-28,24.23-51.72,12.49-79.21-1.12C111.07,34.76,78.78,18.79,42.76,50ZM216,172.25c-26.79,21.16-49.87,9.74-76.45-3.41-25-12.35-52.81-26.13-83.55-8.4V59.79c26.79-21.16,49.87-9.75,76.45,3.4,25,12.35,52.82,26.13,83.55,8.4Z' }
+  ],
+  confetti: [
+    { d: 'M58.89,154.89l42.22,42.22-50.63,18.4a7.79,7.79,0,0,1-10-10Zm138.82-4.72L105.83,58.29A7.79,7.79,0,0,0,93,61.14l-14.9,41,75.82,75.82,41-14.9A7.79,7.79,0,0,0,197.71,150.17Z', opacity: 0.2 },
+    { d: 'M111.49,52.63a15.8,15.8,0,0,0-26,5.77L33,202.78A15.83,15.83,0,0,0,47.76,224a16,16,0,0,0,5.46-1l144.37-52.5a15.8,15.8,0,0,0,5.78-26Zm-8.33,135.21-35-35,13.16-36.21,58.05,58.05Zm-55,20,14-38.41,24.45,24.45ZM156,168.64,87.36,100l13-35.87,91.43,91.43ZM160,72a37.8,37.8,0,0,1,3.84-15.58C169.14,45.83,179.14,40,192,40c6.7,0,11-2.29,13.65-7.21A22,22,0,0,0,208,23.94,8,8,0,0,1,224,24c0,12.86-8.52,32-32,32-6.7,0-11,2.29-13.65,7.21A22,22,0,0,0,176,72.06,8,8,0,0,1,160,72ZM136,40V16a8,8,0,0,1,16,0V40a8,8,0,0,1-16,0Zm101.66,82.34a8,8,0,1,1-11.32,11.31l-16-16a8,8,0,0,1,11.32-11.32Zm4.87-42.75-24,8a8,8,0,0,1-5.06-15.18l24-8a8,8,0,0,1,5.06,15.18Z' }
+  ],
+  acorn: [
+    { d: 'M216,112v16c0,53-88,88-88,112,0-24-88-59-88-112V112Z', opacity: 0.2 },
+    { d: 'M232,104a56.06,56.06,0,0,0-56-56H136a24,24,0,0,1,24-24,8,8,0,0,0,0-16,40,40,0,0,0-40,40H80a56.06,56.06,0,0,0-56,56,16,16,0,0,0,8,13.83V128c0,35.53,33.12,62.12,59.74,83.49C103.66,221.07,120,234.18,120,240a8,8,0,0,0,16,0c0-5.82,16.34-18.93,28.26-28.51C190.88,190.12,224,163.53,224,128V117.83A16,16,0,0,0,232,104ZM80,64h96a40.06,40.06,0,0,1,40,40H40A40,40,0,0,1,80,64Zm74.25,135c-10.62,8.52-20,16-26.25,23.37-6.25-7.32-15.63-14.85-26.25-23.37C77.8,179.79,48,155.86,48,128v-8H208v8C208,155.86,178.2,179.79,154.25,199Z' }
+  ],
+  leaf: [
+    { d: 'M63.81,192.19c-47.89-79.81,16-159.62,151.64-151.64C223.43,176.23,143.62,240.08,63.81,192.19Z', opacity: 0.2 },
+    { d: 'M223.45,40.07a8,8,0,0,0-7.52-7.52C139.8,28.08,78.82,51,52.82,94a87.09,87.09,0,0,0-12.76,49c.57,15.92,5.21,32,13.79,47.85l-19.51,19.5a8,8,0,0,0,11.32,11.32l19.5-19.51C81,210.73,97.09,215.37,113,215.94q1.67.06,3.33.06A86.93,86.93,0,0,0,162,203.18C205,177.18,227.93,116.21,223.45,40.07ZM153.75,189.5c-22.75,13.78-49.68,14-76.71.77l88.63-88.62a8,8,0,0,0-11.32-11.32L65.73,179c-13.19-27-13-54,.77-76.71,22.09-36.47,74.6-56.44,141.31-54.06C210.2,114.89,190.22,167.41,153.75,189.5Z' }
+  ],
+  skull: [
+    { d: 'M128,24c-53,0-96,41.19-96,92,0,34.05,19.31,63.78,48,79.69V216a8,8,0,0,0,8,8h80a8,8,0,0,0,8-8V195.69c28.69-15.91,48-45.64,48-79.69C224,65.19,181,24,128,24ZM92,152a20,20,0,1,1,20-20A20,20,0,0,1,92,152Zm72,0a20,20,0,1,1,20-20A20,20,0,0,1,164,152Z', opacity: 0.2 },
+    { d: 'M92,104a28,28,0,1,0,28,28A28,28,0,0,0,92,104Zm0,40a12,12,0,1,1,12-12A12,12,0,0,1,92,144Zm72-40a28,28,0,1,0,28,28A28,28,0,0,0,164,104Zm0,40a12,12,0,1,1,12-12A12,12,0,0,1,164,144ZM128,16C70.65,16,24,60.86,24,116c0,34.1,18.27,66,48,84.28V216a16,16,0,0,0,16,16h80a16,16,0,0,0,16-16V200.28C213.73,182,232,150.1,232,116,232,60.86,185.35,16,128,16Zm44.12,172.69a8,8,0,0,0-4.12,7V216H152V192a8,8,0,0,0-16,0v24H120V192a8,8,0,0,0-16,0v24H88V195.69a8,8,0,0,0-4.12-7C56.81,173.69,40,145.84,40,116c0-46.32,39.48-84,88-84s88,37.68,88,84C216,145.83,199.19,173.69,172.12,188.69Z' }
+  ],
+  flask: [
+    { d: 'M208,216H48a8,8,0,0,1-6.86-12.12l30.48-50.8h0c13.23-2.48,32-1.41,56.37,10.92,32.25,16.33,54.75,12.91,67.5,7.65h0l19.34,32.23A8,8,0,0,1,208,216Z', opacity: 0.2 },
+    { d: 'M221.69,199.77,160,96.92V40h8a8,8,0,0,0,0-16H88a8,8,0,0,0,0,16h8V96.92L34.31,199.77A16,16,0,0,0,48,224H208a16,16,0,0,0,13.72-24.23ZM110.86,103.25A7.93,7.93,0,0,0,112,99.14V40h32V99.14a7.93,7.93,0,0,0,1.14,4.11L183.36,167c-12,2.37-29.07,1.37-51.75-10.11-15.91-8.05-31.05-12.32-45.22-12.81ZM48,208l28.54-47.58c14.25-1.73,30.31,1.85,47.82,10.72,19,9.61,35,12.88,48,12.88a69.89,69.89,0,0,0,19.55-2.7L208,208Z' }
+  ],
+  evergreen: [
+    { d: 'M32,192l56-72H48L128,16l80,104H168l56,72Z', opacity: 0.2 },
+    { d: 'M230.31,187.09,184.36,128H208a8,8,0,0,0,6.34-12.88l-80-104a8,8,0,0,0-12.68,0l-80,104A8,8,0,0,0,48,128H71.64L25.69,187.09A8,8,0,0,0,32,200h88v40a8,8,0,0,0,16,0V200h88a8,8,0,0,0,6.31-12.91ZM48.36,184l46-59.09A8,8,0,0,0,88,112H64.25L128,29.12,191.75,112H168a8,8,0,0,0-6.31,12.91L207.64,184Z' }
+  ],
+  starFour: [
+    { d: 'M226.76,135.48l-66.94,24.34-24.34,66.94a8,8,0,0,1-15,0L96.18,159.82,29.24,135.48a8,8,0,0,1,0-15L96.18,96.18l24.34-66.94a8,8,0,0,1,15,0l24.34,66.94,66.94,24.34A8,8,0,0,1,226.76,135.48Z', opacity: 0.2 },
+    { d: 'M229.5,113,166.06,89.94,143,26.5a16,16,0,0,0-30,0L89.94,89.94,26.5,113a16,16,0,0,0,0,30l63.44,23.07L113,229.5a16,16,0,0,0,30,0l23.07-63.44L229.5,143a16,16,0,0,0,0-30ZM157.08,152.3a8,8,0,0,0-4.78,4.78L128,223.9l-24.3-66.82a8,8,0,0,0-4.78-4.78L32.1,128l66.82-24.3a8,8,0,0,0,4.78-4.78L128,32.1l24.3,66.82a8,8,0,0,0,4.78,4.78L223.9,128Z' }
+  ],
+  discoBall: [
+    { d: 'M192,152a80,80,0,0,1-80,80s32-24,32-80ZM112,72S80,96,80,152h64C144,96,112,72,112,72Z', opacity: 0.2 },
+    { d: 'M120,64.37V16a8,8,0,0,0-16,0V64.37a88,88,0,1,0,16,0ZM183.54,144H151.77c-1.51-28.36-10.79-48.36-19.44-61.06A72.16,72.16,0,0,1,183.54,144Zm-95.3,16h47.52c-2,33.52-16.13,52.95-23.76,61.08C104.36,212.93,90.23,193.51,88.24,160Zm0-16c2-33.52,16.13-52.95,23.76-61.08,7.64,8.15,21.77,27.57,23.76,61.08Zm3.43-61.06C83,95.64,73.74,115.64,72.23,144H40.46A72.16,72.16,0,0,1,91.67,82.94ZM40.46,160H72.23c1.51,28.36,10.79,48.36,19.44,61.06A72.16,72.16,0,0,1,40.46,160Zm91.87,61.06c8.65-12.7,17.93-32.7,19.44-61.06h31.77A72.16,72.16,0,0,1,132.33,221.06ZM256,88a8,8,0,0,1-8,8h-8v8a8,8,0,0,1-16,0V96h-8a8,8,0,0,1,0-16h8V72a8,8,0,0,1,16,0v8h8A8,8,0,0,1,256,88ZM152,40a8,8,0,0,1,8-8h16V16a8,8,0,0,1,16,0V32h16a8,8,0,0,1,0,16H192V64a8,8,0,0,1-16,0V48H160A8,8,0,0,1,152,40Z' }
+  ],
+  sparkle: [
+    { d: 'M194.82,151.43l-55.09,20.3-20.3,55.09a7.92,7.92,0,0,1-14.86,0l-20.3-55.09-55.09-20.3a7.92,7.92,0,0,1,0-14.86l55.09-20.3,20.3-55.09a7.92,7.92,0,0,1,14.86,0l20.3,55.09,55.09,20.3A7.92,7.92,0,0,1,194.82,151.43Z', opacity: 0.2 },
+    { d: 'M197.58,129.06,146,110l-19-51.62a15.92,15.92,0,0,0-29.88,0L78,110l-51.62,19a15.92,15.92,0,0,0,0,29.88L78,178l19,51.62a15.92,15.92,0,0,0,29.88,0L146,178l51.62-19a15.92,15.92,0,0,0,0-29.88ZM137,164.22a8,8,0,0,0-4.74,4.74L112,223.85,91.78,169A8,8,0,0,0,87,164.22L32.15,144,87,123.78A8,8,0,0,0,91.78,119L112,64.15,132.22,119a8,8,0,0,0,4.74,4.74L191.85,144ZM144,40a8,8,0,0,1,8-8h16V16a8,8,0,0,1,16,0V32h16a8,8,0,0,1,0,16H184V64a8,8,0,0,1-16,0V48H152A8,8,0,0,1,144,40ZM248,88a8,8,0,0,1-8,8h-8v8a8,8,0,0,1-16,0V96h-8a8,8,0,0,1,0-16h8V72a8,8,0,0,1,16,0v8h8A8,8,0,0,1,248,88Z' }
+  ]
+});
 
 const DEFAULT_KOLE_USER_PREFERENCES = {
   driverRosterDefaultOpen: false,
@@ -374,7 +547,8 @@ const DEFAULT_KOLE_USER_PREFERENCES = {
   hideWeeklySettlementReport: false,
   hideRecruiting: false,
   recruitingDefaultOpen: true,
-  skipStartupSplash: false
+  skipStartupSplash: false,
+  seasonalTheme: 'auto'
 };
 
 function getSavedKoleTheme() {
@@ -395,8 +569,13 @@ function normalizeKoleUserPreferences(value = {}) {
     prefs.driverTimeOffDefaultPane = DEFAULT_KOLE_USER_PREFERENCES.driverTimeOffDefaultPane;
   }
 
+  const normalizedSeasonalTheme = String(prefs.seasonalTheme || '').trim().toLowerCase();
+  prefs.seasonalTheme = KOLE_SEASON_THEME_VALUES.has(normalizedSeasonalTheme)
+    ? normalizedSeasonalTheme
+    : DEFAULT_KOLE_USER_PREFERENCES.seasonalTheme;
+
   Object.keys(DEFAULT_KOLE_USER_PREFERENCES).forEach((key) => {
-    if (key !== 'driverTimeOffDefaultPane') {
+    if (key !== 'driverTimeOffDefaultPane' && key !== 'seasonalTheme') {
       prefs[key] = Boolean(prefs[key]);
     }
   });
@@ -419,6 +598,35 @@ function saveKoleUserPreferences(preferences) {
   } catch (err) {
     // Local storage may be unavailable in a locked-down webview; preferences still work for this session.
   }
+}
+
+function getKoleSeasonThemeOption(value) {
+  return KOLE_SEASON_THEME_OPTIONS.find((option) => option.value === value) || KOLE_SEASON_THEME_OPTIONS[0];
+}
+
+function getResolvedKoleSeason(requestedTheme = 'auto', dateValue = getEasternDateInputValue()) {
+  const normalizedTheme = String(requestedTheme || '').trim().toLowerCase();
+
+  if (KOLE_SEASON_PALETTE_VALUES.has(normalizedTheme)) return normalizedTheme;
+  if (normalizedTheme === 'off') return '';
+
+  const [, month = 1, day = 1] = String(dateValue || '').split('-').map(Number);
+  const monthDay = (month * 100) + day;
+
+  if (monthDay >= 1226 || monthDay <= 107) return 'aurora';
+  if (monthDay <= 207) return 'winter';
+  if (monthDay <= 215) return 'valentine';
+  if (monthDay <= 319) return 'winter';
+  if (monthDay <= 515) return 'spring';
+  if (monthDay <= 627) return 'summer';
+  if (monthDay <= 707) return 'americana';
+  if (monthDay <= 831) return 'summer';
+  if (monthDay <= 1020) return 'harvest';
+  if (monthDay <= 1101) return 'halloween';
+  if (monthDay <= 1130) return 'harvest';
+  if (monthDay <= 1225) return 'holiday';
+
+  return 'winter';
 }
 
 function getStartupStepClass(state) {
@@ -506,9 +714,35 @@ function KoleStartupSplash({
   );
 }
 
-function KoleBrandTitle({ animate = false, revealKey = 0, subtitle }) {
+function KoleSeasonBrandIcon({ name }) {
+  const paths = KOLE_SEASON_BRAND_ICON_PATHS[name] || [];
+
+  if (paths.length === 0) return null;
+
+  return (
+    <svg className="brand-season-icon" viewBox="0 0 256 256" focusable="false" aria-hidden="true">
+      {paths.map((path, index) => (
+        <path key={`${name}-${index}`} d={path.d} opacity={path.opacity} />
+      ))}
+    </svg>
+  );
+}
+
+function KoleBrandTitle({ animate = false, revealKey = 0, season = '', subtitle }) {
+  const [primaryMotif, secondaryMotif] = KOLE_SEASON_BRAND_MOTIFS[season] || [];
+
   return (
     <div className={`kole-brand-title-zone ${animate ? 'brand-reveal-active' : ''}`}>
+      <div className="brand-season-scene" aria-hidden="true">
+        <span className="brand-season-glow" />
+        <span className="brand-season-symbol brand-season-symbol-one">
+          <KoleSeasonBrandIcon name={primaryMotif} />
+        </span>
+        <span className="brand-season-symbol brand-season-symbol-two">
+          <KoleSeasonBrandIcon name={secondaryMotif} />
+        </span>
+      </div>
+
       <div className="brand-static-copy" aria-hidden={animate ? 'true' : undefined}>
         <h1 className="brand-title-text">Kole Connect</h1>
         {subtitle && <p className="brand-subtitle-text">{subtitle}</p>}
@@ -1025,12 +1259,17 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [colorTheme, setColorTheme] = useState(getSavedKoleTheme);
   const [userPrefs, setUserPrefs] = useState(getSavedKoleUserPreferences);
+  const [seasonalDateKey, setSeasonalDateKey] = useState(getEasternDateInputValue);
   const [preferencesModalOpen, setPreferencesModalOpen] = useState(false);
   const [brandRevealActive, setBrandRevealActive] = useState(false);
   const [brandRevealKey, setBrandRevealKey] = useState(0);
   const brandRevealTimerRef = useRef(null);
   const lastRefreshCueAtRef = useRef(0);
   const isAuthenticated = Boolean(accessToken);
+  const resolvedSeasonalTheme = useMemo(
+    () => getResolvedKoleSeason(userPrefs.seasonalTheme, seasonalDateKey),
+    [userPrefs.seasonalTheme, seasonalDateKey]
+  );
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
@@ -1259,6 +1498,9 @@ export default function App() {
   const orderNotesRequestRef = useRef(0);
   const startupSplashStartedAtRef = useRef(Date.now());
   const startupSplashCloseTimerRef = useRef(null);
+  const dashboardRefreshLastRunRef = useRef({});
+  const dashboardRefreshInFlightRef = useRef(new Set());
+  const uploadDigestDateRef = useRef(getEasternDateInputValue());
   const operationsActiveTodayRef = useRef(null);
   const operationsLoadingTodayRef = useRef(null);
   const operationsDeliveringTodayRef = useRef(null);
@@ -1585,12 +1827,17 @@ export default function App() {
   }, [reportActionAlertCounts, reportActionAlertsLoading, reportActionAlerts, reportActionAlertsError]);
 
   const startupDashboardSettled = useMemo(() => (
-    Boolean(operationsData || operationsError) &&
-    !operationsLoading
+    userPrefs.hideOperationsToday
+      ? Boolean(reportActionAlerts || reportActionAlertsError) && !reportActionAlertsLoading
+      : Boolean(operationsData || operationsError) && !operationsLoading
   ), [
+    userPrefs.hideOperationsToday,
     operationsData,
     operationsError,
-    operationsLoading
+    operationsLoading,
+    reportActionAlerts,
+    reportActionAlertsError,
+    reportActionAlertsLoading
   ]);
 
   function getActionReportClearMessage(reportLabel) {
@@ -1982,13 +2229,17 @@ export default function App() {
   function renderPreferencesModal() {
     if (!preferencesModalOpen) return null;
 
+    const selectedSeasonalTheme = getKoleSeasonThemeOption(userPrefs.seasonalTheme);
+    const seasonalThemePreview = getKoleSeasonThemeOption(resolvedSeasonalTheme || 'off');
+    const seasonalThemePreviewColors = seasonalThemePreview.colors || ['#0f172a', '#eef2f7', '#2563eb', '#d4a017', '#dbeafe'];
+
     return (
       <div className="modal-overlay preferences-overlay" role="presentation">
         <div className="detail-modal preferences-modal" role="dialog" aria-modal="true" aria-labelledby="preferences-modal-title">
           <div className="detail-header preferences-modal-header">
             <div>
               <h2 id="preferences-modal-title">Kole Connect Preferences</h2>
-              <p>These settings are saved on this device. Theme stays separate so light/dark mode remains one-click.</p>
+              <p>These settings are saved on this device. Light/dark remains one-click, and seasonal color changes apply instantly.</p>
             </div>
             <button type="button" className="close-button" onClick={() => setPreferencesModalOpen(false)}>
               Close
@@ -1996,6 +2247,57 @@ export default function App() {
           </div>
 
           <div className="modal-body preferences-modal-body">
+            <section className="preferences-section seasonal-theme-section">
+              <div className="preferences-section-heading">
+                <h3>Seasonal color</h3>
+                <p>Change the app's personality without changing its layout, status meanings, or light/dark behavior.</p>
+              </div>
+
+              <label className="preference-select-row seasonal-theme-select-row">
+                <span>
+                  <strong>Palette schedule</strong>
+                  <small>Automatic uses brief holiday windows and broader seasonal palettes throughout the year.</small>
+                </span>
+                <select
+                  value={userPrefs.seasonalTheme}
+                  onChange={(e) => updateUserPreference('seasonalTheme', e.target.value, { applyNow: false })}
+                >
+                  {KOLE_SEASON_THEME_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+
+              <div
+                className="seasonal-theme-preview"
+                style={{
+                  '--season-preview-canvas': seasonalThemePreviewColors[0],
+                  '--season-preview-light': seasonalThemePreviewColors[1],
+                  '--season-preview-primary': seasonalThemePreviewColors[2],
+                  '--season-preview-secondary': seasonalThemePreviewColors[3],
+                  '--season-preview-soft': seasonalThemePreviewColors[4]
+                }}
+                aria-live="polite"
+              >
+                <div className="seasonal-theme-preview-copy">
+                  <span>{selectedSeasonalTheme.value === 'auto' ? 'Active today' : 'Selected palette'}</span>
+                  <strong>{seasonalThemePreview.label}</strong>
+                  <small>
+                    {selectedSeasonalTheme.value === 'auto'
+                      ? `${seasonalThemePreview.description} Automatic mode will switch at the next scheduled window.`
+                      : selectedSeasonalTheme.description}
+                  </small>
+                </div>
+                <div className="seasonal-theme-swatches" aria-hidden="true">
+                  <span className="seasonal-theme-swatch canvas" />
+                  <span className="seasonal-theme-swatch light" />
+                  <span className="seasonal-theme-swatch primary" />
+                  <span className="seasonal-theme-swatch secondary" />
+                  <span className="seasonal-theme-swatch soft" />
+                </div>
+              </div>
+            </section>
+
             <section className="preferences-section">
               <div className="preferences-section-heading">
                 <h3>Dashboard startup</h3>
@@ -2220,6 +2522,35 @@ export default function App() {
   }, [colorTheme]);
 
   useEffect(() => {
+    if (userPrefs.seasonalTheme !== 'auto') return undefined;
+
+    const syncSeasonalDate = () => {
+      const nextDateKey = getEasternDateInputValue();
+      setSeasonalDateKey((currentDateKey) => currentDateKey === nextDateKey ? currentDateKey : nextDateKey);
+    };
+
+    syncSeasonalDate();
+    const refreshTimer = window.setInterval(syncSeasonalDate, KOLE_SEASON_RECHECK_MS);
+
+    return () => window.clearInterval(refreshTimer);
+  }, [userPrefs.seasonalTheme]);
+
+  useEffect(() => {
+    const applySeasonalTheme = (element) => {
+      if (!element) return;
+
+      if (resolvedSeasonalTheme) {
+        element.dataset.season = resolvedSeasonalTheme;
+      } else {
+        delete element.dataset.season;
+      }
+    };
+
+    applySeasonalTheme(document.documentElement);
+    applySeasonalTheme(document.body);
+  }, [resolvedSeasonalTheme]);
+
+  useEffect(() => {
     document.body.classList.toggle('compact-dashboard-mode', Boolean(userPrefs.compactDashboardMode));
 
     return () => document.body.classList.remove('compact-dashboard-mode');
@@ -2385,45 +2716,43 @@ export default function App() {
   useEffect(() => {
     if (!isAuthenticated) return undefined;
 
-    loadOperationsDashboard();
-    loadDriverPositions();
-    loadIntelliTrack();
-    loadAvailableTrucks();
-    loadAvailableTruckDistributionList({ silent: true });
-    loadRecruitingDashboard({ silent: true });
-    loadReportActionAlerts({ silent: true });
+    dashboardRefreshLastRunRef.current = {};
+    dashboardRefreshInFlightRef.current.clear();
+    void loadDashboardBootstrap();
 
-    const interval = window.setInterval(() => {
-      const operationsRefresh = loadOperationsDashboard({ silent: true });
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return;
+      runCoordinatedDashboardRefresh();
+    };
+    const interval = window.setInterval(tick, DASHBOARD_REFRESH_TICK_MS);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') tick();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
-      loadDriverPositions({ silent: true });
-      loadIntelliTrack({ silent: true });
-      loadAvailableTrucks({ silent: true });
-      loadAvailableTruckDistributionList({ silent: true });
-      loadRecruitingDashboard({ silent: true });
-      loadReportActionAlerts({ silent: true });
-
-      operationsRefresh.then((operationsSucceeded) => {
-        if (operationsSucceeded) {
-          playDataRefreshCue();
-        }
-      });
-    }, 10 * 60 * 1000);
-
-    return () => window.clearInterval(interval);
-  }, [isAuthenticated, accessToken]);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      dashboardRefreshInFlightRef.current.clear();
+    };
+  }, [
+    isAuthenticated,
+    accessToken,
+    userPrefs.hideOperationsToday,
+    userPrefs.hideUploadDigest,
+    userPrefs.hideIntelliTrack,
+    userPrefs.hideAvailableTrucks,
+    userPrefs.hideRecruiting
+  ]);
 
   useEffect(() => {
-    if (!isAuthenticated) return undefined;
-
-    loadUploadDigest(uploadDigestDate);
-
-    const interval = window.setInterval(() => {
-      loadUploadDigest(uploadDigestDate, { silent: true });
-    }, 10 * 60 * 1000);
-
-    return () => window.clearInterval(interval);
-  }, [isAuthenticated, accessToken, uploadDigestDate]);
+    const previousDate = uploadDigestDateRef.current;
+    uploadDigestDateRef.current = uploadDigestDate;
+    if (!isAuthenticated || userPrefs.hideUploadDigest) return;
+    if (previousDate === uploadDigestDate) return;
+    void loadUploadDigest(uploadDigestDate, { silent: Boolean(uploadDigestData) });
+    dashboardRefreshLastRunRef.current.uploadDigest = Date.now();
+  }, [isAuthenticated, accessToken, uploadDigestDate, userPrefs.hideUploadDigest]);
 
   useEffect(() => {
     driverHistoryRequestRef.current += 1;
@@ -2444,7 +2773,7 @@ export default function App() {
       return undefined;
     }
 
-    if (salesLeadsPrewarmStartedRef.current || salesLeadsReport) return undefined;
+    if (userPrefs.hideSalesAndLeads || salesLeadsPrewarmStartedRef.current || salesLeadsReport) return undefined;
 
     if (!startupDashboardSettled) return undefined;
 
@@ -2470,6 +2799,7 @@ export default function App() {
     };
   }, [
     isAuthenticated,
+    userPrefs.hideSalesAndLeads,
     salesLeadsReport,
     startupDashboardSettled
   ]);
@@ -2666,6 +2996,8 @@ export default function App() {
   }
 
   function resetAppState() {
+    dashboardRefreshLastRunRef.current = {};
+    dashboardRefreshInFlightRef.current.clear();
     setQuery('');
     setResults([]);
     setSearchedRecords(0);
@@ -2682,6 +3014,19 @@ export default function App() {
     setError('');
     setAuthError('');
     setDocumentError('');
+    setOperationsData(null);
+    setOperationsLoading(false);
+    setOperationsError('');
+    setDriverPositionsData(null);
+    setDriverPositionsLoading(false);
+    setDriverPositionsError('');
+    setUploadDigestData(null);
+    setUploadDigestLoading(false);
+    setUploadDigestError('');
+    setUploadDigestActionError('');
+    setIntelliTrackData(null);
+    setIntelliTrackLoading(false);
+    setIntelliTrackError('');
     setDriverLookupLoading(false);
     setDriverLookupError('');
     setSortField('');
@@ -2714,6 +3059,7 @@ export default function App() {
     setAvailableTruckDistributionSortDirection('asc');
     setAvailableTruckDistributionInactiveModalOpen(false);
     setAvailableTrucksData(null);
+    setAvailableTrucksLoading(false);
     setAvailableTrucksError('');
     setAvailableTruckFormDate(getEasternDateInputValue());
     setAvailableTruckTimeOfDay(getDefaultAvailableTruckTimeOfDay());
@@ -2783,6 +3129,55 @@ export default function App() {
     setYearlyProjectionCustomDriverCount('');
     setProjectionRevenueDrilldownLoadingTruck('');
     setProjectionRevenueDrilldownError('');
+    setGrossRevenueReport(null);
+    setGrossRevenueLoading(false);
+    setGrossRevenueError(null);
+    setDriverSummaryReport(null);
+    setDriverSummaryLoading(false);
+    setDriverSummaryError(null);
+    setMonthlyOpsReport(null);
+    setMonthlyOpsLoading(false);
+    setMonthlyOpsError(null);
+    setOrdersDueSettlementReport(null);
+    setOrdersDueSettlementLoading(false);
+    setOrdersDueSettlementError(null);
+    setWeeklySettlementReport(null);
+    setWeeklySettlementLoading(false);
+    setWeeklySettlementError(null);
+    setWonNotRegisteredReport(null);
+    setWonNotRegisteredLoading(false);
+    setWonNotRegisteredError(null);
+    setPermitGovernanceReport(null);
+    setPermitGovernanceLoading(false);
+    setPermitGovernanceError(null);
+    setActiveDriverRosterReport(null);
+    setActiveDriverRosterLoading(false);
+    setActiveDriverRosterError(null);
+    setInactiveDriverRosterReport(null);
+    setInactiveDriverRosterLoading(false);
+    setInactiveDriverRosterError(null);
+    setFleetEquipmentReport(null);
+    setFleetEquipmentLoading(false);
+    setFleetEquipmentError(null);
+    setOnThisDayReport(null);
+    setOnThisDayLoading(false);
+    setOnThisDayError(null);
+    setOperationalNotesReport(null);
+    setOperationalNotesLoading(false);
+    setOperationalNotesError(null);
+    setNoAvailabilityReport(null);
+    setNoAvailabilityLoading(false);
+    setNoAvailabilityError(null);
+    setDriverTimeOffLoading(false);
+    setSalesLeadsReport(null);
+    setSalesLeadsLoading(false);
+    setSalesLeadsError(null);
+    setSalesActivityReport(null);
+    setSalesActivityLoading(false);
+    setSalesActivityError(null);
+    setCustomerTrendReport(null);
+    setCustomerTrendLoading(false);
+    setCustomerTrendError(null);
     searchCacheRef.current.clear();
     onThisDayReportCacheRef.current.clear();
 
@@ -2889,6 +3284,7 @@ export default function App() {
     if (res.status === 401 || res.status === 403) {
       sessionStorage.removeItem('koleLookupToken');
       setAccessToken('');
+      resetAppState();
       throw new Error('Access was denied. Please log in again.');
     }
 
@@ -3019,6 +3415,188 @@ export default function App() {
     }
   }
   
+function getVisibleDashboardModuleKeys() {
+  const moduleKeys = ['actionAlerts'];
+
+  if (!userPrefs.hideOperationsToday) {
+    moduleKeys.push('operations', 'driverPositions');
+  }
+  if (!userPrefs.hideUploadDigest) moduleKeys.push('uploadDigest');
+  if (!userPrefs.hideIntelliTrack) moduleKeys.push('intelliTrack');
+  if (!userPrefs.hideAvailableTrucks) {
+    moduleKeys.push('availableTrucks', 'availableTruckDistribution');
+  }
+  if (!userPrefs.hideRecruiting) moduleKeys.push('recruiting');
+
+  return moduleKeys;
+}
+
+function applyDashboardBootstrapModule(moduleKey, moduleResult) {
+  if (!moduleResult) return;
+
+  const failed = moduleResult.ok === false;
+  const moduleData = moduleResult.data || null;
+  const moduleError = failed ? (moduleResult.error || 'Unable to load this dashboard section.') : '';
+
+  if (moduleKey === 'operations') {
+    if (moduleData) setOperationsData(moduleData);
+    setOperationsError(moduleError);
+    setOperationsLoading(false);
+  } else if (moduleKey === 'driverPositions') {
+    if (moduleData) setDriverPositionsData(moduleData);
+    setDriverPositionsError(moduleError);
+    setDriverPositionsLoading(false);
+  } else if (moduleKey === 'uploadDigest') {
+    if (moduleData) setUploadDigestData(moduleData);
+    setUploadDigestError(moduleError);
+    setUploadDigestLoading(false);
+  } else if (moduleKey === 'intelliTrack') {
+    if (moduleData) setIntelliTrackData(moduleData);
+    setIntelliTrackError(moduleError);
+    setIntelliTrackLoading(false);
+  } else if (moduleKey === 'availableTrucks') {
+    if (moduleData) setAvailableTrucksData(moduleData);
+    setAvailableTrucksError(moduleError);
+    setAvailableTrucksLoading(false);
+  } else if (moduleKey === 'availableTruckDistribution') {
+    if (moduleData) setAvailableTruckDistributionData(moduleData);
+    setAvailableTruckDistributionError(moduleError);
+    setAvailableTruckDistributionLoading(false);
+  } else if (moduleKey === 'recruiting') {
+    if (moduleData) setRecruitingData(moduleData);
+    setRecruitingError(moduleError);
+    setRecruitingLoading(false);
+  } else if (moduleKey === 'actionAlerts') {
+    if (moduleData) setReportActionAlerts(moduleData);
+    setReportActionAlertsError(moduleError);
+    setReportActionAlertsLoading(false);
+  }
+}
+
+async function loadDashboardBootstrap() {
+  const moduleKeys = getVisibleDashboardModuleKeys();
+  const requestedAt = Date.now();
+  moduleKeys.forEach((moduleKey) => dashboardRefreshInFlightRef.current.add(moduleKey));
+
+  if (moduleKeys.includes('operations') && !operationsData) setOperationsLoading(true);
+  if (moduleKeys.includes('driverPositions') && !driverPositionsData) setDriverPositionsLoading(true);
+  if (moduleKeys.includes('uploadDigest') && !uploadDigestData) setUploadDigestLoading(true);
+  if (moduleKeys.includes('intelliTrack') && !intelliTrackData) setIntelliTrackLoading(true);
+  if (moduleKeys.includes('availableTrucks') && !availableTrucksData) setAvailableTrucksLoading(true);
+  if (moduleKeys.includes('availableTruckDistribution') && !availableTruckDistributionData) setAvailableTruckDistributionLoading(true);
+  if (moduleKeys.includes('recruiting') && !recruitingData) setRecruitingLoading(true);
+  if (moduleKeys.includes('actionAlerts') && !reportActionAlerts) setReportActionAlertsLoading(true);
+
+  try {
+    const params = new URLSearchParams({
+      include: moduleKeys.join(','),
+      uploadDate: uploadDigestDateRef.current
+    });
+    const res = await authedFetch(`${API}/dashboard/bootstrap?${params.toString()}`);
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Unable to load the dashboard bootstrap.');
+    }
+
+    moduleKeys.forEach((moduleKey) => {
+      applyDashboardBootstrapModule(moduleKey, data.modules?.[moduleKey]);
+      dashboardRefreshLastRunRef.current[moduleKey] = requestedAt;
+    });
+    return true;
+  } catch (err) {
+    // Keep compatibility during a staggered frontend/server deployment and
+    // preserve the last good screen if the bootstrap request itself fails.
+    const fallbacks = [];
+    if (moduleKeys.includes('operations')) fallbacks.push(loadOperationsDashboard({ silent: Boolean(operationsData) }));
+    if (moduleKeys.includes('driverPositions')) fallbacks.push(loadDriverPositions({ silent: Boolean(driverPositionsData) }));
+    if (moduleKeys.includes('uploadDigest')) fallbacks.push(loadUploadDigest(uploadDigestDateRef.current, { silent: Boolean(uploadDigestData) }));
+    if (moduleKeys.includes('intelliTrack')) fallbacks.push(loadIntelliTrack({ silent: Boolean(intelliTrackData) }));
+    if (moduleKeys.includes('availableTrucks')) fallbacks.push(loadAvailableTrucks({ silent: Boolean(availableTrucksData) }));
+    if (moduleKeys.includes('availableTruckDistribution')) fallbacks.push(loadAvailableTruckDistributionList({ silent: Boolean(availableTruckDistributionData) }));
+    if (moduleKeys.includes('recruiting')) fallbacks.push(loadRecruitingDashboard({ silent: Boolean(recruitingData) }));
+    if (moduleKeys.includes('actionAlerts')) fallbacks.push(loadReportActionAlerts({ silent: Boolean(reportActionAlerts) }));
+    await Promise.allSettled(fallbacks);
+    return false;
+  } finally {
+    moduleKeys.forEach((moduleKey) => dashboardRefreshInFlightRef.current.delete(moduleKey));
+  }
+}
+
+function runDashboardRefreshTask(task) {
+  if (!task.visible || dashboardRefreshInFlightRef.current.has(task.key)) return;
+
+  const now = Date.now();
+  const lastRun = dashboardRefreshLastRunRef.current[task.key] || 0;
+  if (now - lastRun < task.cadenceMs) return;
+
+  dashboardRefreshLastRunRef.current[task.key] = now;
+  dashboardRefreshInFlightRef.current.add(task.key);
+
+  Promise.resolve(task.run())
+    .then((succeeded) => {
+      if (task.key === 'operations' && succeeded) playDataRefreshCue();
+    })
+    .finally(() => {
+      dashboardRefreshInFlightRef.current.delete(task.key);
+    });
+}
+
+function runCoordinatedDashboardRefresh() {
+  const tasks = [
+    {
+      key: 'operations',
+      cadenceMs: DASHBOARD_REFRESH_CADENCE_MS.operations,
+      visible: !userPrefs.hideOperationsToday,
+      run: () => loadOperationsDashboard({ silent: true })
+    },
+    {
+      key: 'driverPositions',
+      cadenceMs: DASHBOARD_REFRESH_CADENCE_MS.driverPositions,
+      visible: !userPrefs.hideOperationsToday,
+      run: () => loadDriverPositions({ silent: true })
+    },
+    {
+      key: 'intelliTrack',
+      cadenceMs: DASHBOARD_REFRESH_CADENCE_MS.intelliTrack,
+      visible: !userPrefs.hideIntelliTrack,
+      run: () => loadIntelliTrack({ silent: true })
+    },
+    {
+      key: 'uploadDigest',
+      cadenceMs: DASHBOARD_REFRESH_CADENCE_MS.uploadDigest,
+      visible: !userPrefs.hideUploadDigest,
+      run: () => loadUploadDigest(uploadDigestDateRef.current, { silent: true })
+    },
+    {
+      key: 'actionAlerts',
+      cadenceMs: DASHBOARD_REFRESH_CADENCE_MS.actionAlerts,
+      visible: true,
+      run: () => loadReportActionAlerts({ silent: true })
+    },
+    {
+      key: 'availableTrucks',
+      cadenceMs: DASHBOARD_REFRESH_CADENCE_MS.availableTrucks,
+      visible: !userPrefs.hideAvailableTrucks,
+      run: () => loadAvailableTrucks({ silent: true })
+    },
+    {
+      key: 'recruiting',
+      cadenceMs: DASHBOARD_REFRESH_CADENCE_MS.recruiting,
+      visible: !userPrefs.hideRecruiting,
+      run: () => loadRecruitingDashboard({ silent: true })
+    },
+    {
+      key: 'availableTruckDistribution',
+      cadenceMs: DASHBOARD_REFRESH_CADENCE_MS.availableTruckDistribution,
+      visible: !userPrefs.hideAvailableTrucks,
+      run: () => loadAvailableTruckDistributionList({ silent: true })
+    }
+  ];
+
+  tasks.forEach(runDashboardRefreshTask);
+}
+
 async function loadOperationsDashboard(options = {}) {
   const { silent = false, forceRefresh = false } = options;
 
@@ -3047,10 +3625,6 @@ async function loadOperationsDashboard(options = {}) {
     return true;
   } catch (err) {
     setOperationsError(err.message);
-
-    if (!silent) {
-      setOperationsData(null);
-    }
 
     return false;
   } finally {
@@ -3083,10 +3657,6 @@ async function loadDriverPositions(options = {}) {
     setDriverPositionsData(data);
   } catch (err) {
     setDriverPositionsError(err.message);
-
-    if (!silent) {
-      setDriverPositionsData(null);
-    }
   } finally {
     if (!silent) {
       setDriverPositionsLoading(false);
@@ -3119,10 +3689,6 @@ async function loadUploadDigest(dateValue = uploadDigestDate, options = {}) {
     setUploadDigestData(data);
   } catch (err) {
     setUploadDigestError(err.message || 'Unable to load Upload Digest.');
-
-    if (!silent) {
-      setUploadDigestData(null);
-    }
   } finally {
     if (!silent) {
       setUploadDigestLoading(false);
@@ -3161,10 +3727,6 @@ async function loadIntelliTrack(options = {}) {
     );
   } catch (err) {
     setIntelliTrackError(err.message || 'Unable to load IntelliTrack.');
-
-    if (!silent) {
-      setIntelliTrackData(null);
-    }
   } finally {
     if (!silent) {
       setIntelliTrackLoading(false);
@@ -3194,10 +3756,6 @@ async function loadAvailableTruckDistributionList(options = {}) {
     setAvailableTruckDistributionData(data);
   } catch (err) {
     setAvailableTruckDistributionError(err.message || 'Unable to load Available Equipment distribution list.');
-
-    if (!silent) {
-      setAvailableTruckDistributionData(null);
-    }
   } finally {
     if (!silent) {
       setAvailableTruckDistributionLoading(false);
@@ -3314,10 +3872,6 @@ async function loadAvailableTrucks(options = {}) {
     setAvailableTrucksData(data);
   } catch (err) {
     setAvailableTrucksError(err.message || 'Unable to load Available Equipment.');
-
-    if (!silent) {
-      setAvailableTrucksData(null);
-    }
   } finally {
     if (!silent) {
       setAvailableTrucksLoading(false);
@@ -4822,6 +5376,7 @@ function getPositionStatusLabel(position) {
 
   async function loadReportActionAlerts(options = {}) {
     const silent = options.silent === true;
+    const forceRefresh = options.forceRefresh === true;
 
     if (!silent) {
       setReportActionAlertsLoading(true);
@@ -4832,7 +5387,7 @@ function getPositionStatusLabel(position) {
     setReportActionAlertsError('');
 
     try {
-      const res = await authedFetch(`${API}/reports/action-alerts`);
+      const res = await authedFetch(`${API}/reports/action-alerts${forceRefresh ? '?refresh=true' : ''}`);
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok || !data.success) {
@@ -4840,8 +5395,10 @@ function getPositionStatusLabel(position) {
       }
 
       setReportActionAlerts(data);
+      return true;
     } catch (err) {
       setReportActionAlertsError(err.message || 'Unable to load report action alerts.');
+      return false;
     } finally {
       setReportActionAlertsLoading(false);
     }
@@ -7446,6 +8003,7 @@ function openReportLoadDetails(load) {
       setOrderNoteSaveMessage('Note added.');
       setOrderNotesTypeFilter(getOrderNoteFilterKey(savedNoteType));
       await loadOrderNotes(record, { forceRefresh: true });
+      void loadOperationsDashboard({ silent: true, forceRefresh: true }).catch(() => {});
     } catch (err) {
       setOrderNoteSaveError(err.message || 'Unable to save order note.');
     } finally {
@@ -8124,7 +8682,11 @@ function openReportLoadDetails(load) {
         window.alert(`Order changes were saved, but the Operations audit note needs attention: ${data.noteWarning}`);
       }
 
-      void loadOperationsDashboard({ silent: true, forceRefresh: true }).catch(() => {});
+      void Promise.allSettled([
+        loadOperationsDashboard({ silent: true, forceRefresh: true }),
+        loadReportActionAlerts({ silent: true, forceRefresh: true }),
+        loadAvailableTrucks({ silent: true })
+      ]);
     } catch (err) {
       setOrderEditError(err.message || 'Unable to update this order.');
     } finally {
@@ -18399,7 +18961,7 @@ function openReportLoadDetails(load) {
   style={{ width: '520px' }}
 />
 
-    <KoleBrandTitle subtitle="Enter your Kole Connect access token to continue." />
+    <KoleBrandTitle season={resolvedSeasonalTheme} subtitle="Enter your Kole Connect access token to continue." />
   </div>
 
   <div className="header-actions login-header-actions">
@@ -18490,6 +19052,7 @@ function openReportLoadDetails(load) {
     <KoleBrandTitle
       animate={brandRevealActive}
       revealKey={brandRevealKey}
+      season={resolvedSeasonalTheme}
       subtitle="Search orders, BOLs, customers, drivers, and inspect dispatch or billing data."
     />
   </div>

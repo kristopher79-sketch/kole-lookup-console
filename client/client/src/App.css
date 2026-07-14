@@ -1,5 +1,471 @@
+/*
+ * KOLE CONNECT THEME CONTRACT
+ *
+ * Cascade order is intentionally simple: shared tokens, shared primitives,
+ * feature components, responsive adjustments, then legacy theme compatibility.
+ * New visual customization should begin with these tokens and should not add a
+ * new chronological "pass" or !important unless an existing integration truly
+ * requires it. Dark mode is the default when data-theme is not yet available.
+ */
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --kole-page-bg: #0f172a;
+  --kole-page-background: radial-gradient(circle at 50% -180px, rgba(59, 76, 112, 0.24), transparent 420px), #0f172a;
+  --kole-shell: #111827;
+  --kole-surface: #182033;
+  --kole-surface-2: #202a3b;
+  --kole-surface-gradient-end: #121b2e;
+  --kole-surface-2-gradient-end: #151f34;
+  --kole-table-body: #0b1220;
+  --kole-table-root: #111827;
+  --kole-table-row: #111827;
+  --kole-table-row-alt: #0b1220;
+  --kole-table-row-hover: #1f2937;
+  --kole-table-head: #273244;
+  --kole-table-head-base: #1f2937;
+  --kole-control-bg: #020617;
+  --kole-control-deep: #050a18;
+  --kole-control-border: #334155;
+  --kole-border: #2b364a;
+  --kole-border-subtle: #1e293b;
+  --kole-border-strong: #3a475d;
+  --kole-text: #f8fafc;
+  --kole-text-soft: #e5e7eb;
+  --kole-summary-text: #9ca3af;
+  --kole-message-text: #cbd5e1;
+  --kole-muted: #aab6c7;
+  --kole-muted-subtle: #94a3b8;
+  --kole-divider: #243044;
+  --kole-divider-strong: #46566e;
+  --kole-gold: #d4a017;
+  --kole-gold-bright: #facc15;
+  --kole-action: #2563eb;
+  --kole-action-hover: #1d4ed8;
+  --kole-action-text: #ffffff;
+  --kole-focus: rgba(37, 99, 235, 0.22);
+  --kole-selection-bg: #263f63;
+  --kole-secondary-rail: #64748b;
+  --kole-secondary-rail-soft: rgba(100, 116, 139, 0.62);
+  --kole-active-slate: rgba(71, 85, 105, 0.34);
+  --kole-success: #34d399;
+  --kole-success-bg: #064e3b;
+  --kole-danger: #fca5a5;
+  --kole-danger-bg: #7f1d1d;
+  --kole-warning: #facc15;
+  --kole-warning-bg: #78350f;
+  --kole-info: #93c5fd;
+  --kole-info-bg: #1e3a8a;
+  --kole-overlay: rgba(2, 6, 23, 0.76);
+  --kole-panel-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  --kole-results-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
+  --kole-modal-shadow: 0 28px 90px rgba(0, 0, 0, 0.60);
+  --kole-light-ink: #f8fafc;
+  --kole-light-ink-soft: #e5e7eb;
+  --kole-light-muted-strong: #aab6c7;
+  --kole-light-line: #2b364a;
+  --kole-light-line-strong: #3a475d;
+  --kole-light-blue: #60a5fa;
+  --kole-light-blue-deep: #93c5fd;
+  --kole-light-teal: #5eead4;
+  --card-border: rgba(148, 163, 184, 0.28);
+  --kole-z-content: 1;
+  --kole-z-sticky: 4;
+  --kole-z-header: 5;
+  --kole-z-modal: 1000;
+  --kole-z-modal-detail: 1100;
+  --kole-z-modal-nested: 1200;
+  --kole-z-modal-deep: 1300;
+  --kole-z-modal-roster: 1400;
+  --kole-z-modal-performance: 1500;
+  --kole-z-splash: 2500;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --kole-page-bg: #eef2f7;
+  --kole-page-background: radial-gradient(circle at 50% -180px, rgba(148, 163, 184, 0.30), transparent 430px), linear-gradient(180deg, #f8fafc 0%, #eef2f7 58%, #e2e8f0 100%);
+  --kole-shell: #ffffff;
+  --kole-surface: #f8fafc;
+  --kole-surface-2: #eef2f7;
+  --kole-surface-gradient-end: #f1f5f9;
+  --kole-surface-2-gradient-end: #e2e8f0;
+  --kole-table-body: #ffffff;
+  --kole-table-root: #ffffff;
+  --kole-table-row: #ffffff;
+  --kole-table-row-alt: #f8fafc;
+  --kole-table-row-hover: #eaf2ff;
+  --kole-table-head: #e2e8f0;
+  --kole-table-head-base: #e2e8f0;
+  --kole-control-bg: #ffffff;
+  --kole-control-deep: #ffffff;
+  --kole-control-border: #cbd5e1;
+  --kole-border: #cbd5e1;
+  --kole-border-subtle: #e2e8f0;
+  --kole-border-strong: #94a3b8;
+  --kole-text: #111827;
+  --kole-text-soft: #1f2937;
+  --kole-summary-text: #475569;
+  --kole-message-text: #334155;
+  --kole-muted: #475569;
+  --kole-muted-subtle: #64748b;
+  --kole-divider: #e2e8f0;
+  --kole-divider-strong: #cbd5e1;
+  --kole-gold: #2563eb;
+  --kole-gold-bright: #1d4ed8;
+  --kole-action: #2563eb;
+  --kole-action-hover: #1d4ed8;
+  --kole-action-text: #ffffff;
+  --kole-focus: rgba(37, 99, 235, 0.16);
+  --kole-selection-bg: #dbeafe;
+  --kole-secondary-rail: #64748b;
+  --kole-secondary-rail-soft: rgba(100, 116, 139, 0.34);
+  --kole-active-slate: rgba(148, 163, 184, 0.18);
+  --kole-success: #047857;
+  --kole-success-bg: #ecfdf5;
+  --kole-danger: #b91c1c;
+  --kole-danger-bg: #fef2f2;
+  --kole-warning: #b45309;
+  --kole-warning-bg: #fffbeb;
+  --kole-info: #1d4ed8;
+  --kole-info-bg: #eff6ff;
+  --kole-overlay: rgba(15, 23, 42, 0.32);
+  --kole-panel-shadow: 0 10px 28px rgba(15, 23, 42, 0.10);
+  --kole-results-shadow: 0 10px 28px rgba(15, 23, 42, 0.10);
+  --kole-modal-shadow: 0 28px 90px rgba(15, 23, 42, 0.24);
+  --kole-light-ink: #0f172a;
+  --kole-light-ink-soft: #334155;
+  --kole-light-muted-strong: #475569;
+  --kole-light-line: #cbd5e1;
+  --kole-light-line-strong: #94a3b8;
+  --kole-light-blue: #2563eb;
+  --kole-light-blue-deep: #1e3a8a;
+  --kole-light-teal: #0f766e;
+  --card-border: var(--kole-border);
+}
+
+/*
+ * SEASONAL PALETTE LAYER
+ *
+ * Each palette defines a compact set of primitives. The two mapping blocks
+ * below apply those primitives to the existing dark/light contract, so future
+ * palettes never need component-specific overrides. Semantic success, warning,
+ * danger, and info colors intentionally remain owned by the base theme.
+ */
+:root[data-season='winter'] {
+  --kole-season-canvas-dark: #0b1120;
+  --kole-season-shell-dark: #111c3f;
+  --kole-season-surface-dark: #172554;
+  --kole-season-surface-2-dark: #1e3a6d;
+  --kole-season-control-dark: #070d1c;
+  --kole-season-border-dark: #274574;
+  --kole-season-border-strong-dark: #3b5d91;
+  --kole-season-canvas-light: #eff6ff;
+  --kole-season-shell-light: #ffffff;
+  --kole-season-surface-light: #f8fbff;
+  --kole-season-surface-2-light: #e0f2fe;
+  --kole-season-border-light: #bfdbfe;
+  --kole-season-border-strong-light: #93c5fd;
+  --kole-season-primary: #2563eb;
+  --kole-season-primary-hover: #1d4ed8;
+  --kole-season-secondary-dark: #22d3ee;
+  --kole-season-secondary-light: #0e7490;
+  --kole-season-soft-dark: #1e3a5f;
+  --kole-season-soft-light: #e0f2fe;
+  --kole-season-focus-rgb: 37, 99, 235;
+}
+
+:root[data-season='valentine'] {
+  --kole-season-canvas-dark: #1f0a14;
+  --kole-season-shell-dark: #2a0d1a;
+  --kole-season-surface-dark: #3f1025;
+  --kole-season-surface-2-dark: #51132f;
+  --kole-season-control-dark: #14060d;
+  --kole-season-border-dark: #6b193a;
+  --kole-season-border-strong-dark: #8f234b;
+  --kole-season-canvas-light: #fff1f2;
+  --kole-season-shell-light: #ffffff;
+  --kole-season-surface-light: #fff7f8;
+  --kole-season-surface-2-light: #ffe4e6;
+  --kole-season-border-light: #fecdd3;
+  --kole-season-border-strong-light: #fda4af;
+  --kole-season-primary: #be123c;
+  --kole-season-primary-hover: #9f1239;
+  --kole-season-secondary-dark: #c084fc;
+  --kole-season-secondary-light: #7e22ce;
+  --kole-season-soft-dark: #5e1534;
+  --kole-season-soft-light: #ffe4e6;
+  --kole-season-focus-rgb: 190, 18, 60;
+}
+
+:root[data-season='spring'] {
+  --kole-season-canvas-dark: #071a14;
+  --kole-season-shell-dark: #0c281f;
+  --kole-season-surface-dark: #12372a;
+  --kole-season-surface-2-dark: #174a36;
+  --kole-season-control-dark: #04110d;
+  --kole-season-border-dark: #216044;
+  --kole-season-border-strong-dark: #2f7b59;
+  --kole-season-canvas-light: #f0fdf4;
+  --kole-season-shell-light: #ffffff;
+  --kole-season-surface-light: #f7fff9;
+  --kole-season-surface-2-light: #d1fae5;
+  --kole-season-border-light: #a7f3d0;
+  --kole-season-border-strong-light: #6ee7b7;
+  --kole-season-primary: #047857;
+  --kole-season-primary-hover: #065f46;
+  --kole-season-secondary-dark: #a3e635;
+  --kole-season-secondary-light: #4d7c0f;
+  --kole-season-soft-dark: #164e3a;
+  --kole-season-soft-light: #d1fae5;
+  --kole-season-focus-rgb: 4, 120, 87;
+}
+
+:root[data-season='summer'] {
+  --kole-season-canvas-dark: #082f49;
+  --kole-season-shell-dark: #0b3d5b;
+  --kole-season-surface-dark: #0c4a6e;
+  --kole-season-surface-2-dark: #115b82;
+  --kole-season-control-dark: #052235;
+  --kole-season-border-dark: #176a90;
+  --kole-season-border-strong-dark: #2582a8;
+  --kole-season-canvas-light: #f0f9ff;
+  --kole-season-shell-light: #ffffff;
+  --kole-season-surface-light: #f7fcff;
+  --kole-season-surface-2-light: #e0f2fe;
+  --kole-season-border-light: #bae6fd;
+  --kole-season-border-strong-light: #7dd3fc;
+  --kole-season-primary: #0369a1;
+  --kole-season-primary-hover: #075985;
+  --kole-season-secondary-dark: #5eead4;
+  --kole-season-secondary-light: #0f766e;
+  --kole-season-soft-dark: #164e63;
+  --kole-season-soft-light: #e0f2fe;
+  --kole-season-focus-rgb: 3, 105, 161;
+}
+
+:root[data-season='americana'] {
+  --kole-season-canvas-dark: #172554;
+  --kole-season-shell-dark: #1b2f69;
+  --kole-season-surface-dark: #1e3a8a;
+  --kole-season-surface-2-dark: #25479f;
+  --kole-season-control-dark: #101a3b;
+  --kole-season-border-dark: #2f55ad;
+  --kole-season-border-strong-dark: #4d6dc1;
+  --kole-season-canvas-light: #f8fafc;
+  --kole-season-shell-light: #ffffff;
+  --kole-season-surface-light: #f8fafc;
+  --kole-season-surface-2-light: #dbeafe;
+  --kole-season-border-light: #bfdbfe;
+  --kole-season-border-strong-light: #93c5fd;
+  --kole-season-primary: #1d4ed8;
+  --kole-season-primary-hover: #1e40af;
+  --kole-season-secondary-dark: #fecaca;
+  --kole-season-secondary-light: #b91c1c;
+  --kole-season-soft-dark: #273a79;
+  --kole-season-soft-light: #dbeafe;
+  --kole-season-focus-rgb: 29, 78, 216;
+}
+
+:root[data-season='harvest'] {
+  --kole-season-canvas-dark: #1c1917;
+  --kole-season-shell-dark: #2d170b;
+  --kole-season-surface-dark: #451a03;
+  --kole-season-surface-2-dark: #5a2508;
+  --kole-season-control-dark: #120d09;
+  --kole-season-border-dark: #6b3413;
+  --kole-season-border-strong-dark: #8a4a23;
+  --kole-season-canvas-light: #fffbeb;
+  --kole-season-shell-light: #ffffff;
+  --kole-season-surface-light: #fffcf4;
+  --kole-season-surface-2-light: #fef3c7;
+  --kole-season-border-light: #fde68a;
+  --kole-season-border-strong-light: #fcd34d;
+  --kole-season-primary: #b45309;
+  --kole-season-primary-hover: #92400e;
+  --kole-season-secondary-dark: #fb923c;
+  --kole-season-secondary-light: #7c2d12;
+  --kole-season-soft-dark: #5a2a12;
+  --kole-season-soft-light: #fef3c7;
+  --kole-season-focus-rgb: 180, 83, 9;
+}
+
+:root[data-season='halloween'] {
+  --kole-season-canvas-dark: #0c0a09;
+  --kole-season-shell-dark: #1c1917;
+  --kole-season-surface-dark: #292524;
+  --kole-season-surface-2-dark: #3a302d;
+  --kole-season-control-dark: #070605;
+  --kole-season-border-dark: #59413a;
+  --kole-season-border-strong-dark: #7a5548;
+  --kole-season-canvas-light: #fff7ed;
+  --kole-season-shell-light: #ffffff;
+  --kole-season-surface-light: #fffaf5;
+  --kole-season-surface-2-light: #ffedd5;
+  --kole-season-border-light: #fed7aa;
+  --kole-season-border-strong-light: #fdba74;
+  --kole-season-primary: #c2410c;
+  --kole-season-primary-hover: #9a3412;
+  --kole-season-secondary-dark: #a78bfa;
+  --kole-season-secondary-light: #6d28d9;
+  --kole-season-soft-dark: #4b2415;
+  --kole-season-soft-light: #ffedd5;
+  --kole-season-focus-rgb: 194, 65, 12;
+}
+
+:root[data-season='holiday'] {
+  --kole-season-canvas-dark: #052e2b;
+  --kole-season-shell-dark: #064e3b;
+  --kole-season-surface-dark: #075e47;
+  --kole-season-surface-2-dark: #08745a;
+  --kole-season-control-dark: #03201e;
+  --kole-season-border-dark: #0c7a5e;
+  --kole-season-border-strong-dark: #13906f;
+  --kole-season-canvas-light: #f0fdf4;
+  --kole-season-shell-light: #ffffff;
+  --kole-season-surface-light: #f7fff9;
+  --kole-season-surface-2-light: #fef3c7;
+  --kole-season-border-light: #a7f3d0;
+  --kole-season-border-strong-light: #6ee7b7;
+  --kole-season-primary: #047857;
+  --kole-season-primary-hover: #065f46;
+  --kole-season-secondary-dark: #fecaca;
+  --kole-season-secondary-light: #b91c1c;
+  --kole-season-soft-dark: #164e3a;
+  --kole-season-soft-light: #fef3c7;
+  --kole-season-focus-rgb: 4, 120, 87;
+}
+
+:root[data-season='aurora'] {
+  --kole-season-canvas-dark: #0f172a;
+  --kole-season-shell-dark: #1e1b4b;
+  --kole-season-surface-dark: #312e81;
+  --kole-season-surface-2-dark: #3730a3;
+  --kole-season-control-dark: #0b1020;
+  --kole-season-border-dark: #4f46a0;
+  --kole-season-border-strong-dark: #6366c1;
+  --kole-season-canvas-light: #eef2ff;
+  --kole-season-shell-light: #ffffff;
+  --kole-season-surface-light: #f7f7ff;
+  --kole-season-surface-2-light: #e0e7ff;
+  --kole-season-border-light: #c7d2fe;
+  --kole-season-border-strong-light: #a5b4fc;
+  --kole-season-primary: #4338ca;
+  --kole-season-primary-hover: #3730a3;
+  --kole-season-secondary-dark: #5eead4;
+  --kole-season-secondary-light: #0f766e;
+  --kole-season-soft-dark: #2c3170;
+  --kole-season-soft-light: #e0e7ff;
+  --kole-season-focus-rgb: 67, 56, 202;
+}
+
+:root[data-theme='dark'][data-season] {
+  --kole-page-bg: var(--kole-season-canvas-dark);
+  --kole-page-background: radial-gradient(circle at 50% -180px, rgba(var(--kole-season-focus-rgb), 0.24), transparent 420px), var(--kole-season-canvas-dark);
+  --kole-shell: var(--kole-season-shell-dark);
+  --kole-surface: var(--kole-season-surface-dark);
+  --kole-surface-2: var(--kole-season-surface-2-dark);
+  --kole-surface-gradient-end: var(--kole-season-shell-dark);
+  --kole-surface-2-gradient-end: var(--kole-season-surface-dark);
+  --kole-table-body: var(--kole-season-canvas-dark);
+  --kole-table-root: var(--kole-season-shell-dark);
+  --kole-table-row: var(--kole-season-shell-dark);
+  --kole-table-row-alt: var(--kole-season-canvas-dark);
+  --kole-table-row-hover: var(--kole-season-surface-2-dark);
+  --kole-table-head: var(--kole-season-surface-2-dark);
+  --kole-table-head-base: var(--kole-season-surface-dark);
+  --kole-control-bg: var(--kole-season-control-dark);
+  --kole-control-deep: var(--kole-season-control-dark);
+  --kole-control-border: var(--kole-season-border-dark);
+  --kole-border: var(--kole-season-border-dark);
+  --kole-border-subtle: var(--kole-season-surface-2-dark);
+  --kole-border-strong: var(--kole-season-border-strong-dark);
+  --kole-divider: var(--kole-season-border-dark);
+  --kole-divider-strong: var(--kole-season-border-strong-dark);
+  --kole-gold: var(--kole-season-secondary-dark);
+  --kole-gold-bright: var(--kole-season-secondary-dark);
+  --kole-action: var(--kole-season-primary);
+  --kole-action-hover: var(--kole-season-primary-hover);
+  --kole-focus: rgba(var(--kole-season-focus-rgb), 0.24);
+  --kole-selection-bg: var(--kole-season-soft-dark);
+  --kole-secondary-rail: var(--kole-season-secondary-dark);
+  --kole-secondary-rail-soft: var(--kole-season-soft-dark);
+  --kole-active-slate: var(--kole-season-soft-dark);
+  --kole-light-blue: var(--kole-season-secondary-dark);
+  --kole-light-blue-deep: var(--kole-season-secondary-dark);
+  --kole-light-teal: var(--kole-season-secondary-dark);
+  --card-border: var(--kole-season-border-dark);
+  --kole-brand-season-primary: var(--kole-season-secondary-dark);
+  --kole-brand-season-secondary: var(--kole-season-primary);
+  --kole-brand-season-glow: rgba(var(--kole-season-focus-rgb), 0.28);
+}
+
+:root[data-theme='light'][data-season] {
+  --kole-page-bg: var(--kole-season-canvas-light);
+  --kole-page-background: radial-gradient(circle at 50% -180px, rgba(var(--kole-season-focus-rgb), 0.18), transparent 430px), linear-gradient(180deg, var(--kole-season-shell-light) 0%, var(--kole-season-canvas-light) 62%, var(--kole-season-surface-2-light) 100%);
+  --kole-shell: var(--kole-season-shell-light);
+  --kole-surface: var(--kole-season-surface-light);
+  --kole-surface-2: var(--kole-season-surface-2-light);
+  --kole-surface-gradient-end: var(--kole-season-canvas-light);
+  --kole-surface-2-gradient-end: var(--kole-season-canvas-light);
+  --kole-table-body: var(--kole-season-shell-light);
+  --kole-table-root: var(--kole-season-shell-light);
+  --kole-table-row: var(--kole-season-shell-light);
+  --kole-table-row-alt: var(--kole-season-surface-light);
+  --kole-table-row-hover: var(--kole-season-soft-light);
+  --kole-table-head: var(--kole-season-surface-2-light);
+  --kole-table-head-base: var(--kole-season-surface-2-light);
+  --kole-control-bg: var(--kole-season-shell-light);
+  --kole-control-deep: var(--kole-season-shell-light);
+  --kole-control-border: var(--kole-season-border-light);
+  --kole-border: var(--kole-season-border-light);
+  --kole-border-subtle: var(--kole-season-surface-2-light);
+  --kole-border-strong: var(--kole-season-border-strong-light);
+  --kole-divider: var(--kole-season-surface-2-light);
+  --kole-divider-strong: var(--kole-season-border-light);
+  --kole-gold: var(--kole-season-secondary-light);
+  --kole-gold-bright: var(--kole-season-secondary-light);
+  --kole-action: var(--kole-season-primary);
+  --kole-action-hover: var(--kole-season-primary-hover);
+  --kole-focus: rgba(var(--kole-season-focus-rgb), 0.18);
+  --kole-selection-bg: var(--kole-season-soft-light);
+  --kole-secondary-rail: var(--kole-season-secondary-light);
+  --kole-secondary-rail-soft: var(--kole-season-soft-light);
+  --kole-active-slate: var(--kole-season-soft-light);
+  --kole-light-blue: var(--kole-season-primary);
+  --kole-light-blue-deep: var(--kole-season-primary-hover);
+  --kole-light-teal: var(--kole-season-secondary-light);
+  --card-border: var(--kole-season-border-light);
+  --kole-brand-season-primary: var(--kole-season-secondary-light);
+  --kole-brand-season-secondary: var(--kole-season-primary);
+  --kole-brand-season-glow: rgba(var(--kole-season-focus-rgb), 0.18);
+}
+
 * {
   box-sizing: border-box;
+}
+
+::selection {
+  background: var(--kole-selection-bg);
+  color: var(--kole-text);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role='button']:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--kole-action);
+  outline-offset: 2px;
 }
 
 
@@ -10,12 +476,10 @@ html {
 body {
   margin: 0;
   font-family: Segoe UI, Arial, sans-serif;
-  background: #0f172a;
-  color: #e5e7eb;
+  color: var(--kole-text-soft);
 }
 
 .container {
-  max-width: 1400px;
   margin: 36px auto;
   padding: 20px;
 }
@@ -32,17 +496,17 @@ body {
 
 .app-header p {
   margin: 0;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 15px;
 }
 
 .search-card {
-  background: #111827;
-  border: 1px solid #1e293b;
+  background: var(--kole-shell);
+  border: 1px solid var(--kole-border-subtle);
   border-radius: 14px;
   padding: 18px;
   margin-bottom: 22px;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--kole-panel-shadow);
 }
 
 .login-status-card {
@@ -96,29 +560,29 @@ input {
   padding: 12px 14px;
   font-size: 16px;
   border-radius: 8px;
-  border: 1px solid #334155;
-  background: #020617;
-  color: #e5e7eb;
+  border: 1px solid var(--kole-control-border);
+  background: var(--kole-control-bg);
+  color: var(--kole-text-soft);
   outline: none;
 }
 
 input:focus {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.22);
+  border-color: var(--kole-action);
+  box-shadow: 0 0 0 3px var(--kole-focus);
 }
 
 button {
   padding: 10px 18px;
   border: none;
   border-radius: 8px;
-  background: #2563eb;
-  color: white;
+  background: var(--kole-action);
+  color: var(--kole-action-text);
   cursor: pointer;
   font-weight: 600;
 }
 
 button:hover {
-  background: #1d4ed8;
+  background: var(--kole-action-hover);
 }
 
 button:disabled {
@@ -128,44 +592,44 @@ button:disabled {
 
 .summary {
   margin-top: 12px;
-  color: #9ca3af;
+  color: var(--kole-summary-text);
 }
 
 .msg {
   margin-top: 14px;
-  color: #cbd5e1;
+  color: var(--kole-message-text);
 }
 
 .msg.error {
-  color: #f87171;
+  color: var(--kole-danger);
 }
 
 .results-panel {
   overflow-x: auto;
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kole-border-subtle);
   border-radius: 14px;
-  background: #111827;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
+  background: var(--kole-shell);
+  box-shadow: var(--kole-results-shadow);
 }
 
 table {
   width: 100%;
   min-width: 1100px;
   border-collapse: collapse;
-  background: #111827;
+  background: var(--kole-table-root);
 }
 
 th,
 td {
   padding: 12px;
   text-align: left;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--kole-border-subtle);
   vertical-align: middle;
 }
 
 th {
-  background: #1f2937;
-  color: #cbd5e1;
+  background: var(--kole-table-head-base);
+  color: var(--kole-message-text);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -177,15 +641,11 @@ tbody tr {
 }
 
 tbody tr:nth-child(even) {
-  background: #0b1220;
+  background: var(--kole-table-row-alt);
 }
 
 tbody tr:hover {
-  background: #1f2937;
-}
-
-.selected-row {
-  background: #1e3a5f !important;
+  background: var(--kole-table-row-hover);
 }
 
 .status {
@@ -199,18 +659,18 @@ tbody tr:hover {
 }
 
 .status.won {
-  background: #064e3b;
-  color: #34d399;
+  background: var(--kole-success-bg);
+  color: var(--kole-success);
 }
 
 .status.lost {
-  background: #7f1d1d;
-  color: #f87171;
+  background: var(--kole-danger-bg);
+  color: var(--kole-danger);
 }
 
 .status.tonu {
-  background: #78350f;
-  color: #fbbf24;
+  background: var(--kole-warning-bg);
+  color: var(--kole-warning);
 }
 
 .status.cancelled {
@@ -248,9 +708,9 @@ tbody tr:hover {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: var(--kole-z-modal);
   padding: 32px;
-  background: rgba(2, 6, 23, 0.76);
+  background: var(--kole-overlay);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -261,10 +721,10 @@ tbody tr:hover {
   width: min(1400px, 94vw);
   max-height: 90vh;
   overflow: hidden;
-  background: #020617;
-  border: 1px solid #334155;
+  background: var(--kole-control-bg);
+  border: 1px solid var(--kole-control-border);
   border-radius: 18px;
-  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--kole-modal-shadow);
   display: flex;
   flex-direction: column;
 }
@@ -275,8 +735,8 @@ tbody tr:hover {
   gap: 16px;
   align-items: flex-start;
   padding: 22px 24px;
-  background: #0f172a;
-  border-bottom: 1px solid #1e293b;
+  background: var(--kole-page-bg);
+  border-bottom: 1px solid var(--kole-border-subtle);
 }
 
 .detail-header h2 {
@@ -287,7 +747,7 @@ tbody tr:hover {
 
 .detail-header p {
   margin: 5px 0 0;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
 }
 
 .close-button {
@@ -302,8 +762,8 @@ tbody tr:hover {
   display: flex;
   gap: 8px;
   padding: 14px 24px;
-  background: #020617;
-  border-bottom: 1px solid #1e293b;
+  background: var(--kole-control-bg);
+  border-bottom: 1px solid var(--kole-border-subtle);
 }
 
 .view-tabs button {
@@ -335,47 +795,29 @@ tbody tr:hover {
 .detail-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 14px;
 }
 
 .section-title {
   grid-column: 1 / -1;
   margin-top: 10px;
-  padding: 10px 12px;
-  background: #e5e7eb;
-  color: #111827;
-  border-radius: 8px;
   font-weight: 800;
   font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
-.section-title:first-child {
-  margin-top: 0;
-}
-
 .detail-item {
-  background: #0f172a;
-  border: 1px solid #1e293b;
-  border-radius: 12px;
   padding: 14px;
-  min-height: 78px;
 }
 
 .detail-item span {
   display: block;
   margin-bottom: 7px;
-  color: #94a3b8;
-  font-size: 12px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .detail-item strong {
   display: block;
-  color: #e5e7eb;
-  font-size: 15px;
   word-break: break-word;
   line-height: 1.35;
 }
@@ -383,7 +825,7 @@ tbody tr:hover {
 .detail-item small {
   display: block;
   margin-top: 6px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   line-height: 1.35;
 }
 
@@ -468,7 +910,7 @@ tbody tr:hover {
 }
 
 .active-filter {
-  background: #0f172a;
+  background: var(--kole-page-bg);
   color: #facc15;
   border-color: #0f172a;
 }
@@ -521,18 +963,13 @@ tbody tr:hover {
 .operations-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-  margin-top: 18px;
 }
 
 .operations-card {
-  border: 1px solid #9ca3af;
   border-radius: 14px;
   padding: 18px;
-  background: #d1d5db;
   color: #111827;
   text-align: center;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
 }
 
 .operations-card span {
@@ -552,13 +989,12 @@ tbody tr:hover {
   margin: 20px auto 0;
 }
 .operations-card:hover {
-  background: #e5e7eb;
   transform: translateY(-1px);
 }
 .operations-table-wrap {
   overflow-x: auto;
   border-radius: 12px;
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kole-border-subtle);
 }
 
 .operations-table-wrap table {
@@ -605,7 +1041,6 @@ tbody tr:hover {
 
 .header-logoff {
   position: absolute;
-  right: 0;
   top: 12px;
 }
 /* REPORTS */
@@ -633,14 +1068,14 @@ tbody tr:hover {
 .report-card p,
 .driver-report-title p {
   margin: 0;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   line-height: 1.45;
 }
 
 .report-card {
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kole-border-subtle);
   border-radius: 14px;
-  background: #0b1220;
+  background: var(--kole-table-body);
   padding: 18px;
 }
 
@@ -676,8 +1111,8 @@ tbody tr:hover {
 .report-controls select {
   padding: 11px 12px;
   border-radius: 8px;
-  border: 1px solid #334155;
-  background: #020617;
+  border: 1px solid var(--kole-control-border);
+  background: var(--kole-control-bg);
   color: #e5e7eb;
   font-size: 15px;
   outline: none;
@@ -753,7 +1188,7 @@ tbody tr:hover {
   justify-content: space-between;
   gap: 16px;
   padding-bottom: 14px;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--kole-border-subtle);
 }
 
 .report-kpi-grid {
@@ -778,10 +1213,10 @@ tbody tr:hover {
 
 .driver-report-section {
   margin-top: 22px;
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kole-border-subtle);
   border-radius: 14px;
   overflow: hidden;
-  background: #111827;
+  background: var(--kole-shell);
 }
 
 .driver-report-section-header {
@@ -790,8 +1225,8 @@ tbody tr:hover {
   gap: 16px;
   align-items: center;
   padding: 14px 16px;
-  background: #0f172a;
-  border-bottom: 1px solid #1e293b;
+  background: var(--kole-page-bg);
+  border-bottom: 1px solid var(--kole-border-subtle);
 }
 
 .driver-report-section-header h4 {
@@ -806,7 +1241,6 @@ tbody tr:hover {
 }
 
 .driver-report-section-total {
-  color: #f8fafc;
   font-weight: 800;
   font-size: 18px;
   white-space: nowrap;
@@ -817,7 +1251,7 @@ tbody tr:hover {
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
   padding: 14px;
-  background: #0b1220;
+  background: var(--kole-table-body);
 }
 
 .driver-report-totals-grid div {
@@ -916,7 +1350,7 @@ tbody tr:hover {
 
 .report-modal-body {
   padding: 22px;
-  background: #020617;
+  background: var(--kole-control-bg);
 }
 
 .modal-report-preview {
@@ -934,7 +1368,7 @@ tbody tr:hover {
 
 .driver-report-generated {
   text-align: center;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   margin-bottom: 16px;
 }
 
@@ -1003,15 +1437,8 @@ tbody tr:hover {
 }
 
 .report-bol-link {
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: #facc15;
-  font: inherit;
   font-weight: 800;
-  text-decoration: underline;
   text-underline-offset: 3px;
-  cursor: pointer;
 }
 
 .report-bol-link:hover {
@@ -1026,7 +1453,7 @@ tbody tr:hover {
 }
 
 .driver-report-table tbody tr.report-clickable-row:hover {
-  background: #1f2937;
+  background: var(--kole-table-row-hover);
 }
 
 .report-bol-link {
@@ -1050,7 +1477,7 @@ tbody tr:hover {
   padding: 12px 14px;
   border-radius: 10px;
   border: 2px solid #facc15;
-  background: #020617;
+  background: var(--kole-control-bg);
   color: #f8fafc;
   color-scheme: dark;
   font-size: 16px;
@@ -1104,9 +1531,9 @@ tbody tr:hover {
 .settlement-report-section {
   max-width: 1280px;
   margin: 22px auto;
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kole-border-subtle);
   border-radius: 14px;
-  background: #0b1220;
+  background: var(--kole-table-body);
   padding: 18px;
 }
 
@@ -1122,16 +1549,16 @@ tbody tr:hover {
 }
 
 .settlement-totals-grid div {
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kole-border-subtle);
   border-radius: 10px;
   padding: 12px;
-  background: #020617;
+  background: var(--kole-control-bg);
   text-align: center;
 }
 
 .settlement-totals-grid span {
   display: block;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
@@ -1182,7 +1609,7 @@ tbody tr:hover {
 }
 
 .settlement-footnote {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   margin-top: 10px;
 }
@@ -1202,9 +1629,9 @@ tbody tr:hover {
 }
 
 .report-accordion {
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kole-border-subtle);
   border-radius: 14px;
-  background: #0b1220;
+  background: var(--kole-table-body);
   overflow: hidden;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
 }
@@ -1217,7 +1644,7 @@ tbody tr:hover {
   gap: 16px;
   padding: 16px 18px;
   border-radius: 0;
-  background: #1f2937;
+  background: var(--kole-table-row-hover);
   color: #facc15;
   font-size: 15px;
   font-weight: 800;
@@ -1230,8 +1657,8 @@ tbody tr:hover {
 }
 
 .report-accordion.open .report-accordion-button {
-  background: #0f172a;
-  border-bottom: 1px solid #1e293b;
+  background: var(--kole-page-bg);
+  border-bottom: 1px solid var(--kole-border-subtle);
 }
 
 .report-accordion-icon {
@@ -1243,7 +1670,7 @@ tbody tr:hover {
 
 .report-accordion-body {
   padding: 18px;
-  background: #111827;
+  background: var(--kole-shell);
 }
 
 .accordion-inner-card {
@@ -1269,10 +1696,8 @@ tbody tr:hover {
 /* DRIVER POSITION TRACKING */
 .driver-position-panel {
   margin-top: 24px;
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kole-border-subtle);
   border-radius: 14px;
-  background: #0b1220;
-  padding: 18px;
   overflow: hidden;
 }
 
@@ -1284,14 +1709,9 @@ tbody tr:hover {
   margin-bottom: 14px;
 }
 
-.driver-position-header h3 {
-  margin: 0 0 6px;
-  color: #d4a017;
-}
-
 .driver-position-header p {
   margin: 0;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   line-height: 1.45;
 }
 
@@ -1307,8 +1727,6 @@ tbody tr:hover {
   align-items: center;
   border-radius: 999px;
   border: 1px solid rgba(255,255,255,0.14);
-  background: rgba(255,255,255,0.05);
-  color: #cbd5e1;
   font-size: 12px;
   font-weight: 700;
   padding: 6px 10px;
@@ -1316,10 +1734,9 @@ tbody tr:hover {
 }
 
 .driver-position-table-wrap {
-  width: 100%;
   overflow-x: hidden;
   border-radius: 12px;
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kole-border-subtle);
 }
 
 .driver-position-table {
@@ -1405,10 +1822,6 @@ tbody tr:hover {
     flex-direction: column;
   }
 
-  .driver-position-counts {
-    justify-content: flex-start;
-  }
-
   .driver-position-table-wrap {
     overflow-x: auto;
   }
@@ -1418,9 +1831,6 @@ tbody tr:hover {
   }
 }
 /* WON / NOT REGISTERED REPORT */
-.won-not-registered-kpi-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
 
 .won-not-registered-table {
   min-width: 900px;
@@ -1438,7 +1848,7 @@ tbody tr:hover {
 .driver-position-row td small {
   display: block;
   margin-top: 4px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   line-height: 1.25;
 }
@@ -1458,12 +1868,7 @@ tbody tr:hover {
 
 .driver-roster-grid .section-title {
   background: #e5e7eb;
-  color: #111827;
   border-left: 5px solid #d4a017;
-}
-
-.driver-roster-grid .detail-item strong {
-  font-size: 14px;
 }
 
 /* Inactive Driver Roster report */
@@ -1494,7 +1899,6 @@ tbody tr:hover {
 /* APP SHELL WIDTH / RUNTIME DENSITY */
 .container {
   width: min(1680px, calc(100vw - 40px));
-  max-width: none;
 }
 
 .web-runtime .operations-panel,
@@ -1517,14 +1921,6 @@ tbody tr:hover {
 .tauri-runtime .search-card {
   padding: 14px;
   margin-bottom: 16px;
-}
-
-.tauri-runtime .app-header h1 {
-  font-size: 26px;
-}
-
-.tauri-runtime .brand-logo-large {
-  width: 210px;
 }
 
 .tauri-runtime th,
@@ -1555,15 +1951,7 @@ tbody tr:hover {
 .upload-digest-panel {
   width: min(1100px, 100%);
   margin: 20px auto 0;
-  padding: 0;
   overflow: hidden;
-}
-
-.upload-digest-header-row {
-  display: grid;
-  grid-template-columns: 54px minmax(0, 1fr) 54px;
-  align-items: stretch;
-  min-height: 64px;
 }
 
 .upload-digest-arrow,
@@ -1572,42 +1960,18 @@ tbody tr:hover {
 }
 
 .upload-digest-arrow {
-  background: #0f172a;
-  color: #facc15;
-  border-right: 1px solid #1e293b;
-  border-left: 1px solid #1e293b;
-  font-size: 30px;
-  line-height: 1;
+  border-right: 1px solid var(--kole-border-subtle);
+  border-left: 1px solid var(--kole-border-subtle);
   padding: 0;
 }
 
-.upload-digest-arrow:hover {
-  background: #1e293b;
-}
-
 .upload-digest-summary {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 14px;
-  align-items: center;
-  width: 100%;
-  padding: 16px 18px;
-  background: #0b1220;
   color: #e5e7eb;
-  text-align: left;
-}
-
-.upload-digest-summary:hover {
-  background: #111827;
 }
 
 .upload-digest-title {
-  color: #d4a017;
   font-size: 18px;
   font-weight: 800;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .upload-digest-count {
@@ -1616,8 +1980,6 @@ tbody tr:hover {
   justify-content: center;
   border-radius: 999px;
   border: 1px solid rgba(255,255,255,0.14);
-  background: rgba(255,255,255,0.06);
-  color: #cbd5e1;
   font-size: 13px;
   font-weight: 800;
   padding: 6px 10px;
@@ -1625,15 +1987,13 @@ tbody tr:hover {
 }
 
 .upload-digest-chevron {
-  color: #facc15;
   font-size: 14px;
   font-weight: 800;
 }
 
 .upload-digest-body {
   padding: 18px;
-  border-top: 1px solid #1e293b;
-  background: #111827;
+  border-top: 1px solid var(--kole-border-subtle);
 }
 
 .upload-digest-table-wrap {
@@ -1641,30 +2001,15 @@ tbody tr:hover {
   overflow: auto;
 }
 
-.upload-digest-table {
-  min-width: 760px;
-}
-
-.upload-digest-table th:nth-child(1),
-.upload-digest-table td:nth-child(1) { width: 190px; }
-.upload-digest-table th:nth-child(2),
-.upload-digest-table td:nth-child(2) { width: 120px; }
-.upload-digest-table th:nth-child(3),
-.upload-digest-table td:nth-child(3) { width: 140px; }
-
 .upload-digest-footnote {
   margin: 12px 0 0;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
 }
 
 @media (max-width: 700px) {
-  .upload-digest-header-row {
-    grid-template-columns: 44px minmax(0, 1fr) 44px;
-  }
 
   .upload-digest-summary {
-    grid-template-columns: 1fr;
     gap: 7px;
   }
 
@@ -1675,8 +2020,6 @@ tbody tr:hover {
 
 .table-link-button {
   border: 1px solid rgba(250, 204, 21, 0.45);
-  background: rgba(250, 204, 21, 0.1);
-  color: #fde68a;
   padding: 7px 10px;
   border-radius: 7px;
   cursor: pointer;
@@ -1685,17 +2028,9 @@ tbody tr:hover {
   white-space: nowrap;
 }
 
-.table-link-button:hover {
-  background: rgba(250, 204, 21, 0.18);
-}
-
 .table-link-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
-}
-
-.upload-digest-table {
-  min-width: 900px;
 }
 
 .upload-digest-table th:nth-child(5),
@@ -1703,13 +2038,6 @@ tbody tr:hover {
 
 
 /* DISPLAY WIDTH / OVERFLOW TUNE-UP */
-html,
-body,
-#root {
-  width: 100%;
-  max-width: 100%;
-  overflow-x: hidden;
-}
 
 .container {
   max-width: calc(100vw - 32px);
@@ -1737,7 +2065,6 @@ input,
 }
 
 .search-bar button {
-  flex: 0 0 auto;
   white-space: nowrap;
 }
 
@@ -1767,25 +2094,13 @@ input,
 }
 
 /* UPLOAD DIGEST REFINEMENTS */
-.upload-digest-header-row {
-  grid-template-columns: 54px minmax(0, 1fr) auto 54px;
-}
 
 .upload-digest-today-button {
   align-self: stretch;
   border-radius: 0;
-  border-left: 1px solid #1e293b;
-  border-right: 1px solid #1e293b;
-  background: #172033;
-  color: #fde68a;
-  padding: 0 16px;
-  font-size: 13px;
-  font-weight: 800;
+  border-left: 1px solid var(--kole-border-subtle);
+  border-right: 1px solid var(--kole-border-subtle);
   white-space: nowrap;
-}
-
-.upload-digest-today-button:hover {
-  background: #243044;
 }
 
 .upload-digest-today-button.hidden {
@@ -1797,34 +2112,18 @@ input,
   opacity: 0.35;
 }
 
-.upload-digest-table {
-  min-width: 680px;
-}
-
-.upload-digest-table th:nth-child(1),
-.upload-digest-table td:nth-child(1) { width: 210px; }
-.upload-digest-table th:nth-child(2),
-.upload-digest-table td:nth-child(2) { width: 130px; }
-.upload-digest-table th:nth-child(3),
-.upload-digest-table td:nth-child(3) { width: 140px; }
-.upload-digest-table th:nth-child(4),
-.upload-digest-table td:nth-child(4) { width: 150px; }
-
 .upload-digest-footnote {
   display: none;
 }
 
 @media (max-width: 700px) {
-  .upload-digest-header-row {
-    grid-template-columns: 44px minmax(0, 1fr) auto 44px;
-  }
 
   .upload-digest-today-button {
     padding: 0 10px;
   }
 }
 
-/* PASS 3: WIDTH CORRECTION + LESS-YELLOW UPLOAD DIGEST */
+/*  WIDTH CORRECTION + LESS-YELLOW UPLOAD DIGEST */
 html,
 body,
 #root {
@@ -1841,7 +2140,6 @@ body {
 .tauri-runtime .container,
 .web-runtime .container {
   width: calc(100vw - 32px) !important;
-  max-width: 1500px !important;
   margin-left: auto !important;
   margin-right: auto !important;
   overflow-x: hidden !important;
@@ -1909,33 +2207,24 @@ body {
 }
 
 .upload-digest-panel {
-  border-color: #243044;
+  border-color: var(--kole-divider);
 }
 
 .upload-digest-arrow {
-  background: #111827;
+  background: var(--kole-shell);
   color: #cbd5e1;
 }
 
 .upload-digest-arrow:hover {
-  background: #1f2937;
+  background: var(--kole-table-row-hover);
   color: #f8fafc;
-}
-
-.upload-digest-summary {
-  background: #111827;
 }
 
 .upload-digest-summary:hover {
   background: #172033;
 }
 
-.upload-digest-title {
-  color: #e5e7eb;
-}
-
 .upload-digest-title::before {
-  content: 'Uploads';
   display: inline-flex;
   align-items: center;
   margin-right: 12px;
@@ -1953,14 +2242,8 @@ body {
   color: #cbd5e1;
 }
 
-.upload-digest-count {
-  background: rgba(148, 163, 184, 0.12);
-  color: #e5e7eb;
-}
-
 .upload-digest-today-button {
-  background: #1f2937;
-  color: #e5e7eb;
+  background: var(--kole-table-row-hover);
 }
 
 .upload-digest-today-button:hover {
@@ -1977,19 +2260,6 @@ body {
   background: rgba(37, 99, 235, 0.26);
 }
 
-.upload-digest-table {
-  min-width: 620px !important;
-}
-
-.upload-digest-table th:nth-child(1),
-.upload-digest-table td:nth-child(1) { width: 38%; }
-.upload-digest-table th:nth-child(2),
-.upload-digest-table td:nth-child(2) { width: 18%; }
-.upload-digest-table th:nth-child(3),
-.upload-digest-table td:nth-child(3) { width: 20%; }
-.upload-digest-table th:nth-child(4),
-.upload-digest-table td:nth-child(4) { width: 24%; }
-
 @media (max-width: 900px) {
   .container,
   .tauri-runtime .container,
@@ -2003,7 +2273,7 @@ body {
   }
 }
 
-/* PASS 4: API rollback companion sizing guard */
+/*  API rollback companion sizing guard */
 .container,
 .tauri-runtime .container,
 .web-runtime .container {
@@ -2032,10 +2302,10 @@ body {
   flex-shrink: 0;
 }
 
-/* PASS 5: SECTION HIERARCHY / COLOR BALANCE */
+/*  SECTION HIERARCHY / COLOR BALANCE */
 .upload-digest-panel {
   padding: 18px !important;
-  background: #111827;
+  background: var(--kole-shell);
 }
 
 .upload-digest-section-header {
@@ -2053,15 +2323,7 @@ body {
   line-height: 1.2;
 }
 
-.upload-digest-header-row {
-  border: 1px solid #1e293b;
-  border-radius: 14px;
-  overflow: hidden;
-  background: #0b1220;
-}
-
 .upload-digest-title {
-  color: #f8fafc !important;
   white-space: normal !important;
   overflow: visible !important;
   text-overflow: clip !important;
@@ -2083,7 +2345,7 @@ body {
 
 .upload-digest-body {
   margin-top: 14px;
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kole-border-subtle);
   border-radius: 14px;
   overflow: hidden;
 }
@@ -2099,7 +2361,7 @@ body {
 }
 
 
-/* PASS 7: Upload Digest final table cleanup */
+/*  Upload Digest final table cleanup */
 .upload-digest-count {
   border-color: rgba(212, 160, 23, 0.55) !important;
   background: rgba(212, 160, 23, 0.18) !important;
@@ -2120,7 +2382,7 @@ body {
 .upload-digest-table th:nth-child(4),
 .upload-digest-table td:nth-child(4) { width: 26% !important; }
 
-/* PASS 8: Gross Revenue / Orders Due / Inactive Driver Term Date */
+/*  Gross Revenue / Orders Due / Inactive Driver Term Date */
 .wide-report-modal {
   width: min(1700px, 96vw);
 }
@@ -2165,7 +2427,6 @@ body {
 }
 
 .report-total-row td {
-  background: rgba(212, 160, 23, 0.14);
   color: #f8fafc;
   font-weight: 800;
 }
@@ -2184,16 +2445,16 @@ body {
   }
 }
 
-/* PASS 9: Gross Revenue quarter display to avoid 12-month compression */
+/*  Gross Revenue quarter display to avoid 12-month compression */
 .gross-revenue-quarter-stack {
   display: grid;
   gap: 18px;
 }
 
 .gross-revenue-quarter-card {
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kole-border-subtle);
   border-radius: 14px;
-  background: #0b1220;
+  background: var(--kole-table-body);
   overflow: hidden;
 }
 
@@ -2206,7 +2467,7 @@ body {
   padding: 14px 16px;
   background: rgba(255, 255, 255, 0.04);
   border: 0;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--kole-border-subtle);
   border-radius: 0;
   text-align: left;
   cursor: pointer;
@@ -2247,7 +2508,7 @@ body {
 
 .gross-revenue-quarter-header p {
   margin: 0;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 13px;
 }
 
@@ -2260,7 +2521,7 @@ body {
 }
 
 .gross-revenue-quarter-total span {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
@@ -2279,7 +2540,6 @@ body {
 
 .gross-revenue-quarter-table {
   min-width: 920px;
-  table-layout: fixed;
 }
 
 .gross-revenue-quarter-table th,
@@ -2291,13 +2551,11 @@ body {
 
 .gross-revenue-quarter-table th:nth-child(1),
 .gross-revenue-quarter-table td:nth-child(1) {
-  width: 80px;
   text-align: left;
 }
 
 .gross-revenue-quarter-table th:nth-child(2),
 .gross-revenue-quarter-table td:nth-child(2) {
-  width: 230px;
   text-align: left;
 }
 
@@ -2310,9 +2568,9 @@ body {
 
 /* REPORT GROUPS / SALES */
 .report-group-accordion {
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kole-border-subtle);
   border-radius: 14px;
-  background: #0b1220;
+  background: var(--kole-table-body);
   overflow: hidden;
   margin-bottom: 14px;
 }
@@ -2320,7 +2578,7 @@ body {
 .report-group-button {
   width: 100%;
   border-radius: 0;
-  background: #111827;
+  background: var(--kole-shell);
   color: #e5e7eb;
   display: flex;
   align-items: center;
@@ -2331,7 +2589,7 @@ body {
 }
 
 .report-group-button:hover {
-  background: #1f2937;
+  background: var(--kole-table-row-hover);
 }
 
 .report-group-button strong {
@@ -2344,14 +2602,14 @@ body {
 .report-group-button span span,
 .report-group-button div span {
   display: block;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 13px;
   font-weight: 500;
 }
 
 .report-group-body {
   padding: 14px;
-  background: #020617;
+  background: var(--kole-control-bg);
 }
 
 .sales-report-card .report-card-header p {
@@ -2375,7 +2633,7 @@ body {
 .sales-summary-grid span,
 .sales-lead-metrics span {
   display: block;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -2386,10 +2644,6 @@ body {
 .sales-lead-metrics strong {
   color: #f8fafc;
   font-size: 18px;
-}
-
-.sales-report-controls {
-  margin-bottom: 16px;
 }
 
 .sales-lead-card-grid {
@@ -2406,21 +2660,10 @@ body {
   width: 100%;
   min-height: 190px;
   text-align: left;
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kole-border-subtle);
   border-radius: 14px;
-  background: #0f172a;
   padding: 15px;
   color: #e5e7eb;
-}
-
-.sales-lead-card:hover {
-  background: #172033;
-  border-color: #334155;
-}
-
-.sales-lead-card.follow-up-due {
-  border-color: #facc15;
-  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.18);
 }
 
 .sales-lead-card-header {
@@ -2439,7 +2682,7 @@ body {
 
 .sales-lead-card p {
   margin: 0;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 13px;
 }
 
@@ -2503,7 +2746,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
 }
 
@@ -2591,11 +2834,11 @@ body {
 }
 
 .sales-profile-overlay {
-  z-index: 1200;
+  z-index: var(--kole-z-modal-nested);
 }
 
 
-/* PASS 10: Sales customer cards load-first view buttons */
+/*  Sales customer cards load-first view buttons */
 .sales-report-start,
 .sales-report-loading {
   display: flex;
@@ -2625,12 +2868,11 @@ body {
 
 .sales-summary-button:hover {
   background: rgba(255,255,255,0.07);
-  border-color: rgba(250, 204, 21, 0.35);
 }
 
 .sales-summary-button span {
   display: block;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -2642,20 +2884,9 @@ body {
   font-size: 18px;
 }
 
-.active-sales-summary-button {
-  background: rgba(212, 160, 23, 0.16);
-  border-color: rgba(250, 204, 21, 0.55);
-  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.12);
-}
-
-.active-sales-summary-button span,
-.active-sales-summary-button strong {
-  color: #facc15;
-}
-
 .sales-summary-helper {
   margin: 0 0 30px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 13px;
   text-align: center;
 }
@@ -2683,7 +2914,7 @@ body {
 }
 
 .sales-year-clickable-row:hover {
-  background: #1f2937;
+  background: var(--kole-table-row-hover);
 }
 
 @media (max-width: 1100px) {
@@ -2771,7 +3002,7 @@ body {
 .sales-note-card-header span,
 .sales-note-card small {
   display: block;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   line-height: 1.35;
   margin-top: 4px;
@@ -2803,7 +3034,7 @@ body {
 
 /* SALES NOTES WRITEBACK */
 .sales-note-composer {
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--kole-border-subtle);
   padding: 14px;
   background: rgba(15, 23, 42, 0.38);
 }
@@ -2826,9 +3057,9 @@ body {
   width: 100%;
   min-height: 110px;
   resize: vertical;
-  border: 1px solid #334155;
+  border: 1px solid var(--kole-control-border);
   border-radius: 10px;
-  background: #020617;
+  background: var(--kole-control-bg);
   color: #e5e7eb;
   padding: 12px;
   font-family: inherit;
@@ -2851,7 +3082,7 @@ body {
 }
 
 .sales-note-composer-footer small {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   line-height: 1.35;
 }
 
@@ -2884,29 +3115,11 @@ body {
 }
 
 
-/* PASS 11: Navy relief / slate surface hierarchy
+/*  Navy relief / slate surface hierarchy
    Goal: keep the KOLE dark console look, but create clearer depth between
    page background, panels, section headers, tables, and clickable report rows. */
-:root {
-  --kole-page-bg: #0f172a;
-  --kole-shell: #111827;
-  --kole-surface: #182033;
-  --kole-surface-2: #202a3b;
-  --kole-table-body: #0b1220;
-  --kole-table-row: #111827;
-  --kole-table-head: #273244;
-  --kole-border: #2b364a;
-  --kole-border-strong: #3a475d;
-  --kole-text: #f8fafc;
-  --kole-muted: #aab6c7;
-  --kole-gold: #d4a017;
-  --kole-gold-bright: #facc15;
-}
-
 body {
-  background:
-    radial-gradient(circle at 50% -180px, rgba(59, 76, 112, 0.24), transparent 420px),
-    var(--kole-page-bg) !important;
+  background: var(--kole-page-background) !important;
 }
 
 .search-card,
@@ -2943,7 +3156,7 @@ body {
   border: 1px solid var(--kole-border) !important;
   border-left: 4px solid var(--kole-gold) !important;
   border-radius: 12px !important;
-  background: linear-gradient(180deg, var(--kole-surface), #121b2e) !important;
+  background: linear-gradient(180deg, var(--kole-surface), var(--kole-surface-gradient-end)) !important;
 }
 
 .operations-panel h2,
@@ -3059,7 +3272,7 @@ th,
 .gross-revenue-table th {
   background: var(--kole-table-head) !important;
   color: var(--kole-text) !important;
-  border-bottom: 1px solid #46566e !important;
+  border-bottom: 1px solid var(--kole-divider-strong) !important;
 }
 
 td,
@@ -3070,7 +3283,7 @@ td,
 .settlement-report-table td,
 .gross-revenue-quarter-table td,
 .gross-revenue-table td {
-  border-bottom-color: #243044 !important;
+  border-bottom-color: var(--kole-divider) !important;
 }
 
 tbody tr,
@@ -3092,7 +3305,7 @@ tbody tr:hover,
 .upload-digest-table tbody tr:hover,
 .report-table-wrap tbody tr:hover,
 .sales-year-clickable-row:hover {
-  background: #1f2937 !important;
+  background: var(--kole-table-row-hover) !important;
 }
 
 .selected-row {
@@ -3103,8 +3316,6 @@ tbody tr:hover,
 /* Upload Digest: make the date bar a raised slate control. */
 .upload-digest-header-row {
   border-color: var(--kole-border-strong) !important;
-  background: var(--kole-table-body) !important;
-  box-shadow: 0 8px 18px rgba(0,0,0,0.18) !important;
 }
 
 .upload-digest-summary,
@@ -3151,7 +3362,6 @@ tbody tr:hover,
 .report-group-accordion.open > .report-group-button,
 .report-accordion.open > .report-accordion-button {
   background: var(--kole-surface-2) !important;
-  border-left-color: var(--kole-gold) !important;
   border-bottom: 1px solid var(--kole-border) !important;
 }
 
@@ -3195,13 +3405,9 @@ tbody tr:hover,
   color: var(--kole-gold-bright) !important;
 }
 
-.report-total-row td {
-  background: rgba(212, 160, 23, 0.18) !important;
-}
-
 /* Sales cards: same dark family, but less flat. */
 .sales-lead-card {
-  background: #121b2e !important;
+  background: var(--kole-surface-gradient-end) !important;
   border-color: var(--kole-border) !important;
 }
 
@@ -3223,7 +3429,7 @@ input,
 .report-controls input[type="date"],
 .sales-note-composer textarea {
   border-color: var(--kole-border-strong) !important;
-  background: #050a18 !important;
+  background: var(--kole-control-deep) !important;
 }
 
 input:focus,
@@ -3246,16 +3452,10 @@ input:focus,
   }
 }
 
-/* PASS 12: De-yellow nested report hierarchy
+/*  De-yellow nested report hierarchy
    Goal: keep gold as a major landmark only, while nested report drawers,
    report section headers, and active filter/KPI cards use slate/white instead.
    This keeps the separation from PASS 11 without creating a clump of yellow. */
-
-:root {
-  --kole-secondary-rail: #64748b;
-  --kole-secondary-rail-soft: rgba(100, 116, 139, 0.62);
-  --kole-active-slate: rgba(71, 85, 105, 0.34);
-}
 
 /* Report accordion titles are structural, not major section landmarks. */
 .report-group-button strong,
@@ -3354,7 +3554,7 @@ input:focus,
   color: var(--kole-gold-bright) !important;
 }
 
-/* PASS 13: Sales Activity Snapshot */
+/*  Sales Activity Snapshot */
 .sales-activity-card {
   border-color: #263244;
 }
@@ -3404,17 +3604,13 @@ input:focus,
 }
 
 .sales-activity-section .driver-report-section-header p {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 13px;
 }
 
 .sales-activity-empty {
   padding: 16px;
   margin: 0;
-}
-
-.sales-activity-table-wrap table {
-  min-width: 1050px;
 }
 
 .sales-activity-note-list {
@@ -3447,7 +3643,7 @@ input:focus,
 
 .sales-activity-note-card-header span {
   display: block;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   margin-top: 4px;
 }
@@ -3474,7 +3670,7 @@ input:focus,
   }
 }
 
-/* PASS 14: Sales Activity Snapshot modal + note alignment */
+/*  Sales Activity Snapshot modal + note alignment */
 .sales-activity-modal {
   width: min(1700px, 96vw);
 }
@@ -3515,10 +3711,9 @@ input:focus,
   max-width: none;
 }
 
-/* PASS 10: Operations snapshot date controls + truthful settlement state */
+/*  Operations snapshot date controls + truthful settlement state */
 .operations-header-bar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   gap: 16px;
   min-width: 0;
@@ -3530,7 +3725,7 @@ input:focus,
   gap: 10px;
   margin: 0 0 18px;
   padding: 12px;
-  border: 1px solid var(--kole-border-strong, #334155);
+  border: 1px solid var(--kole-border-strong, var(--kole-control-border));
   border-radius: 14px;
   background: var(--kole-table-body, #0b1220);
   box-shadow: 0 8px 18px rgba(0,0,0,0.18);
@@ -3621,7 +3816,7 @@ input:focus,
   }
 }
 
-/* PASS 10: Gross revenue drill-down + zero revenue visibility */
+/*  Gross revenue drill-down + zero revenue visibility */
 .gross-revenue-kpi-grid,
 .gross-driver-kpi-grid {
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -3648,7 +3843,7 @@ input:focus,
 }
 
 .gross-revenue-zero-row td {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   background: rgba(100, 116, 139, 0.08) !important;
 }
 
@@ -3678,16 +3873,16 @@ input:focus,
 }
 
 .nested-report-modal-overlay {
-  z-index: 1200;
+  z-index: var(--kole-z-modal-nested);
   background: rgba(2, 6, 23, 0.84);
 }
 
 .driver-roster-modal-overlay {
-  z-index: 1400;
+  z-index: var(--kole-z-modal-roster);
 }
 
 .driver-performance-modal-overlay {
-  z-index: 1500;
+  z-index: var(--kole-z-modal-performance);
 }
 
 .gross-driver-detail-modal {
@@ -3736,7 +3931,7 @@ input:focus,
 
 .gross-driver-card-link:disabled {
   background: transparent;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   opacity: 0.65;
 }
 
@@ -3825,7 +4020,7 @@ input:focus,
   }
 }
 
-/* PASS 15: Customer Booking Trends report */
+/*  Customer Booking Trends report */
 .customer-trends-card {
   border-color: #263244;
 }
@@ -3895,7 +4090,7 @@ input:focus,
 }
 
 .customer-trend-clickable-row:hover {
-  background: #1f2937;
+  background: var(--kole-table-row-hover);
 }
 
 .customer-trend-change {
@@ -3997,17 +4192,13 @@ input:focus,
   }
 }
 
-/* PASS 16: No Availability operations report */
+/*  No Availability operations report */
 .no-availability-modal {
   width: min(1700px, 96vw);
 }
 
 .no-availability-card {
   border-color: rgba(250, 204, 21, 0.16);
-}
-
-.no-availability-kpi-grid {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .no-availability-kpi-grid small,
@@ -4099,7 +4290,7 @@ input:focus,
   }
 }
 
-/* PASS 17: No Availability pattern-finder upgrade */
+/*  No Availability pattern-finder upgrade */
 .no-availability-kpi-grid {
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }
@@ -4121,7 +4312,7 @@ input:focus,
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   padding: 14px;
-  background: #0b1220;
+  background: var(--kole-table-body);
 }
 
 .no-availability-insight-card {
@@ -4145,7 +4336,7 @@ input:focus,
 .no-availability-insight-card span {
   display: block;
   margin-bottom: 6px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
@@ -4178,13 +4369,13 @@ input:focus,
   overflow: hidden;
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 14px;
-  background: #111827;
+  background: var(--kole-shell);
 }
 
 .no-availability-pattern-card-header {
   padding: 13px 15px;
-  background: #0f172a;
-  border-bottom: 1px solid #1e293b;
+  background: var(--kole-page-bg);
+  border-bottom: 1px solid var(--kole-border-subtle);
 }
 
 .no-availability-pattern-card-header h4 {
@@ -4195,7 +4386,7 @@ input:focus,
 
 .no-availability-pattern-card-header p {
   margin: 4px 0 0;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   line-height: 1.35;
 }
@@ -4258,7 +4449,7 @@ input:focus,
 
 .no-availability-pattern-meta {
   margin-top: 4px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   line-height: 1.35;
 }
@@ -4279,14 +4470,14 @@ input:focus,
 
 .no-availability-empty-pattern {
   padding: 16px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 13px;
 }
 
 .no-availability-year-section .no-availability-year-strip {
   margin: 0;
   padding: 14px;
-  background: #0b1220;
+  background: var(--kole-table-body);
 }
 
 .no-availability-log-section .msg {
@@ -4333,12 +4524,10 @@ input:focus,
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  margin-bottom: 12px;
 }
 
 .intellitrack-section-header h2 {
   margin: 0;
-  color: #d4a017;
 }
 
 .intellitrack-summary {
@@ -4348,15 +4537,15 @@ input:focus,
   gap: 12px;
   align-items: center;
   padding: 14px 16px;
-  border: 1px solid #334155;
+  border: 1px solid var(--kole-control-border);
   border-radius: 14px;
-  background: #0b1220;
+  background: var(--kole-table-body);
   color: #f8fafc;
   text-align: left;
 }
 
 .intellitrack-summary:hover {
-  background: #111827;
+  background: var(--kole-shell);
 }
 
 .intellitrack-title {
@@ -4365,7 +4554,6 @@ input:focus,
 }
 
 .intellitrack-title::before {
-  content: "●";
   margin-right: 8px;
   color: #d4a017;
 }
@@ -4390,18 +4578,11 @@ input:focus,
   font-size: 12px;
 }
 
-.intellitrack-body {
-  display: grid;
-  gap: 16px;
-  margin-top: 16px;
-}
-
 .intellitrack-current-card,
 .intellitrack-search-card,
 .intellitrack-order-card {
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kole-border-subtle);
   border-radius: 14px;
-  background: #0b1220;
   padding: 16px;
 }
 
@@ -4415,31 +4596,23 @@ input:focus,
 
 .intellitrack-subheader h3 {
   margin: 0 0 5px;
-  color: #facc15;
 }
 
 .intellitrack-subheader p {
   margin: 0;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   line-height: 1.45;
 }
 
 .intellitrack-empty {
   display: grid;
   gap: 5px;
-  padding: 16px;
-  border: 1px dashed #334155;
+  border: 1px dashed var(--kole-control-border);
   border-radius: 12px;
-  background: rgba(15, 23, 42, 0.65);
-  color: #cbd5e1;
-}
-
-.intellitrack-empty strong {
-  color: #f8fafc;
 }
 
 .intellitrack-empty span {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
 }
 
 .intellitrack-table {
@@ -4478,7 +4651,7 @@ input:focus,
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   padding-bottom: 14px;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--kole-border-subtle);
 }
 
 .intellitrack-order-main > div,
@@ -4486,7 +4659,6 @@ input:focus,
   min-width: 0;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
-  background: rgba(15, 23, 42, 0.65);
   padding: 12px;
 }
 
@@ -4494,7 +4666,6 @@ input:focus,
 .intellitrack-dispatch-grid span {
   display: block;
   margin-bottom: 6px;
-  color: #94a3b8;
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
@@ -4504,7 +4675,6 @@ input:focus,
 .intellitrack-order-main strong,
 .intellitrack-dispatch-grid strong {
   display: block;
-  color: #f8fafc;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
@@ -4535,7 +4705,7 @@ input:focus,
 }
 
 .intellitrack-action-row span {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 13px;
 }
 
@@ -4549,7 +4719,7 @@ input:focus,
 }
 
 .secondary-button {
-  border: 1px solid #334155;
+  border: 1px solid var(--kole-control-border);
   background: #1e293b;
   color: #cbd5e1;
 }
@@ -4605,7 +4775,7 @@ input:focus,
   }
 }
 
-/* INTELLITRACK V1.4: align Job Photo Uploads, IntelliTrack, and Reports visual hierarchy */
+/*  INTELLITRACK: align Job Photo Uploads, IntelliTrack, and Reports visual hierarchy */
 .intellitrack-panel {
   border-color: var(--kole-border-strong) !important;
   background: var(--kole-shell) !important;
@@ -4620,7 +4790,7 @@ input:focus,
   border: 1px solid var(--kole-border) !important;
   border-left: 4px solid var(--kole-gold) !important;
   border-radius: 12px !important;
-  background: linear-gradient(180deg, var(--kole-surface), #121b2e) !important;
+  background: linear-gradient(180deg, var(--kole-surface), var(--kole-surface-gradient-end)) !important;
 }
 
 .intellitrack-section-header h2 {
@@ -4628,20 +4798,11 @@ input:focus,
 }
 
 /* Make the Upload Digest and IntelliTrack drawer controls match the Reports accordion rows. */
-.upload-digest-header-row {
-  gap: 8px !important;
-  border: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
 
 .upload-digest-summary,
 .intellitrack-summary {
-  min-height: 54px !important;
-  padding: 14px 16px !important;
   border: 1px solid var(--kole-border) !important;
   border-left: 4px solid transparent !important;
-  border-radius: 10px !important;
   background: var(--kole-surface) !important;
   color: var(--kole-text) !important;
   box-shadow: 0 10px 24px rgba(0,0,0,0.18) !important;
@@ -4661,7 +4822,6 @@ input:focus,
 
 .upload-digest-title,
 .intellitrack-title {
-  color: var(--kole-text) !important;
   font-weight: 900 !important;
 }
 
@@ -4679,21 +4839,6 @@ input:focus,
 .upload-digest-chevron,
 .intellitrack-chevron {
   color: var(--kole-text) !important;
-}
-
-.upload-digest-arrow,
-.upload-digest-today-button {
-  border: 1px solid var(--kole-border) !important;
-  border-radius: 10px !important;
-  background: var(--kole-surface) !important;
-  color: var(--kole-text) !important;
-  box-shadow: 0 10px 24px rgba(0,0,0,0.16) !important;
-}
-
-.upload-digest-arrow:hover,
-.upload-digest-today-button:hover {
-  background: var(--kole-surface-2) !important;
-  border-color: var(--kole-border-strong) !important;
 }
 
 .intellitrack-current-card,
@@ -4720,18 +4865,7 @@ input:focus,
   }
 }
 
-/* INTELLITRACK V1.5: final drawer typography + full-width upload digest control */
-.upload-digest-header-row {
-  display: block !important;
-  min-height: 0 !important;
-  width: 100% !important;
-  margin: 0 !important;
-}
-
-.upload-digest-arrow,
-.upload-digest-today-button {
-  display: none !important;
-}
+/*  INTELLITRACK: final drawer typography + full-width upload digest control */
 
 .upload-digest-summary,
 .intellitrack-summary {
@@ -4782,7 +4916,7 @@ input:focus,
   }
 }
 
-/* INTELLITRACK V1.6: keep Upload Digest navigation while preserving full-width report-row styling */
+/*  INTELLITRACK: keep Upload Digest navigation while preserving full-width report-row styling */
 .upload-digest-header-row {
   display: grid !important;
   grid-template-columns: 44px minmax(0, 1fr) auto 44px !important;
@@ -4891,7 +5025,7 @@ input:focus,
   }
 }
 
-/* INTELLITRACK V1.7: split show-me and do-something into separate report-style sections */
+/*  INTELLITRACK: split show-me and do-something into separate report-style sections */
 .intellitrack-body {
   display: grid !important;
   gap: 14px !important;
@@ -4960,7 +5094,7 @@ input:focus,
 
 .settlement-subsection-header p {
   margin: 0;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   line-height: 1.4;
 }
 
@@ -5085,18 +5219,7 @@ input:focus,
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 14px;
-  padding: 14px 16px;
-  border: 1px solid rgba(250, 204, 21, 0.26);
-  border-radius: 14px;
-  background: #0f172a;
-  color: #e5e7eb;
   text-align: left;
-}
-
-.available-trucks-summary:hover,
-.available-trucks-summary[aria-expanded="true"] {
-  background: #111827;
-  border-color: rgba(250, 204, 21, 0.5);
 }
 
 .available-trucks-title-block {
@@ -5114,7 +5237,7 @@ input:focus,
 }
 
 .available-trucks-subtitle {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 13px;
   font-weight: 600;
 }
@@ -5138,10 +5261,10 @@ input:focus,
 
 .available-trucks-current-card,
 .available-trucks-action-card {
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kole-border-subtle);
   border-radius: 14px;
   padding: 16px;
-  background: #0b1220;
+  background: var(--kole-table-body);
 }
 
 .available-trucks-subheader {
@@ -5159,7 +5282,7 @@ input:focus,
 
 .available-trucks-subheader p {
   margin: 0;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   line-height: 1.4;
 }
 
@@ -5181,7 +5304,7 @@ input:focus,
 .available-trucks-insight-card > span {
   display: block;
   margin-bottom: 6px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
@@ -5197,8 +5320,7 @@ input:focus,
 .available-trucks-kpi-grid small {
   display: block;
   margin-top: 6px;
-  color: #94a3b8;
-  word-break: break-all;
+  color: var(--kole-muted-subtle);
 }
 
 .available-trucks-insight-grid {
@@ -5264,7 +5386,6 @@ input:focus,
 
 .available-trucks-attention span {
   margin-top: 3px;
-  color: #cbd5e1;
 }
 
 .available-trucks-table {
@@ -5294,7 +5415,7 @@ input:focus,
 .available-trucks-table td small,
 .available-trucks-muted {
   margin-top: 4px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
 }
 
@@ -5311,7 +5432,7 @@ input:focus,
   display: block;
   margin-top: 7px;
   max-width: 150px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   line-height: 1.35;
 }
 
@@ -5334,12 +5455,12 @@ input:focus,
 }
 
 .available-trucks-proximity-list small {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
 }
 
 .available-trucks-footnote {
   margin-top: 12px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
 }
 
@@ -5374,7 +5495,7 @@ input:focus,
   }
 }
 
-/* AVAILABLE TRUCKS V1.1 / SECTION REAL ESTATE PASS
+/*  AVAILABLE TRUCKS: SECTION REAL ESTATE PASS
    Main operating sections now collapse at the section header level, with status pills
    in the true section header instead of nested drawer rows. */
 .feature-accordion-panel {
@@ -5398,7 +5519,7 @@ input:focus,
   border: 1px solid var(--kole-border) !important;
   border-left: 4px solid var(--kole-gold) !important;
   border-radius: 12px !important;
-  background: linear-gradient(180deg, var(--kole-surface), #121b2e) !important;
+  background: linear-gradient(180deg, var(--kole-surface), var(--kole-surface-gradient-end)) !important;
   color: var(--kole-text) !important;
   text-align: left;
   box-shadow: 0 10px 24px rgba(0,0,0,0.18) !important;
@@ -5406,7 +5527,7 @@ input:focus,
 
 .feature-section-header-button:hover,
 .feature-section-header-button[aria-expanded="true"] {
-  background: linear-gradient(180deg, var(--kole-surface-2), #151f34) !important;
+  background: linear-gradient(180deg, var(--kole-surface-2), var(--kole-surface-2-gradient-end)) !important;
   border-color: rgba(250, 204, 21, 0.42) !important;
 }
 
@@ -5532,7 +5653,7 @@ input:focus,
   }
 }
 
-/* V1.2: Available Trucks nested rows no longer use the yellow mini-rail. */
+/*  Available Trucks nested rows no longer use the yellow mini-rail. */
 .available-trucks-summary .available-trucks-title::before {
   display: none !important;
 }
@@ -5594,7 +5715,7 @@ input:focus,
 
 .available-trucks-drilldown-table td small {
   margin-top: 4px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
 }
 
 .available-trucks-gap-value {
@@ -5622,7 +5743,7 @@ input:focus,
   font-weight: 900;
 }
 
-/* AVAILABLE TRUCKS V1.7: keep gold on main headers; nested drawers use slate with an off-white hover/open rail. */
+/*  AVAILABLE TRUCKS: keep gold on main headers; nested drawers use slate with an off-white hover/open rail. */
 .available-trucks-summary {
   min-height: 54px !important;
   padding: 14px 16px !important;
@@ -5647,7 +5768,7 @@ input:focus,
   color: var(--kole-text) !important;
 }
 
-/* AVAILABLE TRUCKS V1.8: match nested drawer hover/open treatment and keep subheader arrows white. */
+/*  AVAILABLE TRUCKS: match nested drawer hover/open treatment and keep subheader arrows white. */
 .available-trucks-summary:hover {
   background: var(--kole-surface-2) !important;
   border-color: var(--kole-border) !important;
@@ -5681,7 +5802,7 @@ input:focus,
 .available-truck-proximity-pair label span {
   display: block;
   margin-bottom: 6px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
@@ -5699,7 +5820,7 @@ input:focus,
 
 .available-trucks-source-note small {
   margin-top: 4px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   overflow-wrap: anywhere;
 }
 
@@ -5723,8 +5844,8 @@ input:focus,
   min-width: 0;
   padding: 11px 12px;
   border-radius: 8px;
-  border: 1px solid #334155;
-  background: #020617;
+  border: 1px solid var(--kole-control-border);
+  background: var(--kole-control-bg);
   color: #e5e7eb;
   font-size: 14px;
   outline: none;
@@ -5749,7 +5870,7 @@ input:focus,
 .available-truck-field-hint {
   display: block;
   margin-top: 5px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 11px;
   line-height: 1.35;
 }
@@ -5775,7 +5896,7 @@ input:focus,
 }
 
 .available-truck-suggestion-header span {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   text-align: right;
 }
@@ -5869,7 +5990,7 @@ input:focus,
 
 .available-truck-form-row-header span {
   margin-top: 3px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
 }
 
@@ -5899,7 +6020,7 @@ input:focus,
 }
 
 .available-truck-form-actions span {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
 }
 
@@ -5940,7 +6061,7 @@ input:focus,
 }
 
 
-/* PASS 16: Available Trucks current/analysis split + posting rules */
+/*  Available Trucks current/analysis split + posting rules */
 .available-trucks-current-summary .available-trucks-title {
   color: var(--kole-text) !important;
 }
@@ -6044,7 +6165,7 @@ input:focus,
 .available-truck-distribution-summary span {
   display: block;
   margin-bottom: 6px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
@@ -6091,12 +6212,7 @@ input:focus,
 
 .available-truck-distribution-table-wrap {
   border-radius: 12px;
-  border: 1px solid #1e293b;
-  overflow-x: auto;
-}
-
-.available-truck-distribution-table {
-  min-width: 720px;
+  border: 1px solid var(--kole-border-subtle);
 }
 
 .available-truck-distribution-table th:nth-child(1),
@@ -6174,7 +6290,7 @@ button.available-truck-distribution-summary-card:disabled {
 .available-truck-distribution-summary-card small {
   display: block;
   margin-top: 6px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   font-weight: 700;
 }
@@ -6224,7 +6340,7 @@ button.available-truck-distribution-summary-card:disabled {
   padding: 18px;
 }
 
-/* AVAILABLE TRUCKS DISTRIBUTION LIST V1.1: match nested chevrons and keep two-column list compact. */
+/* AVAILABLE TRUCKS DISTRIBUTION LIST: match nested chevrons and keep two-column list compact. */
 .available-trucks-summary .available-trucks-chevron-slot {
   justify-self: end;
   min-width: auto;
@@ -6282,7 +6398,6 @@ button.available-truck-distribution-summary-card:disabled {
 
 /* REPORT ACTION ALERT COUNTER */
 .report-alert-status-pill {
-  min-width: 94px;
   border-color: rgba(148, 163, 184, 0.34) !important;
   background: rgba(15, 23, 42, 0.62) !important;
   color: #e5e7eb !important;
@@ -6372,8 +6487,6 @@ button.available-truck-distribution-summary-card:disabled {
   border: 1px solid rgba(45, 212, 191, 0.36);
   border-radius: 10px;
   padding: 10px 12px;
-  background: rgba(20, 184, 166, 0.11);
-  color: #ccfbf1;
   font-size: 13px;
   font-weight: 750;
   text-align: center;
@@ -6389,7 +6502,7 @@ button.available-truck-distribution-summary-card:disabled {
 /* DRIVER TIME OFF LOG */
 .driver-time-off-panel {
   margin: 24px 0 0;
-  border: 1px solid var(--kole-border-strong, #334155);
+  border: 1px solid var(--kole-border-strong, var(--kole-control-border));
   border-radius: 14px;
   background: var(--kole-table-body, #0b1220);
   overflow: hidden;
@@ -6397,7 +6510,7 @@ button.available-truck-distribution-summary-card:disabled {
 
 .driver-time-off-header {
   padding: 14px 16px;
-  border-bottom: 1px solid var(--kole-border, #1e293b);
+  border-bottom: 1px solid var(--kole-border, var(--kole-border-subtle));
   background: var(--kole-surface, #111827);
   align-items: center !important;
 }
@@ -6500,9 +6613,9 @@ button.available-truck-distribution-summary-card:disabled {
 .driver-time-off-form-grid input {
   width: 100%;
   padding: 11px 12px;
-  border: 1px solid #334155;
+  border: 1px solid var(--kole-control-border);
   border-radius: 8px;
-  background: #020617;
+  background: var(--kole-control-bg);
   color: #e5e7eb;
   font-size: 15px;
   outline: none;
@@ -6553,7 +6666,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 .driver-time-off-pattern-header span {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   font-weight: 800;
 }
@@ -6654,7 +6767,7 @@ button.available-truck-distribution-summary-card:disabled {
 
 .driver-time-off-history-header p {
   margin: 0;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 13px;
 }
 
@@ -6752,7 +6865,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 
-/* AFTERNOON POLISH PASS: report gating, count-pill color, and banner stability */
+/*  report gating, count-pill color, and banner stability */
 .reports-panel.feature-accordion-panel {
   width: min(1100px, 100%) !important;
   display: block;
@@ -6819,18 +6932,6 @@ button.available-truck-distribution-summary-card:disabled {
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
 }
 
-.driver-position-counts .driver-position-count-pill.total {
-  border-color: rgba(125, 211, 252, 0.42) !important;
-  background: rgba(14, 165, 233, 0.22) !important;
-  color: #bae6fd !important;
-}
-
-.driver-position-counts .driver-position-count-pill.moving {
-  border-color: rgba(45, 212, 191, 0.62) !important;
-  background: rgba(20, 184, 166, 0.24) !important;
-  color: #99f6e4 !important;
-}
-
 .driver-position-counts .driver-position-count-pill.stale,
 .driver-position-counts .driver-position-count-pill.missing {
   border-color: rgba(251, 146, 60, 0.55) !important;
@@ -6857,7 +6958,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 
-/* AFTERNOON POLISH PASS 2: No Availability PDF, roster pill color matching, Operations Today alignment */
+/*  No Availability PDF, roster pill color matching, Operations Today alignment */
 .driver-position-counts .driver-position-count-pill.total {
   border-color: rgba(248, 250, 252, 0.52) !important;
   background: rgba(248, 250, 252, 0.12) !important;
@@ -6928,7 +7029,7 @@ button.available-truck-distribution-summary-card:disabled {
 .fleet-equipment-table td small {
   display: block;
   margin-top: 4px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 11px;
   line-height: 1.25;
 }
@@ -6952,14 +7053,14 @@ button.available-truck-distribution-summary-card:disabled {
 
 .on-this-day-year-block {
   margin-top: 22px;
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kole-border-subtle);
   border-radius: 14px;
   overflow: hidden;
-  background: #0b1220;
+  background: var(--kole-table-body);
 }
 
 .on-this-day-year-header {
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--kole-border-subtle);
 }
 
 .on-this-day-section {
@@ -6973,7 +7074,6 @@ button.available-truck-distribution-summary-card:disabled {
 
 .on-this-day-section h5 {
   margin: 0 0 10px;
-  color: #f8fafc;
   font-size: 15px;
 }
 
@@ -7042,15 +7142,15 @@ button.available-truck-distribution-summary-card:disabled {
 .on-this-day-filter-bar select {
   padding: 10px 12px;
   border-radius: 8px;
-  border: 1px solid #334155;
-  background: #020617;
+  border: 1px solid var(--kole-control-border);
+  background: var(--kole-control-bg);
   color: #e5e7eb;
   font-size: 14px;
   outline: none;
 }
 
 .on-this-day-filter-bar small {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   padding-bottom: 10px;
 }
 
@@ -7110,7 +7210,7 @@ button.available-truck-distribution-summary-card:disabled {
 .on-this-day-run-hint {
   margin: 10px 0 0;
   text-align: center;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 13px;
 }
 
@@ -7225,7 +7325,7 @@ button.available-truck-distribution-summary-card:disabled {
   justify-content: space-between;
   gap: 16px;
   padding: 14px;
-  border-top: 1px solid #1e293b;
+  border-top: 1px solid var(--kole-border-subtle);
   background: rgba(15, 23, 42, 0.38);
 }
 
@@ -7238,7 +7338,7 @@ button.available-truck-distribution-summary-card:disabled {
 .sales-suppression-control-card p,
 .sales-suppression-control-card small {
   margin: 0;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   line-height: 1.4;
 }
 
@@ -7264,9 +7364,9 @@ button.available-truck-distribution-summary-card:disabled {
   width: 100%;
   min-height: 92px;
   resize: vertical;
-  border: 1px solid #334155;
+  border: 1px solid var(--kole-control-border);
   border-radius: 10px;
-  background: #020617;
+  background: var(--kole-control-bg);
   color: #e5e7eb;
   padding: 12px;
   font-family: inherit;
@@ -7305,7 +7405,7 @@ button.available-truck-distribution-summary-card:disabled {
   }
 }
 
-/* PASS 30: Permit Governance operational report */
+/*  Permit Governance operational report */
 .permit-governance-card-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -7357,7 +7457,7 @@ button.available-truck-distribution-summary-card:disabled {
 .permit-governance-filter-card small {
   display: block;
   margin-top: 10px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   line-height: 1.35;
   font-weight: 600;
@@ -7397,7 +7497,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 .permit-history-detail-overlay {
-  z-index: 1100;
+  z-index: var(--kole-z-modal-detail);
 }
 
 .permit-history-detail-modal {
@@ -7420,7 +7520,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 .muted-table-note {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   font-weight: 700;
 }
@@ -7443,7 +7543,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 
-/* PASS 31: Permit History polish */
+/*  Permit History polish */
 .permit-history-table th:last-child,
 .permit-history-table td:last-child,
 .permit-governance-table th:last-child,
@@ -7454,11 +7554,6 @@ button.available-truck-distribution-summary-card:disabled {
 .permit-history-table td:last-child,
 .permit-governance-table td:last-child {
   text-align: right;
-}
-
-.permit-history-table td:last-child .compact-action-button,
-.permit-governance-table td:last-child .compact-action-button {
-  margin-right: 2px;
 }
 
 .permit-history-detail-actions {
@@ -7473,7 +7568,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 .permit-history-detail-actions span {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 13px;
   line-height: 1.35;
 }
@@ -7486,7 +7581,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 
-/* PASS 32: Permit history action-column breathing room and return-stack polish */
+/*  Permit history action-column breathing room and return-stack polish */
 .permit-history-table th:last-child,
 .permit-history-table td:last-child {
   width: 150px;
@@ -7628,7 +7723,7 @@ button.available-truck-distribution-summary-card:disabled {
 .startup-splash-overlay {
   position: fixed;
   inset: 0;
-  z-index: 2500;
+  z-index: var(--kole-z-splash);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -7810,7 +7905,7 @@ button.available-truck-distribution-summary-card:disabled {
 .startup-splash-step small {
   display: block;
   margin-top: 3px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   line-height: 1.3;
 }
 
@@ -7822,7 +7917,7 @@ button.available-truck-distribution-summary-card:disabled {
   justify-content: space-between;
   gap: 14px;
   margin-top: 22px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 13px;
 }
 
@@ -7901,21 +7996,17 @@ button.available-truck-distribution-summary-card:disabled {
 .driver-snapshot-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 12px;
 }
 
 .driver-snapshot-summary div {
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 10px;
   background: rgba(255, 255, 255, 0.04);
-  padding: 12px;
 }
 
 .driver-snapshot-summary span {
   display: block;
   margin-bottom: 6px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
@@ -7929,7 +8020,7 @@ button.available-truck-distribution-summary-card:disabled {
 
 .driver-snapshot-table-wrap {
   overflow-x: auto;
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kole-border-subtle);
   border-radius: 12px;
   margin-top: 10px;
 }
@@ -7947,7 +8038,7 @@ button.available-truck-distribution-summary-card:disabled {
 .driver-snapshot-source-note {
   display: block;
   margin-top: 10px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   line-height: 1.35;
 }
 
@@ -8014,10 +8105,6 @@ button.available-truck-distribution-summary-card:disabled {
   width: min(1180px, 94vw);
 }
 
-.driver-performance-modal-body {
-  background: radial-gradient(circle at top left, rgba(250, 204, 21, 0.08), transparent 34%), #020617;
-}
-
 .driver-snapshot-summary-wide {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -8057,7 +8144,7 @@ button.available-truck-distribution-summary-card:disabled {
 .driver-performance-analysis-card span {
   display: block;
   margin-bottom: 7px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
@@ -8086,15 +8173,12 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 .driver-performance-section-card {
-  border: 1px solid #1e293b;
-  border-radius: 14px;
+  border: 1px solid var(--kole-border-subtle);
   background: rgba(15, 23, 42, 0.76);
-  padding: 15px;
 }
 
 .driver-performance-section-card h4 {
   margin: 0 0 12px;
-  color: #facc15;
   font-size: 16px;
 }
 
@@ -8122,15 +8206,14 @@ button.available-truck-distribution-summary-card:disabled {
 
 .driver-performance-bar-label span,
 .driver-performance-bar-row small {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
 }
 
 .driver-performance-bar-track {
-  height: 12px;
   border-radius: 999px;
-  background: #111827;
-  border: 1px solid #1e293b;
+  background: var(--kole-shell);
+  border: 1px solid var(--kole-border-subtle);
   overflow: hidden;
 }
 
@@ -8144,7 +8227,6 @@ button.available-truck-distribution-summary-card:disabled {
 .driver-performance-insight-list {
   margin: 0;
   padding-left: 18px;
-  color: #dbe4ef;
   line-height: 1.5;
 }
 
@@ -8180,6 +8262,7 @@ button.available-truck-distribution-summary-card:disabled {
 /* BRAND REVEAL: plane/cloud refresh animation for Operations Today */
 .kole-brand-title-zone {
   position: relative;
+  isolation: isolate;
   width: min(720px, 92vw);
   min-height: 82px;
   display: flex;
@@ -8188,7 +8271,102 @@ button.available-truck-distribution-summary-card:disabled {
   overflow: visible;
 }
 
+:root[data-season] .kole-brand-title-zone {
+  margin-block: 10px 14px;
+}
+
+.brand-season-scene {
+  display: none;
+  position: absolute;
+  inset: 0 -28px;
+  z-index: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+:root[data-season] .brand-season-scene {
+  display: block;
+}
+
+.brand-season-scene::before,
+.brand-season-scene::after {
+  content: '';
+  position: absolute;
+  top: 17px;
+  width: 112px;
+  height: 52px;
+  border: 2px solid var(--kole-brand-season-primary);
+  opacity: 0.34;
+}
+
+.brand-season-scene::before {
+  left: 0;
+  border-right: 0;
+  border-radius: 32px 0 0 32px;
+}
+
+.brand-season-scene::after {
+  right: 0;
+  border-left: 0;
+  border-radius: 0 32px 32px 0;
+}
+
+.brand-season-glow {
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  width: min(540px, 78%);
+  height: 72px;
+  border: 1px solid var(--kole-brand-season-primary);
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 18% 38%, var(--kole-brand-season-glow), transparent 26%),
+    radial-gradient(circle at 82% 62%, var(--kole-brand-season-glow), transparent 28%),
+    linear-gradient(90deg, transparent, var(--kole-brand-season-glow), transparent);
+  box-shadow: inset 0 0 28px var(--kole-brand-season-glow), 0 8px 28px var(--kole-brand-season-glow);
+  opacity: 0.46;
+  transform: translateX(-50%);
+}
+
+.brand-season-symbol {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border: 1px solid var(--kole-brand-season-primary);
+  border-radius: 16px;
+  background: var(--kole-shell);
+  color: var(--kole-brand-season-primary);
+  box-shadow: 0 8px 22px var(--kole-brand-season-glow), inset 0 0 16px var(--kole-brand-season-glow);
+  opacity: 0.96;
+}
+
+.brand-season-icon {
+  display: block;
+  width: 28px;
+  height: 28px;
+  overflow: visible;
+  fill: currentColor;
+  filter: drop-shadow(0 4px 8px var(--kole-brand-season-glow));
+}
+
+.brand-season-symbol-one {
+  top: 20px;
+  left: 4%;
+}
+
+.brand-season-symbol-two {
+  top: 20px;
+  right: 4%;
+  border-color: var(--kole-brand-season-secondary);
+  color: var(--kole-brand-season-secondary);
+}
+
 .brand-static-copy {
+  position: relative;
+  z-index: 2;
   display: flex;
   min-height: 82px;
   flex-direction: column;
@@ -8203,11 +8381,11 @@ button.available-truck-distribution-summary-card:disabled {
 .app-header .brand-title-text,
 .brand-roll-back h1 {
   margin: 0 0 6px;
-  color: #f8fafc;
+  color: var(--kole-text);
   font-size: clamp(28px, 3vw, 42px);
   line-height: 1.05;
   letter-spacing: 0.01em;
-  text-shadow: 0 1px 0 #facc15, 0 14px 34px rgba(0, 0, 0, 0.36);
+  text-shadow: 0 1px 0 var(--kole-brand-season-primary, var(--kole-gold-bright)), 0 14px 34px rgba(0, 0, 0, 0.36);
 }
 
 .app-header .brand-subtitle-text,
@@ -8224,6 +8402,7 @@ button.available-truck-distribution-summary-card:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 2;
   pointer-events: none;
   overflow: visible;
   --brand-reveal-duration: 2.75s;
@@ -8232,11 +8411,11 @@ button.available-truck-distribution-summary-card:disabled {
 .brand-reveal-target {
   position: absolute;
   margin: 0;
-  color: #f8fafc;
+  color: var(--kole-text);
   font-size: clamp(28px, 3vw, 42px);
   line-height: 1.05;
   letter-spacing: 0.01em;
-  text-shadow: 0 1px 0 #facc15, 0 14px 34px rgba(0, 0, 0, 0.36);
+  text-shadow: 0 1px 0 var(--kole-brand-season-primary, var(--kole-gold-bright)), 0 14px 34px rgba(0, 0, 0, 0.36);
   animation: brand-title-cloud-burst var(--brand-reveal-duration) ease-out both;
 }
 
@@ -8468,35 +8647,46 @@ button.available-truck-distribution-summary-card:disabled {
     width: 58px;
     height: 31px;
   }
+
+  .brand-season-scene {
+    inset: 0 -3px;
+  }
+
+  .brand-season-scene::before,
+  .brand-season-scene::after {
+    display: none;
+  }
+
+  .brand-season-glow {
+    width: 86%;
+    height: 72px;
+  }
+
+  .brand-season-symbol-one {
+    left: 0;
+  }
+
+  .brand-season-symbol-two {
+    right: 0;
+  }
+
+  .brand-season-symbol-one,
+  .brand-season-symbol-two {
+    top: 23px;
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+  }
+
+  .brand-season-icon {
+    width: 22px;
+    height: 22px;
+  }
 }
 
-/* PASS 19: Alicia light mode toggle
-   Dark remains the default. Light mode swaps the color tokens first, then patches
-   the older hard-coded dark surfaces that predate the token layer. */
-:root[data-theme='dark'] {
-  color-scheme: dark;
-}
-
-:root[data-theme='light'] {
-  color-scheme: light;
-  --kole-page-bg: #eef2f7;
-  --kole-shell: #ffffff;
-  --kole-surface: #f8fafc;
-  --kole-surface-2: #eef2f7;
-  --kole-table-body: #ffffff;
-  --kole-table-row: #ffffff;
-  --kole-table-head: #e2e8f0;
-  --kole-border: #cbd5e1;
-  --kole-border-strong: #94a3b8;
-  --kole-text: #111827;
-  --kole-muted: #475569;
-  --kole-gold: #b9850d;
-  --kole-gold-bright: #946a08;
-  --kole-secondary-rail: #64748b;
-  --kole-secondary-rail-soft: rgba(100, 116, 139, 0.45);
-  --kole-active-slate: rgba(148, 163, 184, 0.18);
-}
-
+/* LIGHT THEME COMPATIBILITY
+   The token contract handles shared primitives. The rules below cover older,
+   feature-specific surfaces until those components are migrated to tokens. */
 .theme-toggle-button {
   display: inline-flex;
   align-items: center;
@@ -8504,11 +8694,11 @@ button.available-truck-distribution-summary-card:disabled {
   gap: 7px;
   min-height: 40px;
   padding: 9px 13px;
-  border: 1px solid rgba(148, 163, 184, 0.45);
+  border: 1px solid var(--kole-border);
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.82);
-  color: #f8fafc;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+  background: var(--kole-shell);
+  color: var(--kole-text);
+  box-shadow: var(--kole-panel-shadow);
   font-size: 13px;
   font-weight: 800;
   letter-spacing: 0.01em;
@@ -8516,18 +8706,18 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 .theme-toggle-button:hover {
-  background: #1f2937;
+  background: var(--kole-table-row-hover);
 }
 
 .theme-toggle-button.light {
-  background: #ffffff;
-  color: #111827;
-  border-color: #cbd5e1;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+  background: var(--kole-shell);
+  color: var(--kole-text);
+  border-color: var(--kole-border);
+  box-shadow: var(--kole-panel-shadow);
 }
 
 .theme-toggle-button.light:hover {
-  background: #f8fafc;
+  background: var(--kole-surface);
 }
 
 .theme-toggle-icon {
@@ -8537,15 +8727,15 @@ button.available-truck-distribution-summary-card:disabled {
   width: 20px;
   height: 20px;
   border-radius: 999px;
-  background: rgba(250, 204, 21, 0.18);
-  color: #facc15;
+  background: var(--kole-selection-bg);
+  color: var(--kole-gold-bright);
   font-size: 13px;
   line-height: 1;
 }
 
 .theme-toggle-button.light .theme-toggle-icon {
-  background: rgba(180, 83, 9, 0.12);
-  color: #92400e;
+  background: var(--kole-focus);
+  color: var(--kole-action-hover);
 }
 
 .header-actions {
@@ -8556,7 +8746,7 @@ button.available-truck-distribution-summary-card:disabled {
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  z-index: 5;
+  z-index: var(--kole-z-header);
 }
 
 .header-actions .header-logoff {
@@ -8570,9 +8760,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 :root[data-theme='light'] body {
-  background:
-    radial-gradient(circle at 50% -180px, rgba(148, 163, 184, 0.30), transparent 430px),
-    linear-gradient(180deg, #f8fafc 0%, var(--kole-page-bg) 58%, #e2e8f0 100%) !important;
+  background: var(--kole-page-background) !important;
   color: var(--kole-text) !important;
 }
 
@@ -8580,8 +8768,8 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .brand-title-text,
 :root[data-theme='light'] .brand-reveal-target,
 :root[data-theme='light'] .brand-roll-back h1 {
-  color: #111827 !important;
-  text-shadow: none !important;
+  color: var(--kole-text) !important;
+  text-shadow: 0 1px 0 var(--kole-brand-season-primary, transparent), 0 10px 28px rgba(15, 23, 42, 0.12) !important;
 }
 
 :root[data-theme='light'] .app-header p,
@@ -8626,7 +8814,7 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .driver-report-section-header,
 :root[data-theme='light'] .gross-revenue-quarter-header,
 :root[data-theme='light'] .detail-header {
-  background: linear-gradient(180deg, #ffffff, #f1f5f9) !important;
+  background: linear-gradient(180deg, var(--kole-shell), var(--kole-surface)) !important;
   border-color: var(--kole-border) !important;
   color: var(--kole-text) !important;
 }
@@ -8643,7 +8831,7 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .sales-profile-section h3,
 :root[data-theme='light'] .sales-notes-section h3,
 :root[data-theme='light'] .sales-lead-detail h3 {
-  color: #1e293b !important;
+  color: var(--kole-text-soft) !important;
 }
 
 :root[data-theme='light'] table,
@@ -8675,9 +8863,9 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .settlement-report-table th,
 :root[data-theme='light'] .gross-revenue-quarter-table th,
 :root[data-theme='light'] .gross-revenue-table th {
-  background: #e2e8f0 !important;
-  color: #334155 !important;
-  border-bottom-color: #cbd5e1 !important;
+  background: var(--kole-table-head) !important;
+  color: var(--kole-message-text) !important;
+  border-bottom-color: var(--kole-divider-strong) !important;
 }
 
 :root[data-theme='light'] td,
@@ -8688,22 +8876,22 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .settlement-report-table td,
 :root[data-theme='light'] .gross-revenue-quarter-table td,
 :root[data-theme='light'] .gross-revenue-table td {
-  color: #1f2937 !important;
-  border-bottom-color: #e2e8f0 !important;
+  color: var(--kole-text-soft) !important;
+  border-bottom-color: var(--kole-divider) !important;
 }
 
 :root[data-theme='light'] tbody tr,
 :root[data-theme='light'] .driver-position-table tbody tr,
 :root[data-theme='light'] .upload-digest-table tbody tr,
 :root[data-theme='light'] .report-table-wrap tbody tr {
-  background: #ffffff !important;
+  background: var(--kole-table-row) !important;
 }
 
 :root[data-theme='light'] tbody tr:nth-child(even),
 :root[data-theme='light'] .driver-position-table tbody tr:nth-child(even),
 :root[data-theme='light'] .upload-digest-table tbody tr:nth-child(even),
 :root[data-theme='light'] .report-table-wrap tbody tr:nth-child(even) {
-  background: #f8fafc !important;
+  background: var(--kole-table-row-alt) !important;
 }
 
 :root[data-theme='light'] tbody tr:hover,
@@ -8712,12 +8900,12 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .report-table-wrap tbody tr:hover,
 :root[data-theme='light'] .sales-year-clickable-row:hover,
 :root[data-theme='light'] .driver-report-table tbody tr.report-clickable-row:hover {
-  background: #eaf2ff !important;
+  background: var(--kole-table-row-hover) !important;
 }
 
 :root[data-theme='light'] .selected-row {
-  background: #dbeafe !important;
-  box-shadow: inset 4px 0 0 #2563eb !important;
+  background: var(--kole-selection-bg) !important;
+  box-shadow: inset 4px 0 0 var(--kole-action) !important;
 }
 
 :root[data-theme='light'] input,
@@ -8726,9 +8914,9 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .report-controls select,
 :root[data-theme='light'] .report-controls input[type='date'],
 :root[data-theme='light'] .sales-note-composer textarea {
-  background: #ffffff !important;
-  color: #111827 !important;
-  border-color: #cbd5e1 !important;
+  background: var(--kole-control-bg) !important;
+  color: var(--kole-text) !important;
+  border-color: var(--kole-control-border) !important;
   color-scheme: light !important;
 }
 
@@ -8738,8 +8926,8 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .report-controls select:focus,
 :root[data-theme='light'] .report-controls input[type='date']:focus,
 :root[data-theme='light'] .sales-note-composer textarea:focus {
-  border-color: #2563eb !important;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16) !important;
+  border-color: var(--kole-action) !important;
+  box-shadow: 0 0 0 3px var(--kole-focus) !important;
 }
 
 :root[data-theme='light'] .report-group-accordion,
@@ -8758,7 +8946,7 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .sales-lead-metrics div,
 :root[data-theme='light'] .sales-profile-headline-grid div,
 :root[data-theme='light'] .settlement-totals-grid div {
-  background: #ffffff !important;
+  background: var(--kole-shell) !important;
   border-color: var(--kole-border) !important;
   color: var(--kole-text) !important;
   box-shadow: none !important;
@@ -8769,9 +8957,9 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .upload-digest-summary,
 :root[data-theme='light'] .upload-digest-arrow,
 :root[data-theme='light'] .upload-digest-today-button {
-  background: #f8fafc !important;
+  background: var(--kole-surface) !important;
   border-color: var(--kole-border) !important;
-  color: #1f2937 !important;
+  color: var(--kole-text-soft) !important;
 }
 
 :root[data-theme='light'] .report-group-button:hover,
@@ -8779,12 +8967,12 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .upload-digest-summary:hover,
 :root[data-theme='light'] .upload-digest-arrow:hover,
 :root[data-theme='light'] .upload-digest-today-button:hover {
-  background: #eef2f7 !important;
+  background: var(--kole-surface-2) !important;
 }
 
 :root[data-theme='light'] .report-group-accordion.open > .report-group-button,
 :root[data-theme='light'] .report-accordion.open > .report-accordion-button {
-  background: #eef2f7 !important;
+  background: var(--kole-surface-2) !important;
   border-left-color: var(--kole-secondary-rail) !important;
   border-bottom-color: var(--kole-border) !important;
 }
@@ -8798,7 +8986,7 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .sales-lead-metrics strong,
 :root[data-theme='light'] .sales-profile-headline-grid strong,
 :root[data-theme='light'] .driver-report-section-total {
-  color: #111827 !important;
+  color: var(--kole-text) !important;
 }
 
 :root[data-theme='light'] .report-group-button span span,
@@ -8818,13 +9006,13 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .detail-item,
 :root[data-theme='light'] .view-tabs,
 :root[data-theme='light'] .modal-body {
-  background: #ffffff !important;
+  background: var(--kole-shell) !important;
   border-color: var(--kole-border) !important;
   color: var(--kole-text) !important;
 }
 
 :root[data-theme='light'] .detail-item strong {
-  color: #111827 !important;
+  color: var(--kole-text) !important;
 }
 
 :root[data-theme='light'] .view-tabs button,
@@ -8844,48 +9032,41 @@ button.available-truck-distribution-summary-card:disabled {
   background: #334155;
 }
 
-:root[data-theme='light'] .view-tabs .active-tab,
-:root[data-theme='light'] .active-filter {
-  background: #facc15 !important;
-  color: #111827 !important;
-  border-color: #eab308 !important;
-}
-
 :root[data-theme='light'] .modal-overlay {
   background: rgba(15, 23, 42, 0.32) !important;
 }
 
 :root[data-theme='light'] .operations-card {
-  background: linear-gradient(180deg, #ffffff, #e2e8f0) !important;
-  border-color: #cbd5e1 !important;
-  color: #111827 !important;
+  background: linear-gradient(180deg, var(--kole-shell), var(--kole-surface-2)) !important;
+  border-color: var(--kole-border) !important;
+  color: var(--kole-text) !important;
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12), inset 0 1px 0 #ffffff !important;
 }
 
 :root[data-theme='light'] .operations-card:hover {
-  background: #ffffff !important;
+  background: var(--kole-shell) !important;
 }
 
 :root[data-theme='light'] .operations-card span {
-  color: #475569 !important;
+  color: var(--kole-muted) !important;
 }
 
 :root[data-theme='light'] .operations-card strong {
-  color: #020617 !important;
+  color: var(--kole-text) !important;
 }
 
 :root[data-theme='light'] .login-status-card,
 :root[data-theme='light'] .settlement-date-control,
 :root[data-theme='light'] .settlement-window-note {
-  background: rgba(250, 204, 21, 0.14) !important;
-  border-color: rgba(180, 83, 9, 0.24) !important;
-  color: #78350f !important;
+  background: var(--kole-selection-bg) !important;
+  border-color: var(--kole-gold) !important;
+  color: var(--kole-gold) !important;
 }
 
 :root[data-theme='light'] .login-status-card strong,
 :root[data-theme='light'] .settlement-window-note strong,
 :root[data-theme='light'] .settlement-date-control small {
-  color: #78350f !important;
+  color: var(--kole-gold) !important;
 }
 
 :root[data-theme='light'] .report-alert {
@@ -8901,12 +9082,12 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 :root[data-theme='light'] .report-total-row td {
-  background: #e2e8f0 !important;
-  border-top-color: #cbd5e1 !important;
+  background: var(--kole-table-head) !important;
+  border-top-color: var(--kole-divider-strong) !important;
 }
 
 :root[data-theme='light'] .sales-lead-card:hover {
-  background: #f8fafc !important;
+  background: var(--kole-surface) !important;
 }
 
 :root[data-theme='light'] .sales-lead-card.follow-up-due {
@@ -8915,9 +9096,9 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 :root[data-theme='light'] .brand-logo-large {
-  background: #ffffff;
-  border: 1px solid rgba(203, 213, 225, 0.70);
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.10);
+  background: var(--kole-shell);
+  border: 1px solid var(--kole-border);
+  box-shadow: var(--kole-panel-shadow);
 }
 
 @media (max-width: 900px) {
@@ -8929,21 +9110,14 @@ button.available-truck-distribution-summary-card:disabled {
   }
 }
 
-/* PASS 19.1: Alicia light-mode contrast polish
+/*  Alicia light-mode contrast polish
    Light mode moves away from mustard as the default accent. Amber is now reserved for
    warnings only; blue/slate handles section chrome, links, buttons, and note pills. */
-:root[data-theme='light'] {
-  --kole-gold: #2563eb;
-  --kole-gold-bright: #1d4ed8;
-  --kole-secondary-rail: #64748b;
-  --kole-secondary-rail-soft: rgba(100, 116, 139, 0.34);
-}
-
 :root[data-theme='light'] .feature-section-header-button {
-  background: linear-gradient(180deg, #ffffff, #f3f6fb) !important;
-  border-color: #cbd5e1 !important;
-  border-left-color: #2563eb !important;
-  color: #0f172a !important;
+  background: linear-gradient(180deg, var(--kole-shell), var(--kole-surface)) !important;
+  border-color: var(--kole-border) !important;
+  border-left-color: var(--kole-action) !important;
+  color: var(--kole-text) !important;
   box-shadow:
     0 10px 24px rgba(15, 23, 42, 0.08),
     inset 0 1px 0 #ffffff !important;
@@ -8951,9 +9125,9 @@ button.available-truck-distribution-summary-card:disabled {
 
 :root[data-theme='light'] .feature-section-header-button:hover,
 :root[data-theme='light'] .feature-section-header-button[aria-expanded='true'] {
-  background: linear-gradient(180deg, #ffffff, #eaf2ff) !important;
-  border-color: #bfdbfe !important;
-  border-left-color: #1d4ed8 !important;
+  background: linear-gradient(180deg, var(--kole-shell), var(--kole-selection-bg)) !important;
+  border-color: var(--kole-border-strong) !important;
+  border-left-color: var(--kole-action-hover) !important;
 }
 
 :root[data-theme='light'] .feature-section-title,
@@ -8965,7 +9139,7 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .available-trucks-section-header h2,
 :root[data-theme='light'] .report-group-button strong,
 :root[data-theme='light'] .report-accordion-button span:first-child {
-  color: #0f172a !important;
+  color: var(--kole-text) !important;
   text-shadow: none !important;
 }
 
@@ -8978,15 +9152,15 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .report-card p,
 :root[data-theme='light'] .driver-report-title p,
 :root[data-theme='light'] .available-trucks-subheader p {
-  color: #475569 !important;
+  color: var(--kole-muted) !important;
   opacity: 1 !important;
   text-shadow: none !important;
 }
 
 :root[data-theme='light'] .feature-section-status-pill.is-zero {
-  background: #eef2f7 !important;
-  border-color: #cbd5e1 !important;
-  color: #475569 !important;
+  background: var(--kole-surface-2) !important;
+  border-color: var(--kole-border) !important;
+  color: var(--kole-muted) !important;
 }
 
 :root[data-theme='light'] .feature-section-status-pill.has-items,
@@ -9005,9 +9179,9 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .upload-digest-summary,
 :root[data-theme='light'] .intellitrack-summary,
 :root[data-theme='light'] .available-trucks-summary {
-  background: #f8fafc !important;
-  border-color: #cbd5e1 !important;
-  color: #0f172a !important;
+  background: var(--kole-surface) !important;
+  border-color: var(--kole-border) !important;
+  color: var(--kole-text) !important;
   box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06) !important;
 }
 
@@ -9019,28 +9193,28 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .upload-digest-summary[aria-expanded='true'],
 :root[data-theme='light'] .intellitrack-summary[aria-expanded='true'],
 :root[data-theme='light'] .available-trucks-summary[aria-expanded='true'] {
-  background: #eef6ff !important;
-  border-color: #bfdbfe !important;
-  border-left-color: #2563eb !important;
+  background: var(--kole-selection-bg) !important;
+  border-color: var(--kole-border-strong) !important;
+  border-left-color: var(--kole-action) !important;
 }
 
 :root[data-theme='light'] .upload-digest-chevron,
 :root[data-theme='light'] .intellitrack-chevron,
 :root[data-theme='light'] .available-trucks-chevron {
-  color: #0f172a !important;
+  color: var(--kole-text) !important;
 }
 
 :root[data-theme='light'] .table-link-button {
-  border-color: #93c5fd !important;
-  background: #dbeafe !important;
-  color: #1e3a8a !important;
+  border-color: var(--kole-border-strong) !important;
+  background: var(--kole-selection-bg) !important;
+  color: var(--kole-action-hover) !important;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.8) !important;
 }
 
 :root[data-theme='light'] .table-link-button:hover:not(:disabled) {
-  border-color: #60a5fa !important;
-  background: #bfdbfe !important;
-  color: #172554 !important;
+  border-color: var(--kole-action) !important;
+  background: var(--kole-surface-2) !important;
+  color: var(--kole-action-hover) !important;
 }
 
 :root[data-theme='light'] .table-link-button:disabled {
@@ -9071,19 +9245,16 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 :root[data-theme='light'] .sales-lead-footer strong {
-  color: #2563eb !important;
+  color: var(--kole-action) !important;
 }
 
 :root[data-theme='light'] .sales-lead-note-count {
-  background: #dbeafe !important;
-  border-color: #93c5fd !important;
-  color: #1e3a8a !important;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.72) !important;
 }
 
 :root[data-theme='light'] .sales-lead-metrics div {
-  background: #f8fafc !important;
-  border-color: #cbd5e1 !important;
+  background: var(--kole-surface) !important;
+  border-color: var(--kole-border) !important;
 }
 
 :root[data-theme='light'] .sales-status.converted {
@@ -9112,9 +9283,9 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .intellitrack-current-card,
 :root[data-theme='light'] .intellitrack-search-card,
 :root[data-theme='light'] .intellitrack-order-card {
-  background: #ffffff !important;
-  border-color: #cbd5e1 !important;
-  color: #0f172a !important;
+  background: var(--kole-shell) !important;
+  border-color: var(--kole-border) !important;
+  color: var(--kole-text) !important;
   box-shadow: 0 12px 26px rgba(15, 23, 42, 0.08), inset 0 1px 0 #ffffff !important;
 }
 
@@ -9125,15 +9296,15 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .available-trucks-source-note,
 :root[data-theme='light'] .available-truck-form-row-card,
 :root[data-theme='light'] .available-truck-suggestion-box {
-  background: #f8fafc !important;
-  border-color: #cbd5e1 !important;
-  color: #0f172a !important;
+  background: var(--kole-surface) !important;
+  border-color: var(--kole-border) !important;
+  color: var(--kole-text) !important;
   box-shadow: none !important;
 }
 
 :root[data-theme='light'] .available-trucks-kpi-button:hover {
-  background: #eef6ff !important;
-  border-color: #93c5fd !important;
+  background: var(--kole-selection-bg) !important;
+  border-color: var(--kole-border-strong) !important;
   transform: translateY(-1px);
 }
 
@@ -9155,7 +9326,7 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .available-truck-form-actions span,
 :root[data-theme='light'] .available-truck-suggestion-header span,
 :root[data-theme='light'] .available-truck-suggestion-chip span {
-  color: #475569 !important;
+  color: var(--kole-muted) !important;
   opacity: 1 !important;
 }
 
@@ -9168,62 +9339,62 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .available-truck-suggestion-header strong,
 :root[data-theme='light'] .available-truck-suggestion-chip strong,
 :root[data-theme='light'] .available-truck-form-row-header strong {
-  color: #0f172a !important;
+  color: var(--kole-text) !important;
 }
 
 :root[data-theme='light'] .available-trucks-insight-card li span,
 :root[data-theme='light'] .available-trucks-tonu-marker,
 :root[data-theme='light'] .available-trucks-tonu-note sup {
-  color: #2563eb !important;
+  color: var(--kole-action) !important;
 }
 
 :root[data-theme='light'] .available-truck-posting-rules,
 :root[data-theme='light'] .available-truck-roster-warning {
-  background: #eff6ff !important;
-  border-color: #bfdbfe !important;
-  border-left-color: #2563eb !important;
-  color: #1e3a8a !important;
+  background: var(--kole-selection-bg) !important;
+  border-color: var(--kole-border-strong) !important;
+  border-left-color: var(--kole-action) !important;
+  color: var(--kole-action-hover) !important;
 }
 
 :root[data-theme='light'] .available-truck-posting-rules strong,
 :root[data-theme='light'] .available-truck-roster-warning strong {
-  color: #1e3a8a !important;
+  color: var(--kole-action-hover) !important;
 }
 
 :root[data-theme='light'] .available-truck-posting-rules span,
 :root[data-theme='light'] .available-truck-roster-warning span {
-  color: #334155 !important;
+  color: var(--kole-message-text) !important;
 }
 
 :root[data-theme='light'] .available-truck-suggestion-chip {
-  background: #ffffff !important;
-  border-color: #bfdbfe !important;
-  color: #0f172a !important;
+  background: var(--kole-shell) !important;
+  border-color: var(--kole-border-strong) !important;
+  color: var(--kole-text) !important;
 }
 
 :root[data-theme='light'] .available-truck-suggestion-chip:hover:not(:disabled) {
-  background: #eff6ff !important;
-  border-color: #60a5fa !important;
+  background: var(--kole-selection-bg) !important;
+  border-color: var(--kole-action) !important;
 }
 
 :root[data-theme='light'] .available-truck-main-grid input[readonly] {
-  background: #eef2f7 !important;
-  border-color: #cbd5e1 !important;
-  color: #334155 !important;
+  background: var(--kole-surface-2) !important;
+  border-color: var(--kole-border) !important;
+  color: var(--kole-message-text) !important;
 }
 
 :root[data-theme='light'] .view-tabs .active-tab,
 :root[data-theme='light'] .active-filter {
-  background: #2563eb !important;
-  color: #ffffff !important;
-  border-color: #1d4ed8 !important;
+  background: var(--kole-action) !important;
+  color: var(--kole-action-text) !important;
+  border-color: var(--kole-action-hover) !important;
 }
 
 :root[data-theme='light'] .sort-indicator {
-  color: #2563eb !important;
+  color: var(--kole-action) !important;
 }
 
-/* PASS 19.2: Detail-card readability + theme-aware modal polish
+/*  Detail-card readability + theme-aware modal polish
    Applies to shared order detail cards, Driver Roster cards, and Driver Performance Snapshot.
    Goal: make these read like dashboard panels instead of a stack of plain field boxes. */
 .detail-grid {
@@ -9543,12 +9714,6 @@ button.available-truck-distribution-summary-card:disabled {
   color: #1e3a8a !important;
 }
 
-:root[data-theme='light'] .available-trucks-distribution-summary-button {
-  background: #ffffff !important;
-  border-color: #cbd5e1 !important;
-  color: #0f172a !important;
-}
-
 /* Splash screen light-mode memo: same animation, not same cave. */
 :root[data-theme='light'] .startup-splash-overlay {
   background:
@@ -9615,20 +9780,9 @@ button.available-truck-distribution-summary-card:disabled {
   background: linear-gradient(90deg, transparent, #2563eb, transparent) !important;
 }
 
-/* PASS 19.4: Light-mode readability cleanup
+/*  Light-mode readability cleanup
    Fixes low-contrast pills, report chevrons/select arrows, permit governance cards,
    and washed-out financial/report values after the first light-mode rollout. */
-:root[data-theme='light'] {
-  --kole-light-ink: #0f172a;
-  --kole-light-ink-soft: #334155;
-  --kole-light-muted-strong: #475569;
-  --kole-light-line: #cbd5e1;
-  --kole-light-line-strong: #94a3b8;
-  --kole-light-blue: #2563eb;
-  --kole-light-blue-deep: #1e3a8a;
-  --kole-light-teal: #0f766e;
-}
-
 /* Native select arrows were inheriting dark-mode vibes in a few report controls. */
 :root[data-theme='light'] select,
 :root[data-theme='light'] .report-controls select,
@@ -9930,7 +10084,7 @@ button.available-truck-distribution-summary-card:disabled {
   color: #ffffff !important;
 }
 
-/* PASS 19.5: Light-mode report readability polish
+/*  Light-mode report readability polish
    Targets the remaining report islands Kris flagged: Customer Booking Trends pills/notes,
    No Availability dark panels, and pale green/red status language on white. */
 :root[data-theme='light'] .customer-trends-meta-card,
@@ -10199,7 +10353,7 @@ button.available-truck-distribution-summary-card:disabled {
   color: #334155 !important;
 }
 
-/* PASS 19.6: On This Day light-mode section cleanup
+/*  On This Day light-mode section cleanup
    The On This Day modal was still carrying dark report-shell bars inside a light modal.
    Keep the useful grouping, but make the year container and movement section headers read
    like clean light report cards instead of black divider bars. */
@@ -10306,7 +10460,7 @@ button.available-truck-distribution-summary-card:disabled {
   background: #eff6ff !important;
 }
 
-/* PASS 20: first morning polish + accordion close behavior support
+/*  first morning polish + accordion close behavior support
    Tightens the remaining light-mode/dark-mode misses without changing the data shape. */
 
 /* IntelliTrack order lookup: replace the heavy stacked slabs with readable mini-cards. */
@@ -10542,7 +10696,7 @@ button.available-truck-distribution-summary-card:disabled {
   opacity: 1 !important;
 }
 
-/* PASS 20.1: Driver Time Off light-mode visibility cleanup
+/*  Driver Time Off light-mode visibility cleanup
    The Time Off report/form still had a few dark-mode panels and low-contrast labels
    after the first light-mode pass. Keep dark mode unchanged and bring the modal
    analysis cards, edit history card, and log table into the light report language. */
@@ -10745,7 +10899,7 @@ button.available-truck-distribution-summary-card:disabled {
   font-weight: 900 !important;
 }
 
-/* PASS 20.2: Sales Activity Snapshot light-mode/readability + row-open behavior
+/*  Sales Activity Snapshot light-mode/readability + row-open behavior
    The modal no longer needs a heavy Action column. Rows/cards now behave as the card opener,
    with a lighter visual treatment that matches the newer report language. */
 .sales-activity-table-wrap table {
@@ -10950,7 +11104,7 @@ button.available-truck-distribution-summary-card:disabled {
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.82) !important;
 }
 
-/* PASS 21: Operations Today Time Off quick extension helpers */
+/*  Operations Today Time Off quick extension helpers */
 .driver-time-off-title-block p {
   margin: 4px 0 0;
   color: var(--kole-muted, #94a3b8);
@@ -11090,7 +11244,7 @@ button.available-truck-distribution-summary-card:disabled {
   min-width: 760px !important;
 }
 
-/* PASS 16: Monthly Operations Summary */
+/*  Monthly Operations Summary */
 .monthly-ops-card {
   border-color: rgba(250, 204, 21, 0.22);
 }
@@ -11105,17 +11259,7 @@ button.available-truck-distribution-summary-card:disabled {
   margin-bottom: 18px;
 }
 
-.monthly-ops-summary-grid div {
-  border-color: rgba(148, 163, 184, 0.2);
-  background: rgba(15, 23, 42, 0.58);
-}
-
-.monthly-ops-summary-grid span {
-  color: var(--kole-muted, #94a3b8);
-}
-
 .monthly-ops-summary-grid strong {
-  color: var(--kole-text, #f8fafc);
   line-height: 1.15;
 }
 
@@ -11175,20 +11319,7 @@ button.available-truck-distribution-summary-card:disabled {
   }
 }
 
-:root[data-theme='light'] .monthly-ops-summary-grid div {
-  background: #ffffff;
-  border-color: #d1d5db;
-}
-
-:root[data-theme='light'] .monthly-ops-summary-grid span {
-  color: #475569;
-}
-
-:root[data-theme='light'] .monthly-ops-summary-grid strong {
-  color: #111827;
-}
-
-/* PASS 16.1: Monthly Ops readability / duplicate export cleanup */
+/*  Monthly Ops readability / duplicate export cleanup */
 .pdf-export-success {
   border-color: rgba(45, 212, 191, 0.62) !important;
   background:
@@ -11447,7 +11578,7 @@ button.available-truck-distribution-summary-card:disabled {
   border-left-color: #2563eb !important;
 }
 
-/* PASS 17: Sales/Leads banner cleanup and report generator glow-up */
+/*  Sales/Leads banner cleanup and report generator glow-up */
 .sales-and-leads-panel .feature-section-header-button {
   grid-template-columns: minmax(0, 1fr) auto auto;
 }
@@ -11675,7 +11806,7 @@ button.available-truck-distribution-summary-card:disabled {
   }
 }
 
-/* PASS 21: Document modal quick-link tiles
+/*  Document modal quick-link tiles
    These are launch actions, not data fields, so remove the repeated label/title/button stack. */
 .documents-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -11802,7 +11933,7 @@ button.available-truck-distribution-summary-card:disabled {
 
 .document-launch-copy p {
   margin: 5px 0 0;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   font-weight: 650;
   line-height: 1.35;
@@ -11907,7 +12038,7 @@ button.available-truck-distribution-summary-card:disabled {
   }
 }
 
-/* PASS 22: Light mode Sales Notes + Follow-up Suppression contrast restore
+/*  Light mode Sales Notes + Follow-up Suppression contrast restore
    Keep the dark-mode slate treatment, but prevent those dark translucent panels
    from washing out text inside the light-mode sales customer modal. */
 :root[data-theme='light'] .sales-suppression-control-section,
@@ -12018,7 +12149,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 
-/* POLISH PASS: modal/body scroll lock + operation anchors + order-to-driver drillthrough */
+/*  modal/body scroll lock + operation anchors + order-to-driver drillthrough */
 .modal-overlay,
 .detail-modal,
 .modal-body {
@@ -12050,7 +12181,7 @@ button.available-truck-distribution-summary-card:disabled {
   display: block;
   margin: 0 0 12px !important;
   padding: 10px 14px;
-  border: 1px solid var(--kole-border, #1e293b);
+  border: 1px solid var(--kole-border, var(--kole-border-subtle));
   border-left: 4px solid var(--kole-gold, #facc15);
   border-radius: 10px;
   background: rgba(15, 23, 42, 0.68);
@@ -12114,7 +12245,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 
-/* POLISH PASS: accordion alert breadcrumbs + Available Equipment light-mode contrast */
+/*  accordion alert breadcrumbs + Available Equipment light-mode contrast */
 .sales-follow-up-alert-marker {
   background: rgba(217, 119, 6, 0.22) !important;
   color: #fbbf24 !important;
@@ -12173,7 +12304,7 @@ button.available-truck-distribution-summary-card:disabled {
   color: #991b1b !important;
 }
 
-/* POLISH PASS: section alert breadcrumbs for Job Photo Uploads / IntelliTrack / Available Equipment */
+/*  section alert breadcrumbs for Job Photo Uploads / IntelliTrack / Available Equipment */
 .feature-child-alert-marker {
   flex: 0 0 auto;
 }
@@ -12296,7 +12427,7 @@ button.available-truck-distribution-summary-card:disabled {
 
 .yearly-projection-card td small {
   margin-top: 4px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   line-height: 1.35;
 }
 
@@ -12361,7 +12492,7 @@ button.available-truck-distribution-summary-card:disabled {
 
 .yearly-projection-month-card small {
   margin-top: 4px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
 }
 
 .yearly-projection-driver-table-wrap table {
@@ -12498,7 +12629,7 @@ button.available-truck-distribution-summary-card:disabled {
   }
 }
 
-/* PASS 23: Order Notes tab on the order card
+/*  Order Notes tab on the order card
    Read-only timeline for the Order Notes SharePoint list. */
 .order-notes-view {
   display: flex;
@@ -12655,7 +12786,7 @@ button.available-truck-distribution-summary-card:disabled {
 
 .order-note-meta span {
   margin-top: 3px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   font-weight: 750;
 }
@@ -12689,7 +12820,7 @@ button.available-truck-distribution-summary-card:disabled {
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.04);
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 11px;
   font-weight: 800;
 }
@@ -12715,7 +12846,7 @@ button.available-truck-distribution-summary-card:disabled {
 
 .order-notes-empty-state span {
   margin-top: 5px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 13px;
   font-weight: 700;
 }
@@ -12807,7 +12938,7 @@ button.available-truck-distribution-summary-card:disabled {
   }
 }
 
-/* PASS 23B: Order Notes readability cleanup
+/*  Order Notes readability cleanup
    Keep note content left-aligned and remove redundant order-owner chips from the card body. */
 .order-note-title-stack {
   position: relative;
@@ -12820,7 +12951,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 .order-note-source {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   font-weight: 850;
   line-height: 1.2;
@@ -12860,7 +12991,7 @@ button.available-truck-distribution-summary-card:disabled {
   }
 }
 
-/* PASS 23C: Clickable Order Notes type summary filters */
+/*  Clickable Order Notes type summary filters */
 .order-notes-type-summary {
   align-items: center;
 }
@@ -12906,7 +13037,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 
-/* PASS 23D: Order Notes composer */
+/*  Order Notes composer */
 .order-notes-toolbar-actions {
   display: flex;
   flex-direction: column;
@@ -13001,7 +13132,7 @@ button.available-truck-distribution-summary-card:disabled {
   width: 100%;
   border: 1px solid rgba(148, 163, 184, 0.34);
   border-radius: 10px;
-  background: #020617;
+  background: var(--kole-control-bg);
   color: #e5e7eb;
   font-family: inherit;
   font-size: 14px;
@@ -13035,7 +13166,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 .order-note-composer-footer small {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   font-weight: 800;
 }
@@ -13116,7 +13247,7 @@ button.available-truck-distribution-summary-card:disabled {
   }
 }
 
-/* PASS 24: Active Today dispatch/paperwork/permit note indicators */
+/*  Active Today dispatch/paperwork/permit note indicators */
 .operations-active-today-table .operation-notes-column,
 .operations-active-today-table .operation-notes-cell {
   width: 1%;
@@ -13158,7 +13289,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 
-/* TEST PASS: Operations quick-scroll, clickable future time-off, collapsed driver roster, recent notes report */
+/*  Operations quick-scroll, clickable future time-off, collapsed driver roster, recent notes report */
 
 
 
@@ -13212,7 +13343,7 @@ button.available-truck-distribution-summary-card:disabled {
 
 .driver-position-header-button p {
   margin: 4px 0 0;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   font-weight: 750;
 }
@@ -13291,7 +13422,7 @@ button.available-truck-distribution-summary-card:disabled {
   }
 }
 
-/* PASS 24: Open full order modal from recent Order Notes report */
+/*  Open full order modal from recent Order Notes report */
 .order-note-timestamp-stack {
   position: relative;
   z-index: 1;
@@ -13344,7 +13475,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 
-/* TEST PASS: monthly ops cursor truth + cleaner current time-off board */
+/*  monthly ops cursor truth + cleaner current time-off board */
 .monthly-ops-table-wrap tbody tr,
 .monthly-ops-table-wrap tbody tr:hover {
   cursor: default !important;
@@ -13369,7 +13500,7 @@ button.available-truck-distribution-summary-card:disabled {
 .driver-time-off-summary-card span,
 .driver-time-off-summary-card small {
   display: block;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 11px;
   font-weight: 850;
   letter-spacing: 0.04em;
@@ -13447,7 +13578,7 @@ button.available-truck-distribution-summary-card:disabled {
 
 .driver-time-off-group-header p {
   margin: 3px 0 0;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
 }
 
@@ -13537,7 +13668,7 @@ button.available-truck-distribution-summary-card:disabled {
 .driver-time-off-card-topline span:not(.driver-time-off-reason-pill) {
   display: block;
   margin-top: 3px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   font-weight: 750;
 }
@@ -13586,7 +13717,7 @@ button.available-truck-distribution-summary-card:disabled {
 .driver-time-off-card-facts span {
   display: block;
   margin-bottom: 4px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.05em;
@@ -13716,12 +13847,7 @@ button.available-truck-distribution-summary-card:disabled {
   color: #92400e !important;
 }
 
-/* PASS 26: Keep Recent Order Notes report modal from resizing between filters */
-.operational-notes-modal {
-  width: min(1500px, 94vw);
-  height: min(820px, 88vh);
-  max-height: 88vh;
-}
+/*  Keep Recent Order Notes report modal from resizing between filters */
 
 .operational-notes-modal .report-modal-body {
   flex: 1 1 auto;
@@ -13733,7 +13859,7 @@ button.available-truck-distribution-summary-card:disabled {
   min-height: 100%;
 }
 
-/* PASS 27: Max recent notes modal + collapsed Current Driver Time Off accordion */
+/*  Max recent notes modal + collapsed Current Driver Time Off accordion */
 .operational-notes-modal {
   width: min(1760px, 98vw) !important;
   height: min(980px, 94vh) !important;
@@ -13788,7 +13914,7 @@ button.available-truck-distribution-summary-card:disabled {
 
 .driver-time-off-header-main p {
   margin: 4px 0 0;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   font-weight: 750;
 }
@@ -13829,7 +13955,6 @@ button.available-truck-distribution-summary-card:disabled {
 .driver-time-off-lineup-pill span,
 .driver-time-off-lineup-pill small {
   display: block;
-  color: #94a3b8;
   font-size: 10px;
   font-weight: 900;
   text-transform: uppercase;
@@ -13840,7 +13965,6 @@ button.available-truck-distribution-summary-card:disabled {
 .driver-time-off-lineup-pill strong {
   display: block;
   margin: 4px 0 3px;
-  color: #f8fafc;
   font-size: 20px;
   line-height: 1;
 }
@@ -13909,7 +14033,7 @@ button.available-truck-distribution-summary-card:disabled {
 
 .driver-time-off-body-toolbar small {
   margin-top: 3px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   font-weight: 750;
 }
@@ -14007,7 +14131,7 @@ button.available-truck-distribution-summary-card:disabled {
 
 .yearly-projection-card-note {
   margin: -2px 0 12px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   line-height: 1.35;
 }
@@ -14120,9 +14244,6 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 :root[data-theme='light'] .driver-time-off-reason-pill.starting-soon {
-  border-color: #d97706 !important;
-  background: #fef3c7 !important;
-  color: #78350f !important;
   font-weight: 950 !important;
   text-shadow: none !important;
 }
@@ -14138,7 +14259,7 @@ button.available-truck-distribution-summary-card:disabled {
   }
 }
 
-/* POLISH PASS: breadcrumb drilldowns + stable order-card shell */
+/*  breadcrumb drilldowns + stable order-card shell */
 .order-detail-modal {
   width: min(1400px, 94vw);
   height: min(820px, 90vh);
@@ -14223,7 +14344,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 
-/* PASS 28: Driver Time Off pill readability + click-again collapse support */
+/*  Driver Time Off pill readability + click-again collapse support */
 .driver-time-off-lineup-pill span,
 .driver-time-off-lineup-pill small {
   color: #cbd5e1 !important;
@@ -14275,7 +14396,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 
-/* PASS 28b: Driver Time Off record chip readability in light mode */
+/*  Driver Time Off record chip readability in light mode */
 :root[data-theme='light'] .driver-time-off-reason-pill {
   border-color: #0f766e !important;
   background: #ccfbf1 !important;
@@ -14303,7 +14424,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 
-/* PASS 29: remove false-click affordances from static Available Equipment items. */
+/*  remove false-click affordances from static Available Equipment items. */
 .available-trucks-kpi-static {
   cursor: default !important;
 }
@@ -14342,11 +14463,11 @@ button.available-truck-distribution-summary-card:disabled {
   gap: 7px;
   min-height: 40px;
   padding: 9px 13px;
-  border: 1px solid rgba(148, 163, 184, 0.45);
+  border: 1px solid var(--kole-border);
   border-radius: 999px;
-  background: rgba(30, 41, 59, 0.86);
-  color: #f8fafc;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+  background: var(--kole-shell);
+  color: var(--kole-text);
+  box-shadow: var(--kole-panel-shadow);
   font-size: 13px;
   font-weight: 800;
   letter-spacing: 0.01em;
@@ -14354,7 +14475,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 .preferences-toggle-button:hover {
-  background: #334155;
+  background: var(--kole-table-row-hover);
 }
 
 .preferences-toggle-icon {
@@ -14364,8 +14485,8 @@ button.available-truck-distribution-summary-card:disabled {
   width: 20px;
   height: 20px;
   border-radius: 999px;
-  background: rgba(250, 204, 21, 0.16);
-  color: #facc15;
+  background: var(--kole-selection-bg);
+  color: var(--kole-gold-bright);
   font-size: 13px;
   line-height: 1;
 }
@@ -14376,20 +14497,20 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 .preferences-modal-header h2 {
-  color: #facc15;
+  color: var(--kole-gold-bright);
 }
 
 .preferences-modal-body {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  background: #020617;
+  background: var(--kole-control-bg);
 }
 
 .preferences-section {
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kole-border-subtle);
   border-radius: 14px;
-  background: #0b1220;
+  background: var(--kole-table-body);
   padding: 16px;
 }
 
@@ -14399,13 +14520,13 @@ button.available-truck-distribution-summary-card:disabled {
 
 .preferences-section-heading h3 {
   margin: 0 0 5px;
-  color: #facc15;
+  color: var(--kole-gold-bright);
   font-size: 18px;
 }
 
 .preferences-section-heading p {
   margin: 0;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   line-height: 1.4;
 }
 
@@ -14417,15 +14538,11 @@ button.available-truck-distribution-summary-card:disabled {
 
 .preference-toggle-row,
 .preference-select-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
   border: 1px solid rgba(148, 163, 184, 0.20);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.035);
   padding: 13px 14px;
-  color: #e5e7eb;
+  color: var(--kole-text-soft);
 }
 
 .preference-select-row {
@@ -14435,7 +14552,7 @@ button.available-truck-distribution-summary-card:disabled {
 .preference-toggle-row strong,
 .preference-select-row strong {
   display: block;
-  color: #f8fafc;
+  color: var(--kole-text);
   font-size: 14px;
 }
 
@@ -14443,7 +14560,7 @@ button.available-truck-distribution-summary-card:disabled {
 .preference-select-row small {
   display: block;
   margin-top: 4px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   line-height: 1.35;
 }
 
@@ -14451,7 +14568,7 @@ button.available-truck-distribution-summary-card:disabled {
   flex: 0 0 auto;
   width: 20px;
   height: 20px;
-  accent-color: #facc15;
+  accent-color: var(--kole-gold-bright);
   cursor: pointer;
 }
 
@@ -14459,16 +14576,97 @@ button.available-truck-distribution-summary-card:disabled {
   flex: 0 0 190px;
   padding: 10px 12px;
   border-radius: 8px;
-  border: 1px solid #334155;
-  background: #020617;
-  color: #e5e7eb;
+  border: 1px solid var(--kole-control-border);
+  background: var(--kole-control-bg);
+  color: var(--kole-text-soft);
   font-size: 14px;
   outline: none;
 }
 
 .preference-select-row select:focus {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.22);
+  border-color: var(--kole-action);
+  box-shadow: 0 0 0 3px var(--kole-focus);
+}
+
+.seasonal-theme-select-row {
+  margin-top: 0;
+}
+
+.seasonal-theme-select-row select {
+  flex-basis: 230px;
+}
+
+.seasonal-theme-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  margin-top: 10px;
+  padding: 14px;
+  border: 1px solid var(--kole-border-subtle);
+  border-radius: 12px;
+  background: var(--kole-surface-2);
+}
+
+.seasonal-theme-preview-copy {
+  min-width: 0;
+}
+
+.seasonal-theme-preview-copy > span,
+.seasonal-theme-preview-copy > strong,
+.seasonal-theme-preview-copy > small {
+  display: block;
+}
+
+.seasonal-theme-preview-copy > span {
+  margin-bottom: 3px;
+  color: var(--kole-gold-bright);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.seasonal-theme-preview-copy > strong {
+  color: var(--kole-text);
+  font-size: 16px;
+}
+
+.seasonal-theme-preview-copy > small {
+  margin-top: 4px;
+  color: var(--kole-muted-subtle);
+  line-height: 1.4;
+}
+
+.seasonal-theme-swatches {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.seasonal-theme-swatch {
+  display: block;
+  width: 34px;
+  height: 54px;
+  border: 1px solid var(--kole-border);
+  border-radius: 8px;
+  box-shadow: 0 5px 12px rgba(15, 23, 42, 0.12);
+}
+
+.seasonal-theme-swatch.canvas { background: var(--season-preview-canvas); }
+.seasonal-theme-swatch.light { background: var(--season-preview-light); }
+.seasonal-theme-swatch.primary { background: var(--season-preview-primary); }
+.seasonal-theme-swatch.secondary { background: var(--season-preview-secondary); }
+.seasonal-theme-swatch.soft { background: var(--season-preview-soft); }
+
+@media (max-width: 760px) {
+  .seasonal-theme-preview {
+    grid-template-columns: 1fr;
+  }
+
+  .seasonal-theme-swatches {
+    justify-content: flex-start;
+  }
 }
 
 .preferences-footer {
@@ -14479,57 +14677,57 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 :root[data-theme='light'] .preferences-toggle-button {
-  background: #ffffff;
-  color: #111827;
-  border-color: #cbd5e1;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+  background: var(--kole-shell);
+  color: var(--kole-text);
+  border-color: var(--kole-border);
+  box-shadow: var(--kole-panel-shadow);
 }
 
 :root[data-theme='light'] .preferences-toggle-button:hover {
-  background: #f8fafc;
+  background: var(--kole-surface);
 }
 
 :root[data-theme='light'] .preferences-toggle-icon {
-  background: rgba(37, 99, 235, 0.12);
-  color: #1d4ed8;
+  background: var(--kole-focus);
+  color: var(--kole-action-hover);
 }
 
 :root[data-theme='light'] .preferences-modal-body {
-  background: #f8fafc !important;
+  background: var(--kole-page-bg) !important;
 }
 
 :root[data-theme='light'] .preferences-section {
-  background: #ffffff !important;
-  border-color: #cbd5e1 !important;
+  background: var(--kole-shell) !important;
+  border-color: var(--kole-border) !important;
 }
 
 :root[data-theme='light'] .preferences-section-heading h3,
 :root[data-theme='light'] .preferences-modal-header h2 {
-  color: #1d4ed8 !important;
+  color: var(--kole-gold-bright) !important;
 }
 
 :root[data-theme='light'] .preferences-section-heading p,
 :root[data-theme='light'] .preference-toggle-row small,
 :root[data-theme='light'] .preference-select-row small {
-  color: #475569 !important;
+  color: var(--kole-muted) !important;
 }
 
 :root[data-theme='light'] .preference-toggle-row,
 :root[data-theme='light'] .preference-select-row {
-  background: #f8fafc !important;
-  border-color: #cbd5e1 !important;
-  color: #111827 !important;
+  background: var(--kole-surface) !important;
+  border-color: var(--kole-border) !important;
+  color: var(--kole-text) !important;
 }
 
 :root[data-theme='light'] .preference-toggle-row strong,
 :root[data-theme='light'] .preference-select-row strong {
-  color: #111827 !important;
+  color: var(--kole-text) !important;
 }
 
 :root[data-theme='light'] .preference-select-row select {
-  background: #ffffff !important;
-  color: #111827 !important;
-  border-color: #cbd5e1 !important;
+  background: var(--kole-control-bg) !important;
+  color: var(--kole-text) !important;
+  border-color: var(--kole-control-border) !important;
 }
 
 @media (max-width: 760px) {
@@ -14537,17 +14735,11 @@ button.available-truck-distribution-summary-card:disabled {
     grid-template-columns: 1fr;
   }
 
-  .preference-toggle-row,
-  .preference-select-row {
-    align-items: flex-start;
-  }
-
   .preference-select-row {
     flex-direction: column;
   }
 
   .preference-select-row select {
-    width: 100%;
     flex: 0 0 auto;
   }
 }
@@ -14625,7 +14817,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 .gross-month-load-overlay {
-  z-index: 1300;
+  z-index: var(--kole-z-modal-deep);
   background: rgba(2, 6, 23, 0.86);
 }
 
@@ -14829,7 +15021,7 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 .monthly-ops-drilldown-overlay {
-  z-index: 1300;
+  z-index: var(--kole-z-modal-deep);
   background: rgba(2, 6, 23, 0.86);
 }
 
@@ -14931,20 +15123,6 @@ button.available-truck-distribution-summary-card:disabled {
   letter-spacing: 0.05em;
   text-transform: uppercase;
   opacity: 0.82;
-}
-
-.preferences-grid {
-  align-items: stretch;
-}
-
-.preference-toggle-row,
-.preference-select-row {
-  align-items: flex-start;
-}
-
-.preference-toggle-row {
-  min-height: 96px;
-  height: 100%;
 }
 
 .preference-toggle-row > div,
@@ -15087,7 +15265,7 @@ body.compact-dashboard-mode .driver-report-totals-grid div {
   cursor: pointer;
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 14px;
-  background: #0b1220;
+  background: var(--kole-table-body);
   color: #e5e7eb;
   padding: 14px;
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.2);
@@ -15097,7 +15275,7 @@ body.compact-dashboard-mode .driver-report-totals-grid div {
 .order-card:hover,
 .order-card:focus-visible {
   border-color: rgba(250, 204, 21, 0.58);
-  background: #111827;
+  background: var(--kole-shell);
   transform: translateY(-1px);
   outline: none;
 }
@@ -15129,7 +15307,7 @@ body.compact-dashboard-mode .driver-report-totals-grid div {
 
 .order-card-eyebrow {
   display: block;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.06em;
@@ -15172,7 +15350,7 @@ body.compact-dashboard-mode .driver-report-totals-grid div {
 .order-card-field span {
   display: block;
   margin-bottom: 3px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
@@ -15236,7 +15414,7 @@ body.compact-dashboard-mode .driver-report-totals-grid div {
 }
 
 .order-card-notes-label {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
@@ -15538,12 +15716,8 @@ body.compact-dashboard-mode .order-card-route {
 
 .recruiting-requirement-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto;
-  gap: 1rem;
-  align-items: center;
   border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 12px;
-  padding: 0.75rem;
 }
 
 .recruiting-requirement-row.locked {
@@ -15556,14 +15730,12 @@ body.compact-dashboard-mode .order-card-route {
 }
 
 .recruiting-requirement-row small {
-  margin-top: 0.2rem;
   opacity: 0.7;
 }
 
 .recruiting-requirement-result-control {
   display: grid;
   gap: 0.25rem;
-  justify-items: end;
 }
 
 .recruiting-team-list button {
@@ -15595,8 +15767,6 @@ body.compact-dashboard-mode .order-card-route {
 
 .recruiting-note-card header {
   display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
   margin-bottom: 0.4rem;
 }
 
@@ -15697,10 +15867,6 @@ body.compact-dashboard-mode .order-card-route {
   .recruiting-toolbar-actions,
   .recruiting-profile-actions {
     justify-content: flex-start;
-  }
-
-  .recruiting-requirement-result-control {
-    justify-items: start;
   }
 }
 
@@ -15992,7 +16158,7 @@ body.compact-dashboard-mode .order-card-route {
   border: 1px solid var(--kole-border) !important;
   border-left: 4px solid var(--kole-gold) !important;
   border-radius: 12px !important;
-  background: linear-gradient(180deg, var(--kole-surface), #121b2e) !important;
+  background: linear-gradient(180deg, var(--kole-surface), var(--kole-surface-gradient-end)) !important;
   color: var(--kole-text) !important;
   box-shadow: 0 10px 24px rgba(0,0,0,0.18) !important;
 }
@@ -16131,7 +16297,7 @@ body.compact-dashboard-mode .order-card-route {
   padding: 0.45rem;
   border: 1px solid rgba(148, 163, 184, 0.34);
   border-radius: 12px;
-  background: #0f172a;
+  background: var(--kole-page-bg);
   box-shadow: 0 18px 46px rgba(0, 0, 0, 0.34);
 }
 
@@ -16153,7 +16319,7 @@ body.compact-dashboard-mode .order-card-route {
 }
 
 .recruiting-status-picker-menu button.current {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   opacity: 0.75;
 }
 
@@ -16244,7 +16410,7 @@ body.compact-dashboard-mode .order-card-route {
 
 /* Recruiting → Driver Roster bridge */
 .driver-roster-port-overlay {
-  z-index: 1300;
+  z-index: var(--kole-z-modal-deep);
 }
 
 .driver-roster-port-modal {
@@ -16293,7 +16459,7 @@ body.light .driver-roster-port-intro span {
 }
 
 .driver-roster-port-section {
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kole-border-subtle);
   border-radius: 14px;
   padding: 16px;
   background: rgba(15, 23, 42, 0.72);
@@ -16332,7 +16498,7 @@ body.light .driver-roster-port-section h3 {
 }
 
 .driver-roster-port-grid span {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
   font-weight: 800;
   text-transform: uppercase;
@@ -16348,8 +16514,8 @@ body.light .driver-roster-port-grid span {
   width: 100%;
   padding: 11px 12px;
   border-radius: 9px;
-  border: 1px solid #334155;
-  background: #020617;
+  border: 1px solid var(--kole-control-border);
+  background: var(--kole-control-bg);
   color: #e5e7eb;
   font-size: 14px;
   outline: none;
@@ -16439,7 +16605,7 @@ body.light .driver-roster-port-grid select {
 }
 
 .recruiting-admin-actions[open] summary {
-  background: #1f2937;
+  background: var(--kole-table-row-hover);
   color: #f8fafc;
 }
 
@@ -16453,14 +16619,14 @@ body.light .driver-roster-port-grid select {
   flex-direction: column;
   gap: 10px;
   padding: 12px;
-  border: 1px solid #334155;
+  border: 1px solid var(--kole-control-border);
   border-radius: 14px;
-  background: #020617;
+  background: var(--kole-control-bg);
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.30);
 }
 
 .recruiting-admin-actions small {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   line-height: 1.4;
 }
 
@@ -16659,7 +16825,6 @@ body.light .driver-roster-port-grid select {
 }
 
 .recruiting-snapshot-talk-track p {
-  max-width: 86ch;
   margin: 0.35rem 0 0;
   color: #f8fafc;
   font-size: 0.95rem;
@@ -16688,7 +16853,7 @@ body.light .driver-roster-port-grid select {
 }
 
 .recruiting-snapshot-metric-card span {
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 0.72rem;
   font-weight: 850;
   letter-spacing: 0.04em;
@@ -16852,7 +17017,7 @@ body.light .driver-roster-port-grid select {
 /* Recruiting Snapshot print/export polish. */
 .recruiting-snapshot-header p {
   margin-top: 0.25rem;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
 }
 
 .recruiting-snapshot-print-button {
@@ -16881,11 +17046,6 @@ body.light .driver-roster-port-grid select {
 }
 
 @media print {
-  @page {
-    size: letter;
-    margin: 0.42in;
-  }
-
   html,
   body {
     width: auto !important;
@@ -17165,7 +17325,6 @@ body.light .driver-roster-port-grid select {
 
   body.recruiting-snapshot-printing .recruiting-snapshot-body {
     display: grid !important;
-    gap: 0.07in !important;
     padding: 0.10in 0 0 !important;
     height: auto !important;
     max-height: none !important;
@@ -17287,7 +17446,6 @@ body.light .driver-roster-port-grid select {
 
   body.recruiting-snapshot-printing .recruiting-snapshot-disclaimer {
     border-left-width: 4px !important;
-    font-size: 7.2pt !important;
     line-height: 1.15 !important;
   }
 
@@ -17435,7 +17593,7 @@ body.light .driver-roster-port-grid select {
   overflow: hidden;
   border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 14px;
-  background: #0b1220;
+  background: var(--kole-table-body);
 }
 
 .order-edit-section-title {
@@ -17488,9 +17646,9 @@ body.light .driver-roster-port-grid select {
 .order-edit-field textarea {
   width: 100%;
   min-width: 0;
-  border: 1px solid #334155;
+  border: 1px solid var(--kole-control-border);
   border-radius: 9px;
-  background: #020617;
+  background: var(--kole-control-bg);
   color: #e5e7eb;
   padding: 10px 11px;
   font: inherit;
@@ -17519,7 +17677,7 @@ body.light .driver-roster-port-grid select {
 .order-edit-actions {
   position: sticky;
   bottom: -24px;
-  z-index: 4;
+  z-index: var(--kole-z-sticky);
   display: flex;
   justify-content: space-between;
   gap: 18px;
@@ -17549,7 +17707,7 @@ body.light .driver-roster-port-grid select {
 
 .order-edit-actions span {
   margin-top: 3px;
-  color: #94a3b8;
+  color: var(--kole-muted-subtle);
   font-size: 12px;
 }
 

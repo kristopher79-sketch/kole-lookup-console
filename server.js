@@ -47,8 +47,10 @@ let cachedSalesLeadsBaseReport = null;
 let cachedSalesLeadsBaseReportAt = 0;
 let cachedGraphToken = null;
 let cachedGraphTokenExpiresAt = 0;
+let graphTokenRefreshPromise = null;
 let cachedOperationsToday = null;
 let cachedOperationsTodayAt = 0;
+let cachedDashboardBidSource = null;
 const cachedBidItemsByList = new Map();
 const cachedOnThisDayItemsBySource = new Map();
 const cachedOnThisDayReports = new Map();
@@ -59,6 +61,15 @@ const OPERATIONS_TODAY_CACHE_MS = Number(process.env.OPERATIONS_TODAY_CACHE_MS |
 const ON_THIS_DAY_SOURCE_CACHE_MS = Number(process.env.ON_THIS_DAY_SOURCE_CACHE_MS || 5 * 60 * 1000);
 const ON_THIS_DAY_REPORT_CACHE_MS = Number(process.env.ON_THIS_DAY_REPORT_CACHE_MS || 5 * 60 * 1000);
 const SALES_LEADS_REPORT_CACHE_MS = Number(process.env.SALES_LEADS_REPORT_CACHE_MS || BID_LIST_CACHE_MS);
+const DASHBOARD_BID_SOURCE_CACHE_MS = Math.max(1000, Number(process.env.DASHBOARD_BID_SOURCE_CACHE_MS) || 60 * 1000);
+const DASHBOARD_BID_SOURCE_MAX_STALE_MS = Math.max(
+  DASHBOARD_BID_SOURCE_CACHE_MS,
+  Number(process.env.DASHBOARD_BID_SOURCE_MAX_STALE_MS) || 10 * 60 * 1000
+);
+const GRAPH_REQUEST_TIMEOUT_MS = Math.max(1000, Number(process.env.GRAPH_REQUEST_TIMEOUT_MS) || 20 * 1000);
+const GRAPH_READ_RETRIES = Math.max(0, Number(process.env.GRAPH_READ_RETRIES ?? 2) || 0);
+const GRAPH_RETRY_MAX_DELAY_MS = Math.max(250, Number(process.env.GRAPH_RETRY_MAX_DELAY_MS) || 5000);
+const inFlightRequests = new Map();
 
 function getAllowedLookupTokens() {
   return [
@@ -106,62 +117,142 @@ async function getGraphToken(forceRefresh = false) {
     return cachedGraphToken;
   }
 
-  if (!process.env.TENANT_ID || !process.env.CLIENT_ID || !process.env.CLIENT_SECRET) {
-    throw new Error('Graph client credentials are not configured on the server.');
-  }
+  if (graphTokenRefreshPromise) return graphTokenRefreshPromise;
 
-  const body = new URLSearchParams({
-    client_id: process.env.CLIENT_ID,
-    client_secret: process.env.CLIENT_SECRET,
-    scope: 'https://graph.microsoft.com/.default',
-    grant_type: 'client_credentials'
-  });
-
-  const response = await fetch(
-    `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/token`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body
+  graphTokenRefreshPromise = (async () => {
+    if (!process.env.TENANT_ID || !process.env.CLIENT_ID || !process.env.CLIENT_SECRET) {
+      throw new Error('Graph client credentials are not configured on the server.');
     }
-  );
 
-  const data = await response.json();
+    const body = new URLSearchParams({
+      client_id: process.env.CLIENT_ID,
+      client_secret: process.env.CLIENT_SECRET,
+      scope: 'https://graph.microsoft.com/.default',
+      grant_type: 'client_credentials'
+    });
 
-  if (!response.ok) {
-    cachedGraphToken = null;
-    cachedGraphTokenExpiresAt = 0;
-    throw new Error(data.error_description || data.error || 'Unable to acquire Graph token.');
+    const response = await fetchWithTimeoutAndRetry(
+      `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/token`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body
+      },
+      { maxRetries: GRAPH_READ_RETRIES }
+    );
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      cachedGraphToken = null;
+      cachedGraphTokenExpiresAt = 0;
+      throw new Error(data.error_description || data.error || 'Unable to acquire Graph token.');
+    }
+
+    const expiresInMs = Math.max(Number(data.expires_in || 3599) * 1000, 60 * 1000);
+    cachedGraphToken = data.access_token;
+    cachedGraphTokenExpiresAt = Date.now() + Math.max(expiresInMs - 60 * 1000, 30 * 1000);
+    return cachedGraphToken;
+  })();
+
+  try {
+    return await graphTokenRefreshPromise;
+  } finally {
+    graphTokenRefreshPromise = null;
+  }
+}
+
+function coalesceRequest(key, work) {
+  if (inFlightRequests.has(key)) return inFlightRequests.get(key);
+
+  const promise = Promise.resolve()
+    .then(work)
+    .finally(() => {
+      if (inFlightRequests.get(key) === promise) inFlightRequests.delete(key);
+    });
+  inFlightRequests.set(key, promise);
+  return promise;
+}
+
+function isRetryableGraphStatus(status) {
+  return [408, 429, 500, 502, 503, 504].includes(Number(status));
+}
+
+function getRetryDelayMs(response, attempt) {
+  const retryAfter = response?.headers?.get?.('retry-after');
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds)) {
+      return Math.min(Math.max(seconds * 1000, 0), GRAPH_RETRY_MAX_DELAY_MS);
+    }
+
+    const retryDate = new Date(retryAfter).getTime();
+    if (Number.isFinite(retryDate)) {
+      return Math.min(Math.max(retryDate - Date.now(), 0), GRAPH_RETRY_MAX_DELAY_MS);
+    }
   }
 
-  const expiresInMs = Math.max(Number(data.expires_in || 3599) * 1000, 60 * 1000);
-  cachedGraphToken = data.access_token;
-  cachedGraphTokenExpiresAt = Date.now() + Math.max(expiresInMs - 60 * 1000, 30 * 1000);
+  return Math.min(400 * (2 ** attempt) + Math.floor(Math.random() * 200), GRAPH_RETRY_MAX_DELAY_MS);
+}
 
-  return cachedGraphToken;
+function waitForRetry(delayMs) {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+async function fetchWithTimeoutAndRetry(url, options = {}, retryOptions = {}) {
+  const maxRetries = Math.max(0, Number(retryOptions.maxRetries || 0));
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), GRAPH_REQUEST_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      if (!isRetryableGraphStatus(response.status) || attempt >= maxRetries) return response;
+
+      await response.arrayBuffer().catch(() => null);
+      await waitForRetry(getRetryDelayMs(response, attempt));
+    } catch (error) {
+      lastError = error;
+      if (attempt >= maxRetries) {
+        if (error?.name === 'AbortError') {
+          throw new Error(`Microsoft Graph did not respond within ${Math.round(GRAPH_REQUEST_TIMEOUT_MS / 1000)} seconds.`);
+        }
+        throw error;
+      }
+      await waitForRetry(getRetryDelayMs(null, attempt));
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  throw lastError || new Error('Microsoft Graph request failed.');
 }
 
 async function graphGet(token, url, extraHeaders = {}) {
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...extraHeaders
+  const requestKey = `graph-get:${url}:${JSON.stringify(extraHeaders)}`;
+  return coalesceRequest(requestKey, async () => {
+    const response = await fetchWithTimeoutAndRetry(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...extraHeaders
+      }
+    }, { maxRetries: GRAPH_READ_RETRIES });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(JSON.stringify(data));
     }
+
+    return data;
   });
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(JSON.stringify(data));
-  }
-
-  return data;
 }
 
 async function graphPatch(token, url, body, extraHeaders = {}) {
-  const response = await fetch(url, {
+  const response = await fetchWithTimeoutAndRetry(url, {
     method: 'PATCH',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -169,7 +260,7 @@ async function graphPatch(token, url, body, extraHeaders = {}) {
       ...extraHeaders
     },
     body: JSON.stringify(body)
-  });
+  }, { maxRetries: Math.min(GRAPH_READ_RETRIES, 1) });
 
   const data = await response.json().catch(() => ({}));
 
@@ -182,14 +273,14 @@ async function graphPatch(token, url, body, extraHeaders = {}) {
 
 
 async function graphPost(token, url, body) {
-  const response = await fetch(url, {
+  const response = await fetchWithTimeoutAndRetry(url, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(body)
-  });
+  }, { maxRetries: 0 });
 
   const data = await response.json().catch(() => ({}));
 
@@ -1007,6 +1098,7 @@ function clearOrderEditCaches() {
   cachedBidItemsByList.clear();
   cachedOperationsToday = null;
   cachedOperationsTodayAt = 0;
+  cachedDashboardBidSource = null;
   cachedOnThisDayItemsBySource.clear();
   cachedOnThisDayReports.clear();
 }
@@ -11138,6 +11230,7 @@ app.get('/sales-leads/by-customer', requireLookupAccess, async (req, res) => {
 
 app.get('/reports/action-alerts', requireLookupAccess, async (req, res) => {
   try {
+    const forceRefresh = String(req.query.refresh || '').toLowerCase() === 'true';
     const token = await getGraphToken();
     const lists = await getSearchableBidLists(token);
     const currentList = lists.find((list) => list.label === 'Bid Listing');
@@ -11150,11 +11243,7 @@ app.get('/reports/action-alerts', requireLookupAccess, async (req, res) => {
     }
 
     const [items, uploadEvidenceSets] = await Promise.all([
-      getAllListItemsWithFields(
-        token,
-        currentList.listId,
-        getReportActionAlertFieldSelect()
-      ),
+      getDashboardBidSource(token, currentList, { forceRefresh }),
       getUploadEvidenceSets(token)
     ]);
 
@@ -13947,6 +14036,57 @@ async function getCurrentBidListingSource(token) {
   return lists.find((list) => list.label === 'Bid Listing') || null;
 }
 
+function getDashboardBidFieldSelect() {
+  return Array.from(new Set([
+    'BOLNumber_x0028_Won_x0029_',
+    'BidID',
+    'Company',
+    'Shipment_x0020_Origin',
+    'Shipment_x0020_Destination',
+    'Operator_x002f_Team',
+    'Truck_x0020_Number',
+    'Pickup_x0020_Offer_x0020_Date',
+    'Expected_x0020_Delivery_x0020_Da',
+    'Status',
+    'Processed',
+    ...getReportActionAlertFieldSelect().split(','),
+    ...getAvailableTruckAssignmentFieldSelect().split(',')
+  ].filter(Boolean))).join(',');
+}
+
+async function refreshDashboardBidSource(token, currentList) {
+  const items = await getAllListItemsWithFields(
+    token,
+    currentList.listId,
+    getDashboardBidFieldSelect()
+  );
+  cachedDashboardBidSource = {
+    listId: currentList.listId,
+    items,
+    cachedAt: Date.now()
+  };
+  return items;
+}
+
+async function getDashboardBidSource(token, currentList, options = {}) {
+  const forceRefresh = options.forceRefresh === true;
+  const matchesList = cachedDashboardBidSource?.listId === currentList?.listId;
+  const ageMs = matchesList ? Date.now() - cachedDashboardBidSource.cachedAt : Infinity;
+
+  if (!forceRefresh && matchesList && ageMs < DASHBOARD_BID_SOURCE_CACHE_MS) {
+    return cachedDashboardBidSource.items;
+  }
+
+  const requestKey = `dashboard-bid-source:${currentList?.listId || 'missing'}`;
+  if (!forceRefresh && matchesList && ageMs < DASHBOARD_BID_SOURCE_MAX_STALE_MS) {
+    void coalesceRequest(requestKey, () => refreshDashboardBidSource(token, currentList))
+      .catch((error) => console.warn('Dashboard Bid Listing background refresh failed:', error.message));
+    return cachedDashboardBidSource.items;
+  }
+
+  return coalesceRequest(requestKey, () => refreshDashboardBidSource(token, currentList));
+}
+
 function getIntelliTrackFieldSelect() {
   return [
     'BOLNumber',
@@ -14411,11 +14551,7 @@ app.get('/available-trucks', requireLookupAccess, async (req, res) => {
         getAvailableTruckFieldSelect()
       ),
       currentList
-        ? getAllListItemsWithFields(
-            token,
-            currentList.listId,
-            getAvailableTruckAssignmentFieldSelect()
-          )
+        ? getDashboardBidSource(token, currentList)
         : Promise.resolve([]),
       activeDriverOptionsPromise
     ]);
@@ -14743,23 +14879,7 @@ app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, asyn
       });
     }
 
-    const items = await getAllListItemsWithFields(
-      token,
-      currentList.listId,
-      [
-        'BOLNumber_x0028_Won_x0029_',
-        'BidID',
-        'Company',
-        'Shipment_x0020_Origin',
-        'Shipment_x0020_Destination',
-        'Operator_x002f_Team',
-        'Truck_x0020_Number',
-        'Pickup_x0020_Offer_x0020_Date',
-        'Expected_x0020_Delivery_x0020_Da',
-        'Status',
-        'Processed'
-      ].join(',')
-    );
+    const items = await getDashboardBidSource(token, currentList, { forceRefresh });
 
     const plus7 = addDaysToDateInput(targetDate, 7);
 
@@ -16504,6 +16624,336 @@ app.get('/reports/sales-leads/suppression/pdf', requireLookupAccess, async (req,
     res.status(error.statusCode || 500).json({
       success: false,
       error: error.message || 'Unable to export Lead Suppression Report PDF.'
+    });
+  }
+});
+
+async function buildBootstrapOperationsPayload(token, currentList, items, evidenceSets) {
+  const targetDate = formatEasternDate();
+
+  if (
+    cachedOperationsToday &&
+    cachedOperationsToday.targetDate === targetDate &&
+    Date.now() - cachedOperationsTodayAt < OPERATIONS_TODAY_CACHE_MS
+  ) {
+    return {
+      ...cachedOperationsToday.payload,
+      cache: {
+        hit: true,
+        ageSeconds: Math.round((Date.now() - cachedOperationsTodayAt) / 1000)
+      }
+    };
+  }
+
+  if (!currentList) throw new Error('Bid Listing not found.');
+
+  const plus7 = addDaysToDateInput(targetDate, 7);
+  const allWon = items
+    .map((item) => buildOperationsRecord(item, currentList))
+    .filter((record) => normalizeText(record.Status) === 'won');
+  const openWon = allWon.filter((record) => !parseBoolean(record.Processed));
+  const [driverTimeOffResult, driverTimeOffRosterOptions] = await Promise.all([
+    getDriverTimeOffListId()
+      ? getDriverTimeOffRows(token).catch((error) => ({ rows: [], warning: error.message || 'Driver Time Off could not be loaded.' }))
+      : Promise.resolve({ rows: [], warning: 'DRIVER_TIME_OFF_LOG_LIST_ID is not configured.' }),
+    process.env.DRIVER_ROSTER_LIST_ID
+      ? getAvailableTruckRosterOptions(token).catch(() => [])
+      : Promise.resolve([])
+  ]);
+  const driverTimeOffCurrent = buildDriverTimeOffCurrentResponse(driverTimeOffResult.rows || [], { targetDate });
+
+  let activeToday = openWon
+    .filter((record) => {
+      const pickup = normalizeEasternDateOnly(record.PickupDate);
+      const delivery = normalizeEasternDateOnly(record.DeliveryDate);
+      return pickup && delivery && pickup <= targetDate && delivery >= targetDate;
+    })
+    .map((record) => addUploadEvidence(record, evidenceSets));
+  const loadingToday = openWon
+    .filter((record) => normalizeEasternDateOnly(record.PickupDate) === targetDate)
+    .map((record) => addUploadEvidence(record, evidenceSets));
+  const deliveringToday = allWon
+    .filter((record) => normalizeEasternDateOnly(record.DeliveryDate) === targetDate)
+    .map((record) => addUploadEvidence(record, evidenceSets));
+  const loadingNext7 = openWon
+    .filter((record) => {
+      const pickup = normalizeEasternDateOnly(record.PickupDate);
+      return pickup > targetDate && pickup <= plus7;
+    })
+    .map((record) => addUploadEvidence(record, evidenceSets));
+  const orderNoteIndicatorResult = await getOperationOrderNoteIndicators(token, activeToday);
+  activeToday = activeToday.map((record) => addOperationOrderNoteIndicators(record, orderNoteIndicatorResult.byOrder));
+
+  const payload = {
+    success: true,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    targetDate,
+    counts: {
+      rawItemsScanned: items.length,
+      eligibleWon: allWon.length,
+      eligibleWonOpen: openWon.length,
+      eligibleWonSettled: allWon.length - openWon.length,
+      activeToday: activeToday.length,
+      loadingToday: loadingToday.length,
+      deliveringToday: deliveringToday.length,
+      loadingNext7: loadingNext7.length
+    },
+    uploadDigest: {
+      checked: true,
+      recordsScanned: evidenceSets.uploadDigestCount
+    },
+    orderNotes: {
+      checked: Boolean(getOrderNotesListId()),
+      activeNoteTypes: [...getActiveOrderNoteTypes()],
+      recordsScanned: orderNoteIndicatorResult.recordsScanned || 0,
+      usedFallback: orderNoteIndicatorResult.usedFallback || false,
+      warning: orderNoteIndicatorResult.warning || ''
+    },
+    driverTimeOff: {
+      ...driverTimeOffCurrent,
+      warning: driverTimeOffResult.warning || '',
+      activeDriverOptions: driverTimeOffRosterOptions || []
+    },
+    activeToday,
+    loadingToday,
+    deliveringToday,
+    loadingNext7
+  };
+
+  cachedOperationsToday = { targetDate, payload };
+  cachedOperationsTodayAt = Date.now();
+  return payload;
+}
+
+async function buildBootstrapDriverPositionsPayload(token) {
+  const listId = process.env.DRIVER_POSITIONS_LIST_ID;
+  if (!listId) throw new Error('DRIVER_POSITIONS_LIST_ID is not configured on the server.');
+
+  const [items, rosterByTruck] = await Promise.all([
+    getAllListItemsWithFields(token, listId, getDriverPositionFieldSelect()),
+    getDriverRosterByTruck(token)
+  ]);
+  const positions = items
+    .map(cleanDriverPositionItem)
+    .map((position) => {
+      const roster = rosterByTruck.get(normalizeTruckKey(position.equipmentId)) || null;
+      return { ...position, roster, hasRosterDetails: Boolean(roster) };
+    })
+    .sort(sortDriverPositions);
+
+  return {
+    success: true,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    sourceListId: listId,
+    rosterSourceListId: process.env.DRIVER_ROSTER_LIST_ID || '',
+    counts: {
+      total: positions.length,
+      moving: positions.filter((position) => position.isMoving).length,
+      stopped: positions.filter((position) => !position.isMoving).length,
+      stale: positions.filter((position) => position.isStale).length,
+      unmatchedRoster: positions.filter((position) => position.rosterMatched !== true).length,
+      missingRosterDetails: positions.filter((position) => !position.hasRosterDetails).length
+    },
+    positions
+  };
+}
+
+async function buildBootstrapIntelliTrackPayload(token) {
+  const listId = getKoleAutoUpdaterListId();
+  if (!listId) throw new Error('KOLE_AUTO_UPDATER_LIST_ID is not configured on the server.');
+
+  const items = await getAllListItemsWithFields(token, listId, getIntelliTrackFieldSelect());
+  const records = items
+    .map(cleanIntelliTrackRecord)
+    .filter((record) => !record.DisableTracking)
+    .sort(sortIntelliTrackRecords);
+  return {
+    success: true,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    sourceListId: listId,
+    count: records.length,
+    records
+  };
+}
+
+async function buildBootstrapUploadDigestPayload(token, dateValue) {
+  const targetDate = normalizeEasternDateOnly(dateValue) || formatEasternDate();
+  const listId = process.env.UPLOAD_DIGEST_LIST_ID || DEFAULT_UPLOAD_DIGEST_LIST_ID;
+  if (!listId) throw new Error('UPLOAD_DIGEST_LIST_ID is not configured on the server.');
+
+  const uploadItems = await getAllListItemsWithFields(token, listId);
+  const rawRecords = uploadItems
+    .map(buildUploadDigestRecord)
+    .filter((record) => normalizeEasternDateOnly(record.UploadDate) === targetDate)
+    .sort((a, b) => {
+      const aTime = new Date(a.UploadDate).getTime();
+      const bTime = new Date(b.UploadDate).getTime();
+      if (Number.isNaN(aTime) && Number.isNaN(bTime)) return 0;
+      if (Number.isNaN(aTime)) return 1;
+      if (Number.isNaN(bTime)) return -1;
+      return bTime - aTime;
+    });
+  const seenUploadKeys = new Set();
+  const records = rawRecords.filter((record) => {
+    const bolKey = normalizeBolKey(record.BOLNumber);
+    const uploadKey = `${bolKey}|${normalizeText(record.UploadType) || 'unknown'}`;
+    if (!bolKey || seenUploadKeys.has(uploadKey)) return false;
+    seenUploadKeys.add(uploadKey);
+    return true;
+  });
+  return {
+    success: true,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    targetDate,
+    count: records.length,
+    rawCount: rawRecords.length,
+    recordsScanned: uploadItems.length,
+    records
+  };
+}
+
+async function buildBootstrapAvailableTrucksPayload(token, currentList, assignmentItems) {
+  const listId = getAvailableTrucksSingleLineListId();
+  if (!listId) throw new Error('AVAILABLE_TRUCKS_SINGLE_LINE_LIST_ID is not configured on the server.');
+
+  let activeDriverOptionsWarning = process.env.DRIVER_ROSTER_LIST_ID
+    ? ''
+    : 'DRIVER_ROSTER_LIST_ID is not configured, so active roster driver options could not be loaded.';
+  const [items, activeDriverOptions] = await Promise.all([
+    getAllListItemsWithFields(token, listId, getAvailableTruckFieldSelect()),
+    process.env.DRIVER_ROSTER_LIST_ID
+      ? getAvailableTruckRosterOptions(token).catch((error) => {
+          activeDriverOptionsWarning = error.message || 'Driver Roster could not be loaded for available-truck posting.';
+          return [];
+        })
+      : Promise.resolve([])
+  ]);
+  const assignmentIndex = buildActiveFutureAssignmentIndex(assignmentItems || [], currentList);
+  return buildAvailableTrucksResponse(items, {
+    lookbackDays: AVAILABLE_TRUCKS_DEFAULT_LOOKBACK_DAYS,
+    assignmentIndex,
+    activeDriverOptions,
+    activeDriverOptionsWarning
+  });
+}
+
+async function buildBootstrapAvailableTruckDistributionPayload(token) {
+  const listId = getAvailableTrucksEmailListId();
+  if (!listId) throw new Error('AVAILABLE_TRUCKS_EMAIL_LIST_ID is not configured on the server.');
+
+  const { rows, warning } = await getAvailableTrucksDistributionRows(token, listId);
+  const activeRows = rows.filter((row) => row.active);
+  const inactiveRows = rows.filter((row) => !row.active);
+  return {
+    success: true,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    sourceListId: listId,
+    count: activeRows.length,
+    inactiveCount: inactiveRows.length,
+    rows: activeRows,
+    inactiveRows,
+    sourceWarning: warning
+  };
+}
+
+async function buildBootstrapRecruitingPayload(token) {
+  const { lists } = assertRecruitingConfig();
+  const [candidateItems, requirementItems] = await Promise.all([
+    getAllRecruitingItems(token, lists.candidates, RECRUITING_CANDIDATE_FIELD_SELECT),
+    getAllRecruitingItems(token, lists.requirements, RECRUITING_REQUIREMENT_FIELD_SELECT)
+  ]);
+  const candidates = candidateItems.map(normalizeRecruitingCandidate).sort(sortRecruitingCandidates);
+  const requirements = requirementItems.map(normalizeRecruitingRequirement).sort(sortRecruitingRequirements);
+  const currentRequirements = dedupeRecruitingRequirements(requirements);
+  const candidateIds = new Set(candidates.map((candidate) => candidate.candidateId).filter(Boolean));
+  const today = formatEasternDate();
+  return {
+    success: true,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    summary: buildRecruitingDashboard(candidates, currentRequirements),
+    candidates,
+    readyToQualify: candidates.filter((candidate) => candidate.status === RECRUITING_CANDIDATE_STATUS.READY_TO_QUALIFY),
+    followUpDue: candidates.filter((candidate) => (
+      candidate.nextFollowUpDate &&
+      candidate.nextFollowUpDate <= today &&
+      !RECRUITING_CLOSED_STATUSES.has(candidate.status)
+    )),
+    openRequirements: currentRequirements.filter((requirement) => (
+      candidateIds.has(requirement.candidateId) &&
+      requirement.active &&
+      requirement.result !== 'Satisfactory'
+    ))
+  };
+}
+
+async function settleBootstrapModule(work) {
+  try {
+    return { ok: true, data: await work() };
+  } catch (error) {
+    console.error('Dashboard bootstrap module failed:', error);
+    return { ok: false, error: error.message || 'Unable to load dashboard module.' };
+  }
+}
+
+app.get('/dashboard/bootstrap', requireLookupAccess, async (req, res) => {
+  try {
+    const allowedModules = new Set([
+      'operations',
+      'driverPositions',
+      'uploadDigest',
+      'intelliTrack',
+      'availableTrucks',
+      'availableTruckDistribution',
+      'recruiting',
+      'actionAlerts'
+    ]);
+    const requestedModules = String(req.query.include || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter((value) => allowedModules.has(value));
+    const moduleKeys = requestedModules.length ? [...new Set(requestedModules)] : [...allowedModules];
+    const token = await getGraphToken();
+    const needsBidSource = moduleKeys.some((key) => ['operations', 'availableTrucks', 'actionAlerts'].includes(key));
+    const currentList = needsBidSource ? await getCurrentBidListingSource(token) : null;
+    const bidItemsPromise = currentList
+      ? getDashboardBidSource(token, currentList)
+      : Promise.resolve([]);
+    const evidencePromise = moduleKeys.some((key) => ['operations', 'actionAlerts'].includes(key))
+      ? getUploadEvidenceSets(token)
+      : Promise.resolve({ pickupEvidenceBols: new Set(), deliveryEvidenceBols: new Set(), uploadDigestCount: 0 });
+
+    const builders = {
+      operations: async () => buildBootstrapOperationsPayload(token, currentList, await bidItemsPromise, await evidencePromise),
+      driverPositions: () => buildBootstrapDriverPositionsPayload(token),
+      uploadDigest: () => buildBootstrapUploadDigestPayload(token, req.query.uploadDate),
+      intelliTrack: () => buildBootstrapIntelliTrackPayload(token),
+      availableTrucks: async () => buildBootstrapAvailableTrucksPayload(token, currentList, await bidItemsPromise),
+      availableTruckDistribution: () => buildBootstrapAvailableTruckDistributionPayload(token),
+      recruiting: () => buildBootstrapRecruitingPayload(token),
+      actionAlerts: async () => {
+        if (!currentList) throw new Error('Bid Listing was not found.');
+        return buildReportActionAlertsResponse(await bidItemsPromise, currentList, {
+          token,
+          uploadEvidenceSets: await evidencePromise
+        });
+      }
+    };
+
+    const entries = await Promise.all(moduleKeys.map(async (moduleKey) => [
+      moduleKey,
+      await settleBootstrapModule(builders[moduleKey])
+    ]));
+
+    res.json({
+      success: true,
+      generatedAt: `${formatEasternTimestamp()} Eastern`,
+      modules: Object.fromEntries(entries)
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to load dashboard bootstrap.'
     });
   }
 });
