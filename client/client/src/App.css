@@ -17833,3 +17833,377 @@ body.light .driver-roster-port-grid select {
     flex: 1;
   }
 }
+
+/*
+ * SEASONAL MODAL CONTRACT
+ *
+ * Modal components predate the shared palette layer and several of their
+ * light-mode repairs intentionally use !important. This single scoped bridge
+ * keeps those legacy rules from overriding an active seasonal palette. It
+ * changes structural chrome only; semantic success, warning, and danger cards
+ * continue to own their status colors.
+ */
+:root[data-season] {
+  --kole-modal-season-panel: var(--kole-shell);
+  --kole-modal-season-body: var(--kole-page-bg);
+  --kole-modal-season-card: var(--kole-shell);
+  --kole-modal-season-card-alt: var(--kole-surface);
+  --kole-modal-season-wash: rgba(var(--kole-season-focus-rgb), 0.12);
+  --kole-modal-season-wash-soft: rgba(var(--kole-season-focus-rgb), 0.07);
+}
+
+:root[data-theme='dark'][data-season] {
+  --kole-modal-season-wash: rgba(var(--kole-season-focus-rgb), 0.20);
+  --kole-modal-season-wash-soft: rgba(var(--kole-season-focus-rgb), 0.11);
+}
+
+:root[data-season] .detail-modal {
+  background: var(--kole-modal-season-panel) !important;
+  border-color: var(--kole-border-strong) !important;
+  color: var(--kole-text) !important;
+  box-shadow:
+    var(--kole-modal-shadow),
+    inset 0 3px 0 var(--kole-action) !important;
+}
+
+:root[data-season] .detail-header,
+:root[data-season] .driver-time-off-form-modal .detail-header,
+:root[data-season] .sales-activity-modal .detail-header,
+:root[data-season] .driver-roster-port-header {
+  background:
+    linear-gradient(90deg, var(--kole-modal-season-wash), transparent 42%),
+    linear-gradient(180deg, var(--kole-surface), var(--kole-modal-season-panel)) !important;
+  border-color: var(--kole-border-strong) !important;
+  color: var(--kole-text) !important;
+  box-shadow: inset 4px 0 0 var(--kole-action) !important;
+}
+
+:root[data-season] .detail-header h2,
+:root[data-season] .report-modal-header h2,
+:root[data-season] .preferences-modal-header h2,
+:root[data-season] .sales-activity-modal .detail-header h2,
+:root[data-season] .driver-roster-modal .detail-header h2 {
+  color: var(--kole-gold-bright) !important;
+}
+
+:root[data-season] .detail-header p,
+:root[data-season] .sales-activity-modal .detail-header p,
+:root[data-season] .driver-roster-port-header p {
+  color: var(--kole-muted) !important;
+}
+
+:root[data-season] .modal-body,
+:root[data-season] .report-modal-body,
+:root[data-season] .preferences-modal-body,
+:root[data-season] .driver-performance-modal-body,
+:root[data-season] .monthly-ops-modal .report-modal-body,
+:root[data-season] .driver-roster-port-body,
+:root[data-season] .recruiting-snapshot-body {
+  background:
+    radial-gradient(circle at top left, var(--kole-modal-season-wash), transparent 34%),
+    radial-gradient(circle at top right, var(--kole-modal-season-wash-soft), transparent 30%),
+    var(--kole-modal-season-body) !important;
+  border-color: var(--kole-border) !important;
+  color: var(--kole-text) !important;
+}
+
+:root[data-season] .view-tabs {
+  background: var(--kole-surface) !important;
+  border-color: var(--kole-border) !important;
+}
+
+:root[data-season] .view-tabs button,
+:root[data-season] .modal-return-trail,
+:root[data-season] .recruiting-admin-actions summary {
+  background: var(--kole-surface-2) !important;
+  border-color: var(--kole-border) !important;
+  color: var(--kole-text-soft) !important;
+}
+
+:root[data-season] .view-tabs button:hover,
+:root[data-season] .modal-return-trail:hover,
+:root[data-season] .recruiting-admin-actions summary:hover,
+:root[data-season] .recruiting-admin-actions[open] summary {
+  background: var(--kole-selection-bg) !important;
+  border-color: var(--kole-action) !important;
+  color: var(--kole-text) !important;
+}
+
+:root[data-season] .view-tabs .active-tab,
+:root[data-season] .view-tabs .active-tab:hover {
+  background: var(--kole-action) !important;
+  border-color: var(--kole-action-hover) !important;
+  color: var(--kole-action-text) !important;
+}
+
+:root[data-season] .detail-modal .close-button {
+  background: var(--kole-action) !important;
+  color: var(--kole-action-text) !important;
+}
+
+:root[data-season] .detail-modal .close-button:hover {
+  background: var(--kole-action-hover) !important;
+}
+
+:root[data-season] .detail-modal input,
+:root[data-season] .detail-modal select,
+:root[data-season] .detail-modal textarea,
+:root[data-season] .driver-time-off-form-grid input,
+:root[data-season] .driver-time-off-form-grid select,
+:root[data-season] .driver-roster-port-grid input,
+:root[data-season] .driver-roster-port-grid select {
+  background: var(--kole-control-bg) !important;
+  border-color: var(--kole-control-border) !important;
+  color: var(--kole-text) !important;
+}
+
+:root[data-season] .detail-modal input:focus,
+:root[data-season] .detail-modal select:focus,
+:root[data-season] .detail-modal textarea:focus,
+:root[data-season] .driver-time-off-form-grid input:focus,
+:root[data-season] .driver-time-off-form-grid select:focus,
+:root[data-season] .driver-roster-port-grid input:focus,
+:root[data-season] .driver-roster-port-grid select:focus {
+  border-color: var(--kole-action) !important;
+  box-shadow: 0 0 0 3px var(--kole-focus) !important;
+}
+
+:root[data-season] .detail-modal input[readonly],
+:root[data-season] .detail-modal input:disabled,
+:root[data-season] .detail-modal select:disabled,
+:root[data-season] .detail-modal textarea:disabled {
+  background: var(--kole-surface) !important;
+  color: var(--kole-muted) !important;
+}
+
+:root[data-season] .detail-modal table,
+:root[data-season] .detail-modal .report-table-wrap,
+:root[data-season] .detail-modal .wide-report-table-wrap,
+:root[data-season] .detail-modal .driver-time-off-history-table-wrap,
+:root[data-season] .detail-modal .available-truck-distribution-table-wrap {
+  background: var(--kole-table-body) !important;
+  border-color: var(--kole-border) !important;
+  color: var(--kole-text) !important;
+}
+
+:root[data-season] .detail-modal th,
+:root[data-season] .driver-time-off-history-table th,
+:root[data-season] .driver-time-off-report-table th {
+  background: var(--kole-table-head) !important;
+  border-bottom-color: var(--kole-divider-strong) !important;
+  color: var(--kole-message-text) !important;
+}
+
+:root[data-season] .detail-modal td,
+:root[data-season] .driver-time-off-history-table td,
+:root[data-season] .driver-time-off-report-table td {
+  border-bottom-color: var(--kole-divider) !important;
+  color: var(--kole-text-soft) !important;
+}
+
+:root[data-season] .detail-modal tbody tr {
+  background: var(--kole-table-row) !important;
+}
+
+:root[data-season] .detail-modal tbody tr:nth-child(even) {
+  background: var(--kole-table-row-alt) !important;
+}
+
+:root[data-season] .detail-modal tbody tr:hover,
+:root[data-season] .driver-time-off-history-row.active-history-row,
+:root[data-season] .driver-time-off-report-table .driver-time-off-clickable-row.active-history-row {
+  background: var(--kole-table-row-hover) !important;
+}
+
+:root[data-season] .driver-time-off-history-row.active-history-row,
+:root[data-season] .driver-time-off-report-table .driver-time-off-clickable-row.active-history-row {
+  box-shadow: inset 4px 0 0 var(--kole-action) !important;
+}
+
+:root[data-season] .detail-item,
+:root[data-season] .detail-modal .driver-report-section,
+:root[data-season] .detail-modal .settlement-report-section,
+:root[data-season] .detail-modal .report-kpi-card,
+:root[data-season] .detail-modal .driver-report-totals-grid > div,
+:root[data-season] .preferences-section,
+:root[data-season] .preference-toggle-row,
+:root[data-season] .preference-select-row,
+:root[data-season] .driver-snapshot-summary > div,
+:root[data-season] .driver-performance-analysis-card,
+:root[data-season] .driver-performance-section-card,
+:root[data-season] .sales-suppression-control-section,
+:root[data-season] .sales-notes-section,
+:root[data-season] .sales-suppression-control-card,
+:root[data-season] .sales-note-composer,
+:root[data-season] .sales-note-card,
+:root[data-season] .driver-time-off-history-card,
+:root[data-season] .driver-time-off-pattern-card,
+:root[data-season] .driver-time-off-board,
+:root[data-season] .driver-time-off-accordion-body,
+:root[data-season] .monthly-ops-summary-grid > div,
+:root[data-season] .monthly-ops-brief-card,
+:root[data-season] .monthly-ops-section,
+:root[data-season] .detail-modal .available-trucks-insight-card,
+:root[data-season] .detail-modal .available-trucks-proximity-list,
+:root[data-season] .driver-roster-port-intro,
+:root[data-season] .driver-roster-port-section,
+:root[data-season] .recruiting-info-card,
+:root[data-season] .recruiting-profile-summary-card,
+:root[data-season] .recruiting-section-card,
+:root[data-season] .recruiting-followup-control,
+:root[data-season] .recruiting-folder-row,
+:root[data-season] .recruiting-status-save-strip,
+:root[data-season] .recruiting-snapshot-intro,
+:root[data-season] .recruiting-snapshot-tabs button,
+:root[data-season] .recruiting-snapshot-talk-track,
+:root[data-season] .recruiting-snapshot-metric-card,
+:root[data-season] .recruiting-snapshot-section,
+:root[data-season] .recruiting-snapshot-disclaimer,
+:root[data-season] .order-edit-governance-card,
+:root[data-season] .order-edit-locked-card,
+:root[data-season] .order-edit-section,
+:root[data-season] .order-edit-actions {
+  background:
+    linear-gradient(135deg, var(--kole-modal-season-wash-soft), transparent 48%),
+    var(--kole-modal-season-card) !important;
+  border-color: var(--kole-border) !important;
+  color: var(--kole-text) !important;
+  box-shadow: 0 10px 24px var(--kole-modal-season-wash-soft) !important;
+}
+
+:root[data-season] .preference-toggle-row,
+:root[data-season] .preference-select-row,
+:root[data-season] .recruiting-snapshot-tabs button {
+  background: var(--kole-modal-season-card-alt) !important;
+}
+
+:root[data-season] .detail-item::before,
+:root[data-season] .monthly-ops-summary-grid > div::before {
+  background: linear-gradient(180deg, var(--kole-action), var(--kole-gold-bright)) !important;
+}
+
+:root[data-season] .driver-report-section-header,
+:root[data-season] .customer-trend-detail-modal .driver-report-section-header,
+:root[data-season] .monthly-ops-section .driver-report-section-header,
+:root[data-season] .driver-time-off-history-header,
+:root[data-season] .driver-time-off-pattern-header,
+:root[data-season] .driver-time-off-group-header,
+:root[data-season] .recruiting-section-card-header,
+:root[data-season] .order-edit-section-title {
+  background:
+    linear-gradient(90deg, var(--kole-modal-season-wash), transparent 48%),
+    var(--kole-surface) !important;
+  border-color: var(--kole-border) !important;
+  color: var(--kole-text) !important;
+}
+
+:root[data-season] .driver-report-section-header h4,
+:root[data-season] .monthly-ops-section .driver-report-section-header h4,
+:root[data-season] .driver-time-off-history-header h3,
+:root[data-season] .driver-performance-section-card h4,
+:root[data-season] .preferences-section-heading h3,
+:root[data-season] .driver-roster-port-section h3 {
+  color: var(--kole-gold-bright) !important;
+}
+
+:root[data-season] .driver-report-section-header p,
+:root[data-season] .customer-trend-detail-modal .driver-report-section-header p,
+:root[data-season] .monthly-ops-section .driver-report-section-header p,
+:root[data-season] .driver-time-off-history-header p,
+:root[data-season] .driver-time-off-pattern-header span,
+:root[data-season] .preferences-section-heading p,
+:root[data-season] .preference-toggle-row small,
+:root[data-season] .preference-select-row small {
+  color: var(--kole-muted) !important;
+}
+
+:root[data-season] .monthly-ops-summary-grid > div,
+:root[data-season] .monthly-ops-brief-card,
+:root[data-season] .monthly-ops-section {
+  border-left-color: var(--kole-action) !important;
+}
+
+:root[data-season] .recruiting-snapshot-tabs button:hover,
+:root[data-season] .recruiting-snapshot-tabs button.active {
+  background: var(--kole-selection-bg) !important;
+  border-color: var(--kole-action) !important;
+}
+
+:root[data-season] .recruiting-snapshot-intro strong,
+:root[data-season] .recruiting-snapshot-tabs strong,
+:root[data-season] .recruiting-snapshot-talk-track p,
+:root[data-season] .recruiting-snapshot-metric-card strong,
+:root[data-season] .driver-roster-port-header h2,
+:root[data-season] .order-edit-governance-card strong,
+:root[data-season] .order-edit-locked-card strong,
+:root[data-season] .order-edit-actions strong {
+  color: var(--kole-text) !important;
+}
+
+:root[data-season] .recruiting-snapshot-intro span,
+:root[data-season] .recruiting-snapshot-tabs span,
+:root[data-season] .recruiting-snapshot-metric-card small,
+:root[data-season] .recruiting-snapshot-disclaimer,
+:root[data-season] .driver-roster-port-grid span,
+:root[data-season] .driver-roster-port-intro span,
+:root[data-season] .order-edit-governance-card p,
+:root[data-season] .order-edit-locked-card p,
+:root[data-season] .order-edit-actions span {
+  color: var(--kole-muted) !important;
+}
+
+:root[data-season] .recruiting-snapshot-talk-track span {
+  color: var(--kole-action) !important;
+}
+
+:root[data-season] .recruiting-snapshot-disclaimer strong {
+  color: var(--kole-gold-bright) !important;
+}
+
+/*
+ * SEASONAL STRUCTURAL ACCENTS
+ *
+ * Retire the original light-theme blue from non-semantic rails and selection
+ * furniture. Status colors remain independent, while navigation and hierarchy
+ * now follow the active palette in both light and dark modes.
+ */
+:root[data-season] .detail-modal .section-title {
+  border-color: var(--kole-border) !important;
+  border-left-color: var(--kole-action) !important;
+  background:
+    linear-gradient(90deg, var(--kole-modal-season-wash), transparent 40%),
+    linear-gradient(180deg, var(--kole-surface), var(--kole-surface-2)) !important;
+  color: var(--kole-text) !important;
+  box-shadow: inset 0 1px 0 var(--kole-modal-season-wash-soft) !important;
+}
+
+:root[data-season] .detail-modal .detail-item:hover,
+:root[data-season] .detail-modal .detail-item:focus-within {
+  border-color: var(--kole-action) !important;
+  box-shadow:
+    0 14px 28px var(--kole-modal-season-wash),
+    inset 0 1px 0 var(--kole-modal-season-wash-soft) !important;
+}
+
+:root[data-season] .operations-header-bar,
+:root[data-season] .driver-time-off-header,
+:root[data-season] .driver-position-header-button,
+:root[data-season] .operations-panel > div > h3,
+:root[data-season] .operations-next7-heading-button,
+:root[data-season] .feature-section-header-button {
+  border-color: var(--kole-border) !important;
+  border-left-color: var(--kole-action) !important;
+  background: linear-gradient(180deg, var(--kole-shell), var(--kole-surface)) !important;
+  color: var(--kole-text) !important;
+}
+
+:root[data-season] .operations-header-bar:hover,
+:root[data-season] .driver-time-off-header:hover,
+:root[data-season] .driver-position-header-button:hover,
+:root[data-season] .operations-next7-heading-button:hover,
+:root[data-season] .feature-section-header-button:hover,
+:root[data-season] .feature-section-header-button[aria-expanded='true'] {
+  border-color: var(--kole-border-strong) !important;
+  border-left-color: var(--kole-action-hover) !important;
+  background: linear-gradient(180deg, var(--kole-shell), var(--kole-selection-bg)) !important;
+}

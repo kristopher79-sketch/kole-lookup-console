@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import './App.css';
+import './App.css?seasonal-modals=v9';
 import koleLogo from './assets/kole-logo.png';
 
 const isTauriRuntime = Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
@@ -361,6 +361,7 @@ const DASHBOARD_REFRESH_CADENCE_MS = {
 const KOLE_THEME_STORAGE_KEY = 'koleConnectTheme';
 const KOLE_USER_PREFS_STORAGE_KEY = 'koleConnectUserPreferences';
 const KOLE_SEASON_RECHECK_MS = 30 * 60 * 1000;
+const KOLE_MODAL_THEME_VERSION = 'v9';
 const DRIVER_TIME_OFF_PANE_OPTIONS = ['current', 'ended', 'starting-soon'];
 const SALES_AND_LEADS_PANEL_KEYS = ['customerBookingTrends', 'salesActivity', 'leadSuppression', 'salesLeads'];
 
@@ -2538,6 +2539,8 @@ export default function App() {
   useEffect(() => {
     const applySeasonalTheme = (element) => {
       if (!element) return;
+
+      element.dataset.modalThemeVersion = KOLE_MODAL_THEME_VERSION;
 
       if (resolvedSeasonalTheme) {
         element.dataset.season = resolvedSeasonalTheme;
