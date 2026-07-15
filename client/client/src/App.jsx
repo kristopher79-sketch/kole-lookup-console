@@ -1302,6 +1302,12 @@ export default function App() {
   const [orderEditError, setOrderEditError] = useState('');
   const [orderEditMessage, setOrderEditMessage] = useState('');
   const [orderEditNoteWarning, setOrderEditNoteWarning] = useState('');
+  const [noBolBidsOpen, setNoBolBidsOpen] = useState(false);
+  const [noBolBidsData, setNoBolBidsData] = useState(null);
+  const [noBolBidsLoading, setNoBolBidsLoading] = useState(false);
+  const [noBolBidsError, setNoBolBidsError] = useState('');
+  const noBolBidsButtonRef = useRef(null);
+  const noBolBidsCloseButtonRef = useRef(null);
   const [operationsData, setOperationsData] = useState(null);
   const [operationsLoading, setOperationsLoading] = useState(false);
   const [operationsError, setOperationsError] = useState('');
@@ -1599,6 +1605,7 @@ export default function App() {
 
   const isAnyModalOpen = Boolean(
     preferencesModalOpen ||
+    noBolBidsOpen ||
     selected ||
     selectedDriverRoster ||
     driverHistoryModalOpen ||
@@ -2599,6 +2606,16 @@ export default function App() {
   }, [isAnyModalOpen]);
 
   useEffect(() => {
+    if (!noBolBidsOpen || selected) return undefined;
+
+    const frame = window.requestAnimationFrame(() => {
+      noBolBidsCloseButtonRef.current?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [noBolBidsOpen, selected]);
+
+  useEffect(() => {
     return () => {
       if (brandRevealTimerRef.current) {
         window.clearTimeout(brandRevealTimerRef.current);
@@ -2618,6 +2635,7 @@ export default function App() {
         setOrderNotesTypeFilter('All');
         resetOrderNoteComposer();
         orderNotesRequestRef.current += 1;
+        setNoBolBidsOpen(false);
         setGrossRevenueModalOpen(false);
         setSelectedGrossRevenueTruck(null);
         setSelectedGrossRevenueMonth(null);
@@ -3013,6 +3031,10 @@ export default function App() {
     setOrderNotesTypeFilter('All');
     resetOrderNoteComposer();
     orderNotesRequestRef.current += 1;
+    setNoBolBidsOpen(false);
+    setNoBolBidsData(null);
+    setNoBolBidsLoading(false);
+    setNoBolBidsError('');
     setHasSearched(false);
     setError('');
     setAuthError('');
@@ -3324,6 +3346,45 @@ export default function App() {
     setSortDirection('asc');
     setSalesSearchReturnLead(null);
     setDriverLookupError('');
+  }
+
+  async function loadNoBolBids({ forceRefresh = false } = {}) {
+    setNoBolBidsLoading(true);
+    setNoBolBidsError('');
+
+    try {
+      const params = new URLSearchParams();
+      if (forceRefresh) params.set('refresh', 'true');
+
+      const suffix = params.toString() ? `?${params.toString()}` : '';
+      const res = await authedFetch(`${API}/bid-listing/no-bol${suffix}`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Unable to load open bids.');
+      }
+
+      setNoBolBidsData(data);
+    } catch (err) {
+      setNoBolBidsError(err.message || 'Unable to load open bids.');
+    } finally {
+      setNoBolBidsLoading(false);
+    }
+  }
+
+  function openNoBolBids() {
+    setNoBolBidsOpen(true);
+    void loadNoBolBids({ forceRefresh: true });
+  }
+
+  function closeNoBolBids() {
+    setNoBolBidsOpen(false);
+    window.requestAnimationFrame(() => noBolBidsButtonRef.current?.focus());
+  }
+
+  function openNoBolBidRecord(record) {
+    setNoBolBidsError('');
+    void loadDetails(record.id, 'basic', record.SourceListId, { returnLabel: 'Open Bids' });
   }
 
   function returnToCustomerCard() {
@@ -7674,6 +7735,7 @@ function openReportLoadDetails(load) {
   }
 
   function getLiveOrderReturnTrailLabel() {
+    if (noBolBidsOpen) return 'Open Bids';
     if (permitHistoryOrderReturnLoad || selectedPermitHistoryLoad) return 'Historical Permitted Loads';
     if (operationalNotesModalOpen) return 'Operational Notes';
     if (driverSummaryModalOpen) return 'Monthly Driver Summary';
@@ -8678,6 +8740,29 @@ function openReportLoadDetails(load) {
             }
           : record
       )));
+
+      setNoBolBidsData((current) => {
+        if (!current?.rows) return current;
+
+        return {
+          ...current,
+          rows: current.rows.map((record) => (
+            record.id === updatedRecord.id
+              ? {
+                  ...record,
+                  Customer: updatedRecord.Customer,
+                  Driver: updatedRecord.Driver,
+                  Status: updatedRecord.Status,
+                  PickupDate: updatedRecord.PickupDate,
+                  DeliveryDate: updatedRecord.DeliveryDate,
+                  Origin: updatedRecord.Origin,
+                  Destination: updatedRecord.Destination,
+                  LastModifiedDateTime: updatedRecord.LastModifiedDateTime
+                }
+              : record
+          ))
+        };
+      });
 
       setSelectedView('basic');
 
@@ -19091,6 +19176,19 @@ function openReportLoadDetails(load) {
             Clear
           </button>
 
+          <button
+            ref={noBolBidsButtonRef}
+            type="button"
+            className="search-secondary-button no-bol-bids-launch"
+            onClick={openNoBolBids}
+            disabled={noBolBidsLoading}
+            aria-haspopup="dialog"
+            aria-expanded={noBolBidsOpen}
+            title="Show current Bid Listing entries without a BOL"
+          >
+            {noBolBidsLoading ? 'Loading Open Bids...' : 'Open Bids'}
+          </button>
+
           {salesSearchReturnLead && (
             <button
               type="button"
@@ -20069,6 +20167,116 @@ function openReportLoadDetails(load) {
       <DriverRosterModal />
       <DriverPerformanceModal />
       {SalesLeadProfileModal()}
+
+      {noBolBidsOpen && (
+        <div className="modal-overlay no-bol-bids-overlay" role="presentation" onClick={closeNoBolBids}>
+          <section
+            className="no-bol-bids-flyout"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="no-bol-bids-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="no-bol-bids-header">
+              <div>
+                <span className="no-bol-bids-eyebrow">Current Bid Listing</span>
+                <h2 id="no-bol-bids-title">Open Bids</h2>
+                <p>Entries without a BOL, ordered newest to oldest.</p>
+              </div>
+
+              <div className="no-bol-bids-header-actions">
+                <button
+                  type="button"
+                  className="search-secondary-button"
+                  onClick={() => loadNoBolBids({ forceRefresh: true })}
+                  disabled={noBolBidsLoading}
+                >
+                  {noBolBidsLoading ? 'Refreshing...' : 'Refresh'}
+                </button>
+                <button ref={noBolBidsCloseButtonRef} type="button" className="close-button" onClick={closeNoBolBids}>
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="no-bol-bids-body">
+              <div className="no-bol-bids-summary" aria-live="polite">
+                <div>
+                  <strong>{formatReportNumber(noBolBidsData?.count || 0)}</strong>
+                  <span>current entr{Number(noBolBidsData?.count || 0) === 1 ? 'y' : 'ies'} without a BOL</span>
+                </div>
+                {noBolBidsData?.generatedAt && <small>Updated {noBolBidsData.generatedAt}</small>}
+              </div>
+
+              <div className="no-bol-bids-guidance">
+                Select an entry to open its existing order screen, then use Edit to change Status or other permitted details.
+              </div>
+
+              {noBolBidsError && (
+                <div className="msg error no-bol-bids-error" role="alert">
+                  <span>{noBolBidsError}</span>
+                  <button type="button" className="view-button" onClick={() => loadNoBolBids({ forceRefresh: true })}>
+                    Try Again
+                  </button>
+                </div>
+              )}
+
+              {noBolBidsLoading && !noBolBidsData && (
+                <div className="no-bol-bids-loading" role="status">Loading current Bid Listing entries...</div>
+              )}
+
+              {!noBolBidsLoading && !noBolBidsError && noBolBidsData?.rows?.length === 0 && (
+                <div className="no-bol-bids-empty">
+                  <strong>Everything is registered.</strong>
+                  <span>No current Bid Listing entries are missing a BOL.</span>
+                </div>
+              )}
+
+              {noBolBidsData?.rows?.length > 0 && (
+                <div className="no-bol-bids-list">
+                  {noBolBidsData.rows.map((record) => (
+                    <button
+                      key={record.id}
+                      type="button"
+                      className="no-bol-bid-row"
+                      onClick={() => openNoBolBidRecord(record)}
+                      disabled={loadingDetail}
+                      aria-label={`Open ${record.Customer || 'unnamed customer'} bid${record.Status ? ` with status ${record.Status}` : ''}`}
+                    >
+                      <span className="no-bol-bid-cell no-bol-bid-customer">
+                        <small>Customer</small>
+                        <strong>{record.Customer || '-'}</strong>
+                        <span className={getStatusClass(record.Status)}>{record.Status || 'No status'}</span>
+                      </span>
+                      <span className="no-bol-bid-cell">
+                        <small>Driver</small>
+                        <strong>{record.Driver || '-'}</strong>
+                      </span>
+                      <span className="no-bol-bid-cell">
+                        <small>PU Date</small>
+                        <strong>{formatDateOnly(record.PickupDate)}</strong>
+                      </span>
+                      <span className="no-bol-bid-cell">
+                        <small>Del Date</small>
+                        <strong>{formatDateOnly(record.DeliveryDate)}</strong>
+                      </span>
+                      <span className="no-bol-bid-cell">
+                        <small>From</small>
+                        <strong>{record.Origin || '-'}</strong>
+                      </span>
+                      <span className="no-bol-bid-cell">
+                        <small>To</small>
+                        <strong>{record.Destination || '-'}</strong>
+                      </span>
+                      <span className="no-bol-bid-open-hint">Open order <span aria-hidden="true">→</span></span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
 
       {selected && (
         <div className="modal-overlay" onClick={closeModal}>

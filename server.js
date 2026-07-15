@@ -770,6 +770,8 @@ function cleanBidItem(item, sourceList) {
 
   return {
     id: item.id || '',
+    CreatedAt: item.createdDateTime || '',
+    LastModifiedDateTime: item.lastModifiedDateTime || '',
     SourceListId: sourceList.listId,
     SourceList: sourceList.label,
     SourceYear: sourceList.year,
@@ -791,6 +793,42 @@ function cleanBidItem(item, sourceList) {
     Processed: fields.Processed ?? false,
     IsProcessed: parseBoolean(fields.Processed),
     IsSettled: parseBoolean(fields.Processed)
+  };
+}
+
+function buildNoBolBidListingResponse(records, sourceList) {
+  const rows = records
+    .filter((record) => !String(record.BOL || '').trim())
+    .map((record) => ({
+      id: record.id,
+      SourceListId: record.SourceListId,
+      BidID: record.BidID,
+      Customer: record.Customer,
+      Driver: record.Driver,
+      Status: record.Status,
+      PickupDate: record.PickupDate,
+      DeliveryDate: record.DeliveryDate,
+      Origin: record.Origin,
+      Destination: record.Destination,
+      CreatedAt: record.CreatedAt,
+      LastModifiedDateTime: record.LastModifiedDateTime
+    }))
+    .sort((a, b) => {
+      const createdDiff = (Date.parse(b.CreatedAt) || 0) - (Date.parse(a.CreatedAt) || 0);
+      if (createdDiff !== 0) return createdDiff;
+
+      const numericIdDiff = Number(b.id || 0) - Number(a.id || 0);
+      if (Number.isFinite(numericIdDiff) && numericIdDiff !== 0) return numericIdDiff;
+
+      return String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true });
+    });
+
+  return {
+    success: true,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    dataSource: sourceList.label,
+    count: rows.length,
+    rows
   };
 }
 
@@ -10008,6 +10046,32 @@ app.get('/auth-check', requireLookupAccess, (req, res) => {
     success: true,
     message: 'Lookup access authorized'
   });
+});
+
+app.get('/bid-listing/no-bol', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const lists = await getSearchableBidLists(token);
+    const currentList = lists.find((list) => list.label === 'Bid Listing');
+
+    if (!currentList) {
+      return res.status(404).json({
+        success: false,
+        error: 'Bid Listing was not found.'
+      });
+    }
+
+    const forceRefresh = parseBoolean(req.query.refresh);
+    const records = await getAllBidItemsFromList(token, currentList, { forceRefresh });
+
+    res.json(buildNoBolBidListingResponse(records, currentList));
+  } catch {
+    console.error('No-BOL Bid Listing lookup failed.');
+    res.status(500).json({
+      success: false,
+      error: 'Unable to load current Bid Listing entries without a BOL.'
+    });
+  }
 });
 
 app.get('/search', requireLookupAccess, async (req, res) => {
