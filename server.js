@@ -10010,70 +10010,6 @@ app.get('/auth-check', requireLookupAccess, (req, res) => {
   });
 });
 
-app.get('/graph-test', requireLookupAccess, async (req, res) => {
-  try {
-    const token = await getGraphToken();
-
-    res.json({
-      success: true,
-      message: 'Graph token acquired successfully',
-      tokenPreview: token.substring(0, 25) + '...'
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Graph token failed',
-      error: error.message
-    });
-  }
-});
-
-app.get('/lookup-lists', requireLookupAccess, async (req, res) => {
-  try {
-    const token = await getGraphToken();
-    const forceRefresh = String(req.query.refresh || '').toLowerCase() === 'true';
-    const lists = await getSearchableBidLists(token, forceRefresh);
-
-    res.json({
-      success: true,
-      count: lists.length,
-      lists
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-app.get('/bids-test', requireLookupAccess, async (req, res) => {
-  try {
-    const token = await getGraphToken();
-    const lists = await getSearchableBidLists(token);
-    const currentList = lists.find((list) => list.label === 'Bid Listing');
-
-    if (!currentList) {
-      return res.status(404).json({
-        success: false,
-        error: 'Bid Listing was not found.'
-      });
-    }
-
-    const data = await graphGet(
-      token,
-      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}/items?$expand=fields&$top=5`
-    );
-
-    res.json((data.value || []).map((item) => cleanBidItem(item, currentList)));
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
 app.get('/search', requireLookupAccess, async (req, res) => {
   try {
     const token = await getGraphToken();
@@ -10912,34 +10848,6 @@ app.get('/record-fields/:id', requireLookupAccess, async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-
-app.get('/sharepoint-docs-debug', requireLookupAccess, async (req, res) => {
-  try {
-    const token = await getGraphToken();
-
-    const items = await getAllChildrenFromFolder(
-      token,
-      process.env.SHAREPOINT_DOCUMENTS_DRIVE_ID,
-      'root'
-    );
-
-    res.json({
-      count: items.length,
-      items: items.map((i) => ({
-        name: i.name,
-        id: i.id,
-        isFolder: !!i.folder
-      }))
-    });
-  } catch (err) {
-    res.status(500).json({
-      error: err.message
-    });
-  }
-});
-
-
-
 
 async function getSalesActivityReportPayload(query = {}) {
   const salesLeadsListId = getSalesLeadsListId();
