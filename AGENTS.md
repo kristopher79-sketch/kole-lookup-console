@@ -156,6 +156,20 @@ Do not change those deployment assumptions without updating and validating web, 
 - Distinguish authentication, authorization, validation, not found, locked, conflict, throttling, timeout/network, and unexpected failures when the user can act differently.
 - The app handles sensitive operational, customer, driver, recruiting, financial, and document data. Never use live response data as a test fixture.
 
+## Intelligent Quote Engine rules
+
+The Intelligent Quote Engine is a cross-stack Bid Listing workflow. Preserve these non-obvious contracts unless Kris explicitly changes the pricing policy or SharePoint schema.
+
+- Calculate all miles as loaded miles plus empty/deadhead miles. Do not price deadhead separately or add a second deadhead percentage.
+- Select the policy rate from empty/deadhead miles, then apply that rate to all miles: empty miles at or below 250 use `$3.25` per all mile; empty miles above 250 use `$3.10` per all mile.
+- Add permit, escort, holding, and other extraordinary costs separately from the transportation amount. Apply a percentage adjustment to transportation before adding those costs.
+- Round automatically calculated and percentage-adjusted customer totals to the nearest `$50`. Preserve an explicit user-entered final flat-rate override without rerounding it.
+- Treat Bid Listing `Company`, `Truck Number`, and `Operator/Team` as SharePoint choice fields, not lookup fields. Read their approved choices from column metadata and write the selected strings directly.
+- Omit `BidID` from the create payload so the established Power Automate flow can assign it. A temporarily blank Bid ID after creation is a pending automation state, not a reason to create another record.
+- Preflight Quote Engine create fields against the live Bid Listing schema and return a categorized operational error when a field is missing, read-only, required, or incompatible. Do not change SharePoint schema from the application.
+- Never automatically retry a Quote Engine create request. Preserve the request ID and duplicate checks so an uncertain outcome can be investigated without risking a duplicate bid.
+- Keep free-typing Quote Engine inputs locally buffered and commit them on blur/submit so keystrokes do not rerender the full `App` component. Dates, switches, and selections may remain immediate.
+
 ## Business time and reporting rules
 
 Kole Connect's business timezone is **America/New_York / Eastern time**.
