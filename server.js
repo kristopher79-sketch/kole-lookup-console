@@ -28,6 +28,20 @@ const DRIVER_TIME_OFF_DEFAULT_REPORT_YEARS_BACK = 3;
 const AVAILABLE_TRUCKS_DEFAULT_LOOKBACK_DAYS = 30;
 const AVAILABLE_TRUCKS_DEFAULT_ASSIGNMENT_LOOKAHEAD_DAYS = Number(process.env.AVAILABLE_TRUCKS_ASSIGNMENT_LOOKAHEAD_DAYS || 2);
 const SALES_LEAD_NOTE_MAX_LENGTH = 63000;
+const QUOTE_ENGINE_RATE_FLOOR = 2.95;
+const QUOTE_ENGINE_UNKNOWN_DATE = '2100-01-01';
+const QUOTE_ENGINE_SCHEMA_CACHE_MS = 5 * 60 * 1000;
+const QUOTE_ENGINE_OPTIONS_CACHE_MS = 5 * 60 * 1000;
+const QUOTE_ENGINE_COMPARABLE_CACHE_MS = 5 * 60 * 1000;
+const QUOTE_ENGINE_PUBLISH_CACHE_MS = 30 * 60 * 1000;
+const QUOTE_ENGINE_BID_ID_POLL_TIMEOUT_MS = Math.min(
+  60 * 1000,
+  Math.max(5 * 1000, Number(process.env.QUOTE_ENGINE_BID_ID_POLL_TIMEOUT_MS) || 20 * 1000)
+);
+const QUOTE_ENGINE_BID_ID_POLL_INTERVAL_MS = Math.min(
+  5 * 1000,
+  Math.max(500, Number(process.env.QUOTE_ENGINE_BID_ID_POLL_INTERVAL_MS) || 1000)
+);
 
 function getLoadPicturesFolderId() {
   return (
@@ -55,6 +69,14 @@ const cachedBidItemsByList = new Map();
 const cachedOnThisDayItemsBySource = new Map();
 const cachedOnThisDayReports = new Map();
 const cachedOrderNotesByOrder = new Map();
+const cachedQuoteComparableItemsByList = new Map();
+const cachedQuotePublishResults = new Map();
+const inFlightQuotePublishRequests = new Map();
+const pendingQuoteAuditContexts = new Map();
+let cachedQuoteEngineSchema = null;
+let cachedQuoteEngineSchemaAt = 0;
+let cachedQuoteEngineOptions = null;
+let cachedQuoteEngineOptionsAt = 0;
 const BID_LIST_CACHE_MS = 5 * 60 * 1000;
 const BID_ITEM_CACHE_MS = Number(process.env.BID_ITEM_CACHE_MS || 2 * 60 * 1000);
 const OPERATIONS_TODAY_CACHE_MS = Number(process.env.OPERATIONS_TODAY_CACHE_MS || 60 * 1000);
@@ -1268,6 +1290,1251 @@ function normalizeEasternDateOnly(value) {
     month: '2-digit',
     day: '2-digit'
   }).format(parsed);
+}
+
+const QUOTE_ENGINE_LOOKUP_COLUMNS = Object.freeze([
+  {
+    key: 'company',
+    columnName: 'Company',
+    expectedWriteField: 'CompanyLookupId',
+    label: 'Company'
+  },
+  {
+    key: 'truck',
+    columnName: 'Truck_x0020_Number',
+    expectedWriteField: 'Truck_x0020_NumberLookupId',
+    label: 'Truck Number'
+  },
+  {
+    key: 'operator',
+    columnName: 'Operator_x002f_Team',
+    expectedWriteField: 'Operator_x002f_TeamLookupId',
+    label: 'Operator / Team'
+  }
+]);
+
+const QUOTE_ENGINE_REQUIRED_WRITABLE_COLUMNS = Object.freeze([
+  'BidID',
+  'Requestor',
+  'Date_x0020_Solicited',
+  'Ready_x0020_Date',
+  'Pickup_x0020_Offer_x0020_Date',
+  'Expected_x0020_Delivery_x0020_Da',
+  'EnableTracking',
+  'Freight_x0020_Description',
+  'Length',
+  'Width',
+  'Height',
+  'Operator_x0020_Starting_x0020_Lo',
+  'Shipment_x0020_Origin',
+  'Shipment_x0020_Destination',
+  'Empty_x0020__x0028_Deadhead_x002',
+  'Loaded_x0020_Miles',
+  'Team_x0020_Required',
+  'Permits_x002f_Escort_x0020_Fees_',
+  'Quoted_x0020_Total',
+  'Aircraft_x0020_Related_x003f_',
+  'Status'
+]);
+
+function getQuoteEngineBenchmarkRate() {
+  const configured = Number(process.env.QUOTE_ENGINE_BENCHMARK_RATE);
+  return Number.isFinite(configured) && configured >= QUOTE_ENGINE_RATE_FLOOR
+    ? configured
+    : QUOTE_ENGINE_RATE_FLOOR;
+}
+
+function getQuoteEngineMinimumCharge() {
+  const configured = Number(process.env.QUOTE_ENGINE_MINIMUM_CHARGE);
+  return Number.isFinite(configured) && configured > 0 ? configured : 0;
+}
+
+function getQuoteEngineHighConfidenceMatchCount() {
+  const configured = Number(process.env.QUOTE_ENGINE_HIGH_CONFIDENCE_MATCH_COUNT);
+  return Number.isInteger(configured) && configured > 0 ? configured : 0;
+}
+
+function createQuoteEngineError(message, statusCode = 400, code = '') {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  if (code) error.code = code;
+  return error;
+}
+
+async function getQuoteEngineCurrentList(token) {
+  const lists = await getSearchableBidLists(token);
+  const currentList = lists.find((list) => list.label === 'Bid Listing');
+
+  if (!currentList) {
+    throw createQuoteEngineError('Bid Listing was not found.', 404, 'QUOTE_LIST_NOT_FOUND');
+  }
+
+  return currentList;
+}
+
+async function getAllQuoteEngineColumns(token, listId) {
+  let url = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/columns?$select=id,name,displayName,required,hidden,readOnly,lookup,boolean,choice&$top=999`;
+  const columns = [];
+
+  while (url) {
+    let data;
+
+    try {
+      data = await graphGet(token, url);
+    } catch (error) {
+      if (columns.length > 0) throw error;
+      data = await graphGet(
+        token,
+        `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/columns?$top=999`
+      );
+    }
+
+    columns.push(...(data.value || []));
+    url = data['@odata.nextLink'] || null;
+  }
+
+  return columns;
+}
+
+async function getQuoteEngineSchema(token, currentList, forceRefresh = false) {
+  const now = Date.now();
+
+  if (
+    !forceRefresh &&
+    cachedQuoteEngineSchema &&
+    cachedQuoteEngineSchema.listId === currentList.listId &&
+    now - cachedQuoteEngineSchemaAt < QUOTE_ENGINE_SCHEMA_CACHE_MS
+  ) {
+    return cachedQuoteEngineSchema;
+  }
+
+  const columns = await getAllQuoteEngineColumns(token, currentList.listId);
+  const columnsByName = new Map(
+    columns
+      .filter((column) => column?.name)
+      .map((column) => [column.name, column])
+  );
+
+  const missingColumns = QUOTE_ENGINE_REQUIRED_WRITABLE_COLUMNS.filter((name) => {
+    const column = columnsByName.get(name);
+    return !column || column.readOnly === true;
+  });
+
+  if (missingColumns.length > 0) {
+    throw createQuoteEngineError(
+      'Quote publishing is unavailable because required Bid Listing fields are missing or read-only. Ask an administrator to review the Quote Engine mapping.',
+      503,
+      'QUOTE_SCHEMA_MISMATCH'
+    );
+  }
+
+  const lookups = {};
+
+  QUOTE_ENGINE_LOOKUP_COLUMNS.forEach((definition) => {
+    const column = columnsByName.get(definition.columnName);
+    const derivedWriteField = column?.name ? `${column.name}LookupId` : '';
+
+    if (
+      !column ||
+      column.readOnly === true ||
+      !column.lookup?.listId ||
+      !column.lookup?.columnName ||
+      derivedWriteField !== definition.expectedWriteField
+    ) {
+      throw createQuoteEngineError(
+        `${definition.label} lookup metadata does not match the approved Bid Listing integration.`,
+        503,
+        'QUOTE_LOOKUP_SCHEMA_MISMATCH'
+      );
+    }
+
+    lookups[definition.key] = {
+      ...definition,
+      listId: column.lookup.listId,
+      valueColumn: column.lookup.columnName,
+      writeField: derivedWriteField
+    };
+  });
+
+  cachedQuoteEngineSchema = {
+    listId: currentList.listId,
+    listLabel: currentList.label,
+    columnsByName,
+    lookups
+  };
+  cachedQuoteEngineSchemaAt = now;
+
+  return cachedQuoteEngineSchema;
+}
+
+async function getQuoteEngineLookupItems(token, lookupDefinition) {
+  const fieldName = encodeURIComponent(lookupDefinition.valueColumn);
+  let url = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${encodeURIComponent(lookupDefinition.listId)}/items?$select=id&$expand=fields($select=${fieldName})&$top=999`;
+  const rows = [];
+
+  while (url) {
+    const data = await graphGet(token, url);
+
+    (data.value || []).forEach((item) => {
+      const displayValue = getFlexibleFieldValue(item.fields?.[lookupDefinition.valueColumn]);
+      const value = String(displayValue ?? '').trim();
+      if (!item.id || !value) return;
+
+      rows.push({
+        id: String(item.id),
+        value,
+        normalized: normalizeSearchValue(value)
+      });
+    });
+
+    url = data['@odata.nextLink'] || null;
+  }
+
+  return rows;
+}
+
+function getUnambiguousQuoteLookupOptions(items = []) {
+  const grouped = new Map();
+
+  items.forEach((item) => {
+    if (!item.normalized) return;
+    if (!grouped.has(item.normalized)) grouped.set(item.normalized, []);
+    grouped.get(item.normalized).push(item);
+  });
+
+  return [...grouped.values()]
+    .filter((matches) => matches.length === 1)
+    .map((matches) => matches[0].value)
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
+}
+
+async function resolveQuoteLookupValue(token, lookupDefinition, requestedValue) {
+  const normalized = normalizeSearchValue(requestedValue);
+  if (!normalized) {
+    throw createQuoteEngineError(`${lookupDefinition.label} is required.`, 400, 'QUOTE_LOOKUP_REQUIRED');
+  }
+
+  const items = await getQuoteEngineLookupItems(token, lookupDefinition);
+  const matches = items.filter((item) => item.normalized === normalized);
+
+  if (matches.length === 0) {
+    throw createQuoteEngineError(
+      `${lookupDefinition.label} "${String(requestedValue || '').trim()}" was not found in its approved lookup source.`,
+      400,
+      'QUOTE_LOOKUP_NOT_FOUND'
+    );
+  }
+
+  if (matches.length > 1) {
+    throw createQuoteEngineError(
+      `${lookupDefinition.label} "${String(requestedValue || '').trim()}" matches more than one lookup record. Resolve the duplicate before publishing.`,
+      409,
+      'QUOTE_LOOKUP_AMBIGUOUS'
+    );
+  }
+
+  return matches[0];
+}
+
+async function getQuoteEngineOptionsPayload(token, forceRefresh = false) {
+  const now = Date.now();
+
+  if (!forceRefresh && cachedQuoteEngineOptions && now - cachedQuoteEngineOptionsAt < QUOTE_ENGINE_OPTIONS_CACHE_MS) {
+    return cachedQuoteEngineOptions;
+  }
+
+  const currentList = await getQuoteEngineCurrentList(token);
+  const schema = await getQuoteEngineSchema(token, currentList, forceRefresh);
+  const [companies, trucks, operators] = await Promise.all([
+    getQuoteEngineLookupItems(token, schema.lookups.company),
+    getQuoteEngineLookupItems(token, schema.lookups.truck),
+    getQuoteEngineLookupItems(token, schema.lookups.operator)
+  ]);
+
+  const truckOptions = getUnambiguousQuoteLookupOptions(trucks);
+  const operatorOptions = getUnambiguousQuoteLookupOptions(operators);
+
+  if (!truckOptions.some((value) => value === '-')) {
+    throw createQuoteEngineError('The approved unassigned Truck Number lookup value (-) was not found.', 503, 'QUOTE_UNASSIGNED_TRUCK_MISSING');
+  }
+
+  if (!operatorOptions.some((value) => value === '-')) {
+    throw createQuoteEngineError('The approved unassigned Operator / Team lookup value (-) was not found.', 503, 'QUOTE_UNASSIGNED_OPERATOR_MISSING');
+  }
+
+  cachedQuoteEngineOptions = {
+    success: true,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    companies: getUnambiguousQuoteLookupOptions(companies),
+    trucks: truckOptions,
+    operators: operatorOptions,
+    defaults: {
+      dateSolicited: formatEasternDate(),
+      truck: '-',
+      operator: '-',
+      benchmarkRate: getQuoteEngineBenchmarkRate(),
+      floorRate: QUOTE_ENGINE_RATE_FLOOR,
+      minimumCharge: getQuoteEngineMinimumCharge(),
+      unknownDate: QUOTE_ENGINE_UNKNOWN_DATE
+    }
+  };
+  cachedQuoteEngineOptionsAt = now;
+
+  return cachedQuoteEngineOptions;
+}
+
+function getQuoteEngineText(input, key, label, maxLength = 500, required = true) {
+  const value = String(input?.[key] ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .trim();
+
+  if (required && !value) {
+    throw createQuoteEngineError(`${label} is required.`, 400, 'QUOTE_REQUIRED_FIELD');
+  }
+
+  if (value.length > maxLength) {
+    throw createQuoteEngineError(`${label} is too long.`, 400, 'QUOTE_FIELD_TOO_LONG');
+  }
+
+  return value;
+}
+
+function getQuoteEngineNumber(input, key, label, options = {}) {
+  const raw = input?.[key];
+  const clean = String(raw ?? '').replace(/,/g, '').trim();
+
+  if (!clean) {
+    if (options.required !== false) {
+      throw createQuoteEngineError(`${label} is required.`, 400, 'QUOTE_REQUIRED_FIELD');
+    }
+    return Number(options.defaultValue || 0);
+  }
+
+  const value = Number(clean);
+  const minimum = options.minimum ?? 0;
+
+  if (!Number.isFinite(value) || value < minimum) {
+    throw createQuoteEngineError(
+      `${label} must be ${minimum === 0 ? 'zero or greater' : `greater than or equal to ${minimum}`}.`,
+      400,
+      'QUOTE_INVALID_NUMBER'
+    );
+  }
+
+  if (Number.isFinite(options.maximum) && value > options.maximum) {
+    throw createQuoteEngineError(`${label} is above the supported maximum.`, 400, 'QUOTE_INVALID_NUMBER');
+  }
+
+  return value;
+}
+
+function getQuoteEngineBoolean(value, label, required = true) {
+  if (value === true || value === false) return value;
+
+  const normalized = normalizeText(value);
+  if (['true', 'yes', '1'].includes(normalized)) return true;
+  if (['false', 'no', '0'].includes(normalized)) return false;
+
+  if (!required && !normalized) return null;
+  throw createQuoteEngineError(`${label} must be answered Yes or No.`, 400, 'QUOTE_INVALID_BOOLEAN');
+}
+
+function getQuoteEngineDate(input, key, label, allowUnknown = false) {
+  const unknown = getQuoteEngineBoolean(input?.[`${key}Unknown`], `${label} unknown selection`, false) === true;
+  const value = String(input?.[key] || '').trim();
+
+  if (unknown) {
+    if (!allowUnknown) {
+      throw createQuoteEngineError(`${label} cannot use the unknown-date placeholder.`, 400, 'QUOTE_DATE_REQUIRED');
+    }
+    return { value: QUOTE_ENGINE_UNKNOWN_DATE, unknown: true };
+  }
+
+  if (!isValidDateInput(value)) {
+    throw createQuoteEngineError(
+      `${label} must be a valid date${allowUnknown ? ' or be explicitly marked unknown' : ''}.`,
+      400,
+      'QUOTE_INVALID_DATE'
+    );
+  }
+
+  return { value, unknown: false };
+}
+
+function normalizeQuoteEngineDraft(input = {}) {
+  const dateSolicited = getQuoteEngineDate(input, 'dateSolicited', 'Date Solicited');
+  const readyDate = getQuoteEngineDate(input, 'readyDate', 'Ready Date', true);
+  const pickupDate = getQuoteEngineDate(input, 'pickupDate', 'Pickup Offer Date', true);
+  const deliveryDate = getQuoteEngineDate(input, 'deliveryDate', 'Expected Delivery Date', true);
+  const deadheadConfidence = normalizeText(input.deadheadConfidence || 'estimated');
+  const adjustmentMode = normalizeText(input.adjustmentMode || 'none');
+
+  if (!['confirmed', 'estimated', 'uncertain'].includes(deadheadConfidence)) {
+    throw createQuoteEngineError('Deadhead confidence must be Confirmed, Estimated, or Uncertain.', 400, 'QUOTE_INVALID_CONFIDENCE');
+  }
+
+  if (!['none', 'percent', 'flat'].includes(adjustmentMode)) {
+    throw createQuoteEngineError('Quote adjustment mode is invalid.', 400, 'QUOTE_INVALID_ADJUSTMENT');
+  }
+
+  if (!pickupDate.unknown && !deliveryDate.unknown && deliveryDate.value < pickupDate.value) {
+    throw createQuoteEngineError('Expected Delivery Date cannot be earlier than Pickup Offer Date.', 400, 'QUOTE_DATE_ORDER');
+  }
+
+  const adjustmentPercent = adjustmentMode === 'percent'
+    ? getQuoteEngineNumber(
+        { value: input.adjustmentPercent },
+        'value',
+        'Percentage adjustment',
+        { minimum: -95, maximum: 500 }
+      )
+    : 0;
+  const flatRate = adjustmentMode === 'flat'
+    ? getQuoteEngineNumber({ value: input.flatRate }, 'value', 'Flat-rate override', { minimum: 0.01 })
+    : 0;
+  const overrideReason = adjustmentMode === 'none'
+    ? ''
+    : getQuoteEngineText(input, 'overrideReason', 'Override reason', 1000, true);
+
+  return {
+    company: getQuoteEngineText(input, 'company', 'Company', 300),
+    requestor: getQuoteEngineText(input, 'requestor', 'Requestor', 300),
+    dateSolicited: dateSolicited.value,
+    readyDate: readyDate.value,
+    readyDateUnknown: readyDate.unknown,
+    pickupDate: pickupDate.value,
+    pickupDateUnknown: pickupDate.unknown,
+    deliveryDate: deliveryDate.value,
+    deliveryDateUnknown: deliveryDate.unknown,
+    freight: getQuoteEngineText(input, 'freight', 'Freight Description', 1000),
+    length: getQuoteEngineNumber(input, 'length', 'Length', { minimum: 0.01 }),
+    width: getQuoteEngineNumber(input, 'width', 'Width', { minimum: 0.01 }),
+    height: getQuoteEngineNumber(input, 'height', 'Height', { minimum: 0.01 }),
+    operatorStartingLocation: getQuoteEngineText(input, 'operatorStartingLocation', 'Operator Starting Location', 500),
+    origin: getQuoteEngineText(input, 'origin', 'Shipment Origin', 500),
+    destination: getQuoteEngineText(input, 'destination', 'Shipment Destination', 500),
+    emptyMiles: getQuoteEngineNumber(input, 'emptyMiles', 'Empty (Deadhead) Miles', { minimum: 0 }),
+    loadedMiles: getQuoteEngineNumber(input, 'loadedMiles', 'Loaded Miles', { minimum: 0.01 }),
+    deadheadConfidence,
+    teamRequired: getQuoteEngineBoolean(input.teamRequired, 'Team Required', false),
+    extraordinaryCosts: getQuoteEngineNumber(input, 'extraordinaryCosts', 'Permit / Escort / Holding Charges', { required: false, minimum: 0 }),
+    extraordinaryCostsConfirmed: getQuoteEngineBoolean(input.extraordinaryCostsConfirmed, 'Extraordinary cost confirmation', false) === true,
+    truck: getQuoteEngineText(input, 'truck', 'Truck Number', 100, false) || '-',
+    operator: getQuoteEngineText(input, 'operator', 'Operator / Team', 300, false) || '-',
+    aircraftRelated: getQuoteEngineBoolean(input.aircraftRelated, 'Aircraft Related'),
+    enableTracking: getQuoteEngineBoolean(input.enableTracking, 'Enable Tracking', false) === true,
+    localShipment: getQuoteEngineBoolean(input.localShipment, 'Local shipment', false) === true,
+    adjustmentMode,
+    adjustmentPercent,
+    flatRate,
+    overrideReason,
+    floorOverrideConfirmed: getQuoteEngineBoolean(input.floorOverrideConfirmed, 'Floor override confirmation', false) === true,
+    duplicateAcknowledged: getQuoteEngineBoolean(input.duplicateAcknowledged, 'Duplicate acknowledgement', false) === true,
+    confirmPublish: getQuoteEngineBoolean(input.confirmPublish, 'Publish confirmation', false) === true,
+    requestId: getQuoteEngineText(input, 'requestId', 'Publish request ID', 100, false)
+  };
+}
+
+function getQuoteComparableFieldSelect() {
+  return [
+    'BidID',
+    'Company',
+    'Requestor',
+    'Date_x0020_Solicited',
+    'Ready_x0020_Date',
+    'Pickup_x0020_Offer_x0020_Date',
+    'Expected_x0020_Delivery_x0020_Da',
+    'Freight_x0020_Description',
+    'Length',
+    'Width',
+    'Height',
+    'Operator_x0020_Starting_x0020_Lo',
+    'Shipment_x0020_Origin',
+    'Shipment_x0020_Destination',
+    'Empty_x0020__x0028_Deadhead_x002',
+    'Empty_x0020__x0028_Deadhead_x0029__x0020_Miles',
+    'Loaded_x0020_Miles',
+    'Team_x0020_Required',
+    'Permits_x002f_Escort_x0020_Fees_',
+    'Quoted_x0020_Total',
+    'Aircraft_x0020_Related_x003f_',
+    'Status'
+  ].join(',');
+}
+
+function cleanQuoteComparableItem(item, sourceList) {
+  const fields = item.fields || {};
+  const emptyMiles = getNumberValue(
+    fields.Empty_x0020__x0028_Deadhead_x0029__x0020_Miles ??
+    fields.Empty_x0020__x0028_Deadhead_x002
+  );
+  const loadedMiles = getNumberValue(fields.Loaded_x0020_Miles);
+  const allMiles = emptyMiles + loadedMiles;
+  const quotedTotal = getNumberValue(fields.Quoted_x0020_Total);
+  const extraordinaryCosts = getNumberValue(fields.Permits_x002f_Escort_x0020_Fees_);
+  const transportationAmount = Math.max(0, quotedTotal - extraordinaryCosts);
+
+  return {
+    id: String(item.id || ''),
+    SourceListId: sourceList.listId,
+    SourceList: sourceList.label,
+    SourceYear: sourceList.year,
+    CreatedAt: item.createdDateTime || '',
+    BidID: String(fields.BidID || '').trim(),
+    Company: String(getFlexibleFieldValue(fields.Company) || fields.Company || '').trim(),
+    Requestor: String(fields.Requestor || '').trim(),
+    DateSolicited: normalizeEasternDateOnly(fields.Date_x0020_Solicited) || getDateFromBidId(fields.BidID) || normalizeEasternDateOnly(item.createdDateTime),
+    ReadyDate: normalizeEasternDateOnly(fields.Ready_x0020_Date),
+    PickupDate: normalizeEasternDateOnly(fields.Pickup_x0020_Offer_x0020_Date),
+    DeliveryDate: normalizeEasternDateOnly(fields.Expected_x0020_Delivery_x0020_Da),
+    Freight: String(fields.Freight_x0020_Description || '').trim(),
+    Length: getNumberValue(fields.Length),
+    Width: getNumberValue(fields.Width),
+    Height: getNumberValue(fields.Height),
+    OperatorStartingLocation: String(fields.Operator_x0020_Starting_x0020_Lo || '').trim(),
+    Origin: String(getFlexibleFieldValue(fields.Shipment_x0020_Origin) || fields.Shipment_x0020_Origin || '').trim(),
+    Destination: String(getFlexibleFieldValue(fields.Shipment_x0020_Destination) || fields.Shipment_x0020_Destination || '').trim(),
+    EmptyMiles: emptyMiles,
+    LoadedMiles: loadedMiles,
+    AllMiles: allMiles,
+    TeamRequired: fields.Team_x0020_Required,
+    AircraftRelated: fields.Aircraft_x0020_Related_x003f_,
+    ExtraordinaryCosts: extraordinaryCosts,
+    QuotedTotal: quotedTotal,
+    TransportationRate: allMiles > 0 ? transportationAmount / allMiles : 0,
+    Status: String(getFlexibleFieldValue(fields.Status) || fields.Status || '').trim()
+  };
+}
+
+async function getQuoteComparableItemsFromList(token, sourceList, forceRefresh = false) {
+  const cacheKey = `${sourceList.listId}|${sourceList.year}`;
+
+  if (!forceRefresh) {
+    const cached = getCacheRecord(cachedQuoteComparableItemsByList, cacheKey, QUOTE_ENGINE_COMPARABLE_CACHE_MS);
+    if (cached) return cached;
+  }
+
+  const bundle = await getAllListItemsWithFieldsResilient(token, sourceList.listId, getQuoteComparableFieldSelect());
+  const records = (bundle.items || []).map((item) => cleanQuoteComparableItem(item, sourceList));
+
+  return setCacheRecord(cachedQuoteComparableItemsByList, cacheKey, {
+    records,
+    warning: bundle.usedFallback ? `Selected-field retrieval fell back to the full ${sourceList.label} record shape.` : ''
+  }, 12);
+}
+
+async function getAllQuoteComparableRecords(token, options = {}) {
+  const lists = await getSearchableBidLists(token, options.forceRefresh === true);
+  const settled = await Promise.allSettled(
+    lists.map((sourceList) => getQuoteComparableItemsFromList(token, sourceList, options.forceRefresh === true))
+  );
+  const records = [];
+  const warnings = [];
+  let currentListAvailable = false;
+
+  settled.forEach((result, index) => {
+    const sourceList = lists[index];
+
+    if (result.status === 'fulfilled') {
+      records.push(...result.value.records);
+      if (sourceList.label === 'Bid Listing') currentListAvailable = true;
+      if (result.value.warning) warnings.push(result.value.warning);
+      return;
+    }
+
+    warnings.push(`${sourceList.label} could not be included in quote history.`);
+  });
+
+  return { records, warnings, currentListAvailable };
+}
+
+function getQuoteComparableStatusType(status) {
+  const normalized = normalizeSearchValue(status);
+
+  if (normalized === 'won') return 'won';
+  if (normalized === 'lost') return 'lost';
+  if (normalized === 'local') return 'local';
+  if (['tonu', 'can', 'cancelled', 'canceled', 'bid withdrawn', 'withdrawn'].includes(normalized)) return 'excluded';
+  return 'unresolved';
+}
+
+function getQuoteLocationState(value) {
+  const matches = String(value || '').toUpperCase().match(/\b[A-Z]{2}\b/g);
+  return matches?.length ? matches[matches.length - 1] : '';
+}
+
+function getQuoteFreightSimilarity(a, b) {
+  const aTokens = new Set(normalizeSearchValue(a).split(' ').filter((token) => token.length > 2));
+  const bTokens = new Set(normalizeSearchValue(b).split(' ').filter((token) => token.length > 2));
+  if (aTokens.size === 0 || bTokens.size === 0) return 0;
+
+  const shared = [...aTokens].filter((token) => bTokens.has(token)).length;
+  return shared / Math.max(aTokens.size, bTokens.size);
+}
+
+function getQuoteDimensionDifference(record, draft) {
+  const pairs = [
+    [record.Length, draft.length],
+    [record.Width, draft.width],
+    [record.Height, draft.height]
+  ];
+  const differences = pairs
+    .filter(([historical, requested]) => historical > 0 && requested > 0)
+    .map(([historical, requested]) => Math.abs(historical - requested) / Math.max(historical, requested));
+
+  if (differences.length === 0) return 1;
+  return differences.reduce((sum, value) => sum + value, 0) / differences.length;
+}
+
+function buildQuoteComparableMatch(record, draft) {
+  const sameCustomer = normalizeSearchValue(record.Company) === normalizeSearchValue(draft.company);
+  const sameOrigin = normalizeSearchValue(record.Origin) === normalizeSearchValue(draft.origin);
+  const sameDestination = normalizeSearchValue(record.Destination) === normalizeSearchValue(draft.destination);
+  const exactLane = sameOrigin && sameDestination;
+  const reverseLane = (
+    normalizeSearchValue(record.Origin) === normalizeSearchValue(draft.destination) &&
+    normalizeSearchValue(record.Destination) === normalizeSearchValue(draft.origin)
+  );
+  const originState = getQuoteLocationState(record.Origin);
+  const destinationState = getQuoteLocationState(record.Destination);
+  const draftOriginState = getQuoteLocationState(draft.origin);
+  const draftDestinationState = getQuoteLocationState(draft.destination);
+  const sameStatePair = Boolean(
+    originState &&
+    destinationState &&
+    originState === draftOriginState &&
+    destinationState === draftDestinationState
+  );
+  const sameOneWayMarket = sameOrigin || sameDestination || (
+    originState && destinationState && (originState === draftOriginState || destinationState === draftDestinationState)
+  );
+
+  let tier = 6;
+  let relevance = 'Broad historical fallback';
+
+  if (sameCustomer && exactLane) {
+    tier = 1;
+    relevance = 'Same customer and same lane';
+  } else if (sameCustomer && sameStatePair) {
+    tier = 2;
+    relevance = 'Same customer and directional state pair';
+  } else if (exactLane) {
+    tier = 3;
+    relevance = 'Same origin and destination markets';
+  } else if (sameStatePair) {
+    tier = 4;
+    relevance = 'Same directional state pair';
+  } else if (reverseLane) {
+    tier = 5;
+    relevance = 'Reverse-direction secondary comparable';
+  } else if (sameCustomer || sameOneWayMarket) {
+    tier = 5;
+    relevance = sameCustomer ? 'Same customer on a different lane' : 'One matching lane market';
+  }
+
+  const allMiles = draft.emptyMiles + draft.loadedMiles;
+  const mileageDifference = record.AllMiles > 0
+    ? Math.abs(record.AllMiles - allMiles) / Math.max(record.AllMiles, allMiles)
+    : 1;
+  const freightSimilarity = getQuoteFreightSimilarity(record.Freight, draft.freight);
+  const dimensionDifference = getQuoteDimensionDifference(record, draft);
+  const statusType = getQuoteComparableStatusType(record.Status);
+  const dateValue = record.DateSolicited || record.PickupDate || normalizeEasternDateOnly(record.CreatedAt);
+
+  return {
+    record,
+    tier,
+    relevance,
+    sameCustomer,
+    exactLane,
+    reverseLane,
+    sameStatePair,
+    mileageDifference,
+    freightSimilarity,
+    dimensionDifference,
+    statusType,
+    dateValue
+  };
+}
+
+function compareQuoteComparableMatches(a, b) {
+  if (a.tier !== b.tier) return a.tier - b.tier;
+  if (a.mileageDifference !== b.mileageDifference) return a.mileageDifference - b.mileageDifference;
+  if (a.freightSimilarity !== b.freightSimilarity) return b.freightSimilarity - a.freightSimilarity;
+  if (a.dimensionDifference !== b.dimensionDifference) return a.dimensionDifference - b.dimensionDifference;
+
+  const dateDiff = (Date.parse(b.dateValue || '') || 0) - (Date.parse(a.dateValue || '') || 0);
+  if (dateDiff !== 0) return dateDiff;
+
+  const statusRank = { won: 0, lost: 1, unresolved: 2, local: 3, excluded: 4 };
+  return (statusRank[a.statusType] ?? 5) - (statusRank[b.statusType] ?? 5);
+}
+
+function getQuoteComparableDisplay(match) {
+  const record = match.record;
+
+  return {
+    id: record.id,
+    SourceListId: record.SourceListId,
+    SourceList: record.SourceList,
+    BidID: record.BidID,
+    Company: record.Company,
+    DateSolicited: record.DateSolicited,
+    PickupDate: record.PickupDate,
+    Origin: record.Origin,
+    Destination: record.Destination,
+    Freight: record.Freight,
+    EmptyMiles: record.EmptyMiles,
+    LoadedMiles: record.LoadedMiles,
+    AllMiles: record.AllMiles,
+    QuotedTotal: record.QuotedTotal,
+    ExtraordinaryCosts: record.ExtraordinaryCosts,
+    TransportationRate: record.TransportationRate,
+    Status: record.Status,
+    statusTreatment: match.statusType,
+    relevance: match.relevance,
+    reverseDirection: match.reverseLane
+  };
+}
+
+function getMedianQuoteRate(values = []) {
+  const sorted = values.filter((value) => Number.isFinite(value) && value > 0).sort((a, b) => a - b);
+  if (sorted.length === 0) return 0;
+
+  const midpoint = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[midpoint - 1] + sorted[midpoint]) / 2
+    : sorted[midpoint];
+}
+
+function findQuoteDuplicates(records, draft) {
+  const normalized = {
+    company: normalizeSearchValue(draft.company),
+    requestor: normalizeSearchValue(draft.requestor),
+    freight: normalizeSearchValue(draft.freight),
+    origin: normalizeSearchValue(draft.origin),
+    destination: normalizeSearchValue(draft.destination)
+  };
+
+  return records
+    .map((record) => {
+      const sameCompany = normalizeSearchValue(record.Company) === normalized.company;
+      const sameRequestor = normalizeSearchValue(record.Requestor) === normalized.requestor;
+      const sameFreight = normalizeSearchValue(record.Freight) === normalized.freight;
+      const sameLane = (
+        normalizeSearchValue(record.Origin) === normalized.origin &&
+        normalizeSearchValue(record.Destination) === normalized.destination
+      );
+      const samePickup = normalizeEasternDateOnly(record.PickupDate) === draft.pickupDate;
+      const sameDelivery = normalizeEasternDateOnly(record.DeliveryDate) === draft.deliveryDate;
+      const sameDimensions = (
+        Number(record.Length) === Number(draft.length) &&
+        Number(record.Width) === Number(draft.width) &&
+        Number(record.Height) === Number(draft.height)
+      );
+      const exact = sameCompany && sameRequestor && sameFreight && sameLane && samePickup && sameDelivery && sameDimensions;
+      const possible = sameCompany && sameLane && samePickup && (sameFreight || sameDelivery);
+
+      if (!exact && !possible) return null;
+
+      return {
+        severity: exact ? 'exact' : 'possible',
+        id: record.id,
+        SourceListId: record.SourceListId,
+        BidID: record.BidID,
+        Company: record.Company,
+        Requestor: record.Requestor,
+        Freight: record.Freight,
+        Origin: record.Origin,
+        Destination: record.Destination,
+        PickupDate: record.PickupDate,
+        DeliveryDate: record.DeliveryDate,
+        QuotedTotal: record.QuotedTotal,
+        Status: record.Status,
+        DateSolicited: record.DateSolicited
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (a.severity !== b.severity) return a.severity === 'exact' ? -1 : 1;
+      return (Date.parse(b.DateSolicited || '') || 0) - (Date.parse(a.DateSolicited || '') || 0);
+    })
+    .slice(0, 6);
+}
+
+function roundQuoteToNearestFifty(value) {
+  return Math.round(Number(value || 0) / 50) * 50;
+}
+
+function getQuoteDateDifferenceDays(start, end) {
+  if (!isValidDateInput(start) || !isValidDateInput(end)) return null;
+  const startTime = Date.parse(`${start}T12:00:00Z`);
+  const endTime = Date.parse(`${end}T12:00:00Z`);
+  return Math.round((endTime - startTime) / (24 * 60 * 60 * 1000));
+}
+
+function getQuoteConfidence(matches, draft, warnings) {
+  const currentYear = Number(formatEasternDate().slice(0, 4));
+  const highConfidenceMatchCount = getQuoteEngineHighConfidenceMatchCount();
+  const recentExactMatches = matches.filter((match) => (
+    match.tier === 1 &&
+    Number(String(match.dateValue || '').slice(0, 4)) === currentYear
+  ));
+  const relevantMatches = matches.filter((match) => (
+    match.tier <= 4 &&
+    Number(String(match.dateValue || '').slice(0, 4)) >= currentYear - 1
+  ));
+
+  let level = 'Low';
+  const reasons = [];
+
+  if (highConfidenceMatchCount > 0 && recentExactMatches.length >= highConfidenceMatchCount) {
+    level = 'High';
+    reasons.push(`${recentExactMatches.length} current-year same-customer, same-lane comparables were found.`);
+  } else if (relevantMatches.length > 0) {
+    level = 'Medium';
+    reasons.push(`${relevantMatches.length} recent customer, lane, or directional-state comparables were found.`);
+    if (highConfidenceMatchCount <= 0) {
+      reasons.push('High-confidence comparable thresholds remain unconfigured pending policy approval.');
+    }
+  } else if (matches.length > 0) {
+    reasons.push('Historical evidence is limited or broadly matched.');
+  } else {
+    reasons.push('No usable pricing comparables were found.');
+  }
+
+  if (draft.deadheadConfidence === 'uncertain') {
+    level = 'Low';
+    reasons.push('Deadhead mileage is marked uncertain.');
+  } else if (draft.deadheadConfidence === 'estimated' && level === 'High') {
+    level = 'Medium';
+    reasons.push('Deadhead mileage is estimated rather than confirmed.');
+  }
+
+  if (draft.localShipment && getQuoteEngineMinimumCharge() <= 0) {
+    level = 'Low';
+    reasons.push('The local/minimum charge policy is not configured.');
+  }
+
+  if (draft.readyDateUnknown || draft.pickupDateUnknown || draft.deliveryDateUnknown) {
+    if (level === 'High') level = 'Medium';
+    reasons.push('One or more operating dates are explicitly unknown.');
+  }
+
+  if (warnings.length > 2 && level === 'High') level = 'Medium';
+
+  return { level, reasons };
+}
+
+function calculateQuoteEngineRecommendation(draft, historicalRecords, sourceWarnings = []) {
+  const allMiles = draft.emptyMiles + draft.loadedMiles;
+  const benchmarkRate = getQuoteEngineBenchmarkRate();
+  const minimumCharge = getQuoteEngineMinimumCharge();
+  const mileageCharge = allMiles * benchmarkRate;
+  const minimumApplied = draft.localShipment && minimumCharge > mileageCharge;
+  const baseTransportationCharge = minimumApplied ? minimumCharge : mileageCharge;
+  const standardUnroundedTotal = baseTransportationCharge + draft.extraordinaryCosts;
+  const suggestedQuote = roundQuoteToNearestFifty(standardUnroundedTotal);
+  let adjustedTransportationCharge = baseTransportationCharge;
+  let finalQuote = suggestedQuote;
+  let roundingApplied = true;
+
+  if (draft.adjustmentMode === 'percent') {
+    adjustedTransportationCharge = baseTransportationCharge * (1 + (draft.adjustmentPercent / 100));
+    finalQuote = roundQuoteToNearestFifty(adjustedTransportationCharge + draft.extraordinaryCosts);
+  } else if (draft.adjustmentMode === 'flat') {
+    finalQuote = draft.flatRate;
+    adjustedTransportationCharge = Math.max(0, finalQuote - draft.extraordinaryCosts);
+    roundingApplied = false;
+  }
+
+  const eligibleMatches = historicalRecords
+    .map((record) => buildQuoteComparableMatch(record, draft))
+    .filter((match) => (
+      match.record.AllMiles > 0 &&
+      match.record.QuotedTotal > 0 &&
+      match.statusType !== 'excluded' &&
+      match.statusType !== 'local'
+    ))
+    .sort(compareQuoteComparableMatches);
+  const topMatches = eligibleMatches.slice(0, 8);
+  const historicalMedianRate = getMedianQuoteRate(
+    topMatches
+      .filter((match) => match.tier <= 4)
+      .map((match) => match.record.TransportationRate)
+  );
+  const currentRecords = historicalRecords.filter((record) => record.SourceList === 'Bid Listing');
+  const duplicates = findQuoteDuplicates(currentRecords, draft);
+  const warnings = [...sourceWarnings];
+  const assumptions = [];
+
+  if (draft.deadheadConfidence !== 'confirmed') {
+    assumptions.push(`Deadhead mileage is ${draft.deadheadConfidence}.`);
+  }
+
+  if (draft.localShipment && minimumCharge <= 0) {
+    warnings.push('Local shipment selected, but no approved local/minimum charge is configured. Use a reviewed flat-rate override before publishing.');
+  }
+
+  if (draft.teamRequired === true) {
+    assumptions.push('Team service is required, but no automatic team percentage has been applied.');
+  }
+
+  if (draft.extraordinaryCosts > 0 && !draft.extraordinaryCostsConfirmed) {
+    warnings.push('Permit, escort, or holding charges are marked as an estimate and require review.');
+  }
+
+  const quoteToPickupDays = draft.pickupDateUnknown
+    ? null
+    : getQuoteDateDifferenceDays(draft.dateSolicited, draft.pickupDate);
+
+  if (quoteToPickupDays !== null && quoteToPickupDays <= 1) {
+    warnings.push('Pickup is within one day of solicitation. Review equipment positioning, permit lead time, and schedule feasibility.');
+  }
+
+  if (duplicates.length > 0) {
+    warnings.push(`${duplicates.length} possible duplicate Bid Listing entr${duplicates.length === 1 ? 'y was' : 'ies were'} found.`);
+  }
+
+  if (historicalMedianRate > benchmarkRate) {
+    assumptions.push(`Relevant historical transportation rates have a median of $${historicalMedianRate.toFixed(2)} per all mile; unapproved historical weighting has not been applied automatically.`);
+  }
+
+  const floorTransportationCharge = allMiles * QUOTE_ENGINE_RATE_FLOOR;
+  const floorOverrideRequired = adjustedTransportationCharge + 0.01 < floorTransportationCharge;
+
+  if (floorOverrideRequired) {
+    warnings.push('The reviewed transportation amount is below the approved $2.95 all-mile floor and requires an explicit policy override.');
+  }
+
+  const confidence = getQuoteConfidence(eligibleMatches, draft, warnings);
+  const rationale = [
+    `${draft.loadedMiles.toFixed(1)} loaded miles + ${draft.emptyMiles.toFixed(1)} empty miles = ${allMiles.toFixed(1)} all miles.`,
+    `${allMiles.toFixed(1)} all miles × $${benchmarkRate.toFixed(2)} = $${mileageCharge.toFixed(2)} mileage-based transportation charge.`,
+    minimumApplied
+      ? `The configured $${minimumCharge.toFixed(2)} local/minimum charge replaced the lower mileage charge.`
+      : 'No local/minimum charge changed the transportation amount.',
+    draft.extraordinaryCosts > 0
+      ? `$${draft.extraordinaryCosts.toFixed(2)} in permit, escort, or holding charges was added separately.`
+      : 'No extraordinary external costs were added.',
+    draft.adjustmentMode === 'percent'
+      ? `${draft.adjustmentPercent.toFixed(1)}% was applied to the transportation subtotal before external costs.`
+      : draft.adjustmentMode === 'flat'
+        ? `The user supplied a $${draft.flatRate.toFixed(2)} final flat-rate override.`
+        : 'No manual price adjustment was applied.',
+    roundingApplied
+      ? `The customer-facing total was rounded to the nearest $50, from $${(adjustedTransportationCharge + draft.extraordinaryCosts).toFixed(2)} to $${finalQuote.toFixed(2)}.`
+      : 'The user-entered flat-rate override was retained without automatic rounding.'
+  ];
+
+  return {
+    success: true,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    policy: {
+      floorRate: QUOTE_ENGINE_RATE_FLOOR,
+      benchmarkRate,
+      minimumCharge,
+      historicalWeightingApplied: false
+    },
+    calculation: {
+      loadedMiles: draft.loadedMiles,
+      emptyMiles: draft.emptyMiles,
+      allMiles,
+      benchmarkRate,
+      mileageCharge,
+      minimumApplied,
+      baseTransportationCharge,
+      adjustedTransportationCharge,
+      extraordinaryCosts: draft.extraordinaryCosts,
+      standardUnroundedTotal,
+      suggestedQuote,
+      finalQuote,
+      customerAllMileRate: allMiles > 0 ? finalQuote / allMiles : 0,
+      transportationAllMileRate: allMiles > 0 ? Math.max(0, finalQuote - draft.extraordinaryCosts) / allMiles : 0,
+      roundingApplied,
+      floorOverrideRequired,
+      localFlatOverrideRequired: draft.localShipment && minimumCharge <= 0
+    },
+    history: {
+      recordsScanned: historicalRecords.length,
+      usableComparableCount: eligibleMatches.length,
+      displayedComparableCount: topMatches.length,
+      relevantMedianTransportationRate: historicalMedianRate,
+      dateStart: topMatches.map((match) => match.dateValue).filter(Boolean).sort()[0] || '',
+      dateEnd: topMatches.map((match) => match.dateValue).filter(Boolean).sort().slice(-1)[0] || '',
+      comparables: topMatches.map(getQuoteComparableDisplay)
+    },
+    confidence,
+    rationale,
+    assumptions,
+    warnings,
+    duplicates
+  };
+}
+
+function getQuoteEngineGraphDate(dateValue) {
+  if (dateValue === QUOTE_ENGINE_UNKNOWN_DATE) return `${QUOTE_ENGINE_UNKNOWN_DATE}T08:00:00Z`;
+  return `${dateValue}T12:00:00Z`;
+}
+
+function getQuoteEngineYesNoWriteValue(schema, columnName, value) {
+  const column = schema.columnsByName.get(columnName);
+  if (column?.boolean) return Boolean(value);
+  return value ? 'Yes' : 'No';
+}
+
+function getQuoteEngineLocalStatusValue(schema) {
+  const choices = schema.columnsByName.get('Status')?.choice?.choices;
+  if (!Array.isArray(choices) || choices.length === 0) return 'Local';
+
+  const localChoice = choices.find((value) => normalizeSearchValue(value) === 'local');
+  if (!localChoice) {
+    throw createQuoteEngineError(
+      'Local quote publishing is unavailable because the Bid Listing Status field has no approved Local choice.',
+      503,
+      'QUOTE_LOCAL_STATUS_UNAVAILABLE'
+    );
+  }
+
+  return localChoice;
+}
+
+function buildQuoteEngineCreateFields(draft, calculation, schema, resolvedLookups) {
+  const fields = {
+    BidID: '',
+    Requestor: draft.requestor,
+    Date_x0020_Solicited: getQuoteEngineGraphDate(draft.dateSolicited),
+    Ready_x0020_Date: getQuoteEngineGraphDate(draft.readyDate),
+    Pickup_x0020_Offer_x0020_Date: getQuoteEngineGraphDate(draft.pickupDate),
+    Expected_x0020_Delivery_x0020_Da: getQuoteEngineGraphDate(draft.deliveryDate),
+    EnableTracking: getQuoteEngineYesNoWriteValue(schema, 'EnableTracking', draft.enableTracking),
+    Freight_x0020_Description: draft.freight,
+    Length: draft.length,
+    Width: draft.width,
+    Height: draft.height,
+    Operator_x0020_Starting_x0020_Lo: draft.operatorStartingLocation,
+    Shipment_x0020_Origin: draft.origin,
+    Shipment_x0020_Destination: draft.destination,
+    Empty_x0020__x0028_Deadhead_x002: draft.emptyMiles,
+    Loaded_x0020_Miles: draft.loadedMiles,
+    Permits_x002f_Escort_x0020_Fees_: draft.extraordinaryCosts,
+    Quoted_x0020_Total: calculation.finalQuote,
+    Aircraft_x0020_Related_x003f_: getQuoteEngineYesNoWriteValue(schema, 'Aircraft_x0020_Related_x003f_', draft.aircraftRelated),
+    [schema.lookups.company.writeField]: resolvedLookups.company.id,
+    [schema.lookups.truck.writeField]: resolvedLookups.truck.id,
+    [schema.lookups.operator.writeField]: resolvedLookups.operator.id
+  };
+
+  if (draft.teamRequired !== null) {
+    fields.Team_x0020_Required = getQuoteEngineYesNoWriteValue(schema, 'Team_x0020_Required', draft.teamRequired);
+  }
+
+  if (draft.localShipment) {
+    fields.Status = getQuoteEngineLocalStatusValue(schema);
+  }
+
+  return fields;
+}
+
+async function pollQuoteEngineBidId(token, currentList, itemId) {
+  const readUrl = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}/items/${encodeURIComponent(itemId)}?$select=id,createdDateTime,lastModifiedDateTime,eTag&$expand=fields`;
+  const deadline = Date.now() + QUOTE_ENGINE_BID_ID_POLL_TIMEOUT_MS;
+  let lastItem = null;
+
+  while (Date.now() <= deadline) {
+    lastItem = await graphGet(token, readUrl);
+    if (String(lastItem?.fields?.BidID || '').trim()) {
+      return { assigned: true, item: lastItem };
+    }
+
+    if (Date.now() + QUOTE_ENGINE_BID_ID_POLL_INTERVAL_MS > deadline) break;
+    await waitForRetry(QUOTE_ENGINE_BID_ID_POLL_INTERVAL_MS);
+  }
+
+  return { assigned: false, item: lastItem };
+}
+
+function clearQuoteEngineMutationCaches() {
+  clearOrderEditCaches();
+  clearSalesLeadsReportCache();
+  cachedQuoteComparableItemsByList.clear();
+}
+
+async function createQuoteEngineAuditNote(token, draft, recommendation, record) {
+  if (!record?.BidID) return { note: null, warning: '' };
+
+  try {
+    const note = await createOrderNote(token, {
+      bidId: record.BidID,
+      bol: '',
+      noteType: 'Operations',
+      noteBody: [
+        'Intelligent Quote Engine review:',
+        `- Suggested quote: $${recommendation.calculation.suggestedQuote.toFixed(2)}`,
+        `- Published quote: $${recommendation.calculation.finalQuote.toFixed(2)}`,
+        `- All miles: ${recommendation.calculation.allMiles.toFixed(1)}`,
+        `- Transportation all-mile rate: $${recommendation.calculation.transportationAllMileRate.toFixed(2)}`,
+        `- Benchmark rate: $${recommendation.calculation.benchmarkRate.toFixed(2)}`,
+        `- Extraordinary costs: $${recommendation.calculation.extraordinaryCosts.toFixed(2)}`,
+        `- Adjustment: ${draft.adjustmentMode === 'none' ? 'None' : draft.adjustmentMode}`,
+        ...(draft.adjustmentMode === 'percent' ? [`- Percentage adjustment: ${draft.adjustmentPercent.toFixed(1)}%`] : []),
+        ...(draft.overrideReason ? [`- Override reason: ${draft.overrideReason}`] : []),
+        `- Confidence: ${recommendation.confidence.level}`,
+        `- Comparables shown: ${recommendation.history.displayedComparableCount}`
+      ].join('\n'),
+      customerName: draft.company,
+      truckNumber: draft.truck,
+      operatorTeam: draft.operator,
+      createdBy: 'Kole Connect Intelligent Quote Engine'
+    });
+
+    return { note, warning: '' };
+  } catch (error) {
+    return {
+      note: null,
+      warning: 'The bid was created, but the quote review note could not be recorded.'
+    };
+  }
+}
+
+async function completePendingQuoteAudit(token, itemId, record) {
+  const context = getCacheRecord(
+    pendingQuoteAuditContexts,
+    String(itemId || ''),
+    QUOTE_ENGINE_PUBLISH_CACHE_MS
+  );
+
+  if (!context) {
+    return { auditNote: null, noteWarning: '', requestCacheKey: '', recommendation: null };
+  }
+
+  pendingQuoteAuditContexts.delete(String(itemId || ''));
+  const audit = await createQuoteEngineAuditNote(token, context.draft, context.recommendation, record);
+
+  return {
+    auditNote: audit.note,
+    noteWarning: audit.warning,
+    requestCacheKey: context.requestCacheKey,
+    recommendation: context.recommendation
+  };
+}
+
+function getQuotePublishRequestCacheKey(requestId) {
+  return normalizeText(requestId).replace(/[^a-z0-9-]/g, '');
+}
+
+async function publishQuoteEngineBid(token, draft, recommendation, currentList, schema) {
+  if (!draft.confirmPublish) {
+    throw createQuoteEngineError('Explicit publish confirmation is required.', 400, 'QUOTE_CONFIRMATION_REQUIRED');
+  }
+
+  if (!/^[A-Za-z0-9-]{8,100}$/.test(draft.requestId)) {
+    throw createQuoteEngineError('A valid publish request ID is required.', 400, 'QUOTE_REQUEST_ID_REQUIRED');
+  }
+
+  const requestCacheKey = getQuotePublishRequestCacheKey(draft.requestId);
+  const cachedResult = getCacheRecord(cachedQuotePublishResults, requestCacheKey, QUOTE_ENGINE_PUBLISH_CACHE_MS);
+  if (cachedResult) return { ...cachedResult, idempotentReplay: true };
+
+  if (recommendation.calculation.localFlatOverrideRequired && draft.adjustmentMode !== 'flat') {
+    throw createQuoteEngineError(
+      'A reviewed flat-rate override is required because the local/minimum charge policy is not configured.',
+      409,
+      'QUOTE_LOCAL_RATE_REQUIRED'
+    );
+  }
+
+  if (recommendation.calculation.floorOverrideRequired && !draft.floorOverrideConfirmed) {
+    throw createQuoteEngineError(
+      'Confirm the below-floor policy override before publishing.',
+      409,
+      'QUOTE_FLOOR_OVERRIDE_REQUIRED'
+    );
+  }
+
+  if (recommendation.duplicates.length > 0 && !draft.duplicateAcknowledged) {
+    const error = createQuoteEngineError(
+      'Review and acknowledge the possible duplicate bids before publishing.',
+      409,
+      'QUOTE_DUPLICATE_REVIEW_REQUIRED'
+    );
+    error.duplicates = recommendation.duplicates;
+    throw error;
+  }
+
+  const [company, truck, operator] = await Promise.all([
+    resolveQuoteLookupValue(token, schema.lookups.company, draft.company),
+    resolveQuoteLookupValue(token, schema.lookups.truck, draft.truck),
+    resolveQuoteLookupValue(token, schema.lookups.operator, draft.operator)
+  ]);
+  const fields = buildQuoteEngineCreateFields(draft, recommendation.calculation, schema, { company, truck, operator });
+  let createdItem;
+
+  try {
+    createdItem = await graphPost(
+      token,
+      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}/items`,
+      { fields }
+    );
+  } catch {
+    throw createQuoteEngineError(
+      'Bid Listing did not confirm whether the record was created. Check the list before attempting to publish this quote again.',
+      502,
+      'QUOTE_CREATE_UNCONFIRMED'
+    );
+  }
+  const itemId = String(createdItem?.id || '').trim();
+
+  if (!itemId) {
+    throw createQuoteEngineError(
+      'Bid Listing accepted the create request but did not return an item ID. Do not resubmit until the list is checked.',
+      502,
+      'QUOTE_CREATE_UNCONFIRMED'
+    );
+  }
+
+  clearQuoteEngineMutationCaches();
+
+  const pendingResult = {
+    success: true,
+    created: true,
+    pendingBidId: true,
+    code: 'QUOTE_BID_ID_PENDING',
+    itemId,
+    BidID: '',
+    message: 'The Bid Listing record was created. Power Automate is still assigning its Bid ID; do not publish it again.',
+    recommendation
+  };
+  setCacheRecord(cachedQuotePublishResults, requestCacheKey, pendingResult, 40);
+  setCacheRecord(pendingQuoteAuditContexts, itemId, { draft, recommendation, requestCacheKey }, 40);
+
+  let pollResult;
+  try {
+    pollResult = await pollQuoteEngineBidId(token, currentList, itemId);
+  } catch (error) {
+    return pendingResult;
+  }
+
+  if (!pollResult.assigned) return pendingResult;
+
+  const record = buildRecordResponse(pollResult.item, currentList);
+  const audit = await completePendingQuoteAudit(token, itemId, record);
+  const finalResult = {
+    success: true,
+    created: true,
+    pendingBidId: false,
+    itemId,
+    BidID: record.BidID,
+    message: `Created Bid Listing record ${record.BidID}.`,
+    record,
+    recommendation,
+    auditNote: audit.auditNote,
+    noteWarning: audit.noteWarning
+  };
+
+  setCacheRecord(cachedQuotePublishResults, requestCacheKey, finalResult, 40);
+  return finalResult;
 }
 
 function formatUploadDigestTimestamp(value) {
@@ -10046,6 +11313,164 @@ app.get('/auth-check', requireLookupAccess, (req, res) => {
     success: true,
     message: 'Lookup access authorized'
   });
+});
+
+app.get('/quote-engine/options', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const data = await getQuoteEngineOptionsPayload(token, String(req.query.refresh || '').toLowerCase() === 'true');
+    res.json(data);
+  } catch (error) {
+    console.error('Quote Engine options could not be loaded.');
+    res.status(error.statusCode || 500).json({
+      success: false,
+      code: error.code || undefined,
+      error: error.statusCode ? error.message : 'Unable to load Quote Engine options.'
+    });
+  }
+});
+
+app.post('/quote-engine/recommendation', requireLookupAccess, async (req, res) => {
+  try {
+    const draft = normalizeQuoteEngineDraft(req.body || {});
+    const token = await getGraphToken();
+    const history = await getAllQuoteComparableRecords(token);
+    const recommendation = calculateQuoteEngineRecommendation(draft, history.records, history.warnings);
+    res.json(recommendation);
+  } catch (error) {
+    console.error('Quote Engine recommendation failed.');
+    res.status(error.statusCode || 500).json({
+      success: false,
+      code: error.code || undefined,
+      error: error.statusCode ? error.message : 'Unable to calculate a quote recommendation.'
+    });
+  }
+});
+
+app.post('/quote-engine/publish', requireLookupAccess, async (req, res) => {
+  try {
+    const draft = normalizeQuoteEngineDraft(req.body || {});
+    if (!/^[A-Za-z0-9-]{8,100}$/.test(draft.requestId)) {
+      throw createQuoteEngineError('A valid publish request ID is required.', 400, 'QUOTE_REQUEST_ID_REQUIRED');
+    }
+    const requestCacheKey = getQuotePublishRequestCacheKey(draft.requestId);
+    const cachedResult = requestCacheKey
+      ? getCacheRecord(cachedQuotePublishResults, requestCacheKey, QUOTE_ENGINE_PUBLISH_CACHE_MS)
+      : null;
+
+    if (cachedResult) {
+      return res.status(cachedResult.pendingBidId ? 202 : 200).json({ ...cachedResult, idempotentReplay: true });
+    }
+
+    const inFlightPublish = requestCacheKey ? inFlightQuotePublishRequests.get(requestCacheKey) : null;
+    if (inFlightPublish) {
+      const result = await inFlightPublish;
+      return res.status(result.pendingBidId ? 202 : 200).json({ ...result, idempotentReplay: true });
+    }
+
+    const publishOperation = (async () => {
+      const token = await getGraphToken();
+      const currentList = await getQuoteEngineCurrentList(token);
+      const [schema, history] = await Promise.all([
+        getQuoteEngineSchema(token, currentList, true),
+        getAllQuoteComparableRecords(token, { forceRefresh: true })
+      ]);
+      if (!history.currentListAvailable) {
+        throw createQuoteEngineError(
+          'Quote creation is paused because the current Bid Listing could not be checked for duplicates. Try again after the list is available.',
+          503,
+          'QUOTE_DUPLICATE_CHECK_UNAVAILABLE'
+        );
+      }
+      const recommendation = calculateQuoteEngineRecommendation(draft, history.records, history.warnings);
+      return publishQuoteEngineBid(token, draft, recommendation, currentList, schema);
+    })();
+
+    if (requestCacheKey) inFlightQuotePublishRequests.set(requestCacheKey, publishOperation);
+
+    let result;
+    try {
+      result = await publishOperation;
+    } finally {
+      if (requestCacheKey && inFlightQuotePublishRequests.get(requestCacheKey) === publishOperation) {
+        inFlightQuotePublishRequests.delete(requestCacheKey);
+      }
+    }
+
+    return res.status(result.pendingBidId ? 202 : 201).json(result);
+  } catch (error) {
+    console.error('Quote Engine publish failed.');
+    res.status(error.statusCode || 500).json({
+      success: false,
+      code: error.code || undefined,
+      error: error.statusCode ? error.message : 'Unable to publish this quote to Bid Listing.',
+      duplicates: Array.isArray(error.duplicates) ? error.duplicates : undefined
+    });
+  }
+});
+
+app.get('/quote-engine/bid-id/:itemId', requireLookupAccess, async (req, res) => {
+  try {
+    const itemId = String(req.params.itemId || '').trim();
+    if (!/^\d+$/.test(itemId)) {
+      return res.status(400).json({ success: false, error: 'A valid Bid Listing item ID is required.' });
+    }
+
+    const token = await getGraphToken();
+    const currentList = await getQuoteEngineCurrentList(token);
+    const item = await graphGet(
+      token,
+      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}/items/${encodeURIComponent(itemId)}?$select=id,createdDateTime,lastModifiedDateTime,eTag&$expand=fields`
+    );
+    const record = buildRecordResponse(item, currentList);
+
+    if (!record.BidID) {
+      return res.status(202).json({
+        success: true,
+        created: true,
+        pendingBidId: true,
+        code: 'QUOTE_BID_ID_PENDING',
+        itemId,
+        BidID: '',
+        message: 'The Bid Listing record exists, but Power Automate has not assigned its Bid ID yet.'
+      });
+    }
+
+    const audit = await completePendingQuoteAudit(token, itemId, record);
+    const result = {
+      success: true,
+      created: true,
+      pendingBidId: false,
+      itemId,
+      BidID: record.BidID,
+      message: `Bid ID ${record.BidID} is ready.`,
+      record,
+      auditNote: audit.auditNote,
+      noteWarning: audit.noteWarning
+    };
+
+    if (audit.requestCacheKey) {
+      const pendingResult = getCacheRecord(
+        cachedQuotePublishResults,
+        audit.requestCacheKey,
+        QUOTE_ENGINE_PUBLISH_CACHE_MS
+      );
+      setCacheRecord(cachedQuotePublishResults, audit.requestCacheKey, {
+        ...(pendingResult || {}),
+        ...result,
+        recommendation: audit.recommendation || pendingResult?.recommendation
+      }, 40);
+    }
+
+    return res.json(result);
+  } catch (error) {
+    console.error('Quote Engine Bid ID status check failed.');
+    res.status(error.statusCode || 500).json({
+      success: false,
+      code: error.code || undefined,
+      error: error.statusCode ? error.message : 'Unable to check the assigned Bid ID.'
+    });
+  }
 });
 
 app.get('/bid-listing/no-bol', requireLookupAccess, async (req, res) => {

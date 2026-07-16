@@ -26,6 +26,7 @@ const ORDER_EDIT_STATUS_OPTIONS = ['-', 'Won', 'Lost', 'CAN', 'TONU'];
 const ORDER_EDIT_TERMINAL_STATUSES = new Set(['CAN', 'TONU']);
 const ORDER_EDIT_DATE_FIELDS = new Set(['PickupDate', 'DeliveryDate']);
 const ORDER_EDIT_YES_NO_FIELDS = new Set(['TeamRequired', 'AircraftRelated']);
+const QUOTE_ENGINE_UNKNOWN_DATE = '2100-01-01';
 const ORDER_EDIT_FIELD_KEYS = [
   'Status',
   'Requestor',
@@ -66,6 +67,97 @@ const ORDER_EDIT_FIELD_KEYS = [
   'ShipperNumber',
   'Contract'
 ];
+
+function createQuoteEngineDraft() {
+  return {
+    company: '',
+    requestor: '',
+    dateSolicited: getEasternDateInputValue(),
+    readyDate: '',
+    readyDateUnknown: false,
+    pickupDate: '',
+    pickupDateUnknown: false,
+    deliveryDate: '',
+    deliveryDateUnknown: false,
+    freight: '',
+    length: '',
+    width: '',
+    height: '',
+    operatorStartingLocation: '',
+    origin: '',
+    destination: '',
+    emptyMiles: '',
+    loadedMiles: '',
+    deadheadConfidence: 'estimated',
+    teamRequired: '',
+    extraordinaryCosts: '0',
+    extraordinaryCostsConfirmed: false,
+    truck: '-',
+    operator: '-',
+    aircraftRelated: '',
+    enableTracking: false,
+    localShipment: false,
+    adjustmentMode: 'none',
+    adjustmentPercent: '0',
+    flatRate: '',
+    overrideReason: '',
+    floorOverrideConfirmed: false,
+    duplicateAcknowledged: false,
+    confirmPublish: false,
+    requestId: ''
+  };
+}
+
+function createQuoteEngineRequestId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `quote-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function formatQuoteEngineMoney(value) {
+  const amount = Number(value || 0);
+  return Number.isFinite(amount)
+    ? amount.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 2 })
+    : '$0';
+}
+
+function formatQuoteEngineRate(value) {
+  const amount = Number(value || 0);
+  return Number.isFinite(amount) ? `$${amount.toFixed(2)}` : '$0.00';
+}
+
+function getQuoteEngineDisplayDate(value, unknown = false) {
+  if (unknown || value === QUOTE_ENGINE_UNKNOWN_DATE) return 'To be determined';
+  if (!value) return '-';
+
+  const [year, month, day] = String(value).slice(0, 10).split('-');
+  return year && month && day ? `${month}/${day}/${year}` : value;
+}
+
+function buildQuoteEmailBody(draft, recommendation, publishResult = null) {
+  const calculation = recommendation?.calculation;
+  if (!calculation) return '';
+
+  const bidReference = publishResult?.BidID ? `\nKole reference: ${publishResult.BidID}` : '';
+  const externalCostLine = calculation.extraordinaryCosts > 0
+    ? `\nIncluded permit / escort / holding costs: ${formatQuoteEngineMoney(calculation.extraordinaryCosts)}`
+    : '';
+
+  return [
+    'Hello,',
+    '',
+    'Thank you for the opportunity to quote this shipment.',
+    '',
+    `Freight: ${draft.freight}`,
+    `Lane: ${draft.origin} to ${draft.destination}`,
+    `Pickup: ${getQuoteEngineDisplayDate(draft.pickupDate, draft.pickupDateUnknown)}`,
+    `Delivery: ${getQuoteEngineDisplayDate(draft.deliveryDate, draft.deliveryDateUnknown)}`,
+    `Quoted price: ${formatQuoteEngineMoney(calculation.finalQuote)}${externalCostLine}${bidReference}`,
+    '',
+    'Please let us know if you would like us to move forward or if any shipment details have changed.',
+    '',
+    'Thank you,'
+  ].join('\n');
+}
 const DRIVER_TIME_OFF_REASON_OPTIONS = ['Home Time', 'Repairs'];
 const RECRUITING_CANDIDATE_STATUS_OPTIONS = [
   'Heads-Up',
@@ -1308,6 +1400,22 @@ export default function App() {
   const [noBolBidsError, setNoBolBidsError] = useState('');
   const noBolBidsButtonRef = useRef(null);
   const noBolBidsCloseButtonRef = useRef(null);
+  const [quoteEngineOpen, setQuoteEngineOpen] = useState(false);
+  const [quoteEngineStep, setQuoteEngineStep] = useState(1);
+  const [quoteEngineOptions, setQuoteEngineOptions] = useState(null);
+  const [quoteEngineOptionsLoading, setQuoteEngineOptionsLoading] = useState(false);
+  const [quoteEngineOptionsError, setQuoteEngineOptionsError] = useState('');
+  const [quoteEngineDraft, setQuoteEngineDraft] = useState(createQuoteEngineDraft);
+  const [quoteEngineRecommendation, setQuoteEngineRecommendation] = useState(null);
+  const [quoteEngineRecommendationLoading, setQuoteEngineRecommendationLoading] = useState(false);
+  const [quoteEngineRecommendationStale, setQuoteEngineRecommendationStale] = useState(false);
+  const [quoteEngineError, setQuoteEngineError] = useState('');
+  const [quoteEnginePublishing, setQuoteEnginePublishing] = useState(false);
+  const [quoteEnginePublishResult, setQuoteEnginePublishResult] = useState(null);
+  const [quoteEngineCopyMessage, setQuoteEngineCopyMessage] = useState('');
+  const quoteEngineButtonRef = useRef(null);
+  const quoteEngineCloseButtonRef = useRef(null);
+  const quoteEnginePublishingRef = useRef(false);
   const [operationsData, setOperationsData] = useState(null);
   const [operationsLoading, setOperationsLoading] = useState(false);
   const [operationsError, setOperationsError] = useState('');
@@ -1606,6 +1714,7 @@ export default function App() {
   const isAnyModalOpen = Boolean(
     preferencesModalOpen ||
     noBolBidsOpen ||
+    quoteEngineOpen ||
     selected ||
     selectedDriverRoster ||
     driverHistoryModalOpen ||
@@ -2616,6 +2725,20 @@ export default function App() {
   }, [noBolBidsOpen, selected]);
 
   useEffect(() => {
+    quoteEnginePublishingRef.current = quoteEnginePublishing;
+  }, [quoteEnginePublishing]);
+
+  useEffect(() => {
+    if (!quoteEngineOpen) return undefined;
+
+    const frame = window.requestAnimationFrame(() => {
+      quoteEngineCloseButtonRef.current?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [quoteEngineOpen]);
+
+  useEffect(() => {
     return () => {
       if (brandRevealTimerRef.current) {
         window.clearTimeout(brandRevealTimerRef.current);
@@ -2636,6 +2759,13 @@ export default function App() {
         resetOrderNoteComposer();
         orderNotesRequestRef.current += 1;
         setNoBolBidsOpen(false);
+        if (!quoteEnginePublishingRef.current) {
+          const quoteEngineWasOpen = Boolean(quoteEngineCloseButtonRef.current);
+          setQuoteEngineOpen(false);
+          if (quoteEngineWasOpen) {
+            window.requestAnimationFrame(() => quoteEngineButtonRef.current?.focus());
+          }
+        }
         setGrossRevenueModalOpen(false);
         setSelectedGrossRevenueTruck(null);
         setSelectedGrossRevenueMonth(null);
@@ -3035,6 +3165,19 @@ export default function App() {
     setNoBolBidsData(null);
     setNoBolBidsLoading(false);
     setNoBolBidsError('');
+    setQuoteEngineOpen(false);
+    setQuoteEngineStep(1);
+    setQuoteEngineOptions(null);
+    setQuoteEngineOptionsLoading(false);
+    setQuoteEngineOptionsError('');
+    setQuoteEngineDraft(createQuoteEngineDraft());
+    setQuoteEngineRecommendation(null);
+    setQuoteEngineRecommendationLoading(false);
+    setQuoteEngineRecommendationStale(false);
+    setQuoteEngineError('');
+    setQuoteEnginePublishing(false);
+    setQuoteEnginePublishResult(null);
+    setQuoteEngineCopyMessage('');
     setHasSearched(false);
     setError('');
     setAuthError('');
@@ -3380,6 +3523,224 @@ export default function App() {
   function closeNoBolBids() {
     setNoBolBidsOpen(false);
     window.requestAnimationFrame(() => noBolBidsButtonRef.current?.focus());
+  }
+
+  async function loadQuoteEngineOptions({ forceRefresh = false } = {}) {
+    setQuoteEngineOptionsLoading(true);
+    setQuoteEngineOptionsError('');
+
+    try {
+      const suffix = forceRefresh ? '?refresh=true' : '';
+      const res = await authedFetch(`${API}/quote-engine/options${suffix}`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Unable to load Quote Engine options.');
+      }
+
+      setQuoteEngineOptions(data);
+      setQuoteEngineDraft((current) => ({
+        ...current,
+        dateSolicited: current.dateSolicited || data.defaults?.dateSolicited || getEasternDateInputValue(),
+        truck: current.truck || data.defaults?.truck || '-',
+        operator: current.operator || data.defaults?.operator || '-'
+      }));
+    } catch (err) {
+      setQuoteEngineOptionsError(err.message || 'Unable to load Quote Engine options.');
+    } finally {
+      setQuoteEngineOptionsLoading(false);
+    }
+  }
+
+  function openQuoteEngine() {
+    setNoBolBidsOpen(false);
+    setQuoteEngineDraft(createQuoteEngineDraft());
+    setQuoteEngineStep(1);
+    setQuoteEngineRecommendation(null);
+    setQuoteEngineRecommendationStale(false);
+    setQuoteEngineError('');
+    setQuoteEnginePublishResult(null);
+    setQuoteEngineCopyMessage('');
+    setQuoteEngineOpen(true);
+
+    if (!quoteEngineOptions) {
+      void loadQuoteEngineOptions({ forceRefresh: true });
+    }
+  }
+
+  function closeQuoteEngine() {
+    if (quoteEnginePublishing) return;
+    setQuoteEngineOpen(false);
+    setQuoteEngineError('');
+    setQuoteEngineCopyMessage('');
+    window.requestAnimationFrame(() => quoteEngineButtonRef.current?.focus());
+  }
+
+  function updateQuoteEngineDraft(field, value, options = {}) {
+    setQuoteEngineDraft((current) => ({
+      ...current,
+      [field]: value,
+      ...(field !== 'confirmPublish' ? { confirmPublish: false } : {})
+    }));
+    setQuoteEngineError('');
+    setQuoteEngineCopyMessage('');
+
+    if (options.pricingAdjustment) {
+      setQuoteEngineRecommendationStale(true);
+    } else if (quoteEngineStep === 1) {
+      setQuoteEngineRecommendation(null);
+      setQuoteEngineRecommendationStale(false);
+    }
+  }
+
+  async function requestQuoteEngineRecommendation() {
+    if (quoteEngineRecommendationLoading) return;
+
+    setQuoteEngineRecommendationLoading(true);
+    setQuoteEngineError('');
+    setQuoteEnginePublishResult(null);
+    setQuoteEngineCopyMessage('');
+
+    try {
+      const res = await authedFetch(`${API}/quote-engine/recommendation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(quoteEngineDraft)
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Unable to calculate a quote recommendation.');
+      }
+
+      setQuoteEngineRecommendation(data);
+      setQuoteEngineRecommendationStale(false);
+      setQuoteEngineStep(2);
+    } catch (err) {
+      setQuoteEngineError(err.message || 'Unable to calculate a quote recommendation.');
+    } finally {
+      setQuoteEngineRecommendationLoading(false);
+    }
+  }
+
+  function reviewQuoteEnginePublish() {
+    if (!quoteEngineRecommendation || quoteEngineRecommendationStale) return;
+    setQuoteEngineDraft((current) => ({
+      ...current,
+      confirmPublish: false,
+      floorOverrideConfirmed: false,
+      duplicateAcknowledged: false
+    }));
+    setQuoteEngineError('');
+    setQuoteEngineStep(3);
+  }
+
+  function clearQuoteEngineClientCaches() {
+    searchCacheRef.current.clear();
+    onThisDayReportCacheRef.current.clear();
+    setNoBolBidsData(null);
+    setOnThisDayReport(null);
+    setSalesLeadsReport(null);
+    setCustomerTrendReport(null);
+  }
+
+  async function publishQuoteEngineBid() {
+    if (quoteEnginePublishing || !quoteEngineRecommendation || !quoteEngineDraft.confirmPublish) return;
+
+    const requestId = quoteEngineDraft.requestId || createQuoteEngineRequestId();
+    const publishDraft = { ...quoteEngineDraft, requestId };
+    setQuoteEngineDraft(publishDraft);
+    setQuoteEnginePublishing(true);
+    setQuoteEngineError('');
+    setQuoteEngineCopyMessage('');
+
+    try {
+      const res = await authedFetch(`${API}/quote-engine/publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(publishDraft)
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        if (Array.isArray(data.duplicates) && data.duplicates.length > 0) {
+          setQuoteEngineRecommendation((current) => current ? {
+            ...current,
+            duplicates: data.duplicates,
+            warnings: [
+              ...(current.warnings || []).filter((warning) => !warning.includes('possible duplicate Bid Listing')),
+              `${data.duplicates.length} possible duplicate Bid Listing entr${data.duplicates.length === 1 ? 'y was' : 'ies were'} found during the final publish check.`
+            ]
+          } : current);
+          setQuoteEngineStep(2);
+        }
+        throw new Error(data.error || 'Unable to publish this quote.');
+      }
+
+      setQuoteEnginePublishResult(data);
+      if (data.recommendation) setQuoteEngineRecommendation(data.recommendation);
+      clearQuoteEngineClientCaches();
+    } catch (err) {
+      setQuoteEngineError(err.message || 'Unable to publish this quote.');
+    } finally {
+      setQuoteEnginePublishing(false);
+    }
+  }
+
+  async function checkQuoteEngineBidId() {
+    const itemId = quoteEnginePublishResult?.itemId;
+    if (!itemId || quoteEnginePublishing) return;
+
+    setQuoteEnginePublishing(true);
+    setQuoteEngineError('');
+
+    try {
+      const res = await authedFetch(`${API}/quote-engine/bid-id/${encodeURIComponent(itemId)}`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok && res.status !== 202) {
+        throw new Error(data.error || 'Unable to check the assigned Bid ID.');
+      }
+
+      setQuoteEnginePublishResult((current) => ({ ...current, ...data }));
+    } catch (err) {
+      setQuoteEngineError(err.message || 'Unable to check the assigned Bid ID.');
+    } finally {
+      setQuoteEnginePublishing(false);
+    }
+  }
+
+  async function copyQuoteEngineEmail() {
+    const body = buildQuoteEmailBody(quoteEngineDraft, quoteEngineRecommendation, quoteEnginePublishResult);
+    if (!body) return;
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(body);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = body;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        textarea.remove();
+      }
+
+      setQuoteEngineCopyMessage('Email response copied.');
+    } catch {
+      setQuoteEngineCopyMessage('Unable to copy automatically. Select the email text and copy it manually.');
+    }
+  }
+
+  function openCreatedQuoteEngineBid() {
+    const record = quoteEnginePublishResult?.record;
+    if (!record?.id || !record.SourceListId) return;
+
+    setQuoteEngineOpen(false);
+    void loadDetails(record.id, 'basic', record.SourceListId, { returnLabel: 'New Quote' });
   }
 
   function openNoBolBidRecord(record) {
@@ -19035,6 +19396,597 @@ function openReportLoadDetails(load) {
     );
   }
 
+  function renderQuoteEngineModal() {
+    if (!quoteEngineOpen) return null;
+
+    const recommendation = quoteEngineRecommendation;
+    const calculation = recommendation?.calculation;
+    const duplicates = recommendation?.duplicates || [];
+    const floorCheckRequired = Boolean(calculation?.floorOverrideRequired);
+    const duplicateCheckRequired = duplicates.length > 0;
+    const localFlatOverrideMissing = Boolean(
+      calculation?.localFlatOverrideRequired && quoteEngineDraft.adjustmentMode !== 'flat'
+    );
+    const canPublish = Boolean(
+      quoteEngineDraft.confirmPublish &&
+      !localFlatOverrideMissing &&
+      (!floorCheckRequired || quoteEngineDraft.floorOverrideConfirmed) &&
+      (!duplicateCheckRequired || quoteEngineDraft.duplicateAcknowledged) &&
+      !quoteEnginePublishResult
+    );
+    const emailBody = buildQuoteEmailBody(quoteEngineDraft, recommendation, quoteEnginePublishResult);
+
+    const renderUnknownDateField = (label, field, unknownField) => (
+      <label className="quote-engine-field">
+        <span>{label} <em>Required</em></span>
+        <input
+          type="date"
+          value={quoteEngineDraft[field]}
+          disabled={quoteEngineDraft[unknownField]}
+          onChange={(event) => updateQuoteEngineDraft(field, event.target.value)}
+        />
+        <span className="quote-engine-inline-check">
+          <input
+            type="checkbox"
+            checked={quoteEngineDraft[unknownField]}
+            onChange={(event) => {
+              updateQuoteEngineDraft(unknownField, event.target.checked);
+              if (event.target.checked) updateQuoteEngineDraft(field, '');
+            }}
+          />
+          Date is genuinely unknown; publish the approved 1/1/2100 placeholder
+        </span>
+      </label>
+    );
+
+    return (
+      <div className="modal-overlay quote-engine-overlay" role="presentation" onClick={closeQuoteEngine}>
+        <section
+          className="detail-modal quote-engine-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="quote-engine-title"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="detail-header quote-engine-header">
+            <div>
+              <span className="quote-engine-eyebrow">Bid Listing · Pricing workspace</span>
+              <h2 id="quote-engine-title">Intelligent Quote Engine</h2>
+              <p>History advises the quote. Policy controls the quote. You approve the quote.</p>
+            </div>
+
+            <button
+              ref={quoteEngineCloseButtonRef}
+              type="button"
+              className="close-button"
+              onClick={closeQuoteEngine}
+              disabled={quoteEnginePublishing}
+            >
+              Close
+            </button>
+          </div>
+
+          <ol className="quote-engine-steps" aria-label="Quote workflow">
+            {[
+              [1, 'Shipment details'],
+              [2, 'Recommendation'],
+              [3, 'Review & publish']
+            ].map(([step, label]) => (
+              <li key={step} className={`${quoteEngineStep === step ? 'active' : ''} ${quoteEngineStep > step ? 'complete' : ''}`}>
+                <span>{step}</span>
+                <strong>{label}</strong>
+              </li>
+            ))}
+          </ol>
+
+          <div className="modal-body quote-engine-body">
+            {quoteEngineOptionsLoading && !quoteEngineOptions && (
+              <div className="quote-engine-loading" role="status">
+                <span className="login-spinner" aria-hidden="true" />
+                <div>
+                  <strong>Preparing verified Bid Listing options...</strong>
+                  <small>Checking company, truck, operator, and writable-field metadata.</small>
+                </div>
+              </div>
+            )}
+
+            {quoteEngineOptionsError && !quoteEngineOptions && (
+              <div className="report-alert error" role="alert">
+                <h4>Quote Engine is not ready.</h4>
+                <p>{quoteEngineOptionsError}</p>
+                <button type="button" className="view-button" onClick={() => loadQuoteEngineOptions({ forceRefresh: true })}>
+                  Retry setup check
+                </button>
+              </div>
+            )}
+
+            {quoteEngineOptions && quoteEngineStep === 1 && (
+              <form
+                className="quote-engine-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void requestQuoteEngineRecommendation();
+                }}
+              >
+                <section className="quote-engine-form-section">
+                  <div className="quote-engine-section-heading">
+                    <span>01</span>
+                    <div>
+                      <h3>Customer & request</h3>
+                      <p>Identify the real customer and when the pricing request arrived.</p>
+                    </div>
+                  </div>
+
+                  <div className="quote-engine-field-grid three-column">
+                    <label className="quote-engine-field">
+                      <span>Company <em>Required</em></span>
+                      <input
+                        list="quote-engine-company-options"
+                        value={quoteEngineDraft.company}
+                        onChange={(event) => updateQuoteEngineDraft('company', event.target.value)}
+                        placeholder="Start typing a verified company"
+                        autoComplete="off"
+                      />
+                      <datalist id="quote-engine-company-options">
+                        {(quoteEngineOptions.companies || []).map((value) => <option key={value} value={value} />)}
+                      </datalist>
+                    </label>
+
+                    <label className="quote-engine-field">
+                      <span>Requestor <em>Required</em></span>
+                      <input value={quoteEngineDraft.requestor} onChange={(event) => updateQuoteEngineDraft('requestor', event.target.value)} />
+                    </label>
+
+                    <label className="quote-engine-field">
+                      <span>Date Solicited <em>Required</em></span>
+                      <input type="date" value={quoteEngineDraft.dateSolicited} onChange={(event) => updateQuoteEngineDraft('dateSolicited', event.target.value)} />
+                    </label>
+                  </div>
+                </section>
+
+                <section className="quote-engine-form-section">
+                  <div className="quote-engine-section-heading">
+                    <span>02</span>
+                    <div>
+                      <h3>Schedule</h3>
+                      <p>Unknown dates must be explicitly identified; they are never silently replaced.</p>
+                    </div>
+                  </div>
+
+                  <div className="quote-engine-field-grid three-column">
+                    {renderUnknownDateField('Ready Date', 'readyDate', 'readyDateUnknown')}
+                    {renderUnknownDateField('Pickup Offer Date', 'pickupDate', 'pickupDateUnknown')}
+                    {renderUnknownDateField('Expected Delivery Date', 'deliveryDate', 'deliveryDateUnknown')}
+                  </div>
+                </section>
+
+                <section className="quote-engine-form-section">
+                  <div className="quote-engine-section-heading">
+                    <span>03</span>
+                    <div>
+                      <h3>Freight & dimensions</h3>
+                      <p>Dimensions support feasibility review and comparable selection; they do not trigger a hidden flat markup.</p>
+                    </div>
+                  </div>
+
+                  <div className="quote-engine-field-grid freight-grid">
+                    <label className="quote-engine-field freight-description-field">
+                      <span>Freight Description <em>Required</em></span>
+                      <textarea rows="3" value={quoteEngineDraft.freight} onChange={(event) => updateQuoteEngineDraft('freight', event.target.value)} />
+                    </label>
+
+                    {['length', 'width', 'height'].map((field) => (
+                      <label key={field} className="quote-engine-field">
+                        <span>{field[0].toUpperCase() + field.slice(1)} <em>Required</em></span>
+                        <input type="number" min="0.01" step="0.01" value={quoteEngineDraft[field]} onChange={(event) => updateQuoteEngineDraft(field, event.target.value)} />
+                      </label>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="quote-engine-form-section">
+                  <div className="quote-engine-section-heading">
+                    <span>04</span>
+                    <div>
+                      <h3>Lane & mileage</h3>
+                      <p>All expected empty miles are included once; no second deadhead percentage is added.</p>
+                    </div>
+                  </div>
+
+                  <div className="quote-engine-field-grid three-column">
+                    <label className="quote-engine-field">
+                      <span>Operator Starting Location <em>Required</em></span>
+                      <input value={quoteEngineDraft.operatorStartingLocation} onChange={(event) => updateQuoteEngineDraft('operatorStartingLocation', event.target.value)} placeholder="Planning location used for deadhead" />
+                    </label>
+                    <label className="quote-engine-field">
+                      <span>Shipment Origin <em>Required</em></span>
+                      <input value={quoteEngineDraft.origin} onChange={(event) => updateQuoteEngineDraft('origin', event.target.value)} />
+                    </label>
+                    <label className="quote-engine-field">
+                      <span>Shipment Destination <em>Required</em></span>
+                      <input value={quoteEngineDraft.destination} onChange={(event) => updateQuoteEngineDraft('destination', event.target.value)} />
+                    </label>
+                    <label className="quote-engine-field">
+                      <span>Empty (Deadhead) Miles <em>Required</em></span>
+                      <input type="number" min="0" step="0.1" value={quoteEngineDraft.emptyMiles} onChange={(event) => updateQuoteEngineDraft('emptyMiles', event.target.value)} />
+                      <small>Enter 0 only when deadhead is genuinely zero.</small>
+                    </label>
+                    <label className="quote-engine-field">
+                      <span>Loaded Miles <em>Required</em></span>
+                      <input type="number" min="0.1" step="0.1" value={quoteEngineDraft.loadedMiles} onChange={(event) => updateQuoteEngineDraft('loadedMiles', event.target.value)} />
+                    </label>
+                    <label className="quote-engine-field">
+                      <span>Deadhead Reliability <em>Required</em></span>
+                      <select value={quoteEngineDraft.deadheadConfidence} onChange={(event) => updateQuoteEngineDraft('deadheadConfidence', event.target.value)}>
+                        <option value="confirmed">Confirmed</option>
+                        <option value="estimated">Estimated</option>
+                        <option value="uncertain">Uncertain</option>
+                      </select>
+                    </label>
+                  </div>
+                </section>
+
+                <section className="quote-engine-form-section">
+                  <div className="quote-engine-section-heading">
+                    <span>05</span>
+                    <div>
+                      <h3>Operating requirements</h3>
+                      <p>Unassigned truck and operator use the approved existing lookup value.</p>
+                    </div>
+                  </div>
+
+                  <div className="quote-engine-field-grid three-column">
+                    <label className="quote-engine-field">
+                      <span>Truck Number</span>
+                      <input list="quote-engine-truck-options" value={quoteEngineDraft.truck} onChange={(event) => updateQuoteEngineDraft('truck', event.target.value)} />
+                      <datalist id="quote-engine-truck-options">
+                        {(quoteEngineOptions.trucks || []).map((value) => <option key={value} value={value} />)}
+                      </datalist>
+                    </label>
+                    <label className="quote-engine-field">
+                      <span>Operator / Team</span>
+                      <input list="quote-engine-operator-options" value={quoteEngineDraft.operator} onChange={(event) => updateQuoteEngineDraft('operator', event.target.value)} />
+                      <datalist id="quote-engine-operator-options">
+                        {(quoteEngineOptions.operators || []).map((value) => <option key={value} value={value} />)}
+                      </datalist>
+                    </label>
+                    <label className="quote-engine-field">
+                      <span>Team Required</span>
+                      <select value={quoteEngineDraft.teamRequired} onChange={(event) => updateQuoteEngineDraft('teamRequired', event.target.value)}>
+                        <option value="">Not determined</option>
+                        <option value="yes">Yes</option>
+                        <option value="no">No</option>
+                      </select>
+                    </label>
+                    <label className="quote-engine-field">
+                      <span>Aircraft Related <em>Required</em></span>
+                      <select value={quoteEngineDraft.aircraftRelated} onChange={(event) => updateQuoteEngineDraft('aircraftRelated', event.target.value)}>
+                        <option value="">Select Yes or No</option>
+                        <option value="yes">Yes</option>
+                        <option value="no">No</option>
+                      </select>
+                    </label>
+                    <label className="quote-engine-field">
+                      <span>Permit / Escort / Holding Charges</span>
+                      <input type="number" min="0" step="0.01" value={quoteEngineDraft.extraordinaryCosts} onChange={(event) => updateQuoteEngineDraft('extraordinaryCosts', event.target.value)} />
+                      <span className="quote-engine-inline-check">
+                        <input type="checkbox" checked={quoteEngineDraft.extraordinaryCostsConfirmed} onChange={(event) => updateQuoteEngineDraft('extraordinaryCostsConfirmed', event.target.checked)} />
+                        Cost is confirmed rather than provisional
+                      </span>
+                    </label>
+                    <div className="quote-engine-choice-stack">
+                      <label className="quote-engine-switch-row">
+                        <input type="checkbox" checked={quoteEngineDraft.localShipment} onChange={(event) => updateQuoteEngineDraft('localShipment', event.target.checked)} />
+                        <span><strong>Local shipment</strong><small>Requires the approved minimum or a reviewed flat override.</small></span>
+                      </label>
+                      <label className="quote-engine-switch-row">
+                        <input type="checkbox" checked={quoteEngineDraft.enableTracking} onChange={(event) => updateQuoteEngineDraft('enableTracking', event.target.checked)} />
+                        <span><strong>Enable tracking</strong><small>Writes the Bid Listing tracking flag.</small></span>
+                      </label>
+                    </div>
+                  </div>
+                </section>
+
+                {quoteEngineError && <div className="msg error" role="alert">{quoteEngineError}</div>}
+
+                <div className="quote-engine-footer">
+                  <button type="button" className="secondary-button" onClick={closeQuoteEngine}>Cancel</button>
+                  <button type="submit" disabled={quoteEngineRecommendationLoading}>
+                    {quoteEngineRecommendationLoading ? 'Analyzing history...' : 'Calculate suggestion'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {quoteEngineOptions && quoteEngineStep === 2 && recommendation && calculation && (
+              <div className="quote-engine-recommendation">
+                <div className="quote-engine-result-grid">
+                  <article className="quote-engine-result-card primary">
+                    <span>Suggested quote</span>
+                    <strong>{formatQuoteEngineMoney(calculation.suggestedQuote)}</strong>
+                    <small>Policy calculation before manual override</small>
+                  </article>
+                  <article className="quote-engine-result-card final">
+                    <span>Reviewed quote</span>
+                    <strong>{formatQuoteEngineMoney(calculation.finalQuote)}</strong>
+                    <small>{quoteEngineDraft.adjustmentMode === 'none' ? 'No manual adjustment' : 'Includes manual adjustment'}</small>
+                  </article>
+                  <article className="quote-engine-result-card">
+                    <span>Transportation / all mile</span>
+                    <strong>{formatQuoteEngineRate(calculation.transportationAllMileRate)}</strong>
+                    <small>{calculation.allMiles.toFixed(1)} total miles</small>
+                  </article>
+                  <article className={`quote-engine-result-card confidence ${recommendation.confidence.level.toLowerCase()}`}>
+                    <span>Confidence</span>
+                    <strong>{recommendation.confidence.level}</strong>
+                    <small>{recommendation.history.displayedComparableCount} comparables shown</small>
+                  </article>
+                </div>
+
+                {quoteEngineRecommendationStale && (
+                  <div className="report-alert warning quote-engine-stale" role="status">
+                    <h4>Adjustment changed.</h4>
+                    <p>Recalculate before continuing so the effective rate, floor check, and explanation match the reviewed amount.</p>
+                  </div>
+                )}
+
+                {(recommendation.warnings || []).length > 0 && (
+                  <section className="quote-engine-review-panel warning-panel">
+                    <h3>Review required</h3>
+                    <ul>{recommendation.warnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}</ul>
+                  </section>
+                )}
+
+                <div className="quote-engine-review-grid">
+                  <section className="quote-engine-review-panel">
+                    <h3>Calculation</h3>
+                    <dl className="quote-engine-breakdown">
+                      <div><dt>Loaded miles</dt><dd>{calculation.loadedMiles.toFixed(1)}</dd></div>
+                      <div><dt>Empty miles</dt><dd>{calculation.emptyMiles.toFixed(1)}</dd></div>
+                      <div><dt>All miles</dt><dd>{calculation.allMiles.toFixed(1)}</dd></div>
+                      <div><dt>Benchmark</dt><dd>{formatQuoteEngineRate(calculation.benchmarkRate)}</dd></div>
+                      <div><dt>Mileage charge</dt><dd>{formatQuoteEngineMoney(calculation.mileageCharge)}</dd></div>
+                      <div><dt>External costs</dt><dd>{formatQuoteEngineMoney(calculation.extraordinaryCosts)}</dd></div>
+                      <div className="total"><dt>Reviewed total</dt><dd>{formatQuoteEngineMoney(calculation.finalQuote)}</dd></div>
+                    </dl>
+                  </section>
+
+                  <section className="quote-engine-review-panel">
+                    <h3>Manual adjustment</h3>
+                    <label className="quote-engine-field">
+                      <span>Adjustment method</span>
+                      <select
+                        value={quoteEngineDraft.adjustmentMode}
+                        onChange={(event) => updateQuoteEngineDraft('adjustmentMode', event.target.value, { pricingAdjustment: true })}
+                      >
+                        <option value="none">No adjustment</option>
+                        <option value="percent">Percentage of transportation subtotal</option>
+                        <option value="flat">Final flat-rate override</option>
+                      </select>
+                    </label>
+
+                    {quoteEngineDraft.adjustmentMode === 'percent' && (
+                      <label className="quote-engine-field">
+                        <span>Percentage adjustment</span>
+                        <input type="number" min="-95" max="500" step="0.1" value={quoteEngineDraft.adjustmentPercent} onChange={(event) => updateQuoteEngineDraft('adjustmentPercent', event.target.value, { pricingAdjustment: true })} />
+                        <small>Applied before permit, escort, or holding charges.</small>
+                      </label>
+                    )}
+
+                    {quoteEngineDraft.adjustmentMode === 'flat' && (
+                      <label className="quote-engine-field">
+                        <span>Final flat rate</span>
+                        <input type="number" min="0.01" step="0.01" value={quoteEngineDraft.flatRate} onChange={(event) => updateQuoteEngineDraft('flatRate', event.target.value, { pricingAdjustment: true })} />
+                        <small>This is the final all-in customer amount.</small>
+                      </label>
+                    )}
+
+                    {quoteEngineDraft.adjustmentMode !== 'none' && (
+                      <label className="quote-engine-field">
+                        <span>Reason for adjustment <em>Required</em></span>
+                        <textarea rows="3" value={quoteEngineDraft.overrideReason} onChange={(event) => updateQuoteEngineDraft('overrideReason', event.target.value, { pricingAdjustment: true })} />
+                      </label>
+                    )}
+
+                    <button type="button" className="secondary-button" onClick={requestQuoteEngineRecommendation} disabled={quoteEngineRecommendationLoading || !quoteEngineRecommendationStale}>
+                      {quoteEngineRecommendationLoading ? 'Recalculating...' : 'Recalculate reviewed quote'}
+                    </button>
+                  </section>
+                </div>
+
+                <section className="quote-engine-review-panel">
+                  <div className="quote-engine-panel-heading">
+                    <div><h3>Why this quote</h3><p>Direct operational reasoning, retained without hidden scoring.</p></div>
+                    <span className={`quote-engine-confidence-pill ${recommendation.confidence.level.toLowerCase()}`}>{recommendation.confidence.level} confidence</span>
+                  </div>
+                  <ol className="quote-engine-rationale-list">
+                    {recommendation.rationale.map((reason, index) => <li key={`${reason}-${index}`}>{reason}</li>)}
+                  </ol>
+                  {(recommendation.assumptions || []).length > 0 && (
+                    <div className="quote-engine-assumptions">
+                      <strong>Assumptions and policy notes</strong>
+                      <ul>{recommendation.assumptions.map((assumption, index) => <li key={`${assumption}-${index}`}>{assumption}</li>)}</ul>
+                    </div>
+                  )}
+                  <div className="quote-engine-confidence-reasons">
+                    {recommendation.confidence.reasons.map((reason, index) => <span key={`${reason}-${index}`}>{reason}</span>)}
+                  </div>
+                </section>
+
+                <section className="quote-engine-review-panel quote-engine-comparables-panel">
+                  <div className="quote-engine-panel-heading">
+                    <div>
+                      <h3>Historical comparables</h3>
+                      <p>{recommendation.history.recordsScanned} records scanned · {recommendation.history.dateStart || 'No date'} to {recommendation.history.dateEnd || 'No date'}</p>
+                    </div>
+                    {recommendation.history.relevantMedianTransportationRate > 0 && (
+                      <span>Relevant median {formatQuoteEngineRate(recommendation.history.relevantMedianTransportationRate)}/all mi</span>
+                    )}
+                  </div>
+
+                  {recommendation.history.comparables.length === 0 ? (
+                    <div className="msg">No usable historical comparables were found.</div>
+                  ) : (
+                    <div className="quote-engine-table-wrap">
+                      <table>
+                        <thead>
+                          <tr><th>Bid</th><th>Relevance</th><th>Customer</th><th>Lane</th><th>Date</th><th>Status</th><th>All mi</th><th>Quote</th><th>Transport / mi</th></tr>
+                        </thead>
+                        <tbody>
+                          {recommendation.history.comparables.map((record) => (
+                            <tr key={`${record.SourceListId}-${record.id}`}>
+                              <td>{record.BidID || '-'}</td>
+                              <td>{record.relevance}</td>
+                              <td>{record.Company || '-'}</td>
+                              <td>{record.Origin || '-'} → {record.Destination || '-'}</td>
+                              <td>{getQuoteEngineDisplayDate(record.DateSolicited || record.PickupDate)}</td>
+                              <td><span className={getStatusClass(record.Status)}>{record.Status || 'Unresolved'}</span></td>
+                              <td>{Number(record.AllMiles || 0).toFixed(0)}</td>
+                              <td>{formatQuoteEngineMoney(record.QuotedTotal)}</td>
+                              <td>{formatQuoteEngineRate(record.TransportationRate)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+
+                {quoteEngineError && <div className="msg error" role="alert">{quoteEngineError}</div>}
+
+                <div className="quote-engine-footer">
+                  <button type="button" className="secondary-button" onClick={() => setQuoteEngineStep(1)}>Back to shipment</button>
+                  <button type="button" onClick={reviewQuoteEnginePublish} disabled={quoteEngineRecommendationStale || localFlatOverrideMissing}>Review Bid Listing record</button>
+                </div>
+              </div>
+            )}
+
+            {quoteEngineOptions && quoteEngineStep === 3 && recommendation && calculation && (
+              <div className="quote-engine-publish-review">
+                <div className="quote-engine-review-grid">
+                  <section className="quote-engine-review-panel">
+                    <div className="quote-engine-panel-heading">
+                      <div><h3>Bid Listing record</h3><p>These reviewed values will be written to the current Bid Listing.</p></div>
+                      <span className="status quote">Quote</span>
+                    </div>
+                    <dl className="quote-engine-record-summary">
+                      <div><dt>Company</dt><dd>{quoteEngineDraft.company}</dd></div>
+                      <div><dt>Requestor</dt><dd>{quoteEngineDraft.requestor}</dd></div>
+                      <div><dt>Freight</dt><dd>{quoteEngineDraft.freight}</dd></div>
+                      <div><dt>Lane</dt><dd>{quoteEngineDraft.origin} → {quoteEngineDraft.destination}</dd></div>
+                      <div><dt>Ready</dt><dd>{getQuoteEngineDisplayDate(quoteEngineDraft.readyDate, quoteEngineDraft.readyDateUnknown)}</dd></div>
+                      <div><dt>Pickup</dt><dd>{getQuoteEngineDisplayDate(quoteEngineDraft.pickupDate, quoteEngineDraft.pickupDateUnknown)}</dd></div>
+                      <div><dt>Delivery</dt><dd>{getQuoteEngineDisplayDate(quoteEngineDraft.deliveryDate, quoteEngineDraft.deliveryDateUnknown)}</dd></div>
+                      <div><dt>Assignment</dt><dd>Truck {quoteEngineDraft.truck} · {quoteEngineDraft.operator}</dd></div>
+                      <div><dt>Transportation / all mile</dt><dd>{formatQuoteEngineRate(calculation.transportationAllMileRate)}</dd></div>
+                      <div><dt>External costs</dt><dd>{formatQuoteEngineMoney(calculation.extraordinaryCosts)}</dd></div>
+                      <div>
+                        <dt>Adjustment</dt>
+                        <dd>{quoteEngineDraft.adjustmentMode === 'none'
+                          ? 'None'
+                          : quoteEngineDraft.adjustmentMode === 'percent'
+                            ? `${quoteEngineDraft.adjustmentPercent}%`
+                            : 'Final flat-rate override'}</dd>
+                      </div>
+                      {quoteEngineDraft.adjustmentMode !== 'none' && quoteEngineDraft.overrideReason && (
+                        <div><dt>Adjustment reason</dt><dd>{quoteEngineDraft.overrideReason}</dd></div>
+                      )}
+                      <div className="total"><dt>Quoted Total</dt><dd>{formatQuoteEngineMoney(calculation.finalQuote)}</dd></div>
+                    </dl>
+                  </section>
+
+                  <section className="quote-engine-review-panel quote-engine-email-panel">
+                    <div className="quote-engine-panel-heading">
+                      <div><h3>Email response</h3><p>Customer-facing copy without internal scoring or history.</p></div>
+                      <button type="button" className="secondary-button" onClick={copyQuoteEngineEmail}>Copy email</button>
+                    </div>
+                    <textarea readOnly rows="12" value={emailBody} aria-label="Email response body" />
+                    {quoteEngineCopyMessage && <div className="quote-engine-copy-message" role="status">{quoteEngineCopyMessage}</div>}
+                  </section>
+                </div>
+
+                {duplicateCheckRequired && (
+                  <section className="quote-engine-review-panel warning-panel">
+                    <h3>Possible duplicate review</h3>
+                    <div className="quote-engine-duplicate-list">
+                      {duplicates.map((duplicate) => (
+                        <article key={`${duplicate.SourceListId}-${duplicate.id}`}>
+                          <strong>{duplicate.severity === 'exact' ? 'Strong duplicate match' : 'Possible duplicate'} · {duplicate.BidID || 'Bid ID pending'}</strong>
+                          <span>{duplicate.Company} · {duplicate.Origin} → {duplicate.Destination}</span>
+                          <small>{getQuoteEngineDisplayDate(duplicate.PickupDate)} · {formatQuoteEngineMoney(duplicate.QuotedTotal)} · {duplicate.Status || 'No status'}</small>
+                        </article>
+                      ))}
+                    </div>
+                    <label className="quote-engine-confirm-row">
+                      <input type="checkbox" checked={quoteEngineDraft.duplicateAcknowledged} onChange={(event) => updateQuoteEngineDraft('duplicateAcknowledged', event.target.checked)} />
+                      <span>I reviewed these records and intend to create a separate bid.</span>
+                    </label>
+                  </section>
+                )}
+
+                {floorCheckRequired && (
+                  <section className="quote-engine-review-panel danger-panel">
+                    <h3>Below-floor policy override</h3>
+                    <p>The transportation portion is below the approved $2.95 per all-mile floor. The recorded override reason is: “{quoteEngineDraft.overrideReason}”</p>
+                    <label className="quote-engine-confirm-row">
+                      <input type="checkbox" checked={quoteEngineDraft.floorOverrideConfirmed} onChange={(event) => updateQuoteEngineDraft('floorOverrideConfirmed', event.target.checked)} />
+                      <span>I intentionally approve this below-floor quote and confirm the recorded reason.</span>
+                    </label>
+                  </section>
+                )}
+
+                {!quoteEnginePublishResult && (
+                  <section className="quote-engine-publish-confirmation">
+                    <label className="quote-engine-confirm-row final-confirm">
+                      <input type="checkbox" checked={quoteEngineDraft.confirmPublish} onChange={(event) => updateQuoteEngineDraft('confirmPublish', event.target.checked)} />
+                      <span><strong>Create this Bid Listing record</strong><small>The quote will not be created until Publish is selected below.</small></span>
+                    </label>
+                  </section>
+                )}
+
+                {quoteEnginePublishResult && (
+                  <section className={`quote-engine-publish-result ${quoteEnginePublishResult.pendingBidId ? 'pending' : 'success'}`} role="status">
+                    <div>
+                      <span aria-hidden="true">{quoteEnginePublishResult.pendingBidId ? '…' : '✓'}</span>
+                      <div>
+                        <h3>{quoteEnginePublishResult.pendingBidId ? 'Bid created; Bid ID is pending' : 'Quote published'}</h3>
+                        <p>{quoteEnginePublishResult.message}</p>
+                        {quoteEnginePublishResult.noteWarning && <small>{quoteEnginePublishResult.noteWarning}</small>}
+                      </div>
+                    </div>
+                    <strong>{quoteEnginePublishResult.BidID || `SharePoint item ${quoteEnginePublishResult.itemId}`}</strong>
+                  </section>
+                )}
+
+                {quoteEngineError && <div className="msg error" role="alert">{quoteEngineError}</div>}
+
+                <div className="quote-engine-footer">
+                  {!quoteEnginePublishResult && (
+                    <button type="button" className="secondary-button" onClick={() => setQuoteEngineStep(2)} disabled={quoteEnginePublishing}>Back to recommendation</button>
+                  )}
+                  <button type="button" className="secondary-button" onClick={copyQuoteEngineEmail}>Copy email response</button>
+                  {quoteEnginePublishResult?.pendingBidId && (
+                    <button type="button" onClick={checkQuoteEngineBidId} disabled={quoteEnginePublishing}>
+                      {quoteEnginePublishing ? 'Checking...' : 'Check Bid ID'}
+                    </button>
+                  )}
+                  {quoteEnginePublishResult?.record && (
+                    <button type="button" onClick={openCreatedQuoteEngineBid}>Open created bid</button>
+                  )}
+                  {!quoteEnginePublishResult && (
+                    <button type="button" onClick={publishQuoteEngineBid} disabled={!canPublish || quoteEnginePublishing}>
+                      {quoteEnginePublishing ? 'Creating Bid Listing record...' : 'Publish quote'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   if (!isAuthenticated) {
     return (
       <>
@@ -19108,6 +20060,7 @@ function openReportLoadDetails(load) {
   return (
     <>
       {renderPreferencesModal()}
+      {renderQuoteEngineModal()}
       {RecruitingProfileModal()}
       {RecruitingSnapshotModal()}
       {RecruitingDriverRosterPortModal()}
@@ -19141,7 +20094,7 @@ function openReportLoadDetails(load) {
       animate={brandRevealActive}
       revealKey={brandRevealKey}
       season={resolvedSeasonalTheme}
-      subtitle="Search orders, BOLs, customers, drivers, and inspect dispatch or billing data."
+      subtitle="Search by order, BOLs, customers, or driver last name."
     />
   </div>
 
@@ -19174,6 +20127,17 @@ function openReportLoadDetails(load) {
             disabled={loading && !hasSearched}
           >
             Clear
+          </button>
+
+          <button
+            ref={quoteEngineButtonRef}
+            type="button"
+            className="quote-engine-launch"
+            onClick={openQuoteEngine}
+            aria-haspopup="dialog"
+            aria-expanded={quoteEngineOpen}
+          >
+            New Quote
           </button>
 
           <button
