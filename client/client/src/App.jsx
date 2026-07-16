@@ -125,6 +125,27 @@ function formatQuoteEngineRate(value) {
   return Number.isFinite(amount) ? `$${amount.toFixed(2)}` : '$0.00';
 }
 
+function QuoteEngineBufferedField({ as = 'input', value, onCommit, ...props }) {
+  const [localValue, setLocalValue] = useState(() => String(value ?? ''));
+
+  const commitValue = () => {
+    const currentValue = String(value ?? '');
+    if (localValue !== currentValue) onCommit(localValue);
+  };
+
+  const fieldProps = {
+    ...props,
+    value: localValue,
+    onChange: (event) => setLocalValue(event.target.value),
+    onBlur: commitValue,
+    onKeyDown: (event) => {
+      if (as !== 'textarea' && event.key === 'Enter') commitValue();
+    }
+  };
+
+  return as === 'textarea' ? <textarea {...fieldProps} /> : <input {...fieldProps} />;
+}
+
 function getQuoteEngineDisplayDate(value, unknown = false) {
   if (unknown || value === QUOTE_ENGINE_UNKNOWN_DATE) return 'To be determined';
   if (!value) return '-';
@@ -1406,6 +1427,7 @@ export default function App() {
   const [quoteEngineOptionsLoading, setQuoteEngineOptionsLoading] = useState(false);
   const [quoteEngineOptionsError, setQuoteEngineOptionsError] = useState('');
   const [quoteEngineDraft, setQuoteEngineDraft] = useState(createQuoteEngineDraft);
+  const quoteEngineDraftRef = useRef(quoteEngineDraft);
   const [quoteEngineRecommendation, setQuoteEngineRecommendation] = useState(null);
   const [quoteEngineRecommendationLoading, setQuoteEngineRecommendationLoading] = useState(false);
   const [quoteEngineRecommendationStale, setQuoteEngineRecommendationStale] = useState(false);
@@ -2617,7 +2639,9 @@ export default function App() {
       </div>
     );
   }
-
+  useEffect(() => {
+    quoteEngineDraftRef.current = quoteEngineDraft;
+  }, [quoteEngineDraft]);
 
   useEffect(() => {
     const runtimeClass = isTauriRuntime ? 'tauri-runtime' : 'web-runtime';
@@ -3577,11 +3601,13 @@ export default function App() {
   }
 
   function updateQuoteEngineDraft(field, value, options = {}) {
-    setQuoteEngineDraft((current) => ({
-      ...current,
+    const nextDraft = {
+      ...quoteEngineDraftRef.current,
       [field]: value,
       ...(field !== 'confirmPublish' ? { confirmPublish: false } : {})
-    }));
+    };
+    quoteEngineDraftRef.current = nextDraft;
+    setQuoteEngineDraft(nextDraft);
     setQuoteEngineError('');
     setQuoteEngineCopyMessage('');
 
@@ -3605,7 +3631,7 @@ export default function App() {
       const res = await authedFetch(`${API}/quote-engine/recommendation`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(quoteEngineDraft)
+        body: JSON.stringify(quoteEngineDraftRef.current)
       });
       const data = await res.json().catch(() => ({}));
 
@@ -19402,7 +19428,6 @@ function openReportLoadDetails(load) {
     const recommendation = quoteEngineRecommendation;
     const calculation = recommendation?.calculation;
     const duplicates = recommendation?.duplicates || [];
-    const floorCheckRequired = Boolean(calculation?.floorOverrideRequired);
     const duplicateCheckRequired = duplicates.length > 0;
     const localFlatOverrideMissing = Boolean(
       calculation?.localFlatOverrideRequired && quoteEngineDraft.adjustmentMode !== 'flat'
@@ -19410,7 +19435,6 @@ function openReportLoadDetails(load) {
     const canPublish = Boolean(
       quoteEngineDraft.confirmPublish &&
       !localFlatOverrideMissing &&
-      (!floorCheckRequired || quoteEngineDraft.floorOverrideConfirmed) &&
       (!duplicateCheckRequired || quoteEngineDraft.duplicateAcknowledged) &&
       !quoteEnginePublishResult
     );
@@ -19520,10 +19544,10 @@ function openReportLoadDetails(load) {
                   <div className="quote-engine-field-grid three-column">
                     <label className="quote-engine-field">
                       <span>Company <em>Required</em></span>
-                      <input
+                      <QuoteEngineBufferedField
                         list="quote-engine-company-options"
                         value={quoteEngineDraft.company}
-                        onChange={(event) => updateQuoteEngineDraft('company', event.target.value)}
+                        onCommit={(value) => updateQuoteEngineDraft('company', value)}
                         placeholder="Start typing a verified company"
                         autoComplete="off"
                       />
@@ -19534,7 +19558,7 @@ function openReportLoadDetails(load) {
 
                     <label className="quote-engine-field">
                       <span>Requestor <em>Required</em></span>
-                      <input value={quoteEngineDraft.requestor} onChange={(event) => updateQuoteEngineDraft('requestor', event.target.value)} />
+                      <QuoteEngineBufferedField value={quoteEngineDraft.requestor} onCommit={(value) => updateQuoteEngineDraft('requestor', value)} />
                     </label>
 
                     <label className="quote-engine-field">
@@ -19572,13 +19596,13 @@ function openReportLoadDetails(load) {
                   <div className="quote-engine-field-grid freight-grid">
                     <label className="quote-engine-field freight-description-field">
                       <span>Freight Description <em>Required</em></span>
-                      <textarea rows="3" value={quoteEngineDraft.freight} onChange={(event) => updateQuoteEngineDraft('freight', event.target.value)} />
+                      <QuoteEngineBufferedField as="textarea" rows="3" value={quoteEngineDraft.freight} onCommit={(value) => updateQuoteEngineDraft('freight', value)} />
                     </label>
 
                     {['length', 'width', 'height'].map((field) => (
                       <label key={field} className="quote-engine-field">
                         <span>{field[0].toUpperCase() + field.slice(1)} <em>Required</em></span>
-                        <input type="number" min="0.01" step="0.01" value={quoteEngineDraft[field]} onChange={(event) => updateQuoteEngineDraft(field, event.target.value)} />
+                        <QuoteEngineBufferedField type="number" min="0.01" step="0.01" value={quoteEngineDraft[field]} onCommit={(value) => updateQuoteEngineDraft(field, value)} />
                       </label>
                     ))}
                   </div>
@@ -19596,24 +19620,24 @@ function openReportLoadDetails(load) {
                   <div className="quote-engine-field-grid three-column">
                     <label className="quote-engine-field">
                       <span>Operator Starting Location <em>Required</em></span>
-                      <input value={quoteEngineDraft.operatorStartingLocation} onChange={(event) => updateQuoteEngineDraft('operatorStartingLocation', event.target.value)} placeholder="Planning location used for deadhead" />
+                      <QuoteEngineBufferedField value={quoteEngineDraft.operatorStartingLocation} onCommit={(value) => updateQuoteEngineDraft('operatorStartingLocation', value)} placeholder="Planning location used for deadhead" />
                     </label>
                     <label className="quote-engine-field">
                       <span>Shipment Origin <em>Required</em></span>
-                      <input value={quoteEngineDraft.origin} onChange={(event) => updateQuoteEngineDraft('origin', event.target.value)} />
+                      <QuoteEngineBufferedField value={quoteEngineDraft.origin} onCommit={(value) => updateQuoteEngineDraft('origin', value)} />
                     </label>
                     <label className="quote-engine-field">
                       <span>Shipment Destination <em>Required</em></span>
-                      <input value={quoteEngineDraft.destination} onChange={(event) => updateQuoteEngineDraft('destination', event.target.value)} />
+                      <QuoteEngineBufferedField value={quoteEngineDraft.destination} onCommit={(value) => updateQuoteEngineDraft('destination', value)} />
                     </label>
                     <label className="quote-engine-field">
                       <span>Empty (Deadhead) Miles <em>Required</em></span>
-                      <input type="number" min="0" step="0.1" value={quoteEngineDraft.emptyMiles} onChange={(event) => updateQuoteEngineDraft('emptyMiles', event.target.value)} />
+                      <QuoteEngineBufferedField type="number" min="0" step="0.1" value={quoteEngineDraft.emptyMiles} onCommit={(value) => updateQuoteEngineDraft('emptyMiles', value)} />
                       <small>Enter 0 only when deadhead is genuinely zero.</small>
                     </label>
                     <label className="quote-engine-field">
                       <span>Loaded Miles <em>Required</em></span>
-                      <input type="number" min="0.1" step="0.1" value={quoteEngineDraft.loadedMiles} onChange={(event) => updateQuoteEngineDraft('loadedMiles', event.target.value)} />
+                      <QuoteEngineBufferedField type="number" min="0.1" step="0.1" value={quoteEngineDraft.loadedMiles} onCommit={(value) => updateQuoteEngineDraft('loadedMiles', value)} />
                     </label>
                     <label className="quote-engine-field">
                       <span>Deadhead Reliability <em>Required</em></span>
@@ -19631,21 +19655,21 @@ function openReportLoadDetails(load) {
                     <span>05</span>
                     <div>
                       <h3>Operating requirements</h3>
-                      <p>Unassigned truck and operator use the approved existing lookup value.</p>
+                      <p>Unassigned truck and operator use the approved existing choice value.</p>
                     </div>
                   </div>
 
                   <div className="quote-engine-field-grid three-column">
                     <label className="quote-engine-field">
                       <span>Truck Number</span>
-                      <input list="quote-engine-truck-options" value={quoteEngineDraft.truck} onChange={(event) => updateQuoteEngineDraft('truck', event.target.value)} />
+                      <QuoteEngineBufferedField list="quote-engine-truck-options" value={quoteEngineDraft.truck} onCommit={(value) => updateQuoteEngineDraft('truck', value)} />
                       <datalist id="quote-engine-truck-options">
                         {(quoteEngineOptions.trucks || []).map((value) => <option key={value} value={value} />)}
                       </datalist>
                     </label>
                     <label className="quote-engine-field">
                       <span>Operator / Team</span>
-                      <input list="quote-engine-operator-options" value={quoteEngineDraft.operator} onChange={(event) => updateQuoteEngineDraft('operator', event.target.value)} />
+                      <QuoteEngineBufferedField list="quote-engine-operator-options" value={quoteEngineDraft.operator} onCommit={(value) => updateQuoteEngineDraft('operator', value)} />
                       <datalist id="quote-engine-operator-options">
                         {(quoteEngineOptions.operators || []).map((value) => <option key={value} value={value} />)}
                       </datalist>
@@ -19668,7 +19692,7 @@ function openReportLoadDetails(load) {
                     </label>
                     <label className="quote-engine-field">
                       <span>Permit / Escort / Holding Charges</span>
-                      <input type="number" min="0" step="0.01" value={quoteEngineDraft.extraordinaryCosts} onChange={(event) => updateQuoteEngineDraft('extraordinaryCosts', event.target.value)} />
+                      <QuoteEngineBufferedField type="number" min="0" step="0.01" value={quoteEngineDraft.extraordinaryCosts} onCommit={(value) => updateQuoteEngineDraft('extraordinaryCosts', value)} />
                       <span className="quote-engine-inline-check">
                         <input type="checkbox" checked={quoteEngineDraft.extraordinaryCostsConfirmed} onChange={(event) => updateQuoteEngineDraft('extraordinaryCostsConfirmed', event.target.checked)} />
                         Cost is confirmed rather than provisional
@@ -19726,7 +19750,7 @@ function openReportLoadDetails(load) {
                 {quoteEngineRecommendationStale && (
                   <div className="report-alert warning quote-engine-stale" role="status">
                     <h4>Adjustment changed.</h4>
-                    <p>Recalculate before continuing so the effective rate, floor check, and explanation match the reviewed amount.</p>
+                    <p>Recalculate before continuing so the effective rate and explanation match the reviewed amount.</p>
                   </div>
                 )}
 
@@ -19744,7 +19768,7 @@ function openReportLoadDetails(load) {
                       <div><dt>Loaded miles</dt><dd>{calculation.loadedMiles.toFixed(1)}</dd></div>
                       <div><dt>Empty miles</dt><dd>{calculation.emptyMiles.toFixed(1)}</dd></div>
                       <div><dt>All miles</dt><dd>{calculation.allMiles.toFixed(1)}</dd></div>
-                      <div><dt>Benchmark</dt><dd>{formatQuoteEngineRate(calculation.benchmarkRate)}</dd></div>
+                      <div><dt>Policy rate</dt><dd>{formatQuoteEngineRate(calculation.policyRate ?? calculation.benchmarkRate)}</dd></div>
                       <div><dt>Mileage charge</dt><dd>{formatQuoteEngineMoney(calculation.mileageCharge)}</dd></div>
                       <div><dt>External costs</dt><dd>{formatQuoteEngineMoney(calculation.extraordinaryCosts)}</dd></div>
                       <div className="total"><dt>Reviewed total</dt><dd>{formatQuoteEngineMoney(calculation.finalQuote)}</dd></div>
@@ -19768,7 +19792,7 @@ function openReportLoadDetails(load) {
                     {quoteEngineDraft.adjustmentMode === 'percent' && (
                       <label className="quote-engine-field">
                         <span>Percentage adjustment</span>
-                        <input type="number" min="-95" max="500" step="0.1" value={quoteEngineDraft.adjustmentPercent} onChange={(event) => updateQuoteEngineDraft('adjustmentPercent', event.target.value, { pricingAdjustment: true })} />
+                        <QuoteEngineBufferedField type="number" min="-95" max="500" step="0.1" value={quoteEngineDraft.adjustmentPercent} onCommit={(value) => updateQuoteEngineDraft('adjustmentPercent', value, { pricingAdjustment: true })} />
                         <small>Applied before permit, escort, or holding charges.</small>
                       </label>
                     )}
@@ -19776,7 +19800,7 @@ function openReportLoadDetails(load) {
                     {quoteEngineDraft.adjustmentMode === 'flat' && (
                       <label className="quote-engine-field">
                         <span>Final flat rate</span>
-                        <input type="number" min="0.01" step="0.01" value={quoteEngineDraft.flatRate} onChange={(event) => updateQuoteEngineDraft('flatRate', event.target.value, { pricingAdjustment: true })} />
+                        <QuoteEngineBufferedField type="number" min="0.01" step="0.01" value={quoteEngineDraft.flatRate} onCommit={(value) => updateQuoteEngineDraft('flatRate', value, { pricingAdjustment: true })} />
                         <small>This is the final all-in customer amount.</small>
                       </label>
                     )}
@@ -19784,7 +19808,7 @@ function openReportLoadDetails(load) {
                     {quoteEngineDraft.adjustmentMode !== 'none' && (
                       <label className="quote-engine-field">
                         <span>Reason for adjustment <em>Required</em></span>
-                        <textarea rows="3" value={quoteEngineDraft.overrideReason} onChange={(event) => updateQuoteEngineDraft('overrideReason', event.target.value, { pricingAdjustment: true })} />
+                        <QuoteEngineBufferedField as="textarea" rows="3" value={quoteEngineDraft.overrideReason} onCommit={(value) => updateQuoteEngineDraft('overrideReason', value, { pricingAdjustment: true })} />
                       </label>
                     )}
 
@@ -19920,17 +19944,6 @@ function openReportLoadDetails(load) {
                     <label className="quote-engine-confirm-row">
                       <input type="checkbox" checked={quoteEngineDraft.duplicateAcknowledged} onChange={(event) => updateQuoteEngineDraft('duplicateAcknowledged', event.target.checked)} />
                       <span>I reviewed these records and intend to create a separate bid.</span>
-                    </label>
-                  </section>
-                )}
-
-                {floorCheckRequired && (
-                  <section className="quote-engine-review-panel danger-panel">
-                    <h3>Below-floor policy override</h3>
-                    <p>The transportation portion is below the approved $2.95 per all-mile floor. The recorded override reason is: “{quoteEngineDraft.overrideReason}”</p>
-                    <label className="quote-engine-confirm-row">
-                      <input type="checkbox" checked={quoteEngineDraft.floorOverrideConfirmed} onChange={(event) => updateQuoteEngineDraft('floorOverrideConfirmed', event.target.checked)} />
-                      <span>I intentionally approve this below-floor quote and confirm the recorded reason.</span>
                     </label>
                   </section>
                 )}

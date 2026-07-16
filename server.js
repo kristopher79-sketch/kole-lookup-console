@@ -28,7 +28,9 @@ const DRIVER_TIME_OFF_DEFAULT_REPORT_YEARS_BACK = 3;
 const AVAILABLE_TRUCKS_DEFAULT_LOOKBACK_DAYS = 30;
 const AVAILABLE_TRUCKS_DEFAULT_ASSIGNMENT_LOOKAHEAD_DAYS = Number(process.env.AVAILABLE_TRUCKS_ASSIGNMENT_LOOKAHEAD_DAYS || 2);
 const SALES_LEAD_NOTE_MAX_LENGTH = 63000;
-const QUOTE_ENGINE_RATE_FLOOR = 2.95;
+const QUOTE_ENGINE_STANDARD_ALL_MILE_RATE = 3.25;
+const QUOTE_ENGINE_HIGH_DEADHEAD_ALL_MILE_RATE = 3.10;
+const QUOTE_ENGINE_HIGH_DEADHEAD_THRESHOLD_MILES = 250;
 const QUOTE_ENGINE_UNKNOWN_DATE = '2100-01-01';
 const QUOTE_ENGINE_SCHEMA_CACHE_MS = 5 * 60 * 1000;
 const QUOTE_ENGINE_OPTIONS_CACHE_MS = 5 * 60 * 1000;
@@ -1292,23 +1294,20 @@ function normalizeEasternDateOnly(value) {
   }).format(parsed);
 }
 
-const QUOTE_ENGINE_LOOKUP_COLUMNS = Object.freeze([
+const QUOTE_ENGINE_CHOICE_COLUMNS = Object.freeze([
   {
     key: 'company',
     columnName: 'Company',
-    expectedWriteField: 'CompanyLookupId',
     label: 'Company'
   },
   {
     key: 'truck',
     columnName: 'Truck_x0020_Number',
-    expectedWriteField: 'Truck_x0020_NumberLookupId',
     label: 'Truck Number'
   },
   {
     key: 'operator',
     columnName: 'Operator_x002f_Team',
-    expectedWriteField: 'Operator_x002f_TeamLookupId',
     label: 'Operator / Team'
   }
 ]);
@@ -1337,11 +1336,10 @@ const QUOTE_ENGINE_REQUIRED_WRITABLE_COLUMNS = Object.freeze([
   'Status'
 ]);
 
-function getQuoteEngineBenchmarkRate() {
-  const configured = Number(process.env.QUOTE_ENGINE_BENCHMARK_RATE);
-  return Number.isFinite(configured) && configured >= QUOTE_ENGINE_RATE_FLOOR
-    ? configured
-    : QUOTE_ENGINE_RATE_FLOOR;
+function getQuoteEnginePolicyRate(emptyMiles) {
+  return emptyMiles > QUOTE_ENGINE_HIGH_DEADHEAD_THRESHOLD_MILES
+    ? QUOTE_ENGINE_HIGH_DEADHEAD_ALL_MILE_RATE
+    : QUOTE_ENGINE_STANDARD_ALL_MILE_RATE;
 }
 
 function getQuoteEngineMinimumCharge() {
@@ -1428,31 +1426,30 @@ async function getQuoteEngineSchema(token, currentList, forceRefresh = false) {
     );
   }
 
-  const lookups = {};
+  const quoteChoices = {};
 
-  QUOTE_ENGINE_LOOKUP_COLUMNS.forEach((definition) => {
+  QUOTE_ENGINE_CHOICE_COLUMNS.forEach((definition) => {
     const column = columnsByName.get(definition.columnName);
-    const derivedWriteField = column?.name ? `${column.name}LookupId` : '';
+    const choices = Array.isArray(column?.choice?.choices)
+      ? column.choice.choices.map((value) => String(value || '').trim()).filter(Boolean)
+      : [];
 
     if (
       !column ||
       column.readOnly === true ||
-      !column.lookup?.listId ||
-      !column.lookup?.columnName ||
-      derivedWriteField !== definition.expectedWriteField
+      choices.length === 0
     ) {
       throw createQuoteEngineError(
-        `${definition.label} lookup metadata does not match the approved Bid Listing integration.`,
+        `${definition.label} choice metadata does not match the Bid Listing configuration.`,
         503,
-        'QUOTE_LOOKUP_SCHEMA_MISMATCH'
+        'QUOTE_CHOICE_SCHEMA_MISMATCH'
       );
     }
 
-    lookups[definition.key] = {
+    quoteChoices[definition.key] = {
       ...definition,
-      listId: column.lookup.listId,
-      valueColumn: column.lookup.columnName,
-      writeField: derivedWriteField
+      choices,
+      writeField: column.name
     };
   });
 
@@ -1460,76 +1457,55 @@ async function getQuoteEngineSchema(token, currentList, forceRefresh = false) {
     listId: currentList.listId,
     listLabel: currentList.label,
     columnsByName,
-    lookups
+    quoteChoices
   };
   cachedQuoteEngineSchemaAt = now;
 
   return cachedQuoteEngineSchema;
 }
 
-async function getQuoteEngineLookupItems(token, lookupDefinition) {
-  const fieldName = encodeURIComponent(lookupDefinition.valueColumn);
-  let url = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${encodeURIComponent(lookupDefinition.listId)}/items?$select=id&$expand=fields($select=${fieldName})&$top=999`;
-  const rows = [];
-
-  while (url) {
-    const data = await graphGet(token, url);
-
-    (data.value || []).forEach((item) => {
-      const displayValue = getFlexibleFieldValue(item.fields?.[lookupDefinition.valueColumn]);
-      const value = String(displayValue ?? '').trim();
-      if (!item.id || !value) return;
-
-      rows.push({
-        id: String(item.id),
-        value,
-        normalized: normalizeSearchValue(value)
-      });
-    });
-
-    url = data['@odata.nextLink'] || null;
-  }
-
-  return rows;
+function normalizeQuoteChoiceValue(value) {
+  const trimmed = String(value || '').trim();
+  return trimmed === '-' ? '-' : normalizeSearchValue(trimmed);
 }
 
-function getUnambiguousQuoteLookupOptions(items = []) {
+function getUnambiguousQuoteChoiceOptions(items = []) {
   const grouped = new Map();
 
-  items.forEach((item) => {
-    if (!item.normalized) return;
-    if (!grouped.has(item.normalized)) grouped.set(item.normalized, []);
-    grouped.get(item.normalized).push(item);
+  items.forEach((value) => {
+    const normalized = normalizeQuoteChoiceValue(value);
+    if (!normalized) return;
+    if (!grouped.has(normalized)) grouped.set(normalized, []);
+    grouped.get(normalized).push(value);
   });
 
   return [...grouped.values()]
     .filter((matches) => matches.length === 1)
-    .map((matches) => matches[0].value)
+    .map((matches) => matches[0])
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
 }
 
-async function resolveQuoteLookupValue(token, lookupDefinition, requestedValue) {
-  const normalized = normalizeSearchValue(requestedValue);
+function resolveQuoteChoiceValue(choiceDefinition, requestedValue) {
+  const normalized = normalizeQuoteChoiceValue(requestedValue);
   if (!normalized) {
-    throw createQuoteEngineError(`${lookupDefinition.label} is required.`, 400, 'QUOTE_LOOKUP_REQUIRED');
+    throw createQuoteEngineError(`${choiceDefinition.label} is required.`, 400, 'QUOTE_CHOICE_REQUIRED');
   }
 
-  const items = await getQuoteEngineLookupItems(token, lookupDefinition);
-  const matches = items.filter((item) => item.normalized === normalized);
+  const matches = choiceDefinition.choices.filter((value) => normalizeQuoteChoiceValue(value) === normalized);
 
   if (matches.length === 0) {
     throw createQuoteEngineError(
-      `${lookupDefinition.label} "${String(requestedValue || '').trim()}" was not found in its approved lookup source.`,
+      `${choiceDefinition.label} "${String(requestedValue || '').trim()}" is not an approved Bid Listing choice.`,
       400,
-      'QUOTE_LOOKUP_NOT_FOUND'
+      'QUOTE_CHOICE_NOT_FOUND'
     );
   }
 
   if (matches.length > 1) {
     throw createQuoteEngineError(
-      `${lookupDefinition.label} "${String(requestedValue || '').trim()}" matches more than one lookup record. Resolve the duplicate before publishing.`,
+      `${choiceDefinition.label} "${String(requestedValue || '').trim()}" matches more than one configured choice. Resolve the duplicate before publishing.`,
       409,
-      'QUOTE_LOOKUP_AMBIGUOUS'
+      'QUOTE_CHOICE_AMBIGUOUS'
     );
   }
 
@@ -1545,35 +1521,31 @@ async function getQuoteEngineOptionsPayload(token, forceRefresh = false) {
 
   const currentList = await getQuoteEngineCurrentList(token);
   const schema = await getQuoteEngineSchema(token, currentList, forceRefresh);
-  const [companies, trucks, operators] = await Promise.all([
-    getQuoteEngineLookupItems(token, schema.lookups.company),
-    getQuoteEngineLookupItems(token, schema.lookups.truck),
-    getQuoteEngineLookupItems(token, schema.lookups.operator)
-  ]);
-
-  const truckOptions = getUnambiguousQuoteLookupOptions(trucks);
-  const operatorOptions = getUnambiguousQuoteLookupOptions(operators);
+  const companyOptions = getUnambiguousQuoteChoiceOptions(schema.quoteChoices.company.choices);
+  const truckOptions = getUnambiguousQuoteChoiceOptions(schema.quoteChoices.truck.choices);
+  const operatorOptions = getUnambiguousQuoteChoiceOptions(schema.quoteChoices.operator.choices);
 
   if (!truckOptions.some((value) => value === '-')) {
-    throw createQuoteEngineError('The approved unassigned Truck Number lookup value (-) was not found.', 503, 'QUOTE_UNASSIGNED_TRUCK_MISSING');
+    throw createQuoteEngineError('The approved unassigned Truck Number choice (-) was not found.', 503, 'QUOTE_UNASSIGNED_TRUCK_MISSING');
   }
 
   if (!operatorOptions.some((value) => value === '-')) {
-    throw createQuoteEngineError('The approved unassigned Operator / Team lookup value (-) was not found.', 503, 'QUOTE_UNASSIGNED_OPERATOR_MISSING');
+    throw createQuoteEngineError('The approved unassigned Operator / Team choice (-) was not found.', 503, 'QUOTE_UNASSIGNED_OPERATOR_MISSING');
   }
 
   cachedQuoteEngineOptions = {
     success: true,
     generatedAt: `${formatEasternTimestamp()} Eastern`,
-    companies: getUnambiguousQuoteLookupOptions(companies),
+    companies: companyOptions,
     trucks: truckOptions,
     operators: operatorOptions,
     defaults: {
       dateSolicited: formatEasternDate(),
       truck: '-',
       operator: '-',
-      benchmarkRate: getQuoteEngineBenchmarkRate(),
-      floorRate: QUOTE_ENGINE_RATE_FLOOR,
+      standardAllMileRate: QUOTE_ENGINE_STANDARD_ALL_MILE_RATE,
+      highDeadheadAllMileRate: QUOTE_ENGINE_HIGH_DEADHEAD_ALL_MILE_RATE,
+      highDeadheadThresholdMiles: QUOTE_ENGINE_HIGH_DEADHEAD_THRESHOLD_MILES,
       minimumCharge: getQuoteEngineMinimumCharge(),
       unknownDate: QUOTE_ENGINE_UNKNOWN_DATE
     }
@@ -2129,9 +2101,9 @@ function getQuoteConfidence(matches, draft, warnings) {
 
 function calculateQuoteEngineRecommendation(draft, historicalRecords, sourceWarnings = []) {
   const allMiles = draft.emptyMiles + draft.loadedMiles;
-  const benchmarkRate = getQuoteEngineBenchmarkRate();
+  const policyRate = getQuoteEnginePolicyRate(draft.emptyMiles);
   const minimumCharge = getQuoteEngineMinimumCharge();
-  const mileageCharge = allMiles * benchmarkRate;
+  const mileageCharge = allMiles * policyRate;
   const minimumApplied = draft.localShipment && minimumCharge > mileageCharge;
   const baseTransportationCharge = minimumApplied ? minimumCharge : mileageCharge;
   const standardUnroundedTotal = baseTransportationCharge + draft.extraordinaryCosts;
@@ -2197,21 +2169,17 @@ function calculateQuoteEngineRecommendation(draft, historicalRecords, sourceWarn
     warnings.push(`${duplicates.length} possible duplicate Bid Listing entr${duplicates.length === 1 ? 'y was' : 'ies were'} found.`);
   }
 
-  if (historicalMedianRate > benchmarkRate) {
+  if (historicalMedianRate > policyRate) {
     assumptions.push(`Relevant historical transportation rates have a median of $${historicalMedianRate.toFixed(2)} per all mile; unapproved historical weighting has not been applied automatically.`);
-  }
-
-  const floorTransportationCharge = allMiles * QUOTE_ENGINE_RATE_FLOOR;
-  const floorOverrideRequired = adjustedTransportationCharge + 0.01 < floorTransportationCharge;
-
-  if (floorOverrideRequired) {
-    warnings.push('The reviewed transportation amount is below the approved $2.95 all-mile floor and requires an explicit policy override.');
   }
 
   const confidence = getQuoteConfidence(eligibleMatches, draft, warnings);
   const rationale = [
     `${draft.loadedMiles.toFixed(1)} loaded miles + ${draft.emptyMiles.toFixed(1)} empty miles = ${allMiles.toFixed(1)} all miles.`,
-    `${allMiles.toFixed(1)} all miles × $${benchmarkRate.toFixed(2)} = $${mileageCharge.toFixed(2)} mileage-based transportation charge.`,
+    draft.emptyMiles > QUOTE_ENGINE_HIGH_DEADHEAD_THRESHOLD_MILES
+      ? `${draft.emptyMiles.toFixed(1)} deadhead miles exceed ${QUOTE_ENGINE_HIGH_DEADHEAD_THRESHOLD_MILES}, so the policy rate is $${policyRate.toFixed(2)} per all mile.`
+      : `${draft.emptyMiles.toFixed(1)} deadhead miles are at or below ${QUOTE_ENGINE_HIGH_DEADHEAD_THRESHOLD_MILES}, so the policy rate is $${policyRate.toFixed(2)} per all mile.`,
+    `${allMiles.toFixed(1)} all miles × $${policyRate.toFixed(2)} = $${mileageCharge.toFixed(2)} mileage-based transportation charge.`,
     minimumApplied
       ? `The configured $${minimumCharge.toFixed(2)} local/minimum charge replaced the lower mileage charge.`
       : 'No local/minimum charge changed the transportation amount.',
@@ -2232,8 +2200,10 @@ function calculateQuoteEngineRecommendation(draft, historicalRecords, sourceWarn
     success: true,
     generatedAt: `${formatEasternTimestamp()} Eastern`,
     policy: {
-      floorRate: QUOTE_ENGINE_RATE_FLOOR,
-      benchmarkRate,
+      standardAllMileRate: QUOTE_ENGINE_STANDARD_ALL_MILE_RATE,
+      highDeadheadAllMileRate: QUOTE_ENGINE_HIGH_DEADHEAD_ALL_MILE_RATE,
+      highDeadheadThresholdMiles: QUOTE_ENGINE_HIGH_DEADHEAD_THRESHOLD_MILES,
+      appliedAllMileRate: policyRate,
       minimumCharge,
       historicalWeightingApplied: false
     },
@@ -2241,7 +2211,8 @@ function calculateQuoteEngineRecommendation(draft, historicalRecords, sourceWarn
       loadedMiles: draft.loadedMiles,
       emptyMiles: draft.emptyMiles,
       allMiles,
-      benchmarkRate,
+      policyRate,
+      benchmarkRate: policyRate,
       mileageCharge,
       minimumApplied,
       baseTransportationCharge,
@@ -2253,7 +2224,7 @@ function calculateQuoteEngineRecommendation(draft, historicalRecords, sourceWarn
       customerAllMileRate: allMiles > 0 ? finalQuote / allMiles : 0,
       transportationAllMileRate: allMiles > 0 ? Math.max(0, finalQuote - draft.extraordinaryCosts) / allMiles : 0,
       roundingApplied,
-      floorOverrideRequired,
+      floorOverrideRequired: false,
       localFlatOverrideRequired: draft.localShipment && minimumCharge <= 0
     },
     history: {
@@ -2300,9 +2271,8 @@ function getQuoteEngineLocalStatusValue(schema) {
   return localChoice;
 }
 
-function buildQuoteEngineCreateFields(draft, calculation, schema, resolvedLookups) {
+function buildQuoteEngineCreateFields(draft, calculation, schema, resolvedChoices) {
   const fields = {
-    BidID: '',
     Requestor: draft.requestor,
     Date_x0020_Solicited: getQuoteEngineGraphDate(draft.dateSolicited),
     Ready_x0020_Date: getQuoteEngineGraphDate(draft.readyDate),
@@ -2321,9 +2291,9 @@ function buildQuoteEngineCreateFields(draft, calculation, schema, resolvedLookup
     Permits_x002f_Escort_x0020_Fees_: draft.extraordinaryCosts,
     Quoted_x0020_Total: calculation.finalQuote,
     Aircraft_x0020_Related_x003f_: getQuoteEngineYesNoWriteValue(schema, 'Aircraft_x0020_Related_x003f_', draft.aircraftRelated),
-    [schema.lookups.company.writeField]: resolvedLookups.company.id,
-    [schema.lookups.truck.writeField]: resolvedLookups.truck.id,
-    [schema.lookups.operator.writeField]: resolvedLookups.operator.id
+    [schema.quoteChoices.company.writeField]: resolvedChoices.company,
+    [schema.quoteChoices.truck.writeField]: resolvedChoices.truck,
+    [schema.quoteChoices.operator.writeField]: resolvedChoices.operator
   };
 
   if (draft.teamRequired !== null) {
@@ -2335,6 +2305,101 @@ function buildQuoteEngineCreateFields(draft, calculation, schema, resolvedLookup
   }
 
   return fields;
+}
+
+function validateQuoteEngineCreateFields(fields, schema) {
+  const hasField = (name) => Object.prototype.hasOwnProperty.call(fields, name);
+  const isMissing = (value) => value === null || value === undefined || String(value).trim() === '';
+
+  schema.columnsByName.forEach((column, name) => {
+    if (column.required !== true || column.hidden === true || column.readOnly === true) return;
+    if (!hasField(name) || isMissing(fields[name])) {
+      throw createQuoteEngineError(
+        `${column.displayName || 'A required Bid Listing field'} is required before publishing.`,
+        400,
+        'QUOTE_REQUIRED_FIELD'
+      );
+    }
+  });
+
+  Object.entries(fields).forEach(([name, value]) => {
+    const column = schema.columnsByName.get(name);
+    if (!column || column.readOnly === true) {
+      throw createQuoteEngineError(
+        'Quote publishing is unavailable because the Bid Listing mapping changed. Retry the setup check.',
+        503,
+        'QUOTE_SCHEMA_MISMATCH'
+      );
+    }
+
+    if (column.choice && !column.choice.allowTextEntry) {
+      const choices = Array.isArray(column.choice.choices) ? column.choice.choices : [];
+      if (!choices.some((choice) => String(choice) === String(value))) {
+        throw createQuoteEngineError(
+          `${column.displayName || 'A Bid Listing selection'} is not an approved choice.`,
+          400,
+          'QUOTE_CHOICE_NOT_FOUND'
+        );
+      }
+    }
+
+    if ((column.number || column.currency) && !Number.isFinite(Number(value))) {
+      throw createQuoteEngineError(
+        `${column.displayName || 'A Bid Listing number'} must be a valid number.`,
+        400,
+        'QUOTE_INVALID_NUMBER'
+      );
+    }
+
+    if (column.boolean && typeof value !== 'boolean') {
+      throw createQuoteEngineError(
+        `${column.displayName || 'A Bid Listing Yes/No field'} must be answered Yes or No.`,
+        400,
+        'QUOTE_INVALID_BOOLEAN'
+      );
+    }
+
+    if (column.dateTime && Number.isNaN(Date.parse(String(value)))) {
+      throw createQuoteEngineError(
+        `${column.displayName || 'A Bid Listing date'} must be a valid date.`,
+        400,
+        'QUOTE_INVALID_DATE'
+      );
+    }
+  });
+}
+
+function getQuoteEngineCreateFailure(error) {
+  let graphCode = '';
+
+  try {
+    const payload = JSON.parse(String(error?.message || ''));
+    graphCode = normalizeText(payload?.error?.code);
+  } catch {
+    graphCode = '';
+  }
+
+  if (graphCode === 'accessdenied' || graphCode === 'forbidden') {
+    return createQuoteEngineError(
+      'Bid Listing rejected quote creation because the server does not have write access.',
+      403,
+      'QUOTE_CREATE_FORBIDDEN'
+    );
+  }
+
+  if (graphCode === 'invalidrequest' || graphCode === 'badrequest') {
+    return createQuoteEngineError(
+      'Bid Listing rejected one or more quote fields. No record was confirmed; review the current field configuration before retrying.',
+      502,
+      'QUOTE_CREATE_REJECTED'
+    );
+  }
+
+  return createQuoteEngineError(
+    'Bid Listing did not confirm whether the record was created. Check the list before attempting to publish this quote again.',
+    502,
+    'QUOTE_CREATE_UNCONFIRMED'
+  );
 }
 
 async function pollQuoteEngineBidId(token, currentList, itemId) {
@@ -2375,7 +2440,7 @@ async function createQuoteEngineAuditNote(token, draft, recommendation, record) 
         `- Published quote: $${recommendation.calculation.finalQuote.toFixed(2)}`,
         `- All miles: ${recommendation.calculation.allMiles.toFixed(1)}`,
         `- Transportation all-mile rate: $${recommendation.calculation.transportationAllMileRate.toFixed(2)}`,
-        `- Benchmark rate: $${recommendation.calculation.benchmarkRate.toFixed(2)}`,
+        `- Policy all-mile rate: $${recommendation.calculation.policyRate.toFixed(2)}`,
         `- Extraordinary costs: $${recommendation.calculation.extraordinaryCosts.toFixed(2)}`,
         `- Adjustment: ${draft.adjustmentMode === 'none' ? 'None' : draft.adjustmentMode}`,
         ...(draft.adjustmentMode === 'percent' ? [`- Percentage adjustment: ${draft.adjustmentPercent.toFixed(1)}%`] : []),
@@ -2445,14 +2510,6 @@ async function publishQuoteEngineBid(token, draft, recommendation, currentList, 
     );
   }
 
-  if (recommendation.calculation.floorOverrideRequired && !draft.floorOverrideConfirmed) {
-    throw createQuoteEngineError(
-      'Confirm the below-floor policy override before publishing.',
-      409,
-      'QUOTE_FLOOR_OVERRIDE_REQUIRED'
-    );
-  }
-
   if (recommendation.duplicates.length > 0 && !draft.duplicateAcknowledged) {
     const error = createQuoteEngineError(
       'Review and acknowledge the possible duplicate bids before publishing.',
@@ -2463,12 +2520,13 @@ async function publishQuoteEngineBid(token, draft, recommendation, currentList, 
     throw error;
   }
 
-  const [company, truck, operator] = await Promise.all([
-    resolveQuoteLookupValue(token, schema.lookups.company, draft.company),
-    resolveQuoteLookupValue(token, schema.lookups.truck, draft.truck),
-    resolveQuoteLookupValue(token, schema.lookups.operator, draft.operator)
-  ]);
-  const fields = buildQuoteEngineCreateFields(draft, recommendation.calculation, schema, { company, truck, operator });
+  const resolvedChoices = {
+    company: resolveQuoteChoiceValue(schema.quoteChoices.company, draft.company),
+    truck: resolveQuoteChoiceValue(schema.quoteChoices.truck, draft.truck),
+    operator: resolveQuoteChoiceValue(schema.quoteChoices.operator, draft.operator)
+  };
+  const fields = buildQuoteEngineCreateFields(draft, recommendation.calculation, schema, resolvedChoices);
+  validateQuoteEngineCreateFields(fields, schema);
   let createdItem;
 
   try {
@@ -2477,12 +2535,8 @@ async function publishQuoteEngineBid(token, draft, recommendation, currentList, 
       `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}/items`,
       { fields }
     );
-  } catch {
-    throw createQuoteEngineError(
-      'Bid Listing did not confirm whether the record was created. Check the list before attempting to publish this quote again.',
-      502,
-      'QUOTE_CREATE_UNCONFIRMED'
-    );
+  } catch (error) {
+    throw getQuoteEngineCreateFailure(error);
   }
   const itemId = String(createdItem?.id || '').trim();
 
