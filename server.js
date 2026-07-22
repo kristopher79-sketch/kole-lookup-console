@@ -4475,10 +4475,10 @@ function buildRecruitingSnapshotRosterMap(rosterItems = []) {
 }
 
 function getRecruitingSnapshotSegmentKey(roster) {
-  const soloOrTeam = normalizeText(roster?.soloOrTeam);
+  const driverFunction = normalizeText(roster?.soloOrTeam);
 
-  if (soloOrTeam.includes('team') || soloOrTeam.includes('co driver') || soloOrTeam.includes('co-driver')) return 'team';
-  if (soloOrTeam.includes('solo')) return 'solo';
+  if (driverFunction === 'team' || driverFunction === 'absentee - team') return 'team';
+  if (driverFunction === 'solo' || driverFunction === 'absentee - solo') return 'solo';
 
   return 'unknown';
 }
@@ -4794,6 +4794,7 @@ function buildRecruitingSnapshotReport(itemsWithSource = [], sourceLists = [], r
       anchorDate: 'Pickup Offer Date',
       includedStatuses: ['Won'],
       localRule: `Loads <= ${getRecruitingSnapshotLocalLoadedMileMax().toLocaleString('en-US')} loaded miles are local/day-work and excluded from rate/deadhead math.`,
+      functionGroupingRule: 'Absentee - Solo is included with Solo; Absentee - Team is included with Team.',
       settlementMonthRule: `Settlement-month averages use truck-months with ${RECRUITING_SNAPSHOT_SOLO_SETTLEMENT_MIN_LOADS}+ solo loads or ${RECRUITING_SNAPSHOT_TEAM_SETTLEMENT_MIN_LOADS}+ team loads.`,
       soloSettlementMinLoads: RECRUITING_SNAPSHOT_SOLO_SETTLEMENT_MIN_LOADS,
       teamSettlementMinLoads: RECRUITING_SNAPSHOT_TEAM_SETTLEMENT_MIN_LOADS,
@@ -4805,7 +4806,7 @@ function buildRecruitingSnapshotReport(itemsWithSource = [], sourceLists = [], r
     warnings: [
       rosterWarning,
       unknownSegment.metrics.loadCount > 0
-        ? `${unknownSegment.metrics.loadCount.toLocaleString('en-US')} load(s) were not classified as Solo or Team because the truck was not matched to Driver Roster Solo/Team data.`
+        ? `${unknownSegment.metrics.loadCount.toLocaleString('en-US')} load(s) were not classified as Solo or Team because the truck was not matched to a recognized Driver Roster Function.`
         : ''
     ].filter(Boolean),
     counts: {
@@ -4858,7 +4859,7 @@ async function getRecruitingSnapshotReportPayload(options = {}) {
   try {
     rosterItems = await getDriverRosterItems(token);
   } catch (error) {
-    rosterWarning = error.message || 'Driver Roster could not be loaded, so Solo/Team classification may be incomplete.';
+    rosterWarning = error.message || 'Driver Roster could not be loaded, so Function classification may be incomplete.';
   }
 
   const report = buildRecruitingSnapshotReport(
@@ -8672,6 +8673,8 @@ function assertDriverRosterConfig() {
 }
 
 const DRIVER_ROSTER_UNIT_MAX_LENGTH = 17;
+const DRIVER_FUNCTION_OPTIONS = Object.freeze(['Solo', 'Team', 'Absentee - Solo', 'Absentee - Team']);
+const DRIVER_FUNCTION_BY_KEY = new Map(DRIVER_FUNCTION_OPTIONS.map((value) => [value.toLowerCase(), value]));
 
 function cleanDriverRosterDraftText(value) {
   return value == null ? '' : String(value).replace(/\s+/g, ' ').trim();
@@ -8696,6 +8699,19 @@ function normalizeDriverRosterDriverType(value = '') {
   const cleanValue = cleanDriverRosterDraftText(value);
   if (cleanValue.toLowerCase() === 'percentage') return '%';
   return cleanValue;
+}
+
+function normalizeDriverFunction(value = '', fallback = '') {
+  const cleanValue = cleanDriverRosterDraftText(value) || cleanDriverRosterDraftText(fallback);
+  const normalized = DRIVER_FUNCTION_BY_KEY.get(cleanValue.toLowerCase());
+
+  if (!normalized) {
+    const error = new Error(`Function must be one of: ${DRIVER_FUNCTION_OPTIONS.join(', ')}.`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return normalized;
 }
 
 function getDriverRosterDraftValue(body = {}, ...keys) {
@@ -8775,7 +8791,9 @@ function buildDriverRosterFieldsFromRecruitingCandidate(candidate = {}, body = {
   setRosterTextField(fields, 'EmailAddress1', getDriverRosterDraftText(body, 'emailAddress1', 'EmailAddress1') || candidate.email);
   setRosterTextField(fields, 'EmailAddress2', getDriverRosterDraftText(body, 'emailAddress2', 'EmailAddress2'));
   setRosterTextField(fields, 'DriverType', normalizeDriverRosterDriverType(getDriverRosterDraftText(body, 'driverType', 'DriverType') || candidate.relationshipType));
-  setRosterTextField(fields, 'SoloorTeam', getDriverRosterDraftText(body, 'soloOrTeam', 'SoloorTeam') || candidate.type);
+  fields.SoloorTeam = normalizeDriverFunction(
+    getDriverRosterDraftText(body, 'soloOrTeam', 'SoloorTeam') || candidate.type
+  );
   setRosterTextField(fields, 'BOLLetterPrefix', getDriverRosterDraftText(body, 'bolLetterPrefix', 'BOLLetterPrefix').toUpperCase());
   setRosterTextField(fields, 'TrailerType', getDriverRosterDraftText(body, 'trailerType', 'TrailerType'));
 
@@ -10430,7 +10448,7 @@ function normalizeRecruitingCandidate(item) {
     lastName: cleanRecruitingString(f.LastName),
     displayName: cleanRecruitingString(f.DisplayName),
     status,
-    type: cleanRecruitingString(f.CandidateType || 'Unknown'),
+    type: cleanRecruitingString(f.CandidateType),
     teamId: cleanRecruitingString(f.TeamID),
     primaryPhone: cleanRecruitingString(f.PrimaryPhone),
     secondaryPhone: cleanRecruitingString(f.SecondaryPhone),
@@ -10693,7 +10711,7 @@ function buildRecruitingCandidateFieldsFromBody(body = {}) {
     LastName: lastName,
     DisplayName: displayName,
     CandidateStatus: RECRUITING_CANDIDATE_STATUS.APPLIED,
-    CandidateType: cleanRecruitingString(body.candidateType || body.CandidateType || 'Solo') || 'Solo',
+    CandidateType: normalizeDriverFunction(body.candidateType || body.CandidateType, 'Solo'),
     PrimaryPhone: cleanRecruitingString(body.primaryPhone || body.PrimaryPhone),
     SecondaryPhone: cleanRecruitingString(body.secondaryPhone || body.SecondaryPhone),
     EmailAddress: cleanRecruitingString(body.email || body.emailAddress || body.EmailAddress),
@@ -10756,6 +10774,10 @@ function buildRecruitingCandidatePatchFromBody(body = {}) {
       patch[fieldName] = value || null;
     }
   });
+
+  if (Object.prototype.hasOwnProperty.call(patch, 'CandidateType')) {
+    patch.CandidateType = normalizeDriverFunction(patch.CandidateType);
+  }
 
   if (Object.prototype.hasOwnProperty.call(body, 'ownsTruck')) patch.OwnsTruck = body.ownsTruck === true;
   if (Object.prototype.hasOwnProperty.call(body, 'ownsTrailer')) patch.OwnsTrailer = body.ownsTrailer === true;

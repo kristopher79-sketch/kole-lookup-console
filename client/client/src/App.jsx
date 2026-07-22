@@ -172,7 +172,7 @@ function buildQuoteEmailBody(draft, recommendation, publishResult = null) {
     `Lane: ${draft.origin} to ${draft.destination}`,
     `Pickup: ${getQuoteEngineDisplayDate(draft.pickupDate, draft.pickupDateUnknown)}`,
     `Delivery: ${getQuoteEngineDisplayDate(draft.deliveryDate, draft.deliveryDateUnknown)}`,
-    `Quoted price: ${formatQuoteEngineMoney(calculation.finalQuote)}${externalCostLine}${bidReference}`,
+    `Quote price: ${formatQuoteEngineMoney(calculation.finalQuote)}${externalCostLine}${bidReference}`,
     '',
     'Please let us know if you would like us to move forward or if any shipment details have changed.',
     '',
@@ -196,7 +196,7 @@ const RECRUITING_CANDIDATE_STATUS_OPTIONS = [
 ];
 const RECRUITING_CLOSED_STATUSES = ['Qualified', 'Disqualified', 'Withdrawn', 'Dormant'];
 const RECRUITING_HEADS_UP_STATUSES = ['Prospect', 'Applied', 'Active Qualification', 'Ready to Qualify'];
-const RECRUITING_CANDIDATE_TYPE_OPTIONS = ['Solo', 'Team', 'Co-Driver', 'Unknown'];
+const DRIVER_FUNCTION_OPTIONS = ['Solo', 'Team', 'Absentee - Solo', 'Absentee - Team'];
 const RECRUITING_SOURCE_OPTIONS = ['Website', 'Referral', 'Call-In', 'Facebook', 'Returning', 'Indeed', 'LinkedIn', 'Other'];
 const RECRUITING_RELATIONSHIP_OPTIONS = ['Percentage', 'Company', 'Per Mile Solo', 'Absentee Owner Percentage', 'Unknown'];
 const RECRUITING_NOTE_TYPE_OPTIONS = ['Call', 'Email', 'Follow-Up', 'Application', 'Qualification', 'Disqualification', 'Internal', 'System', 'Other'];
@@ -208,7 +208,6 @@ const RECRUITING_PREVIEW_ROW_LIMIT = 8;
 const RECRUITING_MANUAL_STATUS_OPTIONS = ['Prospect', 'Applied', 'Active Qualification', 'Disqualified', 'Withdrawn', 'Dormant'];
 const RECRUITING_MANUAL_CLOSED_STATUS_OPTIONS = ['Disqualified', 'Withdrawn', 'Dormant'];
 const DRIVER_ROSTER_PORT_STATUS_OPTIONS = ['Active', 'Inactive'];
-const DRIVER_ROSTER_PORT_SOLO_TEAM_OPTIONS = ['Solo', 'Team'];
 const DRIVER_ROSTER_PORT_DRIVER_TYPE_OPTIONS = ['%', 'Company', 'Per Mile Solo', 'Absentee Owner Percentage', 'Unknown'];
 const DRIVER_ROSTER_PORT_TRAILER_TYPE_OPTIONS = [
   '',
@@ -263,11 +262,9 @@ function createRecruitingCandidateDraft() {
   };
 }
 
-function getRecruitingDriverRosterSoloOrTeam(candidateType = '') {
+function getRecruitingDriverRosterFunction(candidateType = '') {
   const cleanType = String(candidateType || '').trim();
-
-  if (cleanType === 'Team' || cleanType === 'Co-Driver') return 'Team';
-  return 'Solo';
+  return DRIVER_FUNCTION_OPTIONS.includes(cleanType) ? cleanType : '';
 }
 
 function limitDriverRosterPortUnitValue(value = '') {
@@ -311,7 +308,7 @@ function createRecruitingDriverRosterPortDraft(candidate = {}) {
     emailAddress2: '',
     status: 'Active',
     driverType,
-    soloOrTeam: getRecruitingDriverRosterSoloOrTeam(candidate.type),
+    soloOrTeam: getRecruitingDriverRosterFunction(candidate.type),
     bolLetterPrefix: '',
     trailerType: '',
     registeredWeight: '',
@@ -13215,7 +13212,7 @@ function openReportLoadDetails(load) {
                 <SectionTitle>Operational</SectionTitle>
                 <DetailItem label="Status" value={roster.status} />
                 <DetailItem label="Driver Type" value={roster.driverType} />
-                <DetailItem label="Solo / Team" value={roster.soloOrTeam} />
+                <DetailItem label="Function" value={roster.soloOrTeam} />
                 <DetailItem label="BOL Prefix" value={roster.bolLetterPrefix} />
                 <DetailItem label="Trailer Type" value={roster.trailerType} wide />
                 <DetailItem label="Registered Weight" value={formatRosterNumber(roster.registeredWeight)} />
@@ -16821,6 +16818,11 @@ function openReportLoadDetails(load) {
       return;
     }
 
+    if (!DRIVER_FUNCTION_OPTIONS.includes(driverRosterPortDraft.soloOrTeam)) {
+      setDriverRosterPortError('Select the driver Function before creating the record.');
+      return;
+    }
+
     const portPayload = {
       ...driverRosterPortDraft,
       truck: limitDriverRosterPortUnitValue(driverRosterPortDraft.truck),
@@ -17169,7 +17171,7 @@ function openReportLoadDetails(load) {
                   <div className="recruiting-section-card-header">
                     <div>
                       <h3>Solo / Team Comparison</h3>
-                      <p>Monthly figures use settlement-month thresholds. Rate figures are linehaul only. Contractor net pay excludes company trucks.</p>
+                      <p>Monthly figures use settlement-month thresholds. Absentee functions roll into their matching solo/team operating group. Rate figures are linehaul only. Contractor net pay excludes company trucks.</p>
                     </div>
                   </div>
 
@@ -17212,7 +17214,7 @@ function openReportLoadDetails(load) {
                   <strong>Recruiting use only.</strong>
                   <span>{report.window?.note || 'Historical performance is not a guarantee. Results vary by availability, lane acceptance, equipment, repairs, home time, and market conditions.'}</span>
                   
-                  {unknownLoads > 0 && <span>{formatReportNumber(unknownLoads)} loads are visible in the unclassified bucket because Solo/Team could not be matched from Driver Roster.</span>}
+                  {unknownLoads > 0 && <span>{formatReportNumber(unknownLoads)} loads are visible in the unclassified bucket because a recognized Function could not be matched from Driver Roster.</span>}
                 </div>
               </>
             )}
@@ -17247,9 +17249,9 @@ function openReportLoadDetails(load) {
                 <input value={recruitingCandidateDraft.lastName} onChange={(e) => updateRecruitingCandidateDraft('lastName', e.target.value)} />
               </label>
               <label>
-                <span>Candidate Type</span>
+                <span>Function</span>
                 <select value={recruitingCandidateDraft.candidateType} onChange={(e) => updateRecruitingCandidateDraft('candidateType', e.target.value)}>
-                  {RECRUITING_CANDIDATE_TYPE_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                  {DRIVER_FUNCTION_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
                 </select>
               </label>
               <label>
@@ -17340,14 +17342,16 @@ function openReportLoadDetails(load) {
       </label>
     );
 
-    const renderPortSelect = (field, label, options = []) => (
+    const renderPortSelect = (field, label, options = [], selectOptions = {}) => (
       <label>
         <span>{label}</span>
         <select
           value={draft[field] || ''}
           onChange={(e) => updateRecruitingDriverRosterPortDraft(field, e.target.value)}
           disabled={driverRosterPortSaving}
+          required={selectOptions.required}
         >
+          {selectOptions.placeholder && <option value="" disabled>{selectOptions.placeholder}</option>}
           {options.map((option) => (
             <option key={option} value={option}>{option || 'Blank'}</option>
           ))}
@@ -17393,7 +17397,7 @@ function openReportLoadDetails(load) {
               <div className="driver-roster-port-grid">
                 {renderPortSelect('status', 'Status', DRIVER_ROSTER_PORT_STATUS_OPTIONS)}
                 {renderPortSelect('driverType', 'Driver Type', DRIVER_ROSTER_PORT_DRIVER_TYPE_OPTIONS)}
-                {renderPortSelect('soloOrTeam', 'Solo / Team', DRIVER_ROSTER_PORT_SOLO_TEAM_OPTIONS)}
+                {renderPortSelect('soloOrTeam', 'Function', DRIVER_FUNCTION_OPTIONS, { required: true, placeholder: 'Select function...' })}
                 {renderPortInput('startDate', 'Start Date', { type: 'date' })}
                 {renderPortInput('bolLetterPrefix', 'BOL Letter Prefix', { uppercase: true, placeholder: 'A, B, C...' })}
                 {renderPortSelect('trailerType', 'Trailer Type', DRIVER_ROSTER_PORT_TRAILER_TYPE_OPTIONS)}
@@ -17495,7 +17499,7 @@ function openReportLoadDetails(load) {
           <div className="detail-header recruiting-profile-header">
             <div>
               <h2 id="recruiting-profile-title">{candidate.displayName || candidate.title || 'Candidate'}</h2>
-              <p>{candidate.candidateId} · {candidate.type || 'Unknown'}{candidate.teamId ? ` · ${candidate.teamId}` : ''}</p>
+              <p>{candidate.candidateId} · {candidate.type || 'Function not set'}{candidate.teamId ? ` · ${candidate.teamId}` : ''}</p>
             </div>
             <button type="button" className="close-button" onClick={closeRecruitingProfileModal}>Close</button>
           </div>
@@ -17926,7 +17930,7 @@ function openReportLoadDetails(load) {
                     <tr>
                       <th>Candidate</th>
                       <th>Status</th>
-                      <th>Type</th>
+                      <th>Function</th>
                       <th>Contact</th>
                       <th>Application</th>
                       <th>Follow-Up</th>
