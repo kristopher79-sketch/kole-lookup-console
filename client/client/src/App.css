@@ -19248,3 +19248,385 @@ body.light .driver-roster-port-grid select {
   border-left-color: var(--kole-action-hover) !important;
   background: linear-gradient(180deg, var(--kole-shell), var(--kole-selection-bg)) !important;
 }
+
+/* Service Locations lookup / edit report */
+.service-locations-card {
+  display: grid;
+  gap: 16px;
+}
+
+.service-locations-header {
+  align-items: center;
+  gap: 16px;
+}
+
+.service-locations-header .secondary-action-button {
+  flex: 0 0 auto;
+}
+
+.service-locations-empty-state {
+  padding: 28px 18px;
+  border: 1px dashed var(--kole-border-strong);
+  border-radius: 12px;
+  color: var(--kole-muted);
+  text-align: center;
+}
+
+.service-location-toolbar {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(130px, 170px) minmax(130px, 170px);
+  gap: 12px;
+  align-items: end;
+}
+
+.service-location-toolbar label,
+.service-location-form-grid label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.service-location-toolbar label > span,
+.service-location-form-grid label > span {
+  color: var(--kole-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.service-location-toolbar input,
+.service-location-toolbar select,
+.service-location-form-grid input,
+.service-location-form-grid textarea,
+.service-location-form-grid select {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--kole-control-border);
+  border-radius: 8px;
+  background: var(--kole-control-bg);
+  color: var(--kole-text-soft);
+}
+
+.service-location-form-grid textarea {
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.service-location-toolbar input:focus,
+.service-location-toolbar select:focus,
+.service-location-form-grid input:focus,
+.service-location-form-grid textarea:focus,
+.service-location-form-grid select:focus {
+  border-color: var(--kole-action);
+  box-shadow: 0 0 0 3px var(--kole-focus);
+  outline: none;
+}
+
+.service-location-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  padding: 10px 12px;
+  border: 1px solid var(--kole-border-subtle);
+  border-radius: 10px;
+  background: var(--kole-surface-2);
+  color: var(--kole-muted);
+  font-size: 13px;
+}
+
+.service-location-summary-row strong {
+  color: var(--kole-text-soft);
+}
+
+.service-location-workspace {
+  min-width: 0;
+}
+
+.service-location-results-pane {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--kole-border-subtle);
+  border-radius: 12px;
+  background: var(--kole-shell);
+  box-shadow: var(--kole-results-shadow);
+}
+
+.service-location-table-wrap {
+  width: 100%;
+  max-height: 640px;
+  overflow: auto;
+  border-radius: 12px;
+}
+
+.service-location-table {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+
+.service-location-table th:nth-child(1) { width: 27%; }
+.service-location-table th:nth-child(2) { width: 22%; }
+.service-location-table th:nth-child(3) { width: 20%; }
+.service-location-table th:nth-child(4) { width: 23%; }
+.service-location-table th:nth-child(5) { width: 8%; }
+
+.service-location-table th {
+  position: sticky;
+  top: 0;
+  z-index: var(--kole-z-sticky);
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--kole-border-strong);
+  background: var(--kole-table-head);
+  color: var(--kole-text-soft);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.service-location-table td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--kole-border-subtle);
+  background: var(--kole-table-row);
+  color: var(--kole-text-soft);
+  vertical-align: top;
+  cursor: pointer;
+}
+
+.service-location-table tbody tr:nth-child(even) td {
+  background: var(--kole-table-row-alt);
+}
+
+.service-location-table tbody tr:hover td,
+.service-location-table tbody tr:focus td {
+  background: var(--kole-table-row-hover);
+}
+
+.service-location-table tbody tr:focus {
+  outline: none;
+}
+
+.service-location-table tbody tr:focus td:first-child {
+  box-shadow: inset 4px 0 0 var(--kole-action);
+}
+
+.service-location-table td strong,
+.service-location-table td span {
+  display: block;
+}
+
+.service-location-table td strong {
+  line-height: 1.3;
+}
+
+.service-location-table td span:not(.service-location-status-pill) {
+  margin-top: 3px;
+  color: var(--kole-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.service-location-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 66px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.service-location-status-pill.active {
+  background: var(--kole-success-bg);
+  color: var(--kole-success);
+}
+
+.service-location-status-pill.inactive {
+  background: var(--kole-danger-bg);
+  color: var(--kole-danger);
+}
+
+.service-location-modal-overlay {
+  z-index: var(--kole-z-modal-detail);
+}
+
+.service-location-modal {
+  width: min(1080px, 94vw);
+  max-height: 92vh;
+}
+
+.service-location-modal-header {
+  align-items: flex-start;
+}
+
+.service-location-modal-header h2 {
+  margin: 3px 0 4px;
+  color: var(--kole-gold-bright);
+  font-size: 24px;
+  line-height: 1.25;
+}
+
+.service-location-modal-header p {
+  margin: 0;
+  color: var(--kole-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.service-location-modal-body {
+  display: grid;
+  gap: 14px;
+  overflow-y: auto;
+}
+
+.service-location-eyebrow {
+  display: block;
+  color: var(--kole-gold-bright);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.service-location-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.service-location-detail-grid > div,
+.service-location-readonly-strip > div {
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--kole-border-subtle);
+  border-radius: 9px;
+  background: var(--kole-surface);
+}
+
+.service-location-detail-grid span,
+.service-location-readonly-strip span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--kole-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.service-location-detail-grid strong,
+.service-location-readonly-strip strong {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--kole-text-soft);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.service-location-detail-wide,
+.service-location-form-wide {
+  grid-column: 1 / -1;
+}
+
+.service-location-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.service-location-action-message {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--kole-success) 38%, transparent);
+  border-radius: 9px;
+  background: var(--kole-success-bg);
+  color: var(--kole-success);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.service-location-action-error {
+  margin-top: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--kole-danger) 38%, transparent);
+  border-radius: 9px;
+  background: var(--kole-danger-bg);
+}
+
+.service-location-edit-form {
+  display: grid;
+  gap: 14px;
+}
+
+.service-location-readonly-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.service-location-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.service-location-active-toggle {
+  grid-column: 1 / -1;
+  display: flex !important;
+  align-items: center;
+  gap: 9px !important;
+  padding: 10px 12px;
+  border: 1px solid var(--kole-border-subtle);
+  border-radius: 9px;
+  background: var(--kole-surface);
+}
+
+.service-location-active-toggle input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.service-location-active-toggle span {
+  color: var(--kole-text-soft) !important;
+  font-size: 13px !important;
+  text-transform: none;
+}
+
+@media (max-width: 900px) {
+  .service-location-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .service-location-toolbar,
+  .service-location-form-grid,
+  .service-location-detail-grid,
+  .service-location-readonly-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .service-location-form-wide,
+  .service-location-detail-wide {
+    grid-column: auto;
+  }
+
+  .service-locations-header,
+  .service-location-modal-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .service-location-table th:nth-child(3),
+  .service-location-table td:nth-child(3),
+  .service-location-table th:nth-child(4),
+  .service-location-table td:nth-child(4) {
+    display: none;
+  }
+}
+

@@ -68,6 +68,69 @@ const ORDER_EDIT_FIELD_KEYS = [
   'Contract'
 ];
 
+
+function createServiceLocationDraft(location = {}) {
+  return {
+    Title: String(location.Title || ''),
+    Address1: String(location.Address1 || ''),
+    Address2: String(location.Address2 || ''),
+    City: String(location.City || ''),
+    State: String(location.State || '').toUpperCase(),
+    PostalCode: String(location.PostalCode || ''),
+    ContactName: String(location.ContactName || ''),
+    Phone: String(location.Phone || ''),
+    OperatingDays: String(location.OperatingDays || ''),
+    OperatingHours: String(location.OperatingHours || ''),
+    ServiceNotesKeyword: String(location.ServiceNotesKeyword || ''),
+    SearchAliases: String(location.SearchAliases || ''),
+    ParentComplex: String(location.ParentComplex || ''),
+    Active: location.Active !== false
+  };
+}
+
+function normalizeServiceLocationSearch(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getServiceLocationSearchBlob(location = {}) {
+  return normalizeServiceLocationSearch([
+    location.Title,
+    location.LocationID,
+    location.Address1,
+    location.Address2,
+    location.City,
+    location.State,
+    location.PostalCode,
+    location.ContactName,
+    location.Phone,
+    location.OperatingDays,
+    location.OperatingHours,
+    location.ServiceNotesKeyword,
+    location.SearchAliases,
+    location.ParentComplex,
+    location.NormalizedAddress
+  ].filter(Boolean).join(' '));
+}
+
+function sortServiceLocationRecords(a, b) {
+  const titleDiff = String(a?.Title || '').localeCompare(String(b?.Title || ''), undefined, { sensitivity: 'base', numeric: true });
+  if (titleDiff !== 0) return titleDiff;
+  const cityDiff = String(a?.City || '').localeCompare(String(b?.City || ''), undefined, { sensitivity: 'base', numeric: true });
+  if (cityDiff !== 0) return cityDiff;
+  return String(a?.State || '').localeCompare(String(b?.State || ''), undefined, { sensitivity: 'base' });
+}
+
+function getServiceLocationAddress(location = {}) {
+  const street = [location.Address1, location.Address2].filter(Boolean).join(', ');
+  const cityState = [location.City, location.State].filter(Boolean).join(', ');
+  return [street, cityState, location.PostalCode].filter(Boolean).join(' ');
+}
+
 function createQuoteEngineDraft() {
   return {
     company: '',
@@ -1558,6 +1621,18 @@ export default function App() {
   const [noAvailabilityPdfLoading, setNoAvailabilityPdfLoading] = useState(false);
   const [noAvailabilityPdfError, setNoAvailabilityPdfError] = useState('');
   const [noAvailabilityModalOpen, setNoAvailabilityModalOpen] = useState(false);
+  const [serviceLocationsReport, setServiceLocationsReport] = useState(null);
+  const [serviceLocationsLoading, setServiceLocationsLoading] = useState(false);
+  const [serviceLocationsError, setServiceLocationsError] = useState('');
+  const [serviceLocationSearch, setServiceLocationSearch] = useState('');
+  const [serviceLocationStateFilter, setServiceLocationStateFilter] = useState('all');
+  const [serviceLocationActiveFilter, setServiceLocationActiveFilter] = useState('active');
+  const [selectedServiceLocation, setSelectedServiceLocation] = useState(null);
+  const [serviceLocationEditing, setServiceLocationEditing] = useState(false);
+  const [serviceLocationDraft, setServiceLocationDraft] = useState(() => createServiceLocationDraft());
+  const [serviceLocationSaving, setServiceLocationSaving] = useState(false);
+  const [serviceLocationActionMessage, setServiceLocationActionMessage] = useState('');
+  const [serviceLocationActionError, setServiceLocationActionError] = useState('');
   const [driverTimeOffYear, setDriverTimeOffYear] = useState(() => new Date().getFullYear());
   const [driverTimeOffReport, setDriverTimeOffReport] = useState(null);
   const [driverTimeOffLoading, setDriverTimeOffLoading] = useState(false);
@@ -3357,6 +3432,18 @@ export default function App() {
     setNoAvailabilityReport(null);
     setNoAvailabilityLoading(false);
     setNoAvailabilityError(null);
+    setServiceLocationsReport(null);
+    setServiceLocationsLoading(false);
+    setServiceLocationsError('');
+    setServiceLocationSearch('');
+    setServiceLocationStateFilter('all');
+    setServiceLocationActiveFilter('active');
+    setSelectedServiceLocation(null);
+    setServiceLocationEditing(false);
+    setServiceLocationDraft(createServiceLocationDraft());
+    setServiceLocationSaving(false);
+    setServiceLocationActionMessage('');
+    setServiceLocationActionError('');
     setDriverTimeOffLoading(false);
     setSalesLeadsReport(null);
     setSalesLeadsLoading(false);
@@ -6400,6 +6487,138 @@ function getPositionStatusLabel(position) {
     setInactiveDriverRosterModalOpen(false);
   }
 
+
+  async function loadServiceLocations(forceRefresh = false) {
+    setServiceLocationsLoading(true);
+    setServiceLocationsError('');
+    setServiceLocationActionError('');
+    if (forceRefresh) setServiceLocationActionMessage('');
+
+    try {
+      const params = new URLSearchParams();
+      if (forceRefresh) params.set('refresh', 'true');
+      const queryString = params.toString();
+      const res = await authedFetch(`${API}/reports/service-locations${queryString ? `?${queryString}` : ''}`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to load Service Locations.');
+      }
+
+      setServiceLocationsReport(data);
+      setSelectedServiceLocation((current) => {
+        if (!current?.id) return null;
+        return (data.records || []).find((record) => record.id === current.id) || null;
+      });
+    } catch (err) {
+      setServiceLocationsError(err.message || 'Unable to load Service Locations.');
+    } finally {
+      setServiceLocationsLoading(false);
+    }
+  }
+
+  function selectServiceLocation(location) {
+    setSelectedServiceLocation(location);
+    setServiceLocationDraft(createServiceLocationDraft(location));
+    setServiceLocationEditing(false);
+    setServiceLocationActionMessage('');
+    setServiceLocationActionError('');
+  }
+
+  function closeServiceLocationDetail() {
+    setSelectedServiceLocation(null);
+    setServiceLocationEditing(false);
+    setServiceLocationDraft(createServiceLocationDraft());
+    setServiceLocationActionMessage('');
+    setServiceLocationActionError('');
+  }
+
+  function startServiceLocationEdit() {
+    if (!selectedServiceLocation) return;
+    setServiceLocationDraft(createServiceLocationDraft(selectedServiceLocation));
+    setServiceLocationEditing(true);
+    setServiceLocationActionMessage('');
+    setServiceLocationActionError('');
+  }
+
+  function cancelServiceLocationEdit() {
+    setServiceLocationDraft(createServiceLocationDraft(selectedServiceLocation || {}));
+    setServiceLocationEditing(false);
+    setServiceLocationActionError('');
+  }
+
+  function updateServiceLocationDraft(field, value) {
+    setServiceLocationDraft((current) => ({
+      ...current,
+      [field]: field === 'State' ? String(value || '').toUpperCase().slice(0, 2) : value
+    }));
+  }
+
+  async function saveServiceLocation() {
+    if (!selectedServiceLocation?.id || serviceLocationSaving) return;
+
+    const title = String(serviceLocationDraft.Title || '').trim();
+    if (!title) {
+      setServiceLocationActionError('Location name is required.');
+      return;
+    }
+
+    setServiceLocationSaving(true);
+    setServiceLocationActionError('');
+    setServiceLocationActionMessage('');
+
+    try {
+      const res = await authedFetch(`${API}/service-locations/${encodeURIComponent(selectedServiceLocation.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(serviceLocationDraft)
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success || !data.record) {
+        throw new Error(data.error || data.message || 'Unable to update Service Location.');
+      }
+
+      const updatedRecord = data.record;
+      setServiceLocationsReport((current) => {
+        if (!current) return current;
+        const records = (current.records || [])
+          .map((record) => (record.id === updatedRecord.id ? updatedRecord : record))
+          .sort(sortServiceLocationRecords);
+        const states = [...new Set(records.map((record) => record.State).filter(Boolean))]
+          .sort((a, b) => a.localeCompare(b));
+
+        return {
+          ...current,
+          records,
+          states,
+          count: records.length,
+          activeCount: records.filter((record) => record.Active).length,
+          inactiveCount: records.filter((record) => !record.Active).length
+        };
+      });
+      setSelectedServiceLocation(updatedRecord);
+      setServiceLocationDraft(createServiceLocationDraft(updatedRecord));
+      setServiceLocationEditing(false);
+      setServiceLocationActionMessage(data.message || `${updatedRecord.Title || 'Service location'} updated and verified.`);
+    } catch (err) {
+      setServiceLocationActionError(err.message || 'Unable to update Service Location.');
+    } finally {
+      setServiceLocationSaving(false);
+    }
+  }
+
+  async function openServiceLocationMap(location = selectedServiceLocation) {
+    const address = getServiceLocationAddress(location || {});
+    if (!address) {
+      setServiceLocationActionError('This location does not have an address to open.');
+      return;
+    }
+
+    setServiceLocationActionError('');
+    await openExternalLink(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`);
+  }
+
   async function loadNoAvailabilityReport() {
     setNoAvailabilityLoading(true);
     setNoAvailabilityError(null);
@@ -7105,7 +7324,7 @@ function getPositionStatusLabel(position) {
 
   const reportPanelsByGroup = {
     financial: ['grossRevenue', 'yearlyProjection', 'driverSummary', 'weeklySettlement'],
-    operational: ['monthlyOperations', 'ordersDueSettlement', 'wonNotRegistered', 'permitGovernance', 'onThisDay', 'operationalNotes', 'noAvailability'],
+    operational: ['monthlyOperations', 'serviceLocations', 'ordersDueSettlement', 'wonNotRegistered', 'permitGovernance', 'onThisDay', 'operationalNotes', 'noAvailability'],
     driverFleet: ['activeDriverRoster', 'inactiveDriverRoster', 'fleetEquipment', 'driverTimeOff'],
     sales: ['customerBookingTrends', 'salesActivity', 'leadSuppression', 'salesLeads']
   };
@@ -8048,6 +8267,10 @@ function getPositionStatusLabel(position) {
 
     if (isOpeningPanel && panelName === 'salesLeads') {
       primeSalesLeadsFollowUpDueView();
+    }
+
+    if (isOpeningPanel && panelName === 'serviceLocations' && !serviceLocationsReport && !serviceLocationsLoading) {
+      loadServiceLocations();
     }
 
     setActiveReportPanel((current) => (current === panelName ? '' : panelName));
@@ -18085,12 +18308,342 @@ function openReportLoadDetails(load) {
     );
   }
 
+
+  function renderServiceLocationsPanel() {
+    const allRecords = serviceLocationsReport?.records || [];
+    const searchTerms = normalizeServiceLocationSearch(serviceLocationSearch).split(' ').filter(Boolean);
+    const filteredRecords = allRecords.filter((record) => {
+      if (serviceLocationStateFilter !== 'all' && record.State !== serviceLocationStateFilter) return false;
+      if (serviceLocationActiveFilter === 'active' && !record.Active) return false;
+      if (serviceLocationActiveFilter === 'inactive' && record.Active) return false;
+      if (searchTerms.length === 0) return true;
+
+      const blob = getServiceLocationSearchBlob(record);
+      return searchTerms.every((term) => blob.includes(term));
+    });
+    const states = serviceLocationsReport?.states || [];
+    const selectedAddress = getServiceLocationAddress(selectedServiceLocation || {});
+
+    const detailValue = (value) => String(value || '').trim() || '—';
+
+    return (
+      <>
+        <div className="report-card compact-report-card accordion-inner-card service-locations-card">
+          <div className="report-card-header centered-report-header service-locations-header">
+            <div>
+              <h3>Service Locations</h3>
+              <p>Look up operational service points and update the SharePoint record without leaving Kole Connect.</p>
+            </div>
+            <button
+              type="button"
+              className="secondary-action-button compact"
+              onClick={() => loadServiceLocations(true)}
+              disabled={serviceLocationsLoading || serviceLocationSaving}
+            >
+              {serviceLocationsLoading ? 'Refreshing...' : 'Refresh List'}
+            </button>
+          </div>
+
+          {!serviceLocationsReport && !serviceLocationsLoading && !serviceLocationsError && (
+            <div className="service-locations-empty-state">
+              <button type="button" onClick={() => loadServiceLocations(false)}>Load Service Locations</button>
+            </div>
+          )}
+
+          {serviceLocationsLoading && !serviceLocationsReport && (
+            <div className="msg">Loading Service Locations...</div>
+          )}
+
+          {serviceLocationsError && (
+            <div className="report-alert error">
+              <h4>Service Locations could not be loaded.</h4>
+              <p>{serviceLocationsError}</p>
+            </div>
+          )}
+
+          {serviceLocationsReport && (
+            <>
+              <div className="service-location-toolbar">
+                <label className="service-location-search-field">
+                  <span>Search Locations</span>
+                  <input
+                    type="text"
+                    value={serviceLocationSearch}
+                    onChange={(event) => setServiceLocationSearch(event.target.value)}
+                    placeholder="Name, address, city, contact, phone, alias, keyword..."
+                    autoComplete="off"
+                    spellCheck="false"
+                  />
+                </label>
+
+                <label>
+                  <span>State</span>
+                  <select
+                    value={serviceLocationStateFilter}
+                    onChange={(event) => setServiceLocationStateFilter(event.target.value)}
+                  >
+                    <option value="all">All States</option>
+                    {states.map((state) => <option key={state} value={state}>{state}</option>)}
+                  </select>
+                </label>
+
+                <label>
+                  <span>Status</span>
+                  <select
+                    value={serviceLocationActiveFilter}
+                    onChange={(event) => setServiceLocationActiveFilter(event.target.value)}
+                  >
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                    <option value="all">All</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="service-location-summary-row">
+                <span><strong>{formatReportNumber(filteredRecords.length)}</strong> shown</span>
+                <span>{formatReportNumber(serviceLocationsReport.activeCount || 0)} active</span>
+                <span>{formatReportNumber(serviceLocationsReport.inactiveCount || 0)} inactive</span>
+                <span>{formatReportNumber(serviceLocationsReport.count || allRecords.length)} total</span>
+              </div>
+
+              {serviceLocationsReport.warning && (
+                <div className="report-alert warning">
+                  <p>{serviceLocationsReport.warning}</p>
+                </div>
+              )}
+
+              <div className="service-location-workspace">
+                <div className="service-location-results-pane">
+                  <div className="service-location-table-wrap">
+                    <table className="service-location-table">
+                      <thead>
+                        <tr>
+                          <th>Location</th>
+                          <th>City / State</th>
+                          <th>Contact</th>
+                          <th>Hours</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredRecords.map((record) => (
+                          <tr
+                            key={record.id || record.LocationID}
+                            onClick={() => selectServiceLocation(record)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                selectServiceLocation(record);
+                              }
+                            }}
+                            tabIndex={0}
+                            role="button"
+                            aria-label={`View ${record.Title || record.LocationID || 'service location'}`}
+                          >
+                            <td>
+                              <strong>{record.Title || 'Unnamed Location'}</strong>
+                              <span>{record.LocationID || 'No Location ID'}</span>
+                            </td>
+                            <td>
+                              <strong>{[record.City, record.State].filter(Boolean).join(', ') || '—'}</strong>
+                              <span>{record.Address1 || record.PostalCode || '—'}</span>
+                            </td>
+                            <td>
+                              <strong>{record.ContactName || '—'}</strong>
+                              <span>{record.Phone || '—'}</span>
+                            </td>
+                            <td>
+                              <strong>{record.OperatingDays || '—'}</strong>
+                              <span>{record.OperatingHours || '—'}</span>
+                            </td>
+                            <td>
+                              <span className={`service-location-status-pill ${record.Active ? 'active' : 'inactive'}`}>
+                                {record.Active ? 'Active' : 'Inactive'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {filteredRecords.length === 0 && (
+                    <div className="service-locations-empty-state">No locations match the current search and filters.</div>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        {selectedServiceLocation && (
+          <div
+            className="modal-overlay report-modal-overlay service-location-modal-overlay"
+            role="presentation"
+            onClick={() => {
+              if (!serviceLocationSaving) closeServiceLocationDetail();
+            }}
+          >
+            <div
+              className="detail-modal report-modal service-location-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="service-location-modal-title"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="detail-header report-modal-header service-location-modal-header">
+                <div>
+                  <span className="service-location-eyebrow">{selectedServiceLocation.LocationID || 'Service Location'}</span>
+                  <h2 id="service-location-modal-title">{selectedServiceLocation.Title || 'Unnamed Location'}</h2>
+                  <p>{selectedAddress || 'No address listed'}</p>
+                </div>
+                <button
+                  type="button"
+                  className="close-button compact"
+                  onClick={closeServiceLocationDetail}
+                  disabled={serviceLocationSaving}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="modal-body report-modal-body service-location-modal-body">
+                {serviceLocationActionMessage && (
+                  <div className="service-location-action-message">{serviceLocationActionMessage}</div>
+                )}
+                {serviceLocationActionError && (
+                  <div className="msg error service-location-action-error">{serviceLocationActionError}</div>
+                )}
+
+                {!serviceLocationEditing ? (
+                  <>
+                    <div className="service-location-detail-grid">
+                      <div><span>Address 1</span><strong>{detailValue(selectedServiceLocation.Address1)}</strong></div>
+                      <div><span>Address 2</span><strong>{detailValue(selectedServiceLocation.Address2)}</strong></div>
+                      <div><span>City</span><strong>{detailValue(selectedServiceLocation.City)}</strong></div>
+                      <div><span>State / ZIP</span><strong>{detailValue([selectedServiceLocation.State, selectedServiceLocation.PostalCode].filter(Boolean).join(' '))}</strong></div>
+                      <div><span>Contact</span><strong>{detailValue(selectedServiceLocation.ContactName)}</strong></div>
+                      <div><span>Phone</span><strong>{detailValue(selectedServiceLocation.Phone)}</strong></div>
+                      <div><span>Operating Days</span><strong>{detailValue(selectedServiceLocation.OperatingDays)}</strong></div>
+                      <div><span>Operating Hours</span><strong>{detailValue(selectedServiceLocation.OperatingHours)}</strong></div>
+                      <div><span>Status</span><strong>{selectedServiceLocation.Active ? 'Active' : 'Inactive'}</strong></div>
+                      <div><span>Service Notes Keyword</span><strong>{detailValue(selectedServiceLocation.ServiceNotesKeyword)}</strong></div>
+                      <div><span>Search Aliases</span><strong>{detailValue(selectedServiceLocation.SearchAliases)}</strong></div>
+                      <div><span>Parent Complex</span><strong>{detailValue(selectedServiceLocation.ParentComplex)}</strong></div>
+                      <div><span>Last Verified</span><strong>{selectedServiceLocation.LastVerified ? formatDateOnly(selectedServiceLocation.LastVerified) : 'Not yet verified'}</strong></div>
+                      <div className="service-location-detail-wide"><span>Normalized Address</span><strong>{detailValue(selectedServiceLocation.NormalizedAddress)}</strong></div>
+                    </div>
+
+                    <div className="service-location-detail-actions">
+                      <button type="button" onClick={startServiceLocationEdit}>Edit Location</button>
+                      <button
+                        type="button"
+                        className="secondary-action-button"
+                        onClick={() => openServiceLocationMap(selectedServiceLocation)}
+                        disabled={!selectedAddress}
+                      >
+                        Open in Maps
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="service-location-edit-form">
+                    <div className="service-location-readonly-strip">
+                      <div><span>Location ID</span><strong>{selectedServiceLocation.LocationID || '—'}</strong></div>
+                      <div><span>Normalized Address</span><strong>{selectedServiceLocation.NormalizedAddress || '—'}</strong></div>
+                      <div><span>Last Verified</span><strong>Updates automatically when saved</strong></div>
+                    </div>
+
+                    <div className="service-location-form-grid">
+                      <label className="service-location-form-wide">
+                        <span>Location Name</span>
+                        <input value={serviceLocationDraft.Title} onChange={(event) => updateServiceLocationDraft('Title', event.target.value)} disabled={serviceLocationSaving} />
+                      </label>
+                      <label className="service-location-form-wide">
+                        <span>Address 1</span>
+                        <input value={serviceLocationDraft.Address1} onChange={(event) => updateServiceLocationDraft('Address1', event.target.value)} disabled={serviceLocationSaving} />
+                      </label>
+                      <label className="service-location-form-wide">
+                        <span>Address 2</span>
+                        <input value={serviceLocationDraft.Address2} onChange={(event) => updateServiceLocationDraft('Address2', event.target.value)} disabled={serviceLocationSaving} />
+                      </label>
+                      <label>
+                        <span>City</span>
+                        <input value={serviceLocationDraft.City} onChange={(event) => updateServiceLocationDraft('City', event.target.value)} disabled={serviceLocationSaving} />
+                      </label>
+                      <label>
+                        <span>State</span>
+                        <input value={serviceLocationDraft.State} onChange={(event) => updateServiceLocationDraft('State', event.target.value)} maxLength={2} disabled={serviceLocationSaving} />
+                      </label>
+                      <label>
+                        <span>Postal Code</span>
+                        <input value={serviceLocationDraft.PostalCode} onChange={(event) => updateServiceLocationDraft('PostalCode', event.target.value)} disabled={serviceLocationSaving} />
+                      </label>
+                      <label>
+                        <span>Contact Name</span>
+                        <input value={serviceLocationDraft.ContactName} onChange={(event) => updateServiceLocationDraft('ContactName', event.target.value)} disabled={serviceLocationSaving} />
+                      </label>
+                      <label>
+                        <span>Phone</span>
+                        <input value={serviceLocationDraft.Phone} onChange={(event) => updateServiceLocationDraft('Phone', event.target.value)} disabled={serviceLocationSaving} />
+                      </label>
+                      <label>
+                        <span>Operating Days</span>
+                        <input value={serviceLocationDraft.OperatingDays} onChange={(event) => updateServiceLocationDraft('OperatingDays', event.target.value)} disabled={serviceLocationSaving} />
+                      </label>
+                      <label className="service-location-form-wide">
+                        <span>Operating Hours</span>
+                        <textarea value={serviceLocationDraft.OperatingHours} onChange={(event) => updateServiceLocationDraft('OperatingHours', event.target.value)} rows={3} disabled={serviceLocationSaving} />
+                      </label>
+                      <label className="service-location-form-wide">
+                        <span>Service Notes Keyword</span>
+                        <input value={serviceLocationDraft.ServiceNotesKeyword} onChange={(event) => updateServiceLocationDraft('ServiceNotesKeyword', event.target.value)} disabled={serviceLocationSaving} />
+                      </label>
+                      <label className="service-location-form-wide">
+                        <span>Search Aliases</span>
+                        <textarea value={serviceLocationDraft.SearchAliases} onChange={(event) => updateServiceLocationDraft('SearchAliases', event.target.value)} rows={3} disabled={serviceLocationSaving} />
+                      </label>
+                      <label className="service-location-form-wide">
+                        <span>Parent Complex</span>
+                        <input value={serviceLocationDraft.ParentComplex} onChange={(event) => updateServiceLocationDraft('ParentComplex', event.target.value)} disabled={serviceLocationSaving} />
+                      </label>
+                      <label className="service-location-active-toggle">
+                        <input
+                          type="checkbox"
+                          checked={serviceLocationDraft.Active}
+                          onChange={(event) => updateServiceLocationDraft('Active', event.target.checked)}
+                          disabled={serviceLocationSaving}
+                        />
+                        <span>Active location</span>
+                      </label>
+                    </div>
+
+                    <div className="service-location-detail-actions">
+                      <button type="button" onClick={saveServiceLocation} disabled={serviceLocationSaving}>
+                        {serviceLocationSaving ? 'Saving...' : 'Save Location'}
+                      </button>
+                      <button type="button" className="secondary-action-button" onClick={cancelServiceLocationEdit} disabled={serviceLocationSaving}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
+
   function DriverSummaryReport() {
     const monthOptions = Array.from({ length: 12 }, (_, index) => index + 1);
     const isGrossRevenueOpen = activeReportPanel === 'grossRevenue';
     const isYearlyProjectionOpen = activeReportPanel === 'yearlyProjection';
     const isDriverSummaryOpen = activeReportPanel === 'driverSummary';
     const isMonthlyOperationsOpen = activeReportPanel === 'monthlyOperations';
+    const isServiceLocationsOpen = activeReportPanel === 'serviceLocations';
     const isOrdersDueSettlementOpen = activeReportPanel === 'ordersDueSettlement';
     const isWeeklySettlementOpen = activeReportPanel === 'weeklySettlement';
     const isWonNotRegisteredOpen = activeReportPanel === 'wonNotRegistered';
@@ -18578,6 +19131,24 @@ function openReportLoadDetails(load) {
             {isMonthlyOperationsOpen && (
               <div className="report-accordion-body">
                 <MonthlyOperationsSummaryPanel />
+              </div>
+            )}
+          </div>
+
+
+          <div className={`report-accordion ${isServiceLocationsOpen ? 'open' : ''}`}>
+            <button
+              type="button"
+              className="report-accordion-button"
+              onClick={(e) => handleReportPanelClick(e, 'serviceLocations')}
+            >
+              <span>Service Locations</span>
+              <span className="report-accordion-icon">{isServiceLocationsOpen ? '▼' : '▶'}</span>
+            </button>
+
+            {isServiceLocationsOpen && (
+              <div className="report-accordion-body">
+                {renderServiceLocationsPanel()}
               </div>
             )}
           </div>
@@ -20511,7 +21082,7 @@ function openReportLoadDetails(load) {
 
   {!userPrefs.hideSalesAndLeads && <SalesAndLeadsPanel />}
 
-  <DriverSummaryReport />
+  {DriverSummaryReport()}
   </>
 )}
       </div>
