@@ -15,6 +15,7 @@ const DEFAULT_UPLOAD_DIGEST_LIST_ID = 'c9e907f9-cdac-4657-9da6-cc6ecfaa19a8';
 const DEFAULT_KOLE_AUTO_UPDATER_LIST_ID = 'fd5b0d2f-b0e7-4445-a36d-af753825a3ea';
 const DEFAULT_SALES_LEADS_LIST_ID = '86cc3352-fb75-421d-a5e4-4b16d011fd1e';
 const DEFAULT_SALES_LEADS_NOTES_LIST_NAME = 'Sales Leads Notes Log';
+const DEFAULT_SERVICE_LOCATIONS_LIST_NAME = 'Service Locations';
 const ORDER_NOTES_DEFAULT_CACHE_MS = 60 * 1000;
 const ORDER_NOTE_MAX_LENGTH = 20000;
 const DEFAULT_CUSTOMER_BOOKING_TRENDS_LIST_ID = 'f899ef92-6489-43b1-9a9f-19c5f0ee83b9';
@@ -61,6 +62,10 @@ let cachedSalesLeadsNotesListId = null;
 let cachedSalesLeadsNotesListIdAt = 0;
 let cachedSalesLeadsBaseReport = null;
 let cachedSalesLeadsBaseReportAt = 0;
+let cachedServiceLocationsListId = null;
+let cachedServiceLocationsListIdAt = 0;
+let cachedServiceLocationsReport = null;
+let cachedServiceLocationsReportAt = 0;
 let cachedGraphToken = null;
 let cachedGraphTokenExpiresAt = 0;
 let graphTokenRefreshPromise = null;
@@ -85,6 +90,7 @@ const OPERATIONS_TODAY_CACHE_MS = Number(process.env.OPERATIONS_TODAY_CACHE_MS |
 const ON_THIS_DAY_SOURCE_CACHE_MS = Number(process.env.ON_THIS_DAY_SOURCE_CACHE_MS || 5 * 60 * 1000);
 const ON_THIS_DAY_REPORT_CACHE_MS = Number(process.env.ON_THIS_DAY_REPORT_CACHE_MS || 5 * 60 * 1000);
 const SALES_LEADS_REPORT_CACHE_MS = Number(process.env.SALES_LEADS_REPORT_CACHE_MS || BID_LIST_CACHE_MS);
+const SERVICE_LOCATIONS_CACHE_MS = Number(process.env.SERVICE_LOCATIONS_CACHE_MS || 60 * 1000);
 const DASHBOARD_BID_SOURCE_CACHE_MS = Math.max(1000, Number(process.env.DASHBOARD_BID_SOURCE_CACHE_MS) || 60 * 1000);
 const DASHBOARD_BID_SOURCE_MAX_STALE_MS = Math.max(
   DASHBOARD_BID_SOURCE_CACHE_MS,
@@ -18427,6 +18433,234 @@ app.get('/dashboard/bootstrap', requireLookupAccess, async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Unable to load dashboard bootstrap.'
+    });
+  }
+});
+
+
+function getServiceLocationField(fields, aliases) {
+  return getFlexibleField(fields || {}, aliases);
+}
+
+function normalizeServiceLocationDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : raw;
+}
+
+function cleanServiceLocationItem(item) {
+  const fields = item?.fields || {};
+  const activeValue = getServiceLocationField(fields, ['Active']);
+
+  return {
+    id: String(item?.id || ''),
+    Title: String(getServiceLocationField(fields, ['Title', 'Location Name', 'Name']) || '').trim(),
+    LocationID: String(getServiceLocationField(fields, ['LocationID', 'Location ID']) || '').trim(),
+    Address1: String(getServiceLocationField(fields, ['Address1', 'Address 1']) || '').trim(),
+    Address2: String(getServiceLocationField(fields, ['Address2', 'Address 2']) || '').trim(),
+    City: String(getServiceLocationField(fields, ['City']) || '').trim(),
+    State: String(getServiceLocationField(fields, ['State']) || '').trim().toUpperCase(),
+    PostalCode: String(getServiceLocationField(fields, ['PostalCode', 'Postal Code', 'ZIP', 'Zip']) || '').trim(),
+    ContactName: String(getServiceLocationField(fields, ['ContactName', 'Contact Name']) || '').trim(),
+    Phone: String(getServiceLocationField(fields, ['Phone', 'Phone Number']) || '').trim(),
+    OperatingDays: String(getServiceLocationField(fields, ['OperatingDays', 'Operating Days']) || '').trim(),
+    OperatingHours: String(getServiceLocationField(fields, ['OperatingHours', 'Operating Hours']) || '').trim(),
+    ServiceNotesKeyword: String(getServiceLocationField(fields, ['ServiceNotesKeyword', 'Service Notes Keyword']) || '').trim(),
+    SearchAliases: String(getServiceLocationField(fields, ['SearchAliases', 'Search Aliases']) || '').trim(),
+    ParentComplex: String(getServiceLocationField(fields, ['ParentComplex', 'Parent Complex']) || '').trim(),
+    Active: activeValue === '' ? true : parseBoolean(activeValue),
+    LastVerified: normalizeServiceLocationDate(getServiceLocationField(fields, ['LastVerified', 'Last Verified'])),
+    NormalizedAddress: String(getServiceLocationField(fields, ['NormalizedAddress', 'Normalized Address']) || '').trim(),
+    modifiedAt: String(item?.lastModifiedDateTime || '').trim()
+  };
+}
+
+function sortServiceLocations(a, b) {
+  const titleDiff = String(a.Title || '').localeCompare(String(b.Title || ''), undefined, { sensitivity: 'base', numeric: true });
+  if (titleDiff !== 0) return titleDiff;
+  const cityDiff = String(a.City || '').localeCompare(String(b.City || ''), undefined, { sensitivity: 'base', numeric: true });
+  if (cityDiff !== 0) return cityDiff;
+  return String(a.State || '').localeCompare(String(b.State || ''), undefined, { sensitivity: 'base' });
+}
+
+async function getServiceLocationsListId(token, forceRefresh = false) {
+  const configured = String(process.env.SERVICE_LOCATIONS_LIST_ID || '').trim();
+  if (configured) return configured;
+
+  const now = Date.now();
+  if (!forceRefresh && cachedServiceLocationsListId && now - cachedServiceLocationsListIdAt < BID_LIST_CACHE_MS) {
+    return cachedServiceLocationsListId;
+  }
+
+  const data = await graphGet(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists?$select=id,displayName,list&$top=999`
+  );
+  const target = normalizeGraphName(DEFAULT_SERVICE_LOCATIONS_LIST_NAME);
+  const matched = (data.value || []).find((list) => (
+    list?.list?.hidden !== true && normalizeGraphName(list.displayName) === target
+  ));
+
+  cachedServiceLocationsListId = matched?.id || '';
+  cachedServiceLocationsListIdAt = now;
+  return cachedServiceLocationsListId;
+}
+
+function buildServiceLocationsResponse(items, listId) {
+  const records = items.map(cleanServiceLocationItem).sort(sortServiceLocations);
+  const states = [...new Set(records.map((record) => record.State).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+
+  return {
+    success: true,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    sourceListId: listId,
+    count: records.length,
+    activeCount: records.filter((record) => record.Active).length,
+    inactiveCount: records.filter((record) => !record.Active).length,
+    states,
+    records
+  };
+}
+
+async function getServiceLocationsReport(token, forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && cachedServiceLocationsReport && now - cachedServiceLocationsReportAt < SERVICE_LOCATIONS_CACHE_MS) {
+    return cachedServiceLocationsReport;
+  }
+
+  const listId = await getServiceLocationsListId(token, forceRefresh);
+  if (!listId) {
+    const error = new Error(`${DEFAULT_SERVICE_LOCATIONS_LIST_NAME} was not found. Set SERVICE_LOCATIONS_LIST_ID or confirm the list display name.`);
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const result = await getAllListItemsWithFieldsResilient(token, listId);
+  const report = {
+    ...buildServiceLocationsResponse(result.items, listId),
+    warning: result.warning || ''
+  };
+
+  cachedServiceLocationsReport = report;
+  cachedServiceLocationsReportAt = now;
+  return report;
+}
+
+function getServiceLocationText(body, key) {
+  return String(body?.[key] ?? '').trim();
+}
+
+function setServiceLocationField(fields, columnLookup, aliases, value, options = {}) {
+  const columnName = resolveListColumnName(columnLookup, aliases);
+  if (!columnName) {
+    if (options.required) {
+      const error = new Error(`${options.label || aliases[0]} field was not found on the Service Locations list.`);
+      error.statusCode = 500;
+      throw error;
+    }
+    return '';
+  }
+
+  fields[columnName] = options.boolean ? Boolean(value) : String(value ?? '').trim();
+  return columnName;
+}
+
+function buildServiceLocationPatch(body, columnLookup) {
+  const title = getServiceLocationText(body, 'Title');
+  if (!title) {
+    const error = new Error('Location name is required.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const state = getServiceLocationText(body, 'State').toUpperCase();
+  if (state && state.length > 2) {
+    const error = new Error('State must use the two-letter abbreviation.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const fields = {};
+  setServiceLocationField(fields, columnLookup, ['Title', 'Location Name', 'Name'], title, { required: true, label: 'Location name' });
+  setServiceLocationField(fields, columnLookup, ['Address1', 'Address 1'], getServiceLocationText(body, 'Address1'));
+  setServiceLocationField(fields, columnLookup, ['Address2', 'Address 2'], getServiceLocationText(body, 'Address2'));
+  setServiceLocationField(fields, columnLookup, ['City'], getServiceLocationText(body, 'City'));
+  setServiceLocationField(fields, columnLookup, ['State'], state);
+  setServiceLocationField(fields, columnLookup, ['PostalCode', 'Postal Code', 'ZIP', 'Zip'], getServiceLocationText(body, 'PostalCode'));
+  setServiceLocationField(fields, columnLookup, ['ContactName', 'Contact Name'], getServiceLocationText(body, 'ContactName'));
+  setServiceLocationField(fields, columnLookup, ['Phone', 'Phone Number'], getServiceLocationText(body, 'Phone'));
+  setServiceLocationField(fields, columnLookup, ['OperatingDays', 'Operating Days'], getServiceLocationText(body, 'OperatingDays'));
+  setServiceLocationField(fields, columnLookup, ['OperatingHours', 'Operating Hours'], getServiceLocationText(body, 'OperatingHours'));
+  setServiceLocationField(fields, columnLookup, ['ServiceNotesKeyword', 'Service Notes Keyword'], getServiceLocationText(body, 'ServiceNotesKeyword'));
+  setServiceLocationField(fields, columnLookup, ['SearchAliases', 'Search Aliases'], getServiceLocationText(body, 'SearchAliases'));
+  setServiceLocationField(fields, columnLookup, ['ParentComplex', 'Parent Complex'], getServiceLocationText(body, 'ParentComplex'));
+  setServiceLocationField(fields, columnLookup, ['Active'], body?.Active !== false, { boolean: true, required: true, label: 'Active' });
+  setServiceLocationField(fields, columnLookup, ['LastVerified', 'Last Verified'], formatEasternDate(), { required: true, label: 'Last Verified' });
+
+  return fields;
+}
+
+app.get('/reports/service-locations', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const forceRefresh = parseBoolean(req.query.refresh);
+    const report = await getServiceLocationsReport(token, forceRefresh);
+    res.json(report);
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to load Service Locations.'
+    });
+  }
+});
+
+app.patch('/service-locations/:id', requireLookupAccess, async (req, res) => {
+  try {
+    const itemId = String(req.params.id || '').trim();
+    if (!itemId) {
+      return res.status(400).json({ success: false, error: 'A Service Location item ID is required.' });
+    }
+
+    const token = await getGraphToken();
+    const listId = await getServiceLocationsListId(token);
+    if (!listId) {
+      return res.status(404).json({
+        success: false,
+        error: `${DEFAULT_SERVICE_LOCATIONS_LIST_NAME} was not found. Set SERVICE_LOCATIONS_LIST_ID or confirm the list display name.`
+      });
+    }
+
+    const columnLookup = await getListColumnLookup(token, listId);
+    const fields = buildServiceLocationPatch(req.body || {}, columnLookup);
+    await graphPatch(
+      token,
+      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/items/${encodeURIComponent(itemId)}/fields`,
+      fields
+    );
+
+    const updatedItem = await graphGet(
+      token,
+      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/items/${encodeURIComponent(itemId)}?$expand=fields`
+    );
+    const record = cleanServiceLocationItem(updatedItem);
+
+    cachedServiceLocationsReport = null;
+    cachedServiceLocationsReportAt = 0;
+
+    res.json({
+      success: true,
+      itemId,
+      message: `${record.Title || 'Service location'} updated and verified.`,
+      record
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 400).json({
+      success: false,
+      error: error.message || 'Unable to update Service Location.'
     });
   }
 });
