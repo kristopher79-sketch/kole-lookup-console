@@ -18617,6 +18617,56 @@ app.get('/reports/service-locations', requireLookupAccess, async (req, res) => {
   }
 });
 
+app.post('/service-locations', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const listId = await getServiceLocationsListId(token);
+    if (!listId) {
+      return res.status(404).json({
+        success: false,
+        error: `${DEFAULT_SERVICE_LOCATIONS_LIST_NAME} was not found. Set SERVICE_LOCATIONS_LIST_ID or confirm the list display name.`
+      });
+    }
+
+    const columnLookup = await getListColumnLookup(token, listId);
+    const fields = buildServiceLocationPatch(req.body || {}, columnLookup);
+    const createdItem = await graphPost(
+      token,
+      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/items`,
+      { fields }
+    );
+
+    const itemId = String(createdItem?.id || '').trim();
+    if (!itemId) {
+      const error = new Error('SharePoint created the Service Location but did not return an item ID.');
+      error.statusCode = 502;
+      throw error;
+    }
+
+    const verifiedItem = await graphGet(
+      token,
+      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/items/${encodeURIComponent(itemId)}?$expand=fields`
+    );
+    const record = cleanServiceLocationItem(verifiedItem);
+
+    cachedServiceLocationsReport = null;
+    cachedServiceLocationsReportAt = 0;
+
+    res.status(201).json({
+      success: true,
+      itemId,
+      message: `${record.Title || 'Service location'} created and verified.`,
+      record
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 400).json({
+      success: false,
+      error: error.message || 'Unable to create Service Location.'
+    });
+  }
+});
+
 app.patch('/service-locations/:id', requireLookupAccess, async (req, res) => {
   try {
     const itemId = String(req.params.id || '').trim();

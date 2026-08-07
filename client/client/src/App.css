@@ -19264,6 +19264,18 @@ body.light .driver-roster-port-grid select {
   flex: 0 0 auto;
 }
 
+.service-locations-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.service-locations-header-actions button {
+  white-space: nowrap;
+}
+
 .service-locations-empty-state {
   padding: 28px 18px;
   border: 1px dashed var(--kole-border-strong);
@@ -19556,6 +19568,16 @@ body.light .driver-roster-port-grid select {
   background: var(--kole-danger-bg);
 }
 
+.service-location-create-note {
+  padding: 10px 12px;
+  border: 1px solid var(--kole-border-subtle);
+  border-radius: 9px;
+  background: var(--kole-surface-2);
+  color: var(--kole-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .service-location-edit-form {
   display: grid;
   gap: 14px;
@@ -19620,6 +19642,15 @@ body.light .driver-roster-port-grid select {
   .service-location-modal-header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .service-locations-header-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .service-locations-header-actions button {
+    flex: 1 1 0;
   }
 
   .service-location-table th:nth-child(3),

@@ -1628,6 +1628,7 @@ export default function App() {
   const [serviceLocationStateFilter, setServiceLocationStateFilter] = useState('all');
   const [serviceLocationActiveFilter, setServiceLocationActiveFilter] = useState('active');
   const [selectedServiceLocation, setSelectedServiceLocation] = useState(null);
+  const [serviceLocationCreating, setServiceLocationCreating] = useState(false);
   const [serviceLocationEditing, setServiceLocationEditing] = useState(false);
   const [serviceLocationDraft, setServiceLocationDraft] = useState(() => createServiceLocationDraft());
   const [serviceLocationSaving, setServiceLocationSaving] = useState(false);
@@ -3439,6 +3440,7 @@ export default function App() {
     setServiceLocationStateFilter('all');
     setServiceLocationActiveFilter('active');
     setSelectedServiceLocation(null);
+    setServiceLocationCreating(false);
     setServiceLocationEditing(false);
     setServiceLocationDraft(createServiceLocationDraft());
     setServiceLocationSaving(false);
@@ -6519,14 +6521,25 @@ function getPositionStatusLabel(position) {
 
   function selectServiceLocation(location) {
     setSelectedServiceLocation(location);
+    setServiceLocationCreating(false);
     setServiceLocationDraft(createServiceLocationDraft(location));
     setServiceLocationEditing(false);
     setServiceLocationActionMessage('');
     setServiceLocationActionError('');
   }
 
+  function openNewServiceLocation() {
+    setSelectedServiceLocation(null);
+    setServiceLocationCreating(true);
+    setServiceLocationEditing(false);
+    setServiceLocationDraft(createServiceLocationDraft());
+    setServiceLocationActionMessage('');
+    setServiceLocationActionError('');
+  }
+
   function closeServiceLocationDetail() {
     setSelectedServiceLocation(null);
+    setServiceLocationCreating(false);
     setServiceLocationEditing(false);
     setServiceLocationDraft(createServiceLocationDraft());
     setServiceLocationActionMessage('');
@@ -6535,6 +6548,7 @@ function getPositionStatusLabel(position) {
 
   function startServiceLocationEdit() {
     if (!selectedServiceLocation) return;
+    setServiceLocationCreating(false);
     setServiceLocationDraft(createServiceLocationDraft(selectedServiceLocation));
     setServiceLocationEditing(true);
     setServiceLocationActionMessage('');
@@ -6552,6 +6566,63 @@ function getPositionStatusLabel(position) {
       ...current,
       [field]: field === 'State' ? String(value || '').toUpperCase().slice(0, 2) : value
     }));
+  }
+
+  async function createServiceLocation() {
+    if (serviceLocationSaving) return;
+
+    const title = String(serviceLocationDraft.Title || '').trim();
+    if (!title) {
+      setServiceLocationActionError('Location name is required.');
+      return;
+    }
+
+    setServiceLocationSaving(true);
+    setServiceLocationActionError('');
+    setServiceLocationActionMessage('');
+
+    try {
+      const res = await authedFetch(`${API}/service-locations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(serviceLocationDraft)
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success || !data.record) {
+        throw new Error(data.error || data.message || 'Unable to create Service Location.');
+      }
+
+      const createdRecord = data.record;
+      setServiceLocationsReport((current) => {
+        const existingRecords = current?.records || [];
+        const records = [
+          ...existingRecords.filter((record) => record.id !== createdRecord.id),
+          createdRecord
+        ].sort(sortServiceLocationRecords);
+        const states = [...new Set(records.map((record) => record.State).filter(Boolean))]
+          .sort((a, b) => a.localeCompare(b));
+
+        return {
+          ...(current || {}),
+          success: true,
+          records,
+          states,
+          count: records.length,
+          activeCount: records.filter((record) => record.Active).length,
+          inactiveCount: records.filter((record) => !record.Active).length
+        };
+      });
+      setServiceLocationCreating(false);
+      setSelectedServiceLocation(createdRecord);
+      setServiceLocationDraft(createServiceLocationDraft(createdRecord));
+      setServiceLocationEditing(false);
+      setServiceLocationActionMessage(data.message || `${createdRecord.Title || 'Service location'} created and verified.`);
+    } catch (err) {
+      setServiceLocationActionError(err.message || 'Unable to create Service Location.');
+    } finally {
+      setServiceLocationSaving(false);
+    }
   }
 
   async function saveServiceLocation() {
@@ -18332,16 +18403,26 @@ function openReportLoadDetails(load) {
           <div className="report-card-header centered-report-header service-locations-header">
             <div>
               <h3>Service Locations</h3>
-              <p>Look up operational service points and update the SharePoint record without leaving Kole Connect.</p>
+              <p>Look up operational service points, update records and add new Service Locations.</p>
             </div>
-            <button
-              type="button"
-              className="secondary-action-button compact"
-              onClick={() => loadServiceLocations(true)}
-              disabled={serviceLocationsLoading || serviceLocationSaving}
-            >
-              {serviceLocationsLoading ? 'Refreshing...' : 'Refresh List'}
-            </button>
+            <div className="service-locations-header-actions">
+              <button
+                type="button"
+                className="secondary-action-button compact"
+                onClick={() => loadServiceLocations(true)}
+                disabled={serviceLocationsLoading || serviceLocationSaving}
+              >
+                {serviceLocationsLoading ? 'Refreshing...' : 'Refresh List'}
+              </button>
+              <button
+                type="button"
+                className="compact"
+                onClick={openNewServiceLocation}
+                disabled={serviceLocationsLoading || serviceLocationSaving}
+              >
+                Add New Location
+              </button>
+            </div>
           </div>
 
           {!serviceLocationsReport && !serviceLocationsLoading && !serviceLocationsError && (
@@ -18477,7 +18558,7 @@ function openReportLoadDetails(load) {
           )}
         </div>
 
-        {selectedServiceLocation && (
+        {(selectedServiceLocation || serviceLocationCreating) && (
           <div
             className="modal-overlay report-modal-overlay service-location-modal-overlay"
             role="presentation"
@@ -18494,9 +18575,17 @@ function openReportLoadDetails(load) {
             >
               <div className="detail-header report-modal-header service-location-modal-header">
                 <div>
-                  <span className="service-location-eyebrow">{selectedServiceLocation.LocationID || 'Service Location'}</span>
-                  <h2 id="service-location-modal-title">{selectedServiceLocation.Title || 'Unnamed Location'}</h2>
-                  <p>{selectedAddress || 'No address listed'}</p>
+                  <span className="service-location-eyebrow">
+                    {serviceLocationCreating ? 'New Service Location' : (selectedServiceLocation?.LocationID || 'Service Location')}
+                  </span>
+                  <h2 id="service-location-modal-title">
+                    {serviceLocationCreating ? 'Add New Location' : (selectedServiceLocation?.Title || 'Unnamed Location')}
+                  </h2>
+                  <p>
+                    {serviceLocationCreating
+                      ? 'Create a new operational service point in the SharePoint Service Locations list.'
+                      : (selectedAddress || 'No address listed')}
+                  </p>
                 </div>
                 <button
                   type="button"
@@ -18516,7 +18605,7 @@ function openReportLoadDetails(load) {
                   <div className="msg error service-location-action-error">{serviceLocationActionError}</div>
                 )}
 
-                {!serviceLocationEditing ? (
+                {!serviceLocationCreating && !serviceLocationEditing ? (
                   <>
                     <div className="service-location-detail-grid">
                       <div><span>Address 1</span><strong>{detailValue(selectedServiceLocation.Address1)}</strong></div>
@@ -18549,11 +18638,15 @@ function openReportLoadDetails(load) {
                   </>
                 ) : (
                   <div className="service-location-edit-form">
-                    <div className="service-location-readonly-strip">
-                      <div><span>Location ID</span><strong>{selectedServiceLocation.LocationID || '—'}</strong></div>
-                      <div><span>Normalized Address</span><strong>{selectedServiceLocation.NormalizedAddress || '—'}</strong></div>
-                      <div><span>Last Verified</span><strong>Updates automatically when saved</strong></div>
-                    </div>
+                    {!serviceLocationCreating && selectedServiceLocation && (
+                      <div className="service-location-readonly-strip">
+                        <div><span>Location ID</span><strong>{selectedServiceLocation.LocationID || '—'}</strong></div>
+                        <div><span>Normalized Address</span><strong>{selectedServiceLocation.NormalizedAddress || '—'}</strong></div>
+                        <div><span>Last Verified</span><strong>Updates automatically when saved</strong></div>
+                      </div>
+                    )}
+
+                  
 
                     <div className="service-location-form-grid">
                       <label className="service-location-form-wide">
@@ -18620,10 +18713,21 @@ function openReportLoadDetails(load) {
                     </div>
 
                     <div className="service-location-detail-actions">
-                      <button type="button" onClick={saveServiceLocation} disabled={serviceLocationSaving}>
-                        {serviceLocationSaving ? 'Saving...' : 'Save Location'}
+                      <button
+                        type="button"
+                        onClick={serviceLocationCreating ? createServiceLocation : saveServiceLocation}
+                        disabled={serviceLocationSaving}
+                      >
+                        {serviceLocationSaving
+                          ? (serviceLocationCreating ? 'Creating...' : 'Saving...')
+                          : (serviceLocationCreating ? 'Create Location' : 'Save Location')}
                       </button>
-                      <button type="button" className="secondary-action-button" onClick={cancelServiceLocationEdit} disabled={serviceLocationSaving}>
+                      <button
+                        type="button"
+                        className="secondary-action-button"
+                        onClick={serviceLocationCreating ? closeServiceLocationDetail : cancelServiceLocationEdit}
+                        disabled={serviceLocationSaving}
+                      >
                         Cancel
                       </button>
                     </div>
