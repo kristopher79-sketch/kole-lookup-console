@@ -4010,8 +4010,10 @@ function applyDashboardBootstrapModule(moduleKey, moduleResult) {
   }
 }
 
-async function loadDashboardBootstrap() {
-  const moduleKeys = getVisibleDashboardModuleKeys();
+async function loadDashboardBootstrap(options = {}) {
+  const moduleKeys = Array.isArray(options.moduleKeys) && options.moduleKeys.length > 0
+    ? [...new Set(options.moduleKeys)]
+    : getVisibleDashboardModuleKeys();
   const requestedAt = Date.now();
   moduleKeys.forEach((moduleKey) => dashboardRefreshInFlightRef.current.add(moduleKey));
 
@@ -4040,8 +4042,8 @@ async function loadDashboardBootstrap() {
       applyDashboardBootstrapModule(moduleKey, data.modules?.[moduleKey]);
       dashboardRefreshLastRunRef.current[moduleKey] = requestedAt;
     });
-    return true;
-  } catch (err) {
+    return data.modules || {};
+  } catch {
     // Keep compatibility during a staggered frontend/server deployment and
     // preserve the last good screen if the bootstrap request itself fails.
     const fallbacks = [];
@@ -4060,78 +4062,68 @@ async function loadDashboardBootstrap() {
   }
 }
 
-function runDashboardRefreshTask(task) {
-  if (!task.visible || dashboardRefreshInFlightRef.current.has(task.key)) return;
-
-  const now = Date.now();
-  const lastRun = dashboardRefreshLastRunRef.current[task.key] || 0;
-  if (now - lastRun < task.cadenceMs) return;
-
-  dashboardRefreshLastRunRef.current[task.key] = now;
-  dashboardRefreshInFlightRef.current.add(task.key);
-
-  Promise.resolve(task.run())
-    .then((succeeded) => {
-      if (task.key === 'operations' && succeeded) playDataRefreshCue();
-    })
-    .finally(() => {
-      dashboardRefreshInFlightRef.current.delete(task.key);
-    });
-}
-
 function runCoordinatedDashboardRefresh() {
   const tasks = [
     {
       key: 'operations',
       cadenceMs: DASHBOARD_REFRESH_CADENCE_MS.operations,
-      visible: !userPrefs.hideOperationsToday,
-      run: () => loadOperationsDashboard({ silent: true })
+      visible: !userPrefs.hideOperationsToday
     },
     {
       key: 'driverPositions',
       cadenceMs: DASHBOARD_REFRESH_CADENCE_MS.driverPositions,
-      visible: !userPrefs.hideOperationsToday,
-      run: () => loadDriverPositions({ silent: true })
+      visible: !userPrefs.hideOperationsToday
     },
     {
       key: 'intelliTrack',
       cadenceMs: DASHBOARD_REFRESH_CADENCE_MS.intelliTrack,
-      visible: !userPrefs.hideIntelliTrack,
-      run: () => loadIntelliTrack({ silent: true })
+      visible: !userPrefs.hideIntelliTrack
     },
     {
       key: 'uploadDigest',
       cadenceMs: DASHBOARD_REFRESH_CADENCE_MS.uploadDigest,
-      visible: !userPrefs.hideUploadDigest,
-      run: () => loadUploadDigest(uploadDigestDateRef.current, { silent: true })
+      visible: !userPrefs.hideUploadDigest
     },
     {
       key: 'actionAlerts',
       cadenceMs: DASHBOARD_REFRESH_CADENCE_MS.actionAlerts,
-      visible: true,
-      run: () => loadReportActionAlerts({ silent: true })
+      visible: true
     },
     {
       key: 'availableTrucks',
       cadenceMs: DASHBOARD_REFRESH_CADENCE_MS.availableTrucks,
-      visible: !userPrefs.hideAvailableTrucks,
-      run: () => loadAvailableTrucks({ silent: true })
+      visible: !userPrefs.hideAvailableTrucks
     },
     {
       key: 'recruiting',
       cadenceMs: DASHBOARD_REFRESH_CADENCE_MS.recruiting,
-      visible: !userPrefs.hideRecruiting,
-      run: () => loadRecruitingDashboard({ silent: true })
+      visible: !userPrefs.hideRecruiting
     },
     {
       key: 'availableTruckDistribution',
       cadenceMs: DASHBOARD_REFRESH_CADENCE_MS.availableTruckDistribution,
-      visible: !userPrefs.hideAvailableTrucks,
-      run: () => loadAvailableTruckDistributionList({ silent: true })
+      visible: !userPrefs.hideAvailableTrucks
     }
   ];
+  const now = Date.now();
+  const moduleKeys = tasks
+    .filter((task) => {
+      if (!task.visible || dashboardRefreshInFlightRef.current.has(task.key)) return false;
+      const lastRun = dashboardRefreshLastRunRef.current[task.key] || 0;
+      return now - lastRun >= task.cadenceMs;
+    })
+    .map((task) => task.key);
 
-  tasks.forEach(runDashboardRefreshTask);
+  if (moduleKeys.length === 0) return;
+  moduleKeys.forEach((moduleKey) => {
+    dashboardRefreshLastRunRef.current[moduleKey] = now;
+  });
+
+  void loadDashboardBootstrap({ moduleKeys }).then((modules) => {
+    if (moduleKeys.includes('operations') && modules?.operations?.ok !== false && modules?.operations?.data) {
+      playDataRefreshCue();
+    }
+  });
 }
 
 async function loadOperationsDashboard(options = {}) {
@@ -12548,6 +12540,7 @@ function openReportLoadDetails(load) {
     const currentRecords = getDriverTimeOffCurrentRecords();
     const recentlyEndedRecords = getDriverTimeOffRecentlyEndedRecords();
     const upcomingRecords = getDriverTimeOffUpcomingRecords();
+    const upcomingDays = Number(operationsData?.driverTimeOff?.upcomingDays || 30);
     const activePane = driverTimeOffPaneFilter || 'current';
     const records = getDriverTimeOffPanelRows(activePane);
     const warning = operationsData?.driverTimeOff?.warning || '';
@@ -12614,7 +12607,7 @@ function openReportLoadDetails(load) {
     const panePills = [
       { key: 'current', label: 'Current', value: currentRecords.length, detail: 'off now', tone: currentRecords.length > 0 ? 'current' : 'quiet' },
       { key: 'ended', label: 'Ended', value: recentlyEndedRecords.length, detail: 'last 7 days', tone: recentlyEndedRecords.length > 0 ? 'ended' : 'quiet' },
-      { key: 'starting-soon', label: 'Starting Soon', value: upcomingRecords.length, detail: 'next 7 days', tone: upcomingRecords.length > 0 ? 'starting' : 'quiet' }
+      { key: 'starting-soon', label: 'Starting Soon', value: upcomingRecords.length, detail: `next ${upcomingDays} days`, tone: upcomingRecords.length > 0 ? 'starting' : 'quiet' }
     ];
 
     const groupedRecords = activePane === 'starting-soon'
@@ -12630,7 +12623,7 @@ function openReportLoadDetails(load) {
             .filter((group) => group.records.length > 0);
 
     const emptyMessage = activePane === 'starting-soon'
-      ? 'No driver time off is scheduled to start in the next 7 days.'
+      ? `No driver time off is scheduled to start in the next ${upcomingDays} days.`
       : activePane === 'ended'
         ? 'No driver time off ended in the last 7 days.'
         : 'No drivers are currently marked off.';

@@ -26,6 +26,7 @@ const DEFAULT_AVAILABLE_TRUCKS_SINGLE_LINE_LIST_ID = '67edb153-a389-474a-a7dd-d3
 const DEFAULT_AVAILABLE_EQUIPMENT_SOURCE_LIST_ID = '96af7972-58ff-4bb8-b5a6-ca86f4d19ee6';
 const DEFAULT_AVAILABLE_TRUCKS_EMAIL_LIST_ID = '2458883d-ea8b-4761-8047-a04e35e9f93f';
 const DRIVER_TIME_OFF_DEFAULT_REPORT_YEARS_BACK = 3;
+const DRIVER_TIME_OFF_UPCOMING_DAYS = 30;
 const AVAILABLE_TRUCKS_DEFAULT_LOOKBACK_DAYS = 30;
 const AVAILABLE_TRUCKS_DEFAULT_ASSIGNMENT_LOOKAHEAD_DAYS = Number(process.env.AVAILABLE_TRUCKS_ASSIGNMENT_LOOKAHEAD_DAYS || 2);
 const SALES_LEAD_NOTE_MAX_LENGTH = 63000;
@@ -100,6 +101,22 @@ const GRAPH_REQUEST_TIMEOUT_MS = Math.max(1000, Number(process.env.GRAPH_REQUEST
 const GRAPH_READ_RETRIES = Math.max(0, Number(process.env.GRAPH_READ_RETRIES ?? 2) || 0);
 const GRAPH_RETRY_MAX_DELAY_MS = Math.max(250, Number(process.env.GRAPH_RETRY_MAX_DELAY_MS) || 5000);
 const inFlightRequests = new Map();
+const DASHBOARD_REFRESH_WORKLOAD = 'dashboard-refresh';
+const REPORT_WORKLOAD = 'report';
+const DASHBOARD_REFRESH_PATHS = new Set([
+  '/dashboard/bootstrap',
+  '/operations/today',
+  '/operations/snapshot',
+  '/tracking/driver-positions',
+  '/tracking/intellitrack',
+  '/upload-digest',
+  '/available-trucks',
+  '/available-trucks/distribution-list',
+  '/recruiting/dashboard',
+  '/reports/action-alerts'
+]);
+let activeHeavyWorkload = null;
+const queuedHeavyWorkloads = [];
 
 function getAllowedLookupTokens() {
   return [
@@ -117,6 +134,43 @@ function getLookupTokenFromRequest(req) {
   const authHeader = req.headers.authorization || '';
   const match = authHeader.match(/^Bearer\s+(.+)$/i);
   return match ? match[1].trim() : '';
+}
+
+function getHeavyWorkloadKind(req) {
+  if (String(req.method || '').toUpperCase() !== 'GET') return '';
+
+  if (DASHBOARD_REFRESH_PATHS.has(req.path)) {
+    return DASHBOARD_REFRESH_WORKLOAD;
+  }
+
+  return req.path.startsWith('/reports/') ? REPORT_WORKLOAD : '';
+}
+
+function grantNextHeavyWorkload() {
+  if (activeHeavyWorkload || queuedHeavyWorkloads.length === 0) return;
+
+  const entry = queuedHeavyWorkloads.shift();
+  activeHeavyWorkload = entry;
+  entry.resolve({
+    waitedMs: Date.now() - entry.queuedAt,
+    release: () => {
+      if (activeHeavyWorkload !== entry) return;
+      activeHeavyWorkload = null;
+      grantNextHeavyWorkload();
+    }
+  });
+}
+
+// Render has one shared process budget. Keep report generation and dashboard
+// refresh batches FIFO-exclusive so a large report cannot overlap a refresh.
+function acquireHeavyWorkload(kind) {
+  const queuedAt = Date.now();
+  const wasQueued = Boolean(activeHeavyWorkload || queuedHeavyWorkloads.length > 0);
+
+  return new Promise((resolve) => {
+    queuedHeavyWorkloads.push({ kind, queuedAt, resolve });
+    grantNextHeavyWorkload();
+  }).then((slot) => ({ ...slot, wasQueued }));
 }
 
 function requireLookupAccess(req, res, next) {
@@ -137,7 +191,33 @@ function requireLookupAccess(req, res, next) {
     });
   }
 
-  next();
+  const workloadKind = getHeavyWorkloadKind(req);
+  if (!workloadKind) {
+    next();
+    return;
+  }
+
+  acquireHeavyWorkload(workloadKind).then(({ release, waitedMs, wasQueued }) => {
+    if (req.aborted || res.destroyed) {
+      release();
+      return;
+    }
+
+    let released = false;
+    const releaseOnce = () => {
+      if (released) return;
+      released = true;
+      release();
+    };
+
+    res.setHeader('X-Kole-Workload', workloadKind);
+    if (wasQueued) res.setHeader('X-Kole-Workload-Queued', '1');
+    if (waitedMs > 0) res.setHeader('X-Kole-Workload-Wait-Ms', String(waitedMs));
+    res.once('finish', releaseOnce);
+    res.once('close', releaseOnce);
+    req.once('aborted', releaseOnce);
+    next();
+  }).catch(next);
 }
 
 async function getGraphToken(forceRefresh = false) {
@@ -9281,7 +9361,7 @@ async function getDriverTimeOffRows(token) {
 function buildDriverTimeOffCurrentResponse(rows, options = {}) {
   const targetDate = options.targetDate || formatEasternDate();
   const recentDays = Number(options.recentDays || 7);
-  const upcomingDays = Number(options.upcomingDays || 7);
+  const upcomingDays = Number(options.upcomingDays || DRIVER_TIME_OFF_UPCOMING_DAYS);
   const recentStartDate = addDaysToDateInput(targetDate, -Math.max(recentDays, 1));
   const upcomingEndDate = addDaysToDateInput(targetDate, Math.max(upcomingDays, 1));
   const enrichedRows = rows
@@ -12722,7 +12802,7 @@ app.get('/reports/action-alerts', requireLookupAccess, async (req, res) => {
     }
 
     const [items, uploadEvidenceSets] = await Promise.all([
-      getDashboardBidSource(token, currentList, { forceRefresh }),
+      getDashboardBidSource(token, currentList, { forceRefresh, waitForRefresh: true }),
       getUploadEvidenceSets(token)
     ]);
 
@@ -15549,6 +15629,7 @@ async function refreshDashboardBidSource(token, currentList) {
 
 async function getDashboardBidSource(token, currentList, options = {}) {
   const forceRefresh = options.forceRefresh === true;
+  const waitForRefresh = options.waitForRefresh === true;
   const matchesList = cachedDashboardBidSource?.listId === currentList?.listId;
   const ageMs = matchesList ? Date.now() - cachedDashboardBidSource.cachedAt : Infinity;
 
@@ -15558,8 +15639,10 @@ async function getDashboardBidSource(token, currentList, options = {}) {
 
   const requestKey = `dashboard-bid-source:${currentList?.listId || 'missing'}`;
   if (!forceRefresh && matchesList && ageMs < DASHBOARD_BID_SOURCE_MAX_STALE_MS) {
-    void coalesceRequest(requestKey, () => refreshDashboardBidSource(token, currentList))
-      .catch((error) => console.warn('Dashboard Bid Listing background refresh failed:', error.message));
+    const refreshRequest = coalesceRequest(requestKey, () => refreshDashboardBidSource(token, currentList));
+    if (waitForRefresh) return refreshRequest;
+
+    void refreshRequest.catch((error) => console.warn('Dashboard Bid Listing background refresh failed:', error.message));
     return cachedDashboardBidSource.items;
   }
 
@@ -16030,7 +16113,7 @@ app.get('/available-trucks', requireLookupAccess, async (req, res) => {
         getAvailableTruckFieldSelect()
       ),
       currentList
-        ? getDashboardBidSource(token, currentList)
+        ? getDashboardBidSource(token, currentList, { waitForRefresh: true })
         : Promise.resolve([]),
       activeDriverOptionsPromise
     ]);
@@ -16358,7 +16441,7 @@ app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, asyn
       });
     }
 
-    const items = await getDashboardBidSource(token, currentList, { forceRefresh });
+    const items = await getDashboardBidSource(token, currentList, { forceRefresh, waitForRefresh: true });
 
     const plus7 = addDaysToDateInput(targetDate, 7);
 
@@ -18395,7 +18478,7 @@ app.get('/dashboard/bootstrap', requireLookupAccess, async (req, res) => {
     const needsBidSource = moduleKeys.some((key) => ['operations', 'availableTrucks', 'actionAlerts'].includes(key));
     const currentList = needsBidSource ? await getCurrentBidListingSource(token) : null;
     const bidItemsPromise = currentList
-      ? getDashboardBidSource(token, currentList)
+      ? getDashboardBidSource(token, currentList, { waitForRefresh: true })
       : Promise.resolve([]);
     const evidencePromise = moduleKeys.some((key) => ['operations', 'actionAlerts'].includes(key))
       ? getUploadEvidenceSets(token)
