@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const multer = require('multer');
 
 const app = express();
 app.use(cors());
@@ -398,6 +399,27 @@ async function graphPost(token, url, body) {
 
   if (!response.ok) {
     throw new Error(JSON.stringify(data));
+  }
+
+  return data;
+}
+
+async function graphPutBinary(token, url, body, contentType) {
+  const response = await fetchWithTimeoutAndRetry(url, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': contentType
+    },
+    body
+  }, { maxRetries: 0 });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const error = new Error('Microsoft Graph could not store the uploaded file.');
+    error.statusCode = 502;
+    throw error;
   }
 
   return data;
@@ -18835,6 +18857,152 @@ app.patch('/service-locations/:id', requireLookupAccess, async (req, res) => {
 // ============================================================
 
 const MOBILE_SESSION_EXPIRES_IN = '30d';
+const MOBILE_UPLOAD_MAX_FILE_SIZE = 20 * 1024 * 1024;
+const MOBILE_UPLOAD_MAX_FILES = 10;
+const MOBILE_UPLOAD_TYPES = new Set(['pickup', 'delivery']);
+const MOBILE_UPLOAD_EXTENSIONS_BY_TYPE = new Map([
+  ['image/jpeg', ['.jpg', '.jpeg']],
+  ['image/png', ['.png']],
+  ['image/heic', ['.heic']],
+  ['image/heif', ['.heif', '.heic']],
+  ['application/pdf', ['.pdf']]
+]);
+const MOBILE_UPLOAD_GENERIC_MIME_TYPES = new Set(['', 'application/octet-stream']);
+const MOBILE_UPLOAD_HEIF_BRANDS = new Set(['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'mif1', 'msf1']);
+
+function getMobileUploadOriginalExtension(fileName) {
+  const leafName = String(fileName || '').split(/[\\/]/).pop() || '';
+  const extensionMatch = leafName.toLowerCase().match(/\.[a-z0-9]{1,10}$/);
+  return extensionMatch ? extensionMatch[0] : '';
+}
+
+function isMobileUploadFileCandidateAllowed(file) {
+  const mimeType = normalizeText(file?.mimetype);
+
+  if (MOBILE_UPLOAD_EXTENSIONS_BY_TYPE.has(mimeType)) return true;
+  if (!MOBILE_UPLOAD_GENERIC_MIME_TYPES.has(mimeType)) return false;
+
+  const extension = getMobileUploadOriginalExtension(file?.originalname);
+  return Array.from(MOBILE_UPLOAD_EXTENSIONS_BY_TYPE.values()).some((extensions) =>
+    extensions.includes(extension)
+  );
+}
+
+const mobileUploadParser = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: MOBILE_UPLOAD_MAX_FILE_SIZE,
+    files: MOBILE_UPLOAD_MAX_FILES,
+    fields: 4,
+    fieldSize: 2048
+  },
+  fileFilter: (req, file, callback) => {
+    if (isMobileUploadFileCandidateAllowed(file)) {
+      callback(null, true);
+      return;
+    }
+
+    const error = new Error('Only JPEG, PNG, HEIC/HEIF, and PDF files are supported.');
+    error.statusCode = 415;
+    callback(error);
+  }
+}).array('files', MOBILE_UPLOAD_MAX_FILES);
+
+function parseMobileUpload(req, res) {
+  return new Promise((resolve, reject) => {
+    mobileUploadParser(req, res, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
+function getMobileUploadContentType(file) {
+  const buffer = file?.buffer;
+
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) return '';
+
+  if (
+    buffer.length >= 4 &&
+    buffer[0] === 0xff &&
+    buffer[1] === 0xd8 &&
+    buffer[2] === 0xff
+  ) {
+    return 'image/jpeg';
+  }
+
+  if (
+    buffer.length >= 8 &&
+    buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  ) {
+    return 'image/png';
+  }
+
+  if (buffer.length >= 5 && buffer.subarray(0, 5).toString('ascii') === '%PDF-') {
+    return 'application/pdf';
+  }
+
+  if (buffer.length >= 12 && buffer.subarray(4, 8).toString('ascii') === 'ftyp') {
+    const brand = buffer.subarray(8, 12).toString('ascii').toLowerCase();
+
+    if (MOBILE_UPLOAD_HEIF_BRANDS.has(brand)) {
+      return brand.startsWith('hei') || brand.startsWith('he') ? 'image/heic' : 'image/heif';
+    }
+  }
+
+  return '';
+}
+
+function getMobileUploadSafeFileName(file, contentType) {
+  const originalName = String(file?.originalname || 'upload').split(/[\\/]/).pop() || 'upload';
+  const originalExtension = getMobileUploadOriginalExtension(originalName);
+  const allowedExtensions = MOBILE_UPLOAD_EXTENSIONS_BY_TYPE.get(contentType) || [''];
+  const extension = allowedExtensions.includes(originalExtension)
+    ? originalExtension
+    : allowedExtensions[0];
+  const baseName = originalExtension
+    ? originalName.slice(0, -originalExtension.length)
+    : originalName;
+  const safeBaseName = baseName
+    .normalize('NFKD')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^[._-]+|[._-]+$/g, '')
+    .slice(0, 80) || 'upload';
+  const timestamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
+  const collisionToken = crypto.randomBytes(4).toString('hex');
+
+  return `${timestamp}-${collisionToken}-${safeBaseName}${extension}`;
+}
+
+function getMobileUploadErrorResponse(error) {
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return {
+        status: 413,
+        message: `Each file must be ${Math.round(MOBILE_UPLOAD_MAX_FILE_SIZE / (1024 * 1024))} MB or smaller.`
+      };
+    }
+
+    if (error.code === 'LIMIT_FILE_COUNT' || error.code === 'LIMIT_UNEXPECTED_FILE') {
+      return {
+        status: 400,
+        message: `Upload no more than ${MOBILE_UPLOAD_MAX_FILES} files at once.`
+      };
+    }
+
+    return { status: 400, message: 'The upload form is invalid.' };
+  }
+
+  if (Number(error?.statusCode) >= 400 && Number(error?.statusCode) < 500) {
+    return { status: Number(error.statusCode), message: error.message };
+  }
+
+  return { status: Number(error?.statusCode) || 500, message: 'Unable to upload these files right now.' };
+}
 
 function getMobileSessionSecret() {
   const secret = String(process.env.MOBILE_SESSION_SECRET || '').trim();
@@ -19080,26 +19248,27 @@ function getMobileHomeLoadKey(load) {
   return String(load?.id || `${load?.BOL || ''}|${load?.BidID || ''}|${load?.PickupDate || ''}`);
 }
 
+function isMobileLoadEligibleForRoster(roster, item) {
+  const fields = item?.fields || {};
+  const truckKey = normalizeTruckKey(roster?.truck);
+  const itemTruckKey = normalizeTruckKey(
+    getChoiceValue(fields.Truck_x0020_Number || fields['Truck_x0020_Number/Value'])
+  );
+
+  return (
+    normalizeText(getChoiceValue(fields.Status)) === 'won' &&
+    Boolean(truckKey) &&
+    itemTruckKey === truckKey &&
+    !parseBoolean(fields.Processed) &&
+    !parseBoolean(fields.FinalSettleSent)
+  );
+}
+
 function getMobileHomeSelection(roster, items = [], uploadEvidenceSets = {}) {
   const today = formatEasternDate();
-  const truckKey = normalizeTruckKey(roster?.truck);
 
   const loads = items
-    .filter((item) => {
-      const fields = item?.fields || {};
-      const status = normalizeText(getChoiceValue(fields.Status));
-      const itemTruckKey = normalizeTruckKey(
-        getChoiceValue(fields.Truck_x0020_Number || fields['Truck_x0020_Number/Value'])
-      );
-
-      return (
-        status === 'won' &&
-        Boolean(truckKey) &&
-        itemTruckKey === truckKey &&
-        !parseBoolean(fields.Processed) &&
-        !parseBoolean(fields.FinalSettleSent)
-      );
-    })
+    .filter((item) => isMobileLoadEligibleForRoster(roster, item))
     .map(buildMobileHomeLoadSummary)
     .map((load) => addUploadEvidence(load, {
       pickupEvidenceBols: uploadEvidenceSets.pickupEvidenceBols || new Set(),
@@ -19377,6 +19546,160 @@ app.get('/mobile/my-load', requireMobileSession, async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Unable to load your current load right now.'
+    });
+  }
+});
+
+// ------------------------------------------------------------
+// POST /mobile/upload
+// ------------------------------------------------------------
+
+app.post('/mobile/upload', requireMobileSession, async (req, res) => {
+  try {
+    await parseMobileUpload(req, res);
+
+    const loadId = String(req.body?.loadId || '').trim();
+    const uploadType = normalizeText(req.body?.uploadType);
+
+    if (!/^\d{1,12}$/.test(loadId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'A valid load is required.'
+      });
+    }
+
+    if (!MOBILE_UPLOAD_TYPES.has(uploadType)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Upload type must be Pickup or Delivery.'
+      });
+    }
+
+    if (!Array.isArray(req.files) || req.files.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Select at least one photo or PDF to upload.'
+      });
+    }
+
+    const preparedFiles = req.files.map((file) => ({
+      file,
+      contentType: getMobileUploadContentType(file)
+    }));
+
+    if (preparedFiles.some((entry) => !entry.contentType)) {
+      return res.status(415).json({
+        success: false,
+        error: 'One or more files are not a valid JPEG, PNG, HEIC/HEIF, or PDF.'
+      });
+    }
+
+    if (!process.env.DISPATCH_ONEDRIVE_ID || !getLoadPicturesFolderId()) {
+      return res.status(500).json({
+        success: false,
+        error: 'Mobile upload storage is not configured on the server.'
+      });
+    }
+
+    const graphToken = await getGraphToken();
+    const currentList = await getCurrentBidListingSource(graphToken);
+
+    if (!currentList) {
+      return res.status(404).json({
+        success: false,
+        error: 'The current Bid Listing is not available.'
+      });
+    }
+
+    const items = await getDashboardBidSource(graphToken, currentList, {
+      waitForRefresh: true
+    });
+    const selectedItem = items.find((item) => String(item?.id || '') === loadId);
+
+    if (!selectedItem || !isMobileLoadEligibleForRoster(req.mobileDriver, selectedItem)) {
+      return res.status(404).json({
+        success: false,
+        error: 'That load is not available for this Mobile session.'
+      });
+    }
+
+    const fields = selectedItem.fields || {};
+    const bol = getMobileHomeText(fields.BOLNumber_x0028_Won_x0029_);
+
+    if (!bol) {
+      return res.status(409).json({
+        success: false,
+        error: 'This load does not have a BOL folder reference yet.'
+      });
+    }
+
+    const candidateDrivers = uniqueNonEmpty([
+      getMobileHomeText(fields.TMSName),
+      getMobileHomeText(fields.Operator_x002f_Team),
+      req.mobileDriver.operatorTeamName,
+      req.mobileDriver.tmsName
+    ]);
+    const photoMatch = await findLoadPhotoFolderForBol(graphToken, bol, {
+      candidateDrivers
+    });
+
+    if (!photoMatch) {
+      return res.status(404).json({
+        success: false,
+        error: 'The load photo folder could not be found for this BOL.'
+      });
+    }
+
+    const loadFolderChildren = await getAllChildrenFromFolder(
+      graphToken,
+      process.env.DISPATCH_ONEDRIVE_ID,
+      photoMatch.loadFolder.id
+    );
+    const targetFolder = findUploadTypeFolder(loadFolderChildren, uploadType);
+
+    if (!targetFolder) {
+      return res.status(404).json({
+        success: false,
+        error: `The ${uploadType === 'pickup' ? 'Pickup' : 'Delivery'} photo folder could not be found for this load.`
+      });
+    }
+
+    const uploaded = await Promise.all(preparedFiles.map(async ({ file, contentType }) => {
+      const safeName = getMobileUploadSafeFileName(file, contentType);
+      const uploadUrl =
+        `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(process.env.DISPATCH_ONEDRIVE_ID)}` +
+        `/items/${encodeURIComponent(targetFolder.id)}:/${encodeURIComponent(safeName)}:/content`;
+      const storedFile = await graphPutBinary(
+        graphToken,
+        uploadUrl,
+        file.buffer,
+        contentType
+      );
+
+      return {
+        name: storedFile.name || safeName,
+        size: Number(storedFile.size || file.size || 0)
+      };
+    }));
+
+    res.status(201).json({
+      success: true,
+      load: {
+        id: String(selectedItem.id || ''),
+        BOL: bol,
+        Origin: getMobileHomeText(fields.Shipment_x0020_Origin),
+        Destination: getMobileHomeText(fields.Shipment_x0020_Destination)
+      },
+      uploadType,
+      uploaded
+    });
+  } catch (error) {
+    console.error('Mobile upload failed.');
+    const failure = getMobileUploadErrorResponse(error);
+
+    res.status(failure.status).json({
+      success: false,
+      error: failure.message
     });
   }
 });
