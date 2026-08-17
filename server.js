@@ -2,6 +2,8 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
 const app = express();
 app.use(cors());
@@ -15605,7 +15607,38 @@ function getDashboardBidFieldSelect() {
     'Operator_x002f_Team',
     'Truck_x0020_Number',
     'Pickup_x0020_Offer_x0020_Date',
+    'Pickup1PickupTime',
+    'Pickup1AMorPM',
+    'Pickup1Name',
+    'Pickup1Address1',
+    'Pickup1City',
+    'Pickup2State',
+    'Pickup2Zip',
+    'Pickup1ContactName',
+    'Pickup1ContactNumber',
     'Expected_x0020_Delivery_x0020_Da',
+    'Delivery1Time',
+    'Delivery1AMorPM',
+    'Delivery1Name',
+    'Deliver1Address1',
+    'Delivery1City',
+    'Delivery1State',
+    'Delivery1Zip',
+    'Delivery1ContactName',
+    'Delivery1ContactNumber',
+    'Freight_x0020_Description',
+    'Item1QTY',
+    'Item1Description',
+    'Item1Serial',
+    'Item1Dimensions',
+    'EstimatedWeight',
+    'TotalPieces',
+    'ShipperNumber',
+    'No_x002e_ofTarpsNeeded',
+    'Route',
+    'Aircraft_x0020_Related_x003f_',
+    'Team_x0020_Required',
+    'PpwrkSubmitted',
     'Status',
     'Processed',
     ...getReportActionAlertFieldSelect().split(','),
@@ -18794,6 +18827,535 @@ app.patch('/service-locations/:id', requireLookupAccess, async (req, res) => {
     res.status(error.statusCode || 400).json({
       success: false,
       error: error.message || 'Unable to update Service Location.'
+    });
+  }
+});
+// ============================================================
+// KOLE CONNECT MOBILE - DRIVER AUTHENTICATION
+// ============================================================
+
+const MOBILE_SESSION_EXPIRES_IN = '30d';
+
+function getMobileSessionSecret() {
+  const secret = String(process.env.MOBILE_SESSION_SECRET || '').trim();
+
+  if (!secret) {
+    const error = new Error('MOBILE_SESSION_SECRET is not configured on the server.');
+    error.statusCode = 500;
+    throw error;
+  }
+
+  return secret;
+}
+
+function getMobilePinFingerprint(pin) {
+  return crypto
+    .createHash('sha256')
+    .update(String(pin || '').trim())
+    .digest('hex');
+}
+
+function createMobileSessionToken(roster) {
+  return jwt.sign(
+    {
+      type: 'kole-mobile',
+      rosterId: String(roster.id || ''),
+      truck: String(roster.truck || ''),
+      pinFingerprint: getMobilePinFingerprint(roster.pin)
+    },
+    getMobileSessionSecret(),
+    {
+      expiresIn: MOBILE_SESSION_EXPIRES_IN
+    }
+  );
+}
+
+function getMobileBearerToken(req) {
+  const authHeader = String(req.headers.authorization || '').trim();
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+
+  return match ? match[1].trim() : '';
+}
+
+async function requireMobileSession(req, res, next) {
+  try {
+    const sessionToken = getMobileBearerToken(req);
+
+    if (!sessionToken) {
+      return res.status(401).json({
+        success: false,
+        error: 'Mobile sign-in required.'
+      });
+    }
+
+    let session;
+
+    try {
+      session = jwt.verify(sessionToken, getMobileSessionSecret());
+    } catch {
+      return res.status(401).json({
+        success: false,
+        error: 'Your Mobile session has expired or is no longer valid.'
+      });
+    }
+
+    if (session?.type !== 'kole-mobile' || !session?.rosterId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid Mobile session.'
+      });
+    }
+
+    const graphToken = await getGraphToken();
+    const rosterItems = await getDriverRosterItems(graphToken);
+
+    const roster = rosterItems.find(
+      (item) => String(item.id || '') === String(session.rosterId || '')
+    );
+
+    if (!roster) {
+      return res.status(401).json({
+        success: false,
+        error: 'This driver profile is no longer available.'
+      });
+    }
+
+    if (normalizeText(roster.status) !== 'active') {
+      return res.status(401).json({
+        success: false,
+        error: 'This driver profile is not active.'
+      });
+    }
+
+    if (!String(roster.pin || '').trim()) {
+      return res.status(401).json({
+        success: false,
+        error: 'Mobile access has been disabled for this driver.'
+      });
+    }
+
+    if (
+      getMobilePinFingerprint(roster.pin) !==
+      String(session.pinFingerprint || '')
+    ) {
+      return res.status(401).json({
+        success: false,
+        error: 'Your Mobile credentials have changed. Please sign in again.'
+      });
+    }
+
+    req.mobileDriver = roster;
+    next();
+  } catch (error) {
+    console.error('Mobile session validation failed:', error);
+
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to validate Mobile session.'
+    });
+  }
+}
+
+const MOBILE_HOME_PRIMARY_ACTIONS = Object.freeze({
+  paperwork_needed: Object.freeze({ type: 'upload_paperwork', label: 'Upload Paperwork' }),
+  delivering_today: Object.freeze({ type: 'view_delivery', label: 'View Delivery' }),
+  in_transit: Object.freeze({ type: 'view_load', label: 'View Load' }),
+  pickup_today: Object.freeze({ type: 'view_pickup', label: 'View Pickup' }),
+  upcoming_load: Object.freeze({ type: 'view_load', label: 'View Load' })
+});
+
+function getMobileHomeText(value) {
+  return String(getChoiceValue(value) || '').trim();
+}
+
+function hasMobileHomePaperworkSubmission(value) {
+  if (value === true) return true;
+  if (value === false || value === null || value === undefined) return false;
+
+  const normalized = normalizeText(getFlexibleFieldValue(value) ?? value);
+  return Boolean(normalized && !['false', 'no', '0', 'null'].includes(normalized));
+}
+
+function buildMobileHomeLoadSummary(item) {
+  const fields = item?.fields || {};
+
+  return {
+    id: String(item?.id || ''),
+    BOL: getMobileHomeText(fields.BOLNumber_x0028_Won_x0029_),
+    BidID: getMobileHomeText(fields.BidID),
+    Customer: getMobileHomeText(fields.Company),
+    Origin: getMobileHomeText(fields.Shipment_x0020_Origin),
+    Destination: getMobileHomeText(fields.Shipment_x0020_Destination),
+    PickupDate: normalizeSharePointBusinessDate(fields.Pickup_x0020_Offer_x0020_Date),
+    DeliveryDate: normalizeSharePointBusinessDate(fields.Expected_x0020_Delivery_x0020_Da),
+    PickupTime: getMobileHomeText(fields.Pickup1PickupTime),
+    PickupAMPM: getMobileHomeText(fields.Pickup1AMorPM),
+    DeliveryTime: getMobileHomeText(fields.Delivery1Time),
+    DeliveryAMPM: getMobileHomeText(fields.Delivery1AMorPM),
+    Pickup1Name: getMobileHomeText(fields.Pickup1Name),
+    Pickup1City: getMobileHomeText(fields.Pickup1City),
+    Pickup1State: getMobileHomeText(fields.Pickup2State),
+    Delivery1Name: getMobileHomeText(fields.Delivery1Name),
+    Delivery1City: getMobileHomeText(fields.Delivery1City),
+    Delivery1State: getMobileHomeText(fields.Delivery1State),
+    PpwrkSubmitted: fields.PpwrkSubmitted ?? ''
+  };
+}
+
+function getMobileOperationalValue(value) {
+  if (value === null || value === undefined || value === '') return '';
+
+  const resolved = getFlexibleFieldValue(value) ?? value;
+
+  if (typeof resolved === 'number' || typeof resolved === 'boolean') {
+    return resolved;
+  }
+
+  return String(resolved).trim();
+}
+
+function getMobileOperationalIndicator(value) {
+  const resolved = getMobileOperationalValue(value);
+  return resolved === '' ? null : parseBoolean(resolved);
+}
+
+function buildMobileLoadDetail(item) {
+  const fields = item?.fields || {};
+
+  return {
+    id: String(item?.id || ''),
+    BOL: getMobileHomeText(fields.BOLNumber_x0028_Won_x0029_),
+    BidID: getMobileHomeText(fields.BidID),
+    Customer: getMobileHomeText(fields.Company),
+    Origin: getMobileHomeText(fields.Shipment_x0020_Origin),
+    Destination: getMobileHomeText(fields.Shipment_x0020_Destination),
+    Status: getMobileHomeText(fields.Status),
+
+    PickupDate: normalizeSharePointBusinessDate(fields.Pickup_x0020_Offer_x0020_Date),
+    PickupTime: getMobileHomeText(fields.Pickup1PickupTime),
+    PickupAMPM: getMobileHomeText(fields.Pickup1AMorPM),
+    Pickup1Name: getMobileHomeText(fields.Pickup1Name),
+    Pickup1Address1: getMobileHomeText(fields.Pickup1Address1),
+    Pickup1City: getMobileHomeText(fields.Pickup1City),
+    Pickup1State: getMobileHomeText(fields.Pickup2State),
+    Pickup1Zip: getMobileHomeText(fields.Pickup2Zip),
+    Pickup1ContactName: getMobileHomeText(fields.Pickup1ContactName),
+    Pickup1ContactNumber: getMobileHomeText(fields.Pickup1ContactNumber),
+
+    DeliveryDate: normalizeSharePointBusinessDate(fields.Expected_x0020_Delivery_x0020_Da),
+    DeliveryTime: getMobileHomeText(fields.Delivery1Time),
+    DeliveryAMPM: getMobileHomeText(fields.Delivery1AMorPM),
+    Delivery1Name: getMobileHomeText(fields.Delivery1Name),
+    Delivery1Address1: getMobileHomeText(fields.Deliver1Address1),
+    Delivery1City: getMobileHomeText(fields.Delivery1City),
+    Delivery1State: getMobileHomeText(fields.Delivery1State),
+    Delivery1Zip: getMobileHomeText(fields.Delivery1Zip),
+    Delivery1ContactName: getMobileHomeText(fields.Delivery1ContactName),
+    Delivery1ContactNumber: getMobileHomeText(fields.Delivery1ContactNumber),
+
+    Freight: getMobileOperationalValue(fields.Freight_x0020_Description),
+    Item1QTY: getMobileOperationalValue(fields.Item1QTY),
+    Item1Description: getMobileOperationalValue(fields.Item1Description),
+    Item1Serial: getMobileOperationalValue(fields.Item1Serial),
+    Item1Dimensions: getMobileOperationalValue(fields.Item1Dimensions),
+    EstimatedWeight: getMobileOperationalValue(fields.EstimatedWeight),
+    TotalPieces: getMobileOperationalValue(fields.TotalPieces),
+    ShipperNumber: getMobileOperationalValue(fields.ShipperNumber),
+
+    NoOfTarpsNeeded: getMobileOperationalValue(fields.No_x002e_ofTarpsNeeded),
+    Route: getMobileOperationalValue(fields.Route),
+    AircraftRelated: getMobileOperationalIndicator(fields.Aircraft_x0020_Related_x003f_),
+    TeamRequired: getMobileOperationalIndicator(fields.Team_x0020_Required),
+    PpwrkSubmitted: fields.PpwrkSubmitted ?? ''
+  };
+}
+
+function compareMobileHomeLoads(a, b) {
+  const pickupDiff = String(a.PickupDate || '9999-12-31').localeCompare(
+    String(b.PickupDate || '9999-12-31')
+  );
+  if (pickupDiff !== 0) return pickupDiff;
+
+  const deliveryDiff = String(a.DeliveryDate || '9999-12-31').localeCompare(
+    String(b.DeliveryDate || '9999-12-31')
+  );
+  if (deliveryDiff !== 0) return deliveryDiff;
+
+  return String(a.BOL || a.BidID || a.id).localeCompare(
+    String(b.BOL || b.BidID || b.id),
+    undefined,
+    { numeric: true }
+  );
+}
+
+function getMobileHomeLoadKey(load) {
+  return String(load?.id || `${load?.BOL || ''}|${load?.BidID || ''}|${load?.PickupDate || ''}`);
+}
+
+function getMobileHomeSelection(roster, items = []) {
+  const today = formatEasternDate();
+  const truckKey = normalizeTruckKey(roster?.truck);
+
+  const loads = items
+    .filter((item) => {
+      const fields = item?.fields || {};
+      const status = normalizeText(getChoiceValue(fields.Status));
+      const itemTruckKey = normalizeTruckKey(
+        getChoiceValue(fields.Truck_x0020_Number || fields['Truck_x0020_Number/Value'])
+      );
+
+      return (
+        status === 'won' &&
+        Boolean(truckKey) &&
+        itemTruckKey === truckKey &&
+        !parseBoolean(fields.Processed) &&
+        !parseBoolean(fields.FinalSettleSent)
+      );
+    })
+    .map(buildMobileHomeLoadSummary)
+    .sort(compareMobileHomeLoads);
+
+  const paperworkNeeded = loads
+    .filter(
+      (load) =>
+        load.DeliveryDate &&
+        load.DeliveryDate <= today &&
+        !hasMobileHomePaperworkSubmission(load.PpwrkSubmitted)
+    )
+    .sort((a, b) => {
+      const deliveryDiff = a.DeliveryDate.localeCompare(b.DeliveryDate);
+      return deliveryDiff || compareMobileHomeLoads(a, b);
+    });
+  const deliveringToday = loads.filter((load) => load.DeliveryDate === today);
+  const inTransit = loads.filter(
+    (load) =>
+      load.PickupDate &&
+      load.DeliveryDate &&
+      load.PickupDate < today &&
+      load.DeliveryDate > today
+  );
+  const pickupToday = loads.filter((load) => load.PickupDate === today);
+  const upcoming = loads.filter((load) => load.PickupDate && load.PickupDate > today);
+
+  let homeState = 'no_load';
+  let currentLoad = null;
+
+  if (paperworkNeeded.length) {
+    homeState = 'paperwork_needed';
+    currentLoad = paperworkNeeded[0];
+  } else if (deliveringToday.length) {
+    homeState = 'delivering_today';
+    currentLoad = deliveringToday[0];
+  } else if (inTransit.length) {
+    homeState = 'in_transit';
+    currentLoad = inTransit[0];
+  } else if (pickupToday.length) {
+    homeState = 'pickup_today';
+    currentLoad = pickupToday[0];
+  } else if (upcoming.length) {
+    homeState = 'upcoming_load';
+    currentLoad = upcoming[0];
+  }
+
+  let nextLoad = null;
+
+  if (currentLoad) {
+    const currentKey = getMobileHomeLoadKey(currentLoad);
+    const nextCandidates = loads
+      .filter(
+        (load) =>
+          getMobileHomeLoadKey(load) !== currentKey &&
+          load.PickupDate &&
+          load.PickupDate >= today &&
+          (!currentLoad.PickupDate || load.PickupDate >= currentLoad.PickupDate)
+      )
+      .sort(compareMobileHomeLoads);
+
+    nextLoad = nextCandidates[0] || null;
+  }
+
+  return {
+    targetDate: today,
+    homeState,
+    currentLoad,
+    nextLoad
+  };
+}
+
+function buildMobileHomePayload(roster, items = []) {
+  const selection = getMobileHomeSelection(roster, items);
+
+  return {
+    success: true,
+    targetDate: selection.targetDate,
+    driver: {
+      id: roster.id,
+      truck: roster.truck,
+      name: roster.operatorTeamName || roster.tmsName || 'Truck ' + roster.truck,
+      tmsName: roster.tmsName,
+      soloOrTeam: roster.soloOrTeam
+    },
+    homeState: selection.homeState,
+    currentLoad: selection.currentLoad,
+    nextLoad: selection.nextLoad,
+    primaryAction: MOBILE_HOME_PRIMARY_ACTIONS[selection.homeState] || null
+  };
+}
+
+// ------------------------------------------------------------
+// POST /mobile/login
+// ------------------------------------------------------------
+
+app.post('/mobile/login', async (req, res) => {
+  try {
+    const truck = String(req.body?.truck || '').trim();
+    const pin = String(req.body?.pin || '').trim();
+
+    if (!truck || !pin) {
+      return res.status(400).json({
+        success: false,
+        error: 'Truck number and PIN are required.'
+      });
+    }
+
+    const graphToken = await getGraphToken();
+    const rosterItems = await getDriverRosterItems(graphToken);
+    const truckKey = normalizeTruckKey(truck);
+
+    const roster = rosterItems.find(
+      (item) =>
+        normalizeTruckKey(item.truck) === truckKey &&
+        normalizeText(item.status) === 'active'
+    );
+
+    // Deliberately use the same response whether the truck or PIN is wrong.
+    if (!roster || !roster.pin || String(roster.pin).trim() !== pin) {
+      return res.status(401).json({
+        success: false,
+        error: 'Truck number or PIN is incorrect.'
+      });
+    }
+
+    const sessionToken = createMobileSessionToken(roster);
+
+    res.json({
+      success: true,
+      token: sessionToken,
+      driver: {
+        id: roster.id,
+        truck: roster.truck,
+        name: roster.operatorTeamName || roster.tmsName || 'Truck ' + roster.truck,
+        tmsName: roster.tmsName,
+        driverType: roster.driverType,
+        soloOrTeam: roster.soloOrTeam
+      }
+    });
+  } catch (error) {
+    console.error('Mobile login failed:', error);
+
+    res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Unable to sign in to Kole Connect Mobile.'
+    });
+  }
+});
+
+// ------------------------------------------------------------
+// GET /mobile/me
+// ------------------------------------------------------------
+
+app.get('/mobile/me', requireMobileSession, async (req, res) => {
+  const roster = req.mobileDriver;
+
+  res.json({
+    success: true,
+    driver: {
+      id: roster.id,
+      truck: roster.truck,
+      name: roster.operatorTeamName || roster.tmsName || 'Truck ' + roster.truck,
+      tmsName: roster.tmsName,
+      driverType: roster.driverType,
+      soloOrTeam: roster.soloOrTeam,
+      emailAddress1: roster.emailAddress1,
+      cellPhone1: roster.cellPhone1
+    }
+  });
+});
+
+// ------------------------------------------------------------
+// GET /mobile/home
+// ------------------------------------------------------------
+
+app.get('/mobile/home', requireMobileSession, async (req, res) => {
+  try {
+    const graphToken = await getGraphToken();
+    const currentList = await getCurrentBidListingSource(graphToken);
+
+    if (!currentList) {
+      return res.status(404).json({
+        success: false,
+        error: 'The current Bid Listing is not available.'
+      });
+    }
+
+    const items = await getDashboardBidSource(graphToken, currentList, {
+      waitForRefresh: true
+    });
+
+    res.json(buildMobileHomePayload(req.mobileDriver, items));
+  } catch {
+    console.error('Mobile home failed.');
+
+    res.status(500).json({
+      success: false,
+      error: 'Unable to load your Mobile home right now.'
+    });
+  }
+});
+
+// ------------------------------------------------------------
+// GET /mobile/my-load
+// ------------------------------------------------------------
+
+app.get('/mobile/my-load', requireMobileSession, async (req, res) => {
+  try {
+    const graphToken = await getGraphToken();
+    const currentList = await getCurrentBidListingSource(graphToken);
+
+    if (!currentList) {
+      return res.status(404).json({
+        success: false,
+        error: 'The current Bid Listing is not available.'
+      });
+    }
+
+    const items = await getDashboardBidSource(graphToken, currentList, {
+      waitForRefresh: true
+    });
+    const selection = getMobileHomeSelection(req.mobileDriver, items);
+    const selectedItem = selection.currentLoad
+      ? items.find((item) => String(item?.id || '') === String(selection.currentLoad.id || ''))
+      : null;
+
+    res.json({
+      success: true,
+      driver: {
+        id: req.mobileDriver.id,
+        truck: req.mobileDriver.truck,
+        name: req.mobileDriver.operatorTeamName || req.mobileDriver.tmsName || 'Truck ' + req.mobileDriver.truck,
+        tmsName: req.mobileDriver.tmsName,
+        soloOrTeam: req.mobileDriver.soloOrTeam
+      },
+      homeState: selection.homeState,
+      hasLoad: Boolean(selectedItem),
+      load: selectedItem ? buildMobileLoadDetail(selectedItem) : null
+    });
+  } catch {
+    console.error('Mobile load failed.');
+
+    res.status(500).json({
+      success: false,
+      error: 'Unable to load your current load right now.'
     });
   }
 });
