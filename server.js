@@ -18957,7 +18957,7 @@ async function requireMobileSession(req, res, next) {
 }
 
 const MOBILE_HOME_PRIMARY_ACTIONS = Object.freeze({
-  paperwork_needed: Object.freeze({ type: 'upload_paperwork', label: 'Upload Paperwork' }),
+  delivery_upload_needed: Object.freeze({ type: 'upload_delivery', label: 'Upload Delivery Photos' }),
   delivering_today: Object.freeze({ type: 'view_delivery', label: 'View Delivery' }),
   in_transit: Object.freeze({ type: 'view_load', label: 'View Load' }),
   pickup_today: Object.freeze({ type: 'view_pickup', label: 'View Pickup' }),
@@ -18968,14 +18968,6 @@ function getMobileHomeText(value) {
   return String(getChoiceValue(value) || '').trim();
 }
 
-function hasMobileHomePaperworkSubmission(value) {
-  if (value === true) return true;
-  if (value === false || value === null || value === undefined) return false;
-
-  const normalized = normalizeText(getFlexibleFieldValue(value) ?? value);
-  return Boolean(normalized && !['false', 'no', '0', 'null'].includes(normalized));
-}
-
 function buildMobileHomeLoadSummary(item) {
   const fields = item?.fields || {};
 
@@ -18983,7 +18975,6 @@ function buildMobileHomeLoadSummary(item) {
     id: String(item?.id || ''),
     BOL: getMobileHomeText(fields.BOLNumber_x0028_Won_x0029_),
     BidID: getMobileHomeText(fields.BidID),
-    Customer: getMobileHomeText(fields.Company),
     Origin: getMobileHomeText(fields.Shipment_x0020_Origin),
     Destination: getMobileHomeText(fields.Shipment_x0020_Destination),
     PickupDate: normalizeSharePointBusinessDate(fields.Pickup_x0020_Offer_x0020_Date),
@@ -18997,8 +18988,7 @@ function buildMobileHomeLoadSummary(item) {
     Pickup1State: getMobileHomeText(fields.Pickup2State),
     Delivery1Name: getMobileHomeText(fields.Delivery1Name),
     Delivery1City: getMobileHomeText(fields.Delivery1City),
-    Delivery1State: getMobileHomeText(fields.Delivery1State),
-    PpwrkSubmitted: fields.PpwrkSubmitted ?? ''
+    Delivery1State: getMobileHomeText(fields.Delivery1State)
   };
 }
 
@@ -19026,7 +19016,6 @@ function buildMobileLoadDetail(item) {
     id: String(item?.id || ''),
     BOL: getMobileHomeText(fields.BOLNumber_x0028_Won_x0029_),
     BidID: getMobileHomeText(fields.BidID),
-    Customer: getMobileHomeText(fields.Company),
     Origin: getMobileHomeText(fields.Shipment_x0020_Origin),
     Destination: getMobileHomeText(fields.Shipment_x0020_Destination),
     Status: getMobileHomeText(fields.Status),
@@ -19065,8 +19054,7 @@ function buildMobileLoadDetail(item) {
     NoOfTarpsNeeded: getMobileOperationalValue(fields.No_x002e_ofTarpsNeeded),
     Route: getMobileOperationalValue(fields.Route),
     AircraftRelated: getMobileOperationalIndicator(fields.Aircraft_x0020_Related_x003f_),
-    TeamRequired: getMobileOperationalIndicator(fields.Team_x0020_Required),
-    PpwrkSubmitted: fields.PpwrkSubmitted ?? ''
+    TeamRequired: getMobileOperationalIndicator(fields.Team_x0020_Required)
   };
 }
 
@@ -19092,7 +19080,7 @@ function getMobileHomeLoadKey(load) {
   return String(load?.id || `${load?.BOL || ''}|${load?.BidID || ''}|${load?.PickupDate || ''}`);
 }
 
-function getMobileHomeSelection(roster, items = []) {
+function getMobileHomeSelection(roster, items = [], uploadEvidenceSets = {}) {
   const today = formatEasternDate();
   const truckKey = normalizeTruckKey(roster?.truck);
 
@@ -19113,14 +19101,18 @@ function getMobileHomeSelection(roster, items = []) {
       );
     })
     .map(buildMobileHomeLoadSummary)
+    .map((load) => addUploadEvidence(load, {
+      pickupEvidenceBols: uploadEvidenceSets.pickupEvidenceBols || new Set(),
+      deliveryEvidenceBols: uploadEvidenceSets.deliveryEvidenceBols || new Set()
+    }))
     .sort(compareMobileHomeLoads);
 
-  const paperworkNeeded = loads
+  const deliveryUploadNeeded = loads
     .filter(
       (load) =>
         load.DeliveryDate &&
         load.DeliveryDate <= today &&
-        !hasMobileHomePaperworkSubmission(load.PpwrkSubmitted)
+        !load.hasDeliveryEvidence
     )
     .sort((a, b) => {
       const deliveryDiff = a.DeliveryDate.localeCompare(b.DeliveryDate);
@@ -19140,9 +19132,9 @@ function getMobileHomeSelection(roster, items = []) {
   let homeState = 'no_load';
   let currentLoad = null;
 
-  if (paperworkNeeded.length) {
-    homeState = 'paperwork_needed';
-    currentLoad = paperworkNeeded[0];
+  if (deliveryUploadNeeded.length) {
+    homeState = 'delivery_upload_needed';
+    currentLoad = deliveryUploadNeeded[0];
   } else if (deliveringToday.length) {
     homeState = 'delivering_today';
     currentLoad = deliveringToday[0];
@@ -19178,12 +19170,13 @@ function getMobileHomeSelection(roster, items = []) {
     targetDate: today,
     homeState,
     currentLoad,
-    nextLoad
+    nextLoad,
+    loads
   };
 }
 
-function buildMobileHomePayload(roster, items = []) {
-  const selection = getMobileHomeSelection(roster, items);
+function buildMobileHomePayload(roster, items = [], uploadEvidenceSets = {}) {
+  const selection = getMobileHomeSelection(roster, items, uploadEvidenceSets);
 
   return {
     success: true,
@@ -19298,11 +19291,12 @@ app.get('/mobile/home', requireMobileSession, async (req, res) => {
       });
     }
 
-    const items = await getDashboardBidSource(graphToken, currentList, {
-      waitForRefresh: true
-    });
+    const [items, uploadEvidenceSets] = await Promise.all([
+      getDashboardBidSource(graphToken, currentList, { waitForRefresh: true }),
+      getUploadEvidenceSets(graphToken)
+    ]);
 
-    res.json(buildMobileHomePayload(req.mobileDriver, items));
+    res.json(buildMobileHomePayload(req.mobileDriver, items, uploadEvidenceSets));
   } catch {
     console.error('Mobile home failed.');
 
@@ -19319,6 +19313,15 @@ app.get('/mobile/home', requireMobileSession, async (req, res) => {
 
 app.get('/mobile/my-load', requireMobileSession, async (req, res) => {
   try {
+    const requestedLoadId = String(req.query?.loadId || '').trim();
+
+    if (requestedLoadId && !/^\d{1,12}$/.test(requestedLoadId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'The requested load is invalid.'
+      });
+    }
+
     const graphToken = await getGraphToken();
     const currentList = await getCurrentBidListingSource(graphToken);
 
@@ -19329,13 +19332,30 @@ app.get('/mobile/my-load', requireMobileSession, async (req, res) => {
       });
     }
 
-    const items = await getDashboardBidSource(graphToken, currentList, {
-      waitForRefresh: true
-    });
-    const selection = getMobileHomeSelection(req.mobileDriver, items);
-    const selectedItem = selection.currentLoad
-      ? items.find((item) => String(item?.id || '') === String(selection.currentLoad.id || ''))
+    const [items, uploadEvidenceSets] = await Promise.all([
+      getDashboardBidSource(graphToken, currentList, { waitForRefresh: true }),
+      getUploadEvidenceSets(graphToken)
+    ]);
+    const selection = getMobileHomeSelection(req.mobileDriver, items, uploadEvidenceSets);
+    const availableSelections = [selection.currentLoad, selection.nextLoad].filter(Boolean);
+    const selectedSummary = requestedLoadId
+      ? availableSelections.find((load) => String(load.id || '') === requestedLoadId)
+      : selection.currentLoad;
+
+    if (requestedLoadId && !selectedSummary) {
+      return res.status(404).json({
+        success: false,
+        error: 'That load is not available for this Mobile session.'
+      });
+    }
+
+    const selectedItem = selectedSummary
+      ? items.find((item) => String(item?.id || '') === String(selectedSummary.id || ''))
       : null;
+    const loadRole = selectedSummary && selection.nextLoad &&
+      String(selectedSummary.id || '') === String(selection.nextLoad.id || '')
+      ? 'next'
+      : 'current';
 
     res.json({
       success: true,
@@ -19347,6 +19367,7 @@ app.get('/mobile/my-load', requireMobileSession, async (req, res) => {
         soloOrTeam: req.mobileDriver.soloOrTeam
       },
       homeState: selection.homeState,
+      loadRole,
       hasLoad: Boolean(selectedItem),
       load: selectedItem ? buildMobileLoadDetail(selectedItem) : null
     });
