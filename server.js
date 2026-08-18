@@ -15625,6 +15625,7 @@ function getDashboardBidFieldSelect() {
     'Shipment_x0020_Origin',
     'Shipment_x0020_Destination',
     'Operator_x002f_Team',
+    'TMSName',
     'Truck_x0020_Number',
     'Pickup_x0020_Offer_x0020_Date',
     'Pickup1PickupTime',
@@ -15658,6 +15659,8 @@ function getDashboardBidFieldSelect() {
     'Route',
     'Aircraft_x0020_Related_x003f_',
     'Team_x0020_Required',
+    'PermitsRequested',
+    'Permits_x002f_Escort_x0020_Fees_',
     'PpwrkSubmitted',
     'Status',
     'Processed',
@@ -19123,6 +19126,7 @@ async function requireMobileSession(req, res, next) {
 }
 
 const MOBILE_HOME_PRIMARY_ACTIONS = Object.freeze({
+  pickup_upload_needed: Object.freeze({ type: 'upload_pickup', label: 'Upload Pickup Photos' }),
   delivery_upload_needed: Object.freeze({ type: 'upload_delivery', label: 'Upload Delivery Photos' }),
   delivering_today: Object.freeze({ type: 'view_delivery', label: 'View Delivery' }),
   in_transit: Object.freeze({ type: 'view_load', label: 'View Load' }),
@@ -19175,6 +19179,48 @@ function getMobileOperationalIndicator(value) {
   return resolved === '' ? null : parseBoolean(resolved);
 }
 
+function isMobileOversizedLoad(fields = {}) {
+  return (
+    parseBoolean(fields.PermitsRequested) ||
+    getNumberValue(fields.Permits_x002f_Escort_x0020_Fees_) > 0
+  );
+}
+
+async function getMobilePermitFolderWebUrl(token, item, roster) {
+  const fields = item?.fields || {};
+
+  if (
+    !isMobileOversizedLoad(fields) ||
+    !process.env.DISPATCH_ONEDRIVE_ID ||
+    !process.env.PERMIT_REQUESTS_FOLDER_ID
+  ) {
+    return '';
+  }
+
+  const bol = getMobileHomeText(fields.BOLNumber_x0028_Won_x0029_);
+
+  if (!bol) return '';
+
+  const permitRootItems = await getAllChildrenFromFolder(
+    token,
+    process.env.DISPATCH_ONEDRIVE_ID,
+    process.env.PERMIT_REQUESTS_FOLDER_ID
+  );
+  const candidateOperators = uniqueNonEmpty([
+    getMobileHomeText(fields.Operator_x002f_Team),
+    getMobileHomeText(fields.TMSName),
+    roster?.operatorTeamName,
+    roster?.tmsName
+  ]);
+
+  for (const operatorTeam of candidateOperators) {
+    const match = findPermitFolderMatch(permitRootItems, bol, operatorTeam);
+    if (match?.item?.webUrl) return match.item.webUrl;
+  }
+
+  return findPermitFolderMatch(permitRootItems, bol, '')?.item?.webUrl || '';
+}
+
 function buildMobileLoadDetail(item) {
   const fields = item?.fields || {};
 
@@ -19220,7 +19266,8 @@ function buildMobileLoadDetail(item) {
     NoOfTarpsNeeded: getMobileOperationalValue(fields.No_x002e_ofTarpsNeeded),
     Route: getMobileOperationalValue(fields.Route),
     AircraftRelated: getMobileOperationalIndicator(fields.Aircraft_x0020_Related_x003f_),
-    TeamRequired: getMobileOperationalIndicator(fields.Team_x0020_Required)
+    TeamRequired: getMobileOperationalIndicator(fields.Team_x0020_Required),
+    IsOversized: isMobileOversizedLoad(fields)
   };
 }
 
@@ -19273,28 +19320,43 @@ function getMobileHomeSelection(roster, items = [], uploadEvidenceSets = {}) {
       deliveryEvidenceBols: uploadEvidenceSets.deliveryEvidenceBols || new Set()
     }))
     .sort(compareMobileHomeLoads);
+  // Upload evidence advances the load in order: Pickup, then Delivery.
+  // A completed Delivery no longer competes with the truck's next active load.
+  const activeLoads = loads.filter((load) => !load.hasDeliveryEvidence);
 
-  const deliveryUploadNeeded = loads
+  const deliveryUploadNeeded = activeLoads
     .filter(
       (load) =>
         load.DeliveryDate &&
         load.DeliveryDate <= today &&
+        load.hasPickupEvidence &&
         !load.hasDeliveryEvidence
     )
     .sort((a, b) => {
       const deliveryDiff = a.DeliveryDate.localeCompare(b.DeliveryDate);
       return deliveryDiff || compareMobileHomeLoads(a, b);
     });
-  const deliveringToday = loads.filter((load) => load.DeliveryDate === today);
-  const inTransit = loads.filter(
+  const pickupUploadNeeded = activeLoads
+    .filter(
+      (load) =>
+        load.PickupDate &&
+        load.PickupDate <= today &&
+        !load.hasPickupEvidence
+    )
+    .sort(compareMobileHomeLoads);
+  const deliveringToday = activeLoads.filter(
+    (load) => load.DeliveryDate === today && load.hasPickupEvidence
+  );
+  const inTransit = activeLoads.filter(
     (load) =>
       load.PickupDate &&
       load.DeliveryDate &&
-      load.PickupDate < today &&
-      load.DeliveryDate > today
+      load.PickupDate <= today &&
+      load.DeliveryDate > today &&
+      load.hasPickupEvidence
   );
-  const pickupToday = loads.filter((load) => load.PickupDate === today);
-  const upcoming = loads.filter((load) => load.PickupDate && load.PickupDate > today);
+  const pickupToday = activeLoads.filter((load) => load.PickupDate === today);
+  const upcoming = activeLoads.filter((load) => load.PickupDate && load.PickupDate > today);
 
   let homeState = 'no_load';
   let currentLoad = null;
@@ -19302,6 +19364,9 @@ function getMobileHomeSelection(roster, items = [], uploadEvidenceSets = {}) {
   if (deliveryUploadNeeded.length) {
     homeState = 'delivery_upload_needed';
     currentLoad = deliveryUploadNeeded[0];
+  } else if (pickupUploadNeeded.length) {
+    homeState = 'pickup_upload_needed';
+    currentLoad = pickupUploadNeeded[0];
   } else if (deliveringToday.length) {
     homeState = 'delivering_today';
     currentLoad = deliveringToday[0];
@@ -19317,10 +19382,11 @@ function getMobileHomeSelection(roster, items = [], uploadEvidenceSets = {}) {
   }
 
   let nextLoad = null;
+  let upcomingLoads = [];
 
   if (currentLoad) {
     const currentKey = getMobileHomeLoadKey(currentLoad);
-    const nextCandidates = loads
+    upcomingLoads = activeLoads
       .filter(
         (load) =>
           getMobileHomeLoadKey(load) !== currentKey &&
@@ -19330,7 +19396,7 @@ function getMobileHomeSelection(roster, items = [], uploadEvidenceSets = {}) {
       )
       .sort(compareMobileHomeLoads);
 
-    nextLoad = nextCandidates[0] || null;
+    nextLoad = upcomingLoads[0] || null;
   }
 
   return {
@@ -19338,7 +19404,8 @@ function getMobileHomeSelection(roster, items = [], uploadEvidenceSets = {}) {
     homeState,
     currentLoad,
     nextLoad,
-    loads
+    upcomingLoads,
+    loads: activeLoads
   };
 }
 
@@ -19358,6 +19425,7 @@ function buildMobileHomePayload(roster, items = [], uploadEvidenceSets = {}) {
     homeState: selection.homeState,
     currentLoad: selection.currentLoad,
     nextLoad: selection.nextLoad,
+    upcomingLoads: selection.upcomingLoads,
     primaryAction: MOBILE_HOME_PRIMARY_ACTIONS[selection.homeState] || null
   };
 }
@@ -19504,7 +19572,10 @@ app.get('/mobile/my-load', requireMobileSession, async (req, res) => {
       getUploadEvidenceSets(graphToken)
     ]);
     const selection = getMobileHomeSelection(req.mobileDriver, items, uploadEvidenceSets);
-    const availableSelections = [selection.currentLoad, selection.nextLoad].filter(Boolean);
+    const availableSelections = [
+      selection.currentLoad,
+      ...(selection.upcomingLoads || [])
+    ].filter(Boolean);
     const selectedSummary = requestedLoadId
       ? availableSelections.find((load) => String(load.id || '') === requestedLoadId)
       : selection.currentLoad;
@@ -19519,10 +19590,30 @@ app.get('/mobile/my-load', requireMobileSession, async (req, res) => {
     const selectedItem = selectedSummary
       ? items.find((item) => String(item?.id || '') === String(selectedSummary.id || ''))
       : null;
-    const loadRole = selectedSummary && selection.nextLoad &&
-      String(selectedSummary.id || '') === String(selection.nextLoad.id || '')
-      ? 'next'
-      : 'current';
+    const selectedLoadId = String(selectedSummary?.id || '');
+    const currentLoadId = String(selection.currentLoad?.id || '');
+    const nextLoadId = String(selection.nextLoad?.id || '');
+    const loadRole = selectedLoadId && selectedLoadId === currentLoadId
+      ? 'current'
+      : selectedLoadId && selectedLoadId === nextLoadId
+        ? 'next'
+        : selectedLoadId
+          ? 'upcoming'
+          : 'current';
+    const selectedLoad = selectedItem ? buildMobileLoadDetail(selectedItem) : null;
+    let permitFolderWebUrl = '';
+
+    if (selectedItem && selectedLoad?.IsOversized) {
+      try {
+        permitFolderWebUrl = await getMobilePermitFolderWebUrl(
+          graphToken,
+          selectedItem,
+          req.mobileDriver
+        );
+      } catch {
+        console.warn('Mobile permit folder lookup failed.');
+      }
+    }
 
     res.json({
       success: true,
@@ -19536,7 +19627,9 @@ app.get('/mobile/my-load', requireMobileSession, async (req, res) => {
       homeState: selection.homeState,
       loadRole,
       hasLoad: Boolean(selectedItem),
-      load: selectedItem ? buildMobileLoadDetail(selectedItem) : null
+      load: selectedLoad
+        ? { ...selectedLoad, PermitFolderWebUrl: permitFolderWebUrl }
+        : null
     });
   } catch {
     console.error('Mobile load failed.');
