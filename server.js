@@ -11324,7 +11324,6 @@ app.post('/recruiting/candidates/:candidateId/mark-qualified', requireLookupAcce
     await graphPatch(token, `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${lists.candidates}/items/${encodeURIComponent(profile.candidate.spId)}/fields`, {
       CandidateStatus: RECRUITING_CANDIDATE_STATUS.QUALIFIED,
       RosterHandoffStatus: RECRUITING_ROSTER_HANDOFF_STATUS.PENDING,
-      QualifiedDate: profile.candidate.qualifiedDate || formatEasternDate(),
       LastContactDate: formatEasternDate(),
       ActiveFlag: false,
       QualificationStartedFlag: false,
@@ -11376,8 +11375,7 @@ app.post('/recruiting/candidates/:candidateId/driver-roster', requireLookupAcces
       RosterHandoffStatus: RECRUITING_ROSTER_HANDOFF_STATUS.CREATED,
       ActiveFlag: false,
       QualificationStartedFlag: false,
-      NextFollowUpDate: null,
-      QualifiedDate: profile.candidate.qualifiedDate || formatEasternDate()
+      NextFollowUpDate: null
     });
 
     try {
