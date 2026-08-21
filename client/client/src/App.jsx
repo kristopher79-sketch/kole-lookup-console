@@ -748,6 +748,7 @@ const DEFAULT_KOLE_USER_PREFERENCES = {
   hideRecruiting: false,
   recruitingDefaultOpen: true,
   skipStartupSplash: false,
+  muteRefreshSound: false,
   seasonalTheme: 'auto'
 };
 
@@ -2230,7 +2231,7 @@ export default function App() {
     lastRefreshCueAtRef.current = now;
     playBrandReveal();
 
-    if (sound) {
+    if (sound && !userPrefs.muteRefreshSound) {
       void playRefreshPlaneSound();
     }
   }
@@ -2731,8 +2732,8 @@ export default function App() {
 
             <section className="preferences-section">
               <div className="preferences-section-heading">
-                <h3>Startup behavior</h3>
-                <p>Keeps the dashboard loading normally, but hides the full-screen startup animation.</p>
+                <h3>Animation and sound</h3>
+                <p>Adjust optional feedback without changing dashboard refreshes or data.</p>
               </div>
 
               <div className="preferences-grid">
@@ -2741,6 +2742,12 @@ export default function App() {
                   description="Keeps normal dashboard loading, but removes the full-screen startup animation."
                   checked={userPrefs.skipStartupSplash}
                   onChange={(checked) => updateUserPreference('skipStartupSplash', checked)}
+                />
+                <PreferenceSwitch
+                  label="Mute plane refresh sound"
+                  description="Keeps the plane refresh animation visible, but turns off its sound."
+                  checked={userPrefs.muteRefreshSound}
+                  onChange={(checked) => updateUserPreference('muteRefreshSound', checked)}
                 />
               </div>
             </section>
