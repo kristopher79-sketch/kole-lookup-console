@@ -19,6 +19,7 @@ const DEFAULT_KOLE_AUTO_UPDATER_LIST_ID = 'fd5b0d2f-b0e7-4445-a36d-af753825a3ea'
 const DEFAULT_SALES_LEADS_LIST_ID = '86cc3352-fb75-421d-a5e4-4b16d011fd1e';
 const DEFAULT_SALES_LEADS_NOTES_LIST_NAME = 'Sales Leads Notes Log';
 const DEFAULT_SERVICE_LOCATIONS_LIST_NAME = 'Service Locations';
+const DEFAULT_SERVICE_LOCATION_NOTES_LIST_NAME = 'Service Location Notes';
 const ORDER_NOTES_DEFAULT_CACHE_MS = 60 * 1000;
 const ORDER_NOTE_MAX_LENGTH = 20000;
 const DEFAULT_CUSTOMER_BOOKING_TRENDS_LIST_ID = 'f899ef92-6489-43b1-9a9f-19c5f0ee83b9';
@@ -74,6 +75,10 @@ let cachedServiceLocationsListId = null;
 let cachedServiceLocationsListIdAt = 0;
 let cachedServiceLocationsReport = null;
 let cachedServiceLocationsReportAt = 0;
+let cachedServiceLocationNotesListId = null;
+let cachedServiceLocationNotesListIdAt = 0;
+let cachedServiceLocationNotesByKey = null;
+let cachedServiceLocationNotesByKeyAt = 0;
 let cachedGraphToken = null;
 let cachedGraphTokenExpiresAt = 0;
 let graphTokenRefreshPromise = null;
@@ -16545,6 +16550,7 @@ function getDashboardBidFieldSelect() {
     'Pickup2Zip',
     'Pickup1ContactName',
     'Pickup1ContactNumber',
+    'OriginLocationKey',
     'Expected_x0020_Delivery_x0020_Da',
     'Delivery1Time',
     'Delivery1AMorPM',
@@ -16555,6 +16561,8 @@ function getDashboardBidFieldSelect() {
     'Delivery1Zip',
     'Delivery1ContactName',
     'Delivery1ContactNumber',
+    'DestLocationKey',
+    'OrderNotes',
     'Freight_x0020_Description',
     'Item1QTY',
     'Item1Description',
@@ -19595,6 +19603,122 @@ async function getServiceLocationsReport(token, forceRefresh = false) {
   return report;
 }
 
+function getServiceLocationRawField(fields, aliases) {
+  for (const name of aliases) {
+    if (fields?.[name] !== undefined && fields?.[name] !== null && fields?.[name] !== '') {
+      return fields[name];
+    }
+  }
+
+  const normalizedAliases = aliases.map(normalizeGraphName);
+  const matchedKey = Object.keys(fields || {}).find((key) => normalizedAliases.includes(normalizeGraphName(key)));
+  return matchedKey ? fields[matchedKey] : '';
+}
+
+function normalizeServiceLocationMapLink(value) {
+  const raw = value && typeof value === 'object'
+    ? value.Url || value.url || value.Value || value.value || ''
+    : value;
+  const candidate = String(raw || '').trim();
+  if (!candidate) return '';
+
+  try {
+    const parsed = new URL(candidate);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.toString() : '';
+  } catch {
+    return '';
+  }
+}
+
+async function getServiceLocationNotesListId(token, forceRefresh = false) {
+  const configured = String(process.env.SERVICE_LOCATION_NOTES_LIST_ID || '').trim();
+  if (configured) return configured;
+
+  const now = Date.now();
+  if (
+    !forceRefresh &&
+    cachedServiceLocationNotesListIdAt &&
+    now - cachedServiceLocationNotesListIdAt < BID_LIST_CACHE_MS
+  ) {
+    return cachedServiceLocationNotesListId;
+  }
+
+  const data = await graphGet(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists?$select=id,displayName,list&$top=999`
+  );
+  const target = normalizeGraphName(DEFAULT_SERVICE_LOCATION_NOTES_LIST_NAME);
+  const matched = (data.value || []).find((list) => (
+    list?.list?.hidden !== true && normalizeGraphName(list.displayName) === target
+  ));
+
+  cachedServiceLocationNotesListId = matched?.id || '';
+  cachedServiceLocationNotesListIdAt = now;
+  return cachedServiceLocationNotesListId;
+}
+
+function getServiceLocationNotesFieldSelect() {
+  return ['LocationKey', 'FacilityNotes', 'MapLink'].join(',');
+}
+
+function cleanServiceLocationNotesItem(item) {
+  const fields = item?.fields || {};
+  const locationKey = String(getServiceLocationField(fields, ['LocationKey', 'Location Key']) || '').trim();
+
+  return {
+    locationKey,
+    facilityNotes: stripHtml(getServiceLocationField(fields, ['FacilityNotes', 'Facility Notes'])),
+    mapLink: normalizeServiceLocationMapLink(getServiceLocationRawField(fields, ['MapLink', 'Map Link']))
+  };
+}
+
+async function getServiceLocationNotesByKey(token, forceRefresh = false) {
+  const now = Date.now();
+  if (
+    !forceRefresh &&
+    cachedServiceLocationNotesByKey &&
+    now - cachedServiceLocationNotesByKeyAt < SERVICE_LOCATIONS_CACHE_MS
+  ) {
+    return cachedServiceLocationNotesByKey;
+  }
+
+  const listId = await getServiceLocationNotesListId(token, forceRefresh);
+  if (!listId) {
+    const error = new Error(`${DEFAULT_SERVICE_LOCATION_NOTES_LIST_NAME} was not found. Set SERVICE_LOCATION_NOTES_LIST_ID or confirm the list display name.`);
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const result = await getAllListItemsWithFieldsResilient(token, listId, getServiceLocationNotesFieldSelect());
+  const notesByKey = new Map();
+
+  result.items.map(cleanServiceLocationNotesItem).forEach((record) => {
+    const key = normalizeText(record.locationKey);
+    if (!key) return;
+
+    const existing = notesByKey.get(key);
+    if (!existing) {
+      notesByKey.set(key, record);
+      return;
+    }
+
+    if (
+      existing.facilityNotes !== record.facilityNotes ||
+      existing.mapLink !== record.mapLink
+    ) {
+      notesByKey.set(key, { locationKey: record.locationKey, ambiguous: true });
+    }
+  });
+
+  if (result.usedFallback) {
+    console.warn('Service Location Notes selected-field lookup failed; the full-field fallback succeeded.');
+  }
+
+  cachedServiceLocationNotesByKey = notesByKey;
+  cachedServiceLocationNotesByKeyAt = now;
+  return notesByKey;
+}
+
 function getServiceLocationText(body, key) {
   return String(body?.[key] ?? '').trim();
 }
@@ -20094,6 +20218,199 @@ function isMobileOversizedLoad(fields = {}) {
   );
 }
 
+const MOBILE_ADDRESS_TOKEN_REPLACEMENTS = Object.freeze({
+  avenue: 'ave',
+  boulevard: 'blvd',
+  circle: 'cir',
+  court: 'ct',
+  drive: 'dr',
+  east: 'e',
+  highway: 'hwy',
+  lane: 'ln',
+  northeast: 'ne',
+  northwest: 'nw',
+  parkway: 'pkwy',
+  place: 'pl',
+  road: 'rd',
+  south: 's',
+  southeast: 'se',
+  southwest: 'sw',
+  street: 'st',
+  terrace: 'ter',
+  trail: 'trl',
+  turnpike: 'tpke',
+  west: 'w'
+});
+
+function normalizeMobileAddressText(value) {
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => MOBILE_ADDRESS_TOKEN_REPLACEMENTS[token] || token)
+    .join(' ');
+}
+
+function normalizeMobilePostalCode(value) {
+  return String(value || '').replace(/\D/g, '').slice(0, 5);
+}
+
+function buildMobileServiceLocationAddressKey({ address1, city, state, zip }) {
+  const normalizedAddress = normalizeMobileAddressText(address1);
+  if (!normalizedAddress) return '';
+
+  return [
+    normalizedAddress,
+    normalizeMobileAddressText(city),
+    normalizeMobileAddressText(state),
+    normalizeMobilePostalCode(zip)
+  ].join('|');
+}
+
+function getMobileServiceLocationNames(location) {
+  return uniqueNonEmpty([
+    location?.Title,
+    ...String(location?.SearchAliases || '').split(/[\n,;|]+/)
+  ]).map(normalizeSearchValue).filter(Boolean);
+}
+
+function resolveMobileServiceLocation(stop, serviceLocations = []) {
+  const directLocationKey = String(stop?.locationKey || '').trim();
+  if (directLocationKey) {
+    return { status: 'resolved_direct', locationKey: directLocationKey };
+  }
+
+  const addressKey = buildMobileServiceLocationAddressKey(stop || {});
+  if (!addressKey) return { status: 'no_match', locationKey: '' };
+
+  const candidates = serviceLocations.filter((location) => (
+    location?.Active !== false &&
+    String(location?.LocationID || '').trim() &&
+    buildMobileServiceLocationAddressKey({
+      address1: location?.Address1,
+      city: location?.City,
+      state: location?.State,
+      zip: location?.PostalCode
+    }) === addressKey
+  ));
+
+  if (candidates.length === 0) return { status: 'no_match', locationKey: '' };
+
+  const stopName = normalizeSearchValue(stop?.name);
+  if (stopName) {
+    const nameMatches = candidates.filter((location) => getMobileServiceLocationNames(location).includes(stopName));
+    if (nameMatches.length === 1) {
+      return { status: 'resolved_address_name', locationKey: nameMatches[0].LocationID };
+    }
+    if (nameMatches.length > 1) return { status: 'ambiguous', locationKey: '' };
+  }
+
+  if (candidates.length === 1) {
+    return { status: 'resolved_unique_address', locationKey: candidates[0].LocationID };
+  }
+
+  return { status: 'ambiguous', locationKey: '' };
+}
+
+function getMobileServiceLocationStops(item) {
+  const fields = item?.fields || {};
+
+  return {
+    pickup: {
+      locationKey: getMobileHomeText(fields.OriginLocationKey),
+      name: getMobileHomeText(fields.Pickup1Name),
+      address1: getMobileHomeText(fields.Pickup1Address1),
+      city: getMobileHomeText(fields.Pickup1City),
+      state: getMobileHomeText(fields.Pickup2State),
+      zip: getMobileHomeText(fields.Pickup2Zip)
+    },
+    delivery: {
+      locationKey: getMobileHomeText(fields.DestLocationKey),
+      name: getMobileHomeText(fields.Delivery1Name),
+      address1: getMobileHomeText(fields.Deliver1Address1),
+      city: getMobileHomeText(fields.Delivery1City),
+      state: getMobileHomeText(fields.Delivery1State),
+      zip: getMobileHomeText(fields.Delivery1Zip)
+    }
+  };
+}
+
+function buildMobileResolvedServiceLocation(resolution, notesByKey) {
+  if (!resolution?.locationKey) return null;
+
+  const note = notesByKey?.get(normalizeText(resolution.locationKey));
+  if (note?.ambiguous) {
+    return {
+      locationKey: resolution.locationKey,
+      facilityNotes: '',
+      mapLink: ''
+    };
+  }
+
+  return {
+    locationKey: resolution.locationKey,
+    facilityNotes: note?.facilityNotes || '',
+    mapLink: note?.mapLink || ''
+  };
+}
+
+async function getMobileServiceLocationDetails(token, item) {
+  const stops = getMobileServiceLocationStops(item);
+  let serviceLocations = [];
+
+  if (!stops.pickup.locationKey || !stops.delivery.locationKey) {
+    try {
+      const report = await getServiceLocationsReport(token);
+      serviceLocations = report.records || [];
+    } catch (error) {
+      console.warn('Mobile Service Locations retrieval failed; address-based location notes were omitted.', {
+        statusCode: Number(error?.statusCode) || null
+      });
+    }
+  }
+
+  const pickupResolution = resolveMobileServiceLocation(stops.pickup, serviceLocations);
+  const deliveryResolution = resolveMobileServiceLocation(stops.delivery, serviceLocations);
+
+  if (pickupResolution.status === 'ambiguous') {
+    console.warn('Mobile pickup Service Location match was ambiguous; location notes were omitted.');
+  }
+  if (deliveryResolution.status === 'ambiguous') {
+    console.warn('Mobile delivery Service Location match was ambiguous; location notes were omitted.');
+  }
+
+  const hasResolvedLocation = pickupResolution.locationKey || deliveryResolution.locationKey;
+  if (!hasResolvedLocation) {
+    return { pickupServiceLocation: null, deliveryServiceLocation: null };
+  }
+
+  let notesByKey = null;
+  try {
+    notesByKey = await getServiceLocationNotesByKey(token);
+  } catch (error) {
+    console.warn('Mobile Service Location Notes retrieval failed; the load will continue without location notes.', {
+      statusCode: Number(error?.statusCode) || null
+    });
+  }
+
+  const pickupServiceLocation = buildMobileResolvedServiceLocation(pickupResolution, notesByKey);
+  const deliveryServiceLocation = buildMobileResolvedServiceLocation(deliveryResolution, notesByKey);
+
+  if (pickupServiceLocation && notesByKey?.get(normalizeText(pickupServiceLocation.locationKey))?.ambiguous) {
+    console.warn('Multiple Service Location Notes records conflict for the pickup Location Key; notes were omitted.');
+  }
+  if (deliveryServiceLocation && notesByKey?.get(normalizeText(deliveryServiceLocation.locationKey))?.ambiguous) {
+    console.warn('Multiple Service Location Notes records conflict for the delivery Location Key; notes were omitted.');
+  }
+
+  return { pickupServiceLocation, deliveryServiceLocation };
+}
+
 async function getMobilePermitFolderWebUrl(token, item, roster) {
   const fields = item?.fields || {};
 
@@ -20161,6 +20478,8 @@ function buildMobileLoadDetail(item) {
     Delivery1Zip: getMobileHomeText(fields.Delivery1Zip),
     Delivery1ContactName: getMobileHomeText(fields.Delivery1ContactName),
     Delivery1ContactNumber: getMobileHomeText(fields.Delivery1ContactNumber),
+
+    OrderNotes: stripHtml(getMobileHomeText(fields.OrderNotes)),
 
     Freight: getMobileOperationalValue(fields.Freight_x0020_Description),
     Item1QTY: getMobileOperationalValue(fields.Item1QTY),
@@ -20510,17 +20829,24 @@ app.get('/mobile/my-load', requireMobileSession, async (req, res) => {
           : 'current';
     const selectedLoad = selectedItem ? buildMobileLoadDetail(selectedItem) : null;
     let permitFolderWebUrl = '';
+    let serviceLocationDetails = {
+      pickupServiceLocation: null,
+      deliveryServiceLocation: null
+    };
 
-    if (selectedItem && selectedLoad?.IsOversized) {
-      try {
-        permitFolderWebUrl = await getMobilePermitFolderWebUrl(
-          graphToken,
-          selectedItem,
-          req.mobileDriver
-        );
-      } catch {
-        console.warn('Mobile permit folder lookup failed.');
-      }
+    if (selectedItem) {
+      [serviceLocationDetails, permitFolderWebUrl] = await Promise.all([
+        getMobileServiceLocationDetails(graphToken, selectedItem).catch(() => {
+          console.warn('Mobile Service Location hydration failed; the load will continue without location notes.');
+          return { pickupServiceLocation: null, deliveryServiceLocation: null };
+        }),
+        selectedLoad?.IsOversized
+          ? getMobilePermitFolderWebUrl(graphToken, selectedItem, req.mobileDriver).catch(() => {
+            console.warn('Mobile permit folder lookup failed.');
+            return '';
+          })
+          : Promise.resolve('')
+      ]);
     }
 
     res.json({
@@ -20536,7 +20862,11 @@ app.get('/mobile/my-load', requireMobileSession, async (req, res) => {
       loadRole,
       hasLoad: Boolean(selectedItem),
       load: selectedLoad
-        ? { ...selectedLoad, PermitFolderWebUrl: permitFolderWebUrl }
+        ? {
+          ...selectedLoad,
+          ...serviceLocationDetails,
+          PermitFolderWebUrl: permitFolderWebUrl
+        }
         : null
     });
   } catch {
