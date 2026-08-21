@@ -28,6 +28,8 @@ const DEFAULT_NO_AVAILABILITY_2024_LIST_ID = '8336e21e-38bb-47c0-bc01-6fea891b7c
 const DEFAULT_AVAILABLE_TRUCKS_SINGLE_LINE_LIST_ID = '67edb153-a389-474a-a7dd-d3bc0d746952';
 const DEFAULT_AVAILABLE_EQUIPMENT_SOURCE_LIST_ID = '96af7972-58ff-4bb8-b5a6-ca86f4d19ee6';
 const DEFAULT_AVAILABLE_TRUCKS_EMAIL_LIST_ID = '2458883d-ea8b-4761-8047-a04e35e9f93f';
+const DEFAULT_CONTRACT_LANES_LIST_NAME = 'Contract Lanes';
+const DEFAULT_DOE_DIESEL_LIST_NAME = 'DOE Average Diesel Price';
 const DRIVER_TIME_OFF_DEFAULT_REPORT_YEARS_BACK = 3;
 const DRIVER_TIME_OFF_UPCOMING_DAYS = 30;
 const AVAILABLE_TRUCKS_DEFAULT_LOOKBACK_DAYS = 30;
@@ -41,6 +43,7 @@ const QUOTE_ENGINE_SCHEMA_CACHE_MS = 5 * 60 * 1000;
 const QUOTE_ENGINE_OPTIONS_CACHE_MS = 5 * 60 * 1000;
 const QUOTE_ENGINE_COMPARABLE_CACHE_MS = 5 * 60 * 1000;
 const QUOTE_ENGINE_PUBLISH_CACHE_MS = 30 * 60 * 1000;
+const CONTRACT_LANES_CACHE_MS = 5 * 60 * 1000;
 const QUOTE_ENGINE_BID_ID_POLL_TIMEOUT_MS = Math.min(
   60 * 1000,
   Math.max(5 * 1000, Number(process.env.QUOTE_ENGINE_BID_ID_POLL_TIMEOUT_MS) || 20 * 1000)
@@ -84,10 +87,19 @@ const cachedQuoteComparableItemsByList = new Map();
 const cachedQuotePublishResults = new Map();
 const inFlightQuotePublishRequests = new Map();
 const pendingQuoteAuditContexts = new Map();
+const cachedContractLaneBookingResults = new Map();
+const inFlightContractLaneBookings = new Map();
+const pendingContractLaneBookings = new Map();
 let cachedQuoteEngineSchema = null;
 let cachedQuoteEngineSchemaAt = 0;
 let cachedQuoteEngineOptions = null;
 let cachedQuoteEngineOptionsAt = 0;
+let cachedContractLaneListId = '';
+let cachedContractLaneListIdAt = 0;
+let cachedDoeDieselListId = '';
+let cachedDoeDieselListIdAt = 0;
+let cachedContractLaneSourceData = null;
+let cachedContractLaneSourceDataAt = 0;
 const BID_LIST_CACHE_MS = 5 * 60 * 1000;
 const BID_ITEM_CACHE_MS = Number(process.env.BID_ITEM_CACHE_MS || 2 * 60 * 1000);
 const OPERATIONS_TODAY_CACHE_MS = Number(process.env.OPERATIONS_TODAY_CACHE_MS || 60 * 1000);
@@ -1481,7 +1493,7 @@ async function getQuoteEngineCurrentList(token) {
 }
 
 async function getAllQuoteEngineColumns(token, listId) {
-  let url = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/columns?$select=id,name,displayName,required,hidden,readOnly,lookup,boolean,choice&$top=999`;
+  let url = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/columns?$select=id,name,displayName,required,hidden,readOnly,lookup,text,number,currency,dateTime,boolean,choice&$top=999`;
   const columns = [];
 
   while (url) {
@@ -2698,6 +2710,680 @@ async function publishQuoteEngineBid(token, draft, recommendation, currentList, 
   };
 
   setCacheRecord(cachedQuotePublishResults, requestCacheKey, finalResult, 40);
+  return finalResult;
+}
+
+const CONTRACT_LANE_SOURCE_FIELD_SELECT = [
+  'Title',
+  'ContractLaneID',
+  'RTXItemID',
+  'ContractProgram',
+  'AllocationType',
+  'OriginCity',
+  'OriginState',
+  'OriginZip',
+  'DestinationCity',
+  'DestinationState',
+  'DestinationZip',
+  'EquipmentType',
+  'ContractMiles',
+  'BasePrice',
+  'AllocatedVolume',
+  'BusinessRequirements',
+  'FSCProgram',
+  'EffectiveDate',
+  'ExpirationDate',
+  'Active',
+  'RateVersion'
+].join(',');
+
+const CONTRACT_LANE_DOE_FIELD_SELECT = [
+  'PostingDate',
+  'AverageWeeklyPrice',
+  'PWUFSC',
+  'PWUFSCEffectiveDate'
+].join(',');
+
+const CONTRACT_LANE_REQUIRED_BID_COLUMNS = Object.freeze([
+  'ContractOrder',
+  'ContractLaneID',
+  'ContractProgram',
+  'ContractBaseRate',
+  'ContractMiles',
+  'ContractFSCRate',
+  'ContractFSCAmount',
+  'ContractRateVersion'
+]);
+
+function getContractLaneError(message, statusCode = 400, code = '') {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  if (code) error.code = code;
+  return error;
+}
+
+function parseContractNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(String(value).replace(/[$,]/g, '').trim());
+  return Number.isFinite(number) ? number : null;
+}
+
+function roundContractCurrency(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+function formatContractLaneLocation(city, state, zip) {
+  const cityState = [String(city || '').trim(), String(state || '').trim()].filter(Boolean).join(', ');
+  return [cityState, String(zip || '').trim()].filter(Boolean).join(' ');
+}
+
+function cleanContractLaneItem(item) {
+  const fields = item?.fields || {};
+  const contractMiles = parseContractNumber(fields.ContractMiles);
+  const basePrice = parseContractNumber(fields.BasePrice);
+
+  return {
+    id: String(item?.id || '').trim(),
+    laneName: String(fields.Title || '').trim(),
+    contractLaneId: String(fields.ContractLaneID || '').trim(),
+    rtxItemId: fields.RTXItemID === null || fields.RTXItemID === undefined ? '' : String(fields.RTXItemID).trim(),
+    contractProgram: String(fields.ContractProgram || '').trim(),
+    allocationType: String(getFlexibleFieldValue(fields.AllocationType) || fields.AllocationType || '').trim(),
+    originCity: String(fields.OriginCity || '').trim(),
+    originState: String(fields.OriginState || '').trim(),
+    originZip: String(fields.OriginZip || '').trim(),
+    destinationCity: String(fields.DestinationCity || '').trim(),
+    destinationState: String(fields.DestinationState || '').trim(),
+    destinationZip: String(fields.DestinationZip || '').trim(),
+    origin: formatContractLaneLocation(fields.OriginCity, fields.OriginState, fields.OriginZip),
+    destination: formatContractLaneLocation(fields.DestinationCity, fields.DestinationState, fields.DestinationZip),
+    equipmentType: String(fields.EquipmentType || '').trim(),
+    contractMiles,
+    basePrice,
+    allocatedVolume: parseContractNumber(fields.AllocatedVolume),
+    businessRequirements: String(fields.BusinessRequirements || '').trim(),
+    fscProgram: String(getFlexibleFieldValue(fields.FSCProgram) || fields.FSCProgram || '').trim(),
+    effectiveDate: normalizeSharePointBusinessDate(fields.EffectiveDate),
+    expirationDate: normalizeSharePointBusinessDate(fields.ExpirationDate),
+    active: parseBoolean(fields.Active),
+    rateVersion: String(fields.RateVersion || '').trim(),
+    valid: Boolean(
+      item?.id &&
+      String(fields.ContractLaneID || '').trim() &&
+      Number.isFinite(contractMiles) &&
+      contractMiles > 0 &&
+      Number.isFinite(basePrice) &&
+      basePrice >= 0
+    )
+  };
+}
+
+function cleanContractDoeItem(item) {
+  const fields = item?.fields || {};
+  const effectiveDate = normalizeSharePointBusinessDate(fields.PWUFSCEffectiveDate);
+  const rate = parseContractNumber(fields.PWUFSC);
+
+  return {
+    id: String(item?.id || '').trim(),
+    postingDate: normalizeSharePointBusinessDate(fields.PostingDate),
+    effectiveDate,
+    rate,
+    valid: Boolean(effectiveDate && Number.isFinite(rate) && rate >= 0)
+  };
+}
+
+async function getContractLaneListId(token, forceRefresh = false) {
+  const configured = String(process.env.CONTRACT_LANES_LIST_ID || '').trim();
+  if (configured) return configured;
+
+  const now = Date.now();
+  if (
+    !forceRefresh &&
+    cachedContractLaneListIdAt &&
+    now - cachedContractLaneListIdAt < CONTRACT_LANES_CACHE_MS
+  ) {
+    return cachedContractLaneListId;
+  }
+
+  cachedContractLaneListId = await getListIdByDisplayName(token, DEFAULT_CONTRACT_LANES_LIST_NAME);
+  cachedContractLaneListIdAt = now;
+  return cachedContractLaneListId;
+}
+
+async function getDoeDieselListId(token, forceRefresh = false) {
+  const configured = String(process.env.DOE_DIESEL_LIST_ID || '').trim();
+  if (configured) return configured;
+
+  const now = Date.now();
+  if (
+    !forceRefresh &&
+    cachedDoeDieselListIdAt &&
+    now - cachedDoeDieselListIdAt < CONTRACT_LANES_CACHE_MS
+  ) {
+    return cachedDoeDieselListId;
+  }
+
+  cachedDoeDieselListId = await getListIdByDisplayName(token, DEFAULT_DOE_DIESEL_LIST_NAME);
+  cachedDoeDieselListIdAt = now;
+  return cachedDoeDieselListId;
+}
+
+async function getContractLaneSourceData(token, options = {}) {
+  const forceRefresh = options.forceRefresh === true;
+  const now = Date.now();
+
+  if (
+    !forceRefresh &&
+    cachedContractLaneSourceData &&
+    now - cachedContractLaneSourceDataAt < CONTRACT_LANES_CACHE_MS
+  ) {
+    return cachedContractLaneSourceData;
+  }
+
+  const [contractLaneListId, doeListId] = await Promise.all([
+    getContractLaneListId(token, forceRefresh),
+    getDoeDieselListId(token, forceRefresh)
+  ]);
+
+  if (!contractLaneListId) {
+    throw getContractLaneError('The Contract Lanes SharePoint list was not found.', 503, 'CONTRACT_LANES_LIST_NOT_FOUND');
+  }
+
+  if (!doeListId) {
+    throw getContractLaneError('The DOE fuel-price SharePoint list was not found.', 503, 'CONTRACT_DOE_LIST_NOT_FOUND');
+  }
+
+  const [laneBundle, doeBundle] = await Promise.all([
+    getAllListItemsWithFieldsResilient(token, contractLaneListId, CONTRACT_LANE_SOURCE_FIELD_SELECT),
+    getAllListItemsWithFieldsResilient(token, doeListId, CONTRACT_LANE_DOE_FIELD_SELECT)
+  ]);
+  const allLanes = (laneBundle.items || []).map(cleanContractLaneItem);
+  const lanes = allLanes
+    .filter((lane) => lane.active && lane.valid)
+    .map(({ valid, ...lane }) => lane)
+    .sort((a, b) => {
+      const allocationDiff = String(a.allocationType).localeCompare(String(b.allocationType));
+      if (allocationDiff !== 0) return allocationDiff;
+      return String(a.laneName || a.contractLaneId).localeCompare(String(b.laneName || b.contractLaneId), undefined, {
+        sensitivity: 'base',
+        numeric: true
+      });
+    });
+  const doeRecords = (doeBundle.items || [])
+    .map(cleanContractDoeItem)
+    .filter((record) => record.valid)
+    .map(({ valid, ...record }) => record)
+    .sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate) || Number(a.id || 0) - Number(b.id || 0));
+  const warnings = [];
+  const invalidActiveLaneCount = allLanes.filter((lane) => lane.active && !lane.valid).length;
+
+  if (invalidActiveLaneCount > 0) {
+    warnings.push(`${invalidActiveLaneCount} active contract lane record${invalidActiveLaneCount === 1 ? ' was' : 's were'} excluded because required pricing fields were incomplete.`);
+  }
+  if (laneBundle.usedFallback) warnings.push('Contract Lane fields were loaded with the resilient full-field fallback.');
+  if (doeBundle.usedFallback) warnings.push('DOE fuel fields were loaded with the resilient full-field fallback.');
+  if (doeRecords.length === 0) warnings.push('No valid PW fuel-surcharge records are currently available.');
+
+  cachedContractLaneSourceData = {
+    contractLaneListId,
+    doeListId,
+    lanes,
+    doeRecords,
+    warnings
+  };
+  cachedContractLaneSourceDataAt = now;
+  return cachedContractLaneSourceData;
+}
+
+function resolveContractLanePricing(lane, doeRecords, requestedPickupDate, options = {}) {
+  if (!isValidDateInput(requestedPickupDate)) {
+    throw getContractLaneError('Requested Pickup Date must be a valid date.', 400, 'CONTRACT_INVALID_PICKUP_DATE');
+  }
+
+  if (options.validateLaneWindow !== false) {
+    if (lane.effectiveDate && requestedPickupDate < lane.effectiveDate) {
+      throw getContractLaneError('Requested Pickup Date is before this contract lane becomes effective.', 409, 'CONTRACT_LANE_NOT_EFFECTIVE');
+    }
+    if (lane.expirationDate && requestedPickupDate > lane.expirationDate) {
+      throw getContractLaneError('Requested Pickup Date is after this contract lane expires.', 409, 'CONTRACT_LANE_EXPIRED');
+    }
+  }
+
+  const applicableRecords = doeRecords.filter((record) => record.effectiveDate <= requestedPickupDate);
+  const applicable = applicableRecords[applicableRecords.length - 1];
+  const latestAvailable = doeRecords[doeRecords.length - 1];
+
+  if (!applicable || !latestAvailable) {
+    throw getContractLaneError(
+      'No PW fuel-surcharge record is effective for the requested pickup date.',
+      409,
+      'CONTRACT_FSC_NOT_AVAILABLE'
+    );
+  }
+
+  const fscAmount = roundContractCurrency(lane.contractMiles * applicable.rate);
+  const quotedTotal = roundContractCurrency(lane.basePrice + fscAmount);
+  const provisional = requestedPickupDate > latestAvailable.effectiveDate;
+
+  return {
+    requestedPickupDate,
+    fscRate: applicable.rate,
+    fscEffectiveDate: applicable.effectiveDate,
+    latestAvailableEffectiveDate: latestAvailable.effectiveDate,
+    fscAmount,
+    quotedTotal,
+    provisional,
+    pricingStatus: provisional ? 'estimate' : 'final',
+    provisionalMessage: provisional
+      ? `The latest available PW fuel rate is effective ${latestAvailable.effectiveDate}. This pickup date is later, so the displayed total will be booked as an estimate and should be finalized during billing.`
+      : ''
+  };
+}
+
+function assertContractLaneBidSchema(schema) {
+  const unavailable = CONTRACT_LANE_REQUIRED_BID_COLUMNS.filter((name) => {
+    const column = schema.columnsByName.get(name);
+    return !column || column.readOnly === true;
+  });
+
+  if (unavailable.length > 0) {
+    throw getContractLaneError(
+      'Contract Lane booking is unavailable because the Bid Listing contract mapping is incomplete or read-only.',
+      503,
+      'CONTRACT_BID_SCHEMA_MISMATCH'
+    );
+  }
+
+  if (!schema.columnsByName.get('ContractOrder')?.boolean) {
+    throw getContractLaneError(
+      'Contract Lane booking is unavailable because the Contract Order field is not configured as Yes/No.',
+      503,
+      'CONTRACT_BID_SCHEMA_MISMATCH'
+    );
+  }
+}
+
+function resolveContractBidChoice(schema, columnName, label, requestedValue) {
+  const column = schema.columnsByName.get(columnName);
+  const choices = Array.isArray(column?.choice?.choices) ? column.choice.choices : [];
+
+  if (!column || column.readOnly === true || choices.length === 0) {
+    throw getContractLaneError(`${label} choice metadata is unavailable in Bid Listing.`, 503, 'CONTRACT_CHOICE_SCHEMA_MISMATCH');
+  }
+
+  return resolveQuoteChoiceValue({ label, choices }, requestedValue);
+}
+
+function getContractLaneDriverChoice(option, schema) {
+  try {
+    return {
+      operator: resolveQuoteChoiceValue(schema.quoteChoices.operator, option.driverName),
+      truck: resolveQuoteChoiceValue(schema.quoteChoices.truck, option.unitNo)
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function getContractLaneDriverOptions(token, schema) {
+  if (!process.env.DRIVER_ROSTER_LIST_ID) {
+    return {
+      options: [],
+      warning: 'Driver Roster is not configured, so Contract Lane booking is unavailable.'
+    };
+  }
+
+  const rosterOptions = await getAvailableTruckRosterOptions(token);
+  const mappedOptions = rosterOptions
+    .map((option) => {
+      const choice = getContractLaneDriverChoice(option, schema);
+      if (!choice) return null;
+      return {
+        key: option.key,
+        driverName: choice.operator,
+        unitNo: choice.truck,
+        equipmentType: option.equipmentType || '',
+        trailerType: option.trailerType || '',
+        soloOrTeam: option.soloOrTeam || '',
+        tmsName: option.tmsName || ''
+      };
+    })
+    .filter(Boolean);
+  const excludedCount = rosterOptions.length - mappedOptions.length;
+
+  return {
+    options: mappedOptions,
+    warning: excludedCount > 0
+      ? `${excludedCount} active Driver Roster option${excludedCount === 1 ? ' is' : 's are'} hidden because its driver or truck choice is not unambiguous in Bid Listing.`
+      : ''
+  };
+}
+
+async function getContractLanesPayload(token, options = {}) {
+  const forceRefresh = options.forceRefresh === true;
+  const [source, currentList] = await Promise.all([
+    getContractLaneSourceData(token, { forceRefresh }),
+    getQuoteEngineCurrentList(token)
+  ]);
+  const schema = await getQuoteEngineSchema(token, currentList, forceRefresh);
+  assertContractLaneBidSchema(schema);
+
+  let drivers = [];
+  let driverWarning = '';
+  try {
+    const driverBundle = await getContractLaneDriverOptions(token, schema);
+    drivers = driverBundle.options;
+    driverWarning = driverBundle.warning;
+  } catch {
+    driverWarning = 'Active Driver Roster options could not be loaded. Refresh before booking an order.';
+  }
+
+  const today = formatEasternDate();
+  const lanes = source.lanes.map((lane) => {
+    try {
+      return {
+        ...lane,
+        currentPricing: resolveContractLanePricing(lane, source.doeRecords, today, { validateLaneWindow: false })
+      };
+    } catch {
+      return { ...lane, currentPricing: null };
+    }
+  });
+
+  return {
+    success: true,
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    asOfDate: today,
+    lanes,
+    drivers,
+    warnings: [...source.warnings, ...(driverWarning ? [driverWarning] : [])],
+    source: {
+      contractLanes: DEFAULT_CONTRACT_LANES_LIST_NAME,
+      fuel: DEFAULT_DOE_DIESEL_LIST_NAME,
+      orders: currentList.label
+    },
+    provisionalFscCanBeBooked: true
+  };
+}
+
+function normalizeContractLaneBooking(input = {}) {
+  const laneItemId = String(input.laneItemId || '').trim();
+  if (!/^\d+$/.test(laneItemId)) {
+    throw getContractLaneError('Choose a valid active Contract Lane.', 400, 'CONTRACT_LANE_REQUIRED');
+  }
+
+  const requestedPickupDate = getQuoteEngineDate(input, 'requestedPickupDate', 'Requested Pickup Date').value;
+  const expectedDeliveryDate = getQuoteEngineDate(input, 'expectedDeliveryDate', 'Expected Delivery Date').value;
+  if (expectedDeliveryDate < requestedPickupDate) {
+    throw getContractLaneError('Expected Delivery Date cannot be earlier than Requested Pickup Date.', 400, 'CONTRACT_DATE_ORDER');
+  }
+
+  return {
+    laneItemId,
+    rosterDriverKey: getQuoteEngineText(input, 'rosterDriverKey', 'Driver Name', 200),
+    emptyMiles: getQuoteEngineNumber(input, 'emptyMiles', 'Empty Miles', { minimum: 0, maximum: 10000 }),
+    startingLocation: getQuoteEngineText(input, 'startingLocation', 'Starting Location', 500),
+    freightDescription: getQuoteEngineText(input, 'freightDescription', 'Freight Description', 1000),
+    requestedPickupDate,
+    expectedDeliveryDate,
+    duplicateAcknowledged: getQuoteEngineBoolean(input.duplicateAcknowledged, 'Duplicate acknowledgement', false) === true,
+    confirmBook: getQuoteEngineBoolean(input.confirmBook, 'Booking confirmation', false) === true,
+    requestId: getQuoteEngineText(input, 'requestId', 'Booking request ID', 100, false)
+  };
+}
+
+async function resolveContractLaneBookingDriver(token, schema, rosterDriverKey) {
+  if (!process.env.DRIVER_ROSTER_LIST_ID) {
+    throw getContractLaneError('Driver Roster is not configured on the server.', 503, 'CONTRACT_DRIVER_ROSTER_UNAVAILABLE');
+  }
+
+  const rosterOptions = await getAvailableTruckRosterOptions(token);
+  const roster = rosterOptions.find((option) => option.key === rosterDriverKey);
+  if (!roster) {
+    throw getContractLaneError(
+      'The selected driver is no longer active in Driver Roster. Refresh and choose again.',
+      409,
+      'CONTRACT_DRIVER_STALE'
+    );
+  }
+
+  const choice = getContractLaneDriverChoice(roster, schema);
+  if (!choice) {
+    throw getContractLaneError(
+      'The selected driver or truck does not map unambiguously to the approved Bid Listing choices.',
+      409,
+      'CONTRACT_DRIVER_CHOICE_MISMATCH'
+    );
+  }
+
+  return {
+    ...roster,
+    driverName: choice.operator,
+    unitNo: choice.truck
+  };
+}
+
+function getContractLaneDuplicateFieldSelect() {
+  return [
+    'BidID',
+    'ContractLaneID',
+    'Pickup_x0020_Offer_x0020_Date',
+    'Operator_x002f_Team',
+    'Truck_x0020_Number',
+    'Status',
+    'Quoted_x0020_Total'
+  ].join(',');
+}
+
+async function findContractLaneBookingDuplicates(token, currentList, lane, requestedPickupDate) {
+  let bundle;
+  try {
+    bundle = await getAllListItemsWithFieldsResilient(
+      token,
+      currentList.listId,
+      getContractLaneDuplicateFieldSelect()
+    );
+  } catch {
+    throw getContractLaneError(
+      'Contract booking is paused because the current Bid Listing could not be checked for duplicates.',
+      503,
+      'CONTRACT_DUPLICATE_CHECK_UNAVAILABLE'
+    );
+  }
+
+  return (bundle.items || [])
+    .filter((item) => {
+      const fields = item?.fields || {};
+      const status = normalizeText(getFlexibleFieldValue(fields.Status) || fields.Status);
+      return (
+        normalizeSearchValue(fields.ContractLaneID) === normalizeSearchValue(lane.contractLaneId) &&
+        normalizeSharePointBusinessDate(fields.Pickup_x0020_Offer_x0020_Date) === requestedPickupDate &&
+        !['lost', 'can', 'tonu', 'bid withdrawn'].includes(status)
+      );
+    })
+    .map((item) => ({
+      id: String(item.id || ''),
+      bidId: String(item.fields?.BidID || '').trim(),
+      driverName: String(getFlexibleFieldValue(item.fields?.Operator_x002f_Team) || item.fields?.Operator_x002f_Team || '').trim(),
+      truck: String(getFlexibleFieldValue(item.fields?.Truck_x0020_Number) || item.fields?.Truck_x0020_Number || '').trim(),
+      status: String(getFlexibleFieldValue(item.fields?.Status) || item.fields?.Status || '').trim(),
+      quotedTotal: parseContractNumber(item.fields?.Quoted_x0020_Total) || 0,
+      pickupDate: requestedPickupDate
+    }));
+}
+
+function setContractLaneOptionalField(fields, schema, name, value) {
+  const column = schema.columnsByName.get(name);
+  if (!column || column.readOnly === true || value === undefined || value === null || value === '') return;
+  fields[name] = value;
+}
+
+function buildContractLaneCreateFields(booking, lane, pricing, driver, schema) {
+  const fields = {
+    Requestor: `RTX ${lane.contractProgram || 'Contract'}`.slice(0, 300),
+    Date_x0020_Solicited: getQuoteEngineGraphDate(formatEasternDate()),
+    Ready_x0020_Date: getQuoteEngineGraphDate(booking.requestedPickupDate),
+    Pickup_x0020_Offer_x0020_Date: getQuoteEngineGraphDate(booking.requestedPickupDate),
+    Expected_x0020_Delivery_x0020_Da: getQuoteEngineGraphDate(booking.expectedDeliveryDate),
+    EnableTracking: getQuoteEngineYesNoWriteValue(schema, 'EnableTracking', false),
+    Freight_x0020_Description: booking.freightDescription,
+    Length: 0,
+    Width: 0,
+    Height: 0,
+    Operator_x0020_Starting_x0020_Lo: booking.startingLocation,
+    Shipment_x0020_Origin: lane.origin,
+    Shipment_x0020_Destination: lane.destination,
+    Empty_x0020__x0028_Deadhead_x002: booking.emptyMiles,
+    Loaded_x0020_Miles: lane.contractMiles,
+    Team_x0020_Required: getQuoteEngineYesNoWriteValue(
+      schema,
+      'Team_x0020_Required',
+      normalizeText(driver.soloOrTeam).includes('team')
+    ),
+    Permits_x002f_Escort_x0020_Fees_: 0,
+    Quoted_x0020_Total: pricing.quotedTotal,
+    Aircraft_x0020_Related_x003f_: getQuoteEngineYesNoWriteValue(schema, 'Aircraft_x0020_Related_x003f_', true),
+    Company: resolveQuoteChoiceValue(schema.quoteChoices.company, 'Pratt & Whitney'),
+    Truck_x0020_Number: driver.unitNo,
+    Operator_x002f_Team: driver.driverName,
+    Status: resolveContractBidChoice(schema, 'Status', 'Status', 'Won'),
+    ContractOrder: true,
+    ContractLaneID: lane.contractLaneId,
+    ContractProgram: lane.contractProgram,
+    ContractBaseRate: lane.basePrice,
+    ContractMiles: lane.contractMiles,
+    ContractFSCRate: pricing.fscRate,
+    ContractFSCAmount: pricing.fscAmount,
+    ContractRateVersion: lane.rateVersion
+  };
+
+  const contractReference = lane.rtxItemId ? `RTX Item ${lane.rtxItemId}` : lane.contractLaneId;
+  setContractLaneOptionalField(
+    fields,
+    schema,
+    'Contract',
+    pricing.provisional
+      ? `${contractReference} | FSC estimate effective ${pricing.fscEffectiveDate}`
+      : contractReference
+  );
+  setContractLaneOptionalField(fields, schema, 'ContractCustomer', 'Pratt & Whitney / RTX');
+  setContractLaneOptionalField(fields, schema, 'Pickup1City', lane.originCity);
+  setContractLaneOptionalField(fields, schema, 'Pickup2State', lane.originState);
+  setContractLaneOptionalField(fields, schema, 'Pickup2Zip', lane.originZip);
+  setContractLaneOptionalField(fields, schema, 'Delivery1City', lane.destinationCity);
+  setContractLaneOptionalField(fields, schema, 'Delivery1State', lane.destinationState);
+  setContractLaneOptionalField(fields, schema, 'Delivery1Zip', lane.destinationZip);
+
+  return fields;
+}
+
+function getContractLaneRequestCacheKey(requestId) {
+  const normalized = normalizeText(requestId).replace(/[^a-z0-9-]/g, '');
+  return normalized ? `contract-${normalized}` : '';
+}
+
+async function publishContractLaneBooking(token, booking, currentList, schema) {
+  if (!booking.confirmBook) {
+    throw getContractLaneError('Explicit booking confirmation is required.', 400, 'CONTRACT_CONFIRMATION_REQUIRED');
+  }
+  if (!/^[A-Za-z0-9-]{8,100}$/.test(booking.requestId)) {
+    throw getContractLaneError('A valid booking request ID is required.', 400, 'CONTRACT_REQUEST_ID_REQUIRED');
+  }
+
+  const requestCacheKey = getContractLaneRequestCacheKey(booking.requestId);
+  const cachedResult = getCacheRecord(cachedContractLaneBookingResults, requestCacheKey, QUOTE_ENGINE_PUBLISH_CACHE_MS);
+  if (cachedResult) return { ...cachedResult, idempotentReplay: true };
+
+  const source = await getContractLaneSourceData(token, { forceRefresh: true });
+  const lane = source.lanes.find((candidate) => candidate.id === booking.laneItemId);
+  if (!lane) {
+    throw getContractLaneError(
+      'The selected Contract Lane is no longer active. Refresh before booking.',
+      409,
+      'CONTRACT_LANE_STALE'
+    );
+  }
+
+  const pricing = resolveContractLanePricing(lane, source.doeRecords, booking.requestedPickupDate);
+
+  const [driver, duplicates] = await Promise.all([
+    resolveContractLaneBookingDriver(token, schema, booking.rosterDriverKey),
+    findContractLaneBookingDuplicates(token, currentList, lane, booking.requestedPickupDate)
+  ]);
+
+  if (duplicates.length > 0 && !booking.duplicateAcknowledged) {
+    const error = getContractLaneError(
+      'Review and acknowledge the existing Contract Lane booking before creating another Won order.',
+      409,
+      'CONTRACT_DUPLICATE_REVIEW_REQUIRED'
+    );
+    error.duplicates = duplicates;
+    throw error;
+  }
+
+  const fields = buildContractLaneCreateFields(booking, lane, pricing, driver, schema);
+  validateQuoteEngineCreateFields(fields, schema);
+  let createdItem;
+
+  try {
+    createdItem = await graphPost(
+      token,
+      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}/items`,
+      { fields }
+    );
+  } catch (error) {
+    throw getQuoteEngineCreateFailure(error);
+  }
+
+  const itemId = String(createdItem?.id || '').trim();
+  if (!itemId) {
+    throw getContractLaneError(
+      'Bid Listing accepted the create request but did not return an item ID. Do not resubmit until the list is checked.',
+      502,
+      'CONTRACT_CREATE_UNCONFIRMED'
+    );
+  }
+
+  clearQuoteEngineMutationCaches();
+
+  const pendingResult = {
+    success: true,
+    created: true,
+    pendingBidId: true,
+    code: 'CONTRACT_BID_ID_PENDING',
+    itemId,
+    BidID: '',
+    message: 'The Won order was created. Power Automate is still assigning its Bid ID; do not book it again.',
+    lane: {
+      id: lane.id,
+      laneName: lane.laneName,
+      contractLaneId: lane.contractLaneId
+    },
+    pricing
+  };
+  setCacheRecord(cachedContractLaneBookingResults, requestCacheKey, pendingResult, 40);
+  setCacheRecord(pendingContractLaneBookings, itemId, { requestCacheKey }, 40);
+
+  let pollResult;
+  try {
+    pollResult = await pollQuoteEngineBidId(token, currentList, itemId);
+  } catch {
+    return pendingResult;
+  }
+
+  if (!pollResult.assigned) return pendingResult;
+
+  const record = buildRecordResponse(pollResult.item, currentList);
+  const finalResult = {
+    ...pendingResult,
+    pendingBidId: false,
+    code: 'CONTRACT_ORDER_CREATED',
+    BidID: record.BidID,
+    message: `Created Won Bid Listing order ${record.BidID}.`,
+    record
+  };
+  setCacheRecord(cachedContractLaneBookingResults, requestCacheKey, finalResult, 40);
+  pendingContractLaneBookings.delete(itemId);
   return finalResult;
 }
 
@@ -11653,6 +12339,194 @@ app.get('/quote-engine/bid-id/:itemId', requireLookupAccess, async (req, res) =>
       success: false,
       code: error.code || undefined,
       error: error.statusCode ? error.message : 'Unable to check the assigned Bid ID.'
+    });
+  }
+});
+
+app.get('/contract-lanes', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const payload = await getContractLanesPayload(token, {
+      forceRefresh: normalizeText(req.query.refresh) === 'true'
+    });
+    res.json(payload);
+  } catch (error) {
+    console.error('Contract Lanes could not be loaded.');
+    res.status(error.statusCode || 500).json({
+      success: false,
+      code: error.code || undefined,
+      error: error.statusCode ? error.message : 'Unable to load Contract Lanes.'
+    });
+  }
+});
+
+app.get('/contract-lanes/pricing', requireLookupAccess, async (req, res) => {
+  try {
+    const laneItemId = String(req.query.laneItemId || '').trim();
+    const requestedPickupDate = String(req.query.requestedPickupDate || '').trim();
+
+    if (!/^\d+$/.test(laneItemId)) {
+      throw getContractLaneError('Choose a valid active Contract Lane.', 400, 'CONTRACT_LANE_REQUIRED');
+    }
+    if (!isValidDateInput(requestedPickupDate)) {
+      throw getContractLaneError('Requested Pickup Date must be a valid date.', 400, 'CONTRACT_INVALID_PICKUP_DATE');
+    }
+
+    const token = await getGraphToken();
+    const source = await getContractLaneSourceData(token, {
+      forceRefresh: normalizeText(req.query.refresh) === 'true'
+    });
+    const lane = source.lanes.find((candidate) => candidate.id === laneItemId);
+
+    if (!lane) {
+      throw getContractLaneError(
+        'The selected Contract Lane is no longer active. Refresh before booking.',
+        409,
+        'CONTRACT_LANE_STALE'
+      );
+    }
+
+    res.json({
+      success: true,
+      generatedAt: `${formatEasternTimestamp()} Eastern`,
+      lane: {
+        id: lane.id,
+        laneName: lane.laneName,
+        contractLaneId: lane.contractLaneId,
+        contractMiles: lane.contractMiles,
+        basePrice: lane.basePrice,
+        rateVersion: lane.rateVersion
+      },
+      pricing: resolveContractLanePricing(lane, source.doeRecords, requestedPickupDate)
+    });
+  } catch (error) {
+    console.error('Contract Lane pricing could not be resolved.');
+    res.status(error.statusCode || 500).json({
+      success: false,
+      code: error.code || undefined,
+      error: error.statusCode ? error.message : 'Unable to resolve the applicable PW fuel rate.'
+    });
+  }
+});
+
+app.post('/contract-lanes/book', requireLookupAccess, async (req, res) => {
+  try {
+    const booking = normalizeContractLaneBooking(req.body || {});
+    if (!/^[A-Za-z0-9-]{8,100}$/.test(booking.requestId)) {
+      throw getContractLaneError('A valid booking request ID is required.', 400, 'CONTRACT_REQUEST_ID_REQUIRED');
+    }
+
+    const requestCacheKey = getContractLaneRequestCacheKey(booking.requestId);
+    const cachedResult = getCacheRecord(
+      cachedContractLaneBookingResults,
+      requestCacheKey,
+      QUOTE_ENGINE_PUBLISH_CACHE_MS
+    );
+    if (cachedResult) {
+      return res.status(cachedResult.pendingBidId ? 202 : 200).json({ ...cachedResult, idempotentReplay: true });
+    }
+
+    const inFlightBooking = inFlightContractLaneBookings.get(requestCacheKey);
+    if (inFlightBooking) {
+      const result = await inFlightBooking;
+      return res.status(result.pendingBidId ? 202 : 200).json({ ...result, idempotentReplay: true });
+    }
+
+    const bookingOperation = (async () => {
+      const token = await getGraphToken();
+      const currentList = await getQuoteEngineCurrentList(token);
+      const schema = await getQuoteEngineSchema(token, currentList, true);
+      assertContractLaneBidSchema(schema);
+      return publishContractLaneBooking(token, booking, currentList, schema);
+    })();
+    inFlightContractLaneBookings.set(requestCacheKey, bookingOperation);
+
+    let result;
+    try {
+      result = await bookingOperation;
+    } finally {
+      if (inFlightContractLaneBookings.get(requestCacheKey) === bookingOperation) {
+        inFlightContractLaneBookings.delete(requestCacheKey);
+      }
+    }
+
+    return res.status(result.pendingBidId ? 202 : 201).json(result);
+  } catch (error) {
+    console.error('Contract Lane booking failed.');
+    res.status(error.statusCode || 500).json({
+      success: false,
+      code: error.code || undefined,
+      error: error.statusCode ? error.message : 'Unable to book this Contract Lane order.',
+      duplicates: Array.isArray(error.duplicates) ? error.duplicates : undefined
+    });
+  }
+});
+
+app.get('/contract-lanes/bid-id/:itemId', requireLookupAccess, async (req, res) => {
+  try {
+    const itemId = String(req.params.itemId || '').trim();
+    if (!/^\d+$/.test(itemId)) {
+      throw getContractLaneError('A valid Bid Listing item ID is required.', 400, 'CONTRACT_INVALID_ITEM_ID');
+    }
+
+    const token = await getGraphToken();
+    const currentList = await getQuoteEngineCurrentList(token);
+    const item = await graphGet(
+      token,
+      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}/items/${encodeURIComponent(itemId)}?$select=id,createdDateTime,lastModifiedDateTime,eTag&$expand=fields`
+    );
+    const record = buildRecordResponse(item, currentList);
+
+    if (!record.BidID) {
+      return res.status(202).json({
+        success: true,
+        created: true,
+        pendingBidId: true,
+        code: 'CONTRACT_BID_ID_PENDING',
+        itemId,
+        BidID: '',
+        message: 'The Won order exists, but Power Automate has not assigned its Bid ID yet.'
+      });
+    }
+
+    const pendingContext = getCacheRecord(
+      pendingContractLaneBookings,
+      itemId,
+      QUOTE_ENGINE_PUBLISH_CACHE_MS
+    );
+    const result = {
+      success: true,
+      created: true,
+      pendingBidId: false,
+      code: 'CONTRACT_ORDER_CREATED',
+      itemId,
+      BidID: record.BidID,
+      message: `Won order ${record.BidID} is ready.`,
+      record
+    };
+
+    if (pendingContext?.requestCacheKey) {
+      const pendingResult = getCacheRecord(
+        cachedContractLaneBookingResults,
+        pendingContext.requestCacheKey,
+        QUOTE_ENGINE_PUBLISH_CACHE_MS
+      );
+      setCacheRecord(
+        cachedContractLaneBookingResults,
+        pendingContext.requestCacheKey,
+        { ...(pendingResult || {}), ...result },
+        40
+      );
+      pendingContractLaneBookings.delete(itemId);
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error('Contract Lane Bid ID status check failed.');
+    res.status(error.statusCode || 500).json({
+      success: false,
+      code: error.code || undefined,
+      error: error.statusCode ? error.message : 'Unable to check the Contract Lane order Bid ID.'
     });
   }
 });

@@ -1043,6 +1043,17 @@ tbody tr:hover {
   background: var(--kole-gold-bright);
 }
 
+.contract-lanes-launch {
+  border: 1px solid color-mix(in srgb, var(--kole-info) 62%, var(--kole-border));
+  background: color-mix(in srgb, var(--kole-info-bg) 72%, var(--kole-surface));
+  color: var(--kole-info);
+  font-weight: 850;
+}
+
+.contract-lanes-launch:hover {
+  background: color-mix(in srgb, var(--kole-info-bg) 88%, var(--kole-surface-2));
+}
+
 .quote-engine-overlay {
   z-index: var(--kole-z-modal-detail);
   padding: 20px;
@@ -1828,6 +1839,522 @@ tbody tr:hover {
 
   .quote-engine-publish-result > strong {
     white-space: normal;
+  }
+}
+
+/* CONTRACT LANES */
+
+.contract-lanes-modal {
+  width: min(1580px, 98vw);
+  max-height: 96vh;
+  color: var(--kole-text-soft);
+}
+
+.contract-lanes-header {
+  align-items: center;
+  background: linear-gradient(135deg, var(--kole-surface), var(--kole-surface-gradient-end));
+}
+
+.contract-lanes-header h2 {
+  color: var(--kole-gold-bright);
+  font-size: clamp(23px, 2.2vw, 32px);
+}
+
+.contract-lanes-header-actions,
+.contract-lanes-toolbar > div {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.contract-lanes-body,
+.contract-booking-body {
+  min-height: 0;
+  background: var(--kole-page-bg);
+}
+
+.contract-lanes-body {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.contract-lanes-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.contract-lanes-toolbar > div > span {
+  color: var(--kole-muted-subtle);
+  font-size: 11px;
+}
+
+.contract-lanes-search {
+  display: grid;
+  gap: 6px;
+  width: min(480px, 100%);
+  color: var(--kole-text-soft);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.contract-lanes-search input {
+  width: 100%;
+  border: 1px solid var(--kole-control-border);
+  border-radius: 9px;
+  background: var(--kole-control-bg);
+  color: var(--kole-text);
+  padding: 10px 12px;
+  outline: none;
+}
+
+.contract-lanes-search input:focus {
+  border-color: var(--kole-action);
+  box-shadow: 0 0 0 3px var(--kole-focus);
+}
+
+.contract-lanes-warning {
+  margin: 0;
+}
+
+.contract-lanes-warning p {
+  margin: 0;
+}
+
+.contract-lanes-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.contract-lanes-summary > div {
+  padding: 12px 14px;
+  border: 1px solid var(--kole-border);
+  border-radius: 11px;
+  background: var(--kole-shell);
+}
+
+.contract-lanes-summary span,
+.contract-lanes-summary strong {
+  display: block;
+}
+
+.contract-lanes-summary span {
+  color: var(--kole-muted-subtle);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.contract-lanes-summary strong {
+  margin-top: 5px;
+  color: var(--kole-text);
+  font-size: 18px;
+}
+
+.contract-lanes-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--kole-border);
+  border-radius: 12px;
+  background: var(--kole-table-root);
+}
+
+.contract-lanes-table {
+  width: 100%;
+  min-width: 1420px;
+  border-collapse: collapse;
+}
+
+.contract-lanes-table th,
+.contract-lanes-table td {
+  padding: 11px 10px;
+  border-bottom: 1px solid var(--kole-divider);
+  color: var(--kole-text-soft);
+  font-size: 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.contract-lanes-table th {
+  position: sticky;
+  top: 0;
+  z-index: var(--kole-z-sticky);
+  background: var(--kole-table-head);
+  color: var(--kole-text);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.contract-lanes-table tbody tr:nth-child(even) {
+  background: var(--kole-table-row-alt);
+}
+
+.contract-lanes-table tbody tr:hover {
+  background: var(--kole-table-row-hover);
+}
+
+.contract-lane-name-cell {
+  min-width: 220px;
+}
+
+.contract-lane-name-cell strong,
+.contract-lane-name-cell small {
+  display: block;
+}
+
+.contract-lane-name-cell strong {
+  color: var(--kole-text);
+}
+
+.contract-lane-name-cell small {
+  margin-top: 4px;
+  color: var(--kole-muted-subtle);
+}
+
+.contract-lane-name-cell details {
+  margin-top: 8px;
+  color: var(--kole-info);
+}
+
+.contract-lane-name-cell summary {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.contract-lane-name-cell details p {
+  min-width: 260px;
+  margin: 7px 0 0;
+  color: var(--kole-message-text);
+  line-height: 1.45;
+}
+
+.contract-allocation-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 8px;
+  border: 1px solid var(--kole-border-strong);
+  border-radius: 999px;
+  color: var(--kole-muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.contract-allocation-badge.primary {
+  border-color: var(--kole-success);
+  color: var(--kole-success);
+}
+
+.contract-allocation-badge.backup {
+  border-color: var(--kole-warning);
+  color: var(--kole-warning);
+}
+
+.contract-pricing-estimate {
+  display: block;
+  margin-top: 4px;
+  color: var(--kole-warning);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.contract-lane-total {
+  color: var(--kole-gold-bright) !important;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.contract-lane-book-button {
+  min-width: 125px;
+  padding: 8px 10px;
+  font-size: 11px;
+  white-space: normal;
+}
+
+.contract-lanes-source-note {
+  color: var(--kole-muted-subtle);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.contract-booking-body {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.contract-booking-lane-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px;
+  border: 1px solid var(--kole-border);
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--kole-shell), var(--kole-surface));
+}
+
+.contract-booking-lane-banner h3 {
+  margin: 10px 0 3px;
+  color: var(--kole-text);
+  font-size: 21px;
+}
+
+.contract-booking-lane-banner p {
+  margin: 0;
+  color: var(--kole-message-text);
+}
+
+.contract-booking-lane-banner dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(100px, auto));
+  gap: 10px;
+  margin: 0;
+}
+
+.contract-booking-lane-banner dl > div {
+  padding: 9px 11px;
+  border-left: 2px solid var(--kole-border-strong);
+}
+
+.contract-booking-lane-banner dt,
+.contract-booking-lane-banner dd {
+  margin: 0;
+}
+
+.contract-booking-lane-banner dt {
+  color: var(--kole-muted-subtle);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.contract-booking-lane-banner dd {
+  margin-top: 5px;
+  color: var(--kole-text);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.contract-requirements-panel {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--kole-warning) 58%, var(--kole-border));
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--kole-warning-bg) 24%, var(--kole-shell));
+}
+
+.contract-requirements-panel > div {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border: 1px solid var(--kole-warning);
+  border-radius: 50%;
+  color: var(--kole-warning);
+  font-weight: 900;
+}
+
+.contract-requirements-panel span {
+  color: var(--kole-warning);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.contract-requirements-panel p {
+  margin: 5px 0 0;
+  color: var(--kole-text-soft);
+  line-height: 1.5;
+}
+
+.contract-booking-form,
+.contract-booking-success {
+  display: grid;
+  gap: 16px;
+}
+
+.contract-pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.contract-pricing-grid > div {
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--kole-border-subtle);
+  border-radius: 10px;
+  background: var(--kole-surface);
+}
+
+.contract-pricing-grid dt,
+.contract-pricing-grid dd {
+  margin: 0;
+}
+
+.contract-pricing-grid dt {
+  color: var(--kole-muted-subtle);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.contract-pricing-grid dd {
+  margin-top: 7px;
+  overflow-wrap: anywhere;
+  color: var(--kole-text);
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.contract-pricing-grid .total {
+  border-color: var(--kole-gold);
+  background: color-mix(in srgb, var(--kole-gold) 8%, var(--kole-surface));
+}
+
+.contract-pricing-grid .total dd {
+  color: var(--kole-gold-bright);
+  font-size: 18px;
+}
+
+.contract-fsc-provisional {
+  margin-bottom: 14px;
+}
+
+.contract-fsc-provisional h4,
+.contract-fsc-provisional p {
+  margin-top: 0;
+}
+
+.contract-fsc-provisional small {
+  color: var(--kole-warning);
+  font-weight: 800;
+}
+
+.contract-snapshot-panel > dl {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.contract-snapshot-panel > dl > div {
+  padding: 10px 12px;
+  border-left: 2px solid var(--kole-border-strong);
+}
+
+.contract-snapshot-panel dt,
+.contract-snapshot-panel dd {
+  margin: 0;
+}
+
+.contract-snapshot-panel dt {
+  color: var(--kole-muted-subtle);
+  font-size: 10px;
+}
+
+.contract-snapshot-panel dd {
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+  color: var(--kole-text);
+  font-weight: 800;
+}
+
+.contract-duplicate-review > p {
+  color: var(--kole-message-text);
+}
+
+.contract-booking-success {
+  min-height: 420px;
+  align-content: center;
+  padding: 30px 0;
+}
+
+.contract-success-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 1180px) {
+  .contract-booking-lane-banner {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .contract-booking-lane-banner dl {
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .contract-pricing-grid,
+  .contract-snapshot-panel > dl {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .contract-lanes-overlay {
+    padding: 0;
+  }
+
+  .contract-lanes-modal {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .contract-lanes-header,
+  .contract-lanes-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .contract-lanes-header-actions,
+  .contract-lanes-toolbar > div {
+    justify-content: stretch;
+  }
+
+  .contract-lanes-header-actions button,
+  .contract-lanes-toolbar > div button {
+    flex: 1 1 0;
+  }
+
+  .contract-lanes-summary,
+  .contract-pricing-grid,
+  .contract-snapshot-panel > dl,
+  .contract-success-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .contract-booking-lane-banner dl {
+    grid-template-columns: 1fr;
+  }
+
+  .contract-booking-body,
+  .contract-lanes-body {
+    padding: 14px;
+  }
+
+  .contract-booking-form .quote-engine-footer,
+  .contract-booking-success .quote-engine-footer {
+    bottom: -14px;
+    margin: 0 -14px -14px;
   }
 }
 
@@ -19660,4 +20187,3 @@ body.light .driver-roster-port-grid select {
     display: none;
   }
 }
-

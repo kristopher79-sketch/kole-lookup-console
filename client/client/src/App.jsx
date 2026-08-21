@@ -171,6 +171,26 @@ function createQuoteEngineDraft() {
   };
 }
 
+function createContractLaneBookingDraft(lane = {}) {
+  return {
+    laneItemId: String(lane.id || ''),
+    rosterDriverKey: '',
+    emptyMiles: '',
+    startingLocation: '',
+    freightDescription: '',
+    requestedPickupDate: '',
+    expectedDeliveryDate: '',
+    duplicateAcknowledged: false,
+    confirmBook: false,
+    requestId: ''
+  };
+}
+
+function createContractLaneRequestId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `contract-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function createQuoteEngineRequestId() {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();
   return `quote-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -186,6 +206,11 @@ function formatQuoteEngineMoney(value) {
 function formatQuoteEngineRate(value) {
   const amount = Number(value || 0);
   return Number.isFinite(amount) ? `$${amount.toFixed(2)}` : '$0.00';
+}
+
+function formatContractFscRate(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? `$${amount.toFixed(3)}` : 'Unavailable';
 }
 
 function QuoteEngineBufferedField({ as = 'input', value, onCommit, ...props }) {
@@ -1498,6 +1523,25 @@ export default function App() {
   const quoteEngineButtonRef = useRef(null);
   const quoteEngineCloseButtonRef = useRef(null);
   const quoteEnginePublishingRef = useRef(false);
+  const [contractLanesOpen, setContractLanesOpen] = useState(false);
+  const [contractLanesData, setContractLanesData] = useState(null);
+  const [contractLanesLoading, setContractLanesLoading] = useState(false);
+  const [contractLanesError, setContractLanesError] = useState('');
+  const [contractLaneFilter, setContractLaneFilter] = useState('');
+  const [selectedContractLane, setSelectedContractLane] = useState(null);
+  const [contractLaneBookingDraft, setContractLaneBookingDraft] = useState(createContractLaneBookingDraft);
+  const contractLaneBookingDraftRef = useRef(contractLaneBookingDraft);
+  const [contractLanePricing, setContractLanePricing] = useState(null);
+  const [contractLanePricingLoading, setContractLanePricingLoading] = useState(false);
+  const [contractLanePricingError, setContractLanePricingError] = useState('');
+  const [contractLaneBookingError, setContractLaneBookingError] = useState('');
+  const [contractLaneBookingDuplicates, setContractLaneBookingDuplicates] = useState([]);
+  const [contractLaneBookingSubmitting, setContractLaneBookingSubmitting] = useState(false);
+  const [contractLaneBookingResult, setContractLaneBookingResult] = useState(null);
+  const contractLanesButtonRef = useRef(null);
+  const contractLanesCloseButtonRef = useRef(null);
+  const contractLaneBookingSubmittingRef = useRef(false);
+  const contractLanePricingControllerRef = useRef(null);
   const [operationsData, setOperationsData] = useState(null);
   const [operationsLoading, setOperationsLoading] = useState(false);
   const [operationsError, setOperationsError] = useState('');
@@ -1810,6 +1854,7 @@ export default function App() {
     preferencesModalOpen ||
     noBolBidsOpen ||
     quoteEngineOpen ||
+    contractLanesOpen ||
     selected ||
     selectedDriverRoster ||
     driverHistoryModalOpen ||
@@ -2717,6 +2762,10 @@ export default function App() {
   }, [quoteEngineDraft]);
 
   useEffect(() => {
+    contractLaneBookingDraftRef.current = contractLaneBookingDraft;
+  }, [contractLaneBookingDraft]);
+
+  useEffect(() => {
     const runtimeClass = isTauriRuntime ? 'tauri-runtime' : 'web-runtime';
     document.body.classList.add(runtimeClass);
 
@@ -2826,6 +2875,10 @@ export default function App() {
   }, [quoteEnginePublishing]);
 
   useEffect(() => {
+    contractLaneBookingSubmittingRef.current = contractLaneBookingSubmitting;
+  }, [contractLaneBookingSubmitting]);
+
+  useEffect(() => {
     if (!quoteEngineOpen) return undefined;
 
     const frame = window.requestAnimationFrame(() => {
@@ -2834,6 +2887,20 @@ export default function App() {
 
     return () => window.cancelAnimationFrame(frame);
   }, [quoteEngineOpen]);
+
+  useEffect(() => {
+    if (!contractLanesOpen) return undefined;
+
+    const frame = window.requestAnimationFrame(() => {
+      contractLanesCloseButtonRef.current?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [contractLanesOpen]);
+
+  useEffect(() => {
+    return () => contractLanePricingControllerRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -2861,6 +2928,15 @@ export default function App() {
           setQuoteEngineOpen(false);
           if (quoteEngineWasOpen) {
             window.requestAnimationFrame(() => quoteEngineButtonRef.current?.focus());
+          }
+        }
+        if (!contractLaneBookingSubmittingRef.current) {
+          const contractLanesWasOpen = Boolean(contractLanesCloseButtonRef.current);
+          setContractLanesOpen(false);
+          setSelectedContractLane(null);
+          contractLanePricingControllerRef.current?.abort();
+          if (contractLanesWasOpen) {
+            window.requestAnimationFrame(() => contractLanesButtonRef.current?.focus());
           }
         }
         setGrossRevenueModalOpen(false);
@@ -3275,6 +3351,22 @@ export default function App() {
     setQuoteEnginePublishing(false);
     setQuoteEnginePublishResult(null);
     setQuoteEngineCopyMessage('');
+    setContractLanesOpen(false);
+    setContractLanesData(null);
+    setContractLanesLoading(false);
+    setContractLanesError('');
+    setContractLaneFilter('');
+    setSelectedContractLane(null);
+    setContractLaneBookingDraft(createContractLaneBookingDraft());
+    contractLaneBookingDraftRef.current = createContractLaneBookingDraft();
+    setContractLanePricing(null);
+    setContractLanePricingLoading(false);
+    setContractLanePricingError('');
+    setContractLaneBookingError('');
+    setContractLaneBookingDuplicates([]);
+    setContractLaneBookingSubmitting(false);
+    setContractLaneBookingResult(null);
+    contractLanePricingControllerRef.current?.abort();
     setHasSearched(false);
     setError('');
     setAuthError('');
@@ -3853,6 +3945,213 @@ export default function App() {
 
     setQuoteEngineOpen(false);
     void loadDetails(record.id, 'basic', record.SourceListId, { returnLabel: 'New Quote' });
+  }
+
+  async function loadContractLanes({ forceRefresh = false } = {}) {
+    setContractLanesLoading(true);
+    setContractLanesError('');
+
+    try {
+      const query = forceRefresh ? '?refresh=true' : '';
+      const res = await authedFetch(`${API}/contract-lanes${query}`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Unable to load Contract Lanes.');
+      }
+
+      setContractLanesData(data);
+      setSelectedContractLane((current) => {
+        if (!current) return null;
+        return (data.lanes || []).find((lane) => lane.id === current.id) || null;
+      });
+      return true;
+    } catch (err) {
+      setContractLanesError(err.message || 'Unable to load Contract Lanes.');
+      return false;
+    } finally {
+      setContractLanesLoading(false);
+    }
+  }
+
+  function openContractLanes() {
+    setContractLanesOpen(true);
+    setSelectedContractLane(null);
+    setContractLaneBookingError('');
+    setContractLaneBookingResult(null);
+    setContractLaneBookingDuplicates([]);
+    if (!contractLanesData) void loadContractLanes({ forceRefresh: true });
+  }
+
+  function closeContractLanes() {
+    if (contractLaneBookingSubmitting) return;
+    contractLanePricingControllerRef.current?.abort();
+    setContractLanesOpen(false);
+    setSelectedContractLane(null);
+    setContractLanePricing(null);
+    setContractLanePricingError('');
+    setContractLaneBookingError('');
+    window.requestAnimationFrame(() => contractLanesButtonRef.current?.focus());
+  }
+
+  function updateContractLaneBookingDraft(field, value) {
+    const nextDraft = {
+      ...contractLaneBookingDraftRef.current,
+      [field]: value
+    };
+    contractLaneBookingDraftRef.current = nextDraft;
+    setContractLaneBookingDraft(nextDraft);
+    setContractLaneBookingError('');
+
+    if (field === 'requestedPickupDate') {
+      setContractLaneBookingDuplicates([]);
+      if (nextDraft.duplicateAcknowledged) {
+        const resetDraft = { ...nextDraft, duplicateAcknowledged: false };
+        contractLaneBookingDraftRef.current = resetDraft;
+        setContractLaneBookingDraft(resetDraft);
+      }
+    }
+  }
+
+  function openContractLaneBooking(lane) {
+    const draft = createContractLaneBookingDraft(lane);
+    contractLaneBookingDraftRef.current = draft;
+    setContractLaneBookingDraft(draft);
+    setSelectedContractLane(lane);
+    setContractLanePricing(null);
+    setContractLanePricingLoading(false);
+    setContractLanePricingError('');
+    setContractLaneBookingError('');
+    setContractLaneBookingDuplicates([]);
+    setContractLaneBookingResult(null);
+  }
+
+  function returnToContractLaneTable() {
+    if (contractLaneBookingSubmitting) return;
+    contractLanePricingControllerRef.current?.abort();
+    setSelectedContractLane(null);
+    setContractLanePricing(null);
+    setContractLanePricingError('');
+    setContractLaneBookingError('');
+    setContractLaneBookingDuplicates([]);
+    setContractLaneBookingResult(null);
+  }
+
+  async function loadContractLanePricing(lane, requestedPickupDate) {
+    contractLanePricingControllerRef.current?.abort();
+    const controller = new AbortController();
+    contractLanePricingControllerRef.current = controller;
+    setContractLanePricing(null);
+    setContractLanePricingError('');
+    setContractLanePricingLoading(true);
+
+    try {
+      const params = new URLSearchParams({
+        laneItemId: lane.id,
+        requestedPickupDate
+      });
+      const res = await authedFetch(`${API}/contract-lanes/pricing?${params.toString()}`, {
+        signal: controller.signal
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Unable to resolve the applicable PW fuel rate.');
+      }
+
+      setContractLanePricing(data.pricing);
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        setContractLanePricingError(err.message || 'Unable to resolve the applicable PW fuel rate.');
+      }
+    } finally {
+      if (contractLanePricingControllerRef.current === controller) {
+        setContractLanePricingLoading(false);
+      }
+    }
+  }
+
+  function handleContractLanePickupDateChange(value) {
+    updateContractLaneBookingDraft('requestedPickupDate', value);
+    setContractLanePricing(null);
+    setContractLanePricingError('');
+    setContractLaneBookingResult(null);
+    if (selectedContractLane && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      void loadContractLanePricing(selectedContractLane, value);
+    } else {
+      contractLanePricingControllerRef.current?.abort();
+      setContractLanePricingLoading(false);
+    }
+  }
+
+  async function bookContractLaneOrder() {
+    if (contractLaneBookingSubmitting || contractLaneBookingResult) return;
+
+    const currentDraft = contractLaneBookingDraftRef.current;
+    const requestId = currentDraft.requestId || createContractLaneRequestId();
+    const publishDraft = { ...currentDraft, requestId };
+    contractLaneBookingDraftRef.current = publishDraft;
+    setContractLaneBookingDraft(publishDraft);
+    setContractLaneBookingSubmitting(true);
+    setContractLaneBookingError('');
+
+    try {
+      const res = await authedFetch(`${API}/contract-lanes/book`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(publishDraft)
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        if (Array.isArray(data.duplicates) && data.duplicates.length > 0) {
+          setContractLaneBookingDuplicates(data.duplicates);
+        }
+        throw new Error(data.error || 'Unable to book this Contract Lane order.');
+      }
+
+      setContractLaneBookingResult(data);
+      setContractLanePricing(data.pricing || contractLanePricing);
+      setContractLaneBookingDuplicates([]);
+      clearQuoteEngineClientCaches();
+      void loadOperationsDashboard({ silent: true, forceRefresh: true }).catch(() => {});
+    } catch (err) {
+      setContractLaneBookingError(err.message || 'Unable to book this Contract Lane order.');
+    } finally {
+      setContractLaneBookingSubmitting(false);
+    }
+  }
+
+  async function checkContractLaneBidId() {
+    const itemId = contractLaneBookingResult?.itemId;
+    if (!itemId || contractLaneBookingSubmitting) return;
+
+    setContractLaneBookingSubmitting(true);
+    setContractLaneBookingError('');
+
+    try {
+      const res = await authedFetch(`${API}/contract-lanes/bid-id/${encodeURIComponent(itemId)}`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok && res.status !== 202) {
+        throw new Error(data.error || 'Unable to check the assigned Bid ID.');
+      }
+
+      setContractLaneBookingResult((current) => ({ ...current, ...data }));
+    } catch (err) {
+      setContractLaneBookingError(err.message || 'Unable to check the assigned Bid ID.');
+    } finally {
+      setContractLaneBookingSubmitting(false);
+    }
+  }
+
+  function openCreatedContractLaneOrder() {
+    const record = contractLaneBookingResult?.record;
+    if (!record?.id || !record.SourceListId) return;
+
+    setContractLanesOpen(false);
+    setSelectedContractLane(null);
+    void loadDetails(record.id, 'basic', record.SourceListId, { returnLabel: 'Contract Lanes' });
   }
 
   function openNoBolBidRecord(record) {
@@ -20094,6 +20393,471 @@ function openReportLoadDetails(load) {
     );
   }
 
+  function renderContractLanesModal() {
+    if (!contractLanesOpen) return null;
+
+    const lanes = contractLanesData?.lanes || [];
+    const drivers = contractLanesData?.drivers || [];
+    const filter = String(contractLaneFilter || '').trim().toLowerCase();
+    const filteredLanes = filter
+      ? lanes.filter((lane) => [
+          lane.laneName,
+          lane.contractLaneId,
+          lane.allocationType,
+          lane.origin,
+          lane.destination,
+          lane.equipmentType,
+          lane.contractProgram
+        ].some((value) => String(value || '').toLowerCase().includes(filter)))
+      : lanes;
+    const selectedDriver = drivers.find((driver) => driver.key === contractLaneBookingDraft.rosterDriverKey);
+    const duplicateReviewComplete = (
+      contractLaneBookingDuplicates.length === 0 || contractLaneBookingDraft.duplicateAcknowledged
+    );
+    const pricingMatchesPickup = Boolean(
+      contractLanePricing &&
+      contractLanePricing.requestedPickupDate === contractLaneBookingDraft.requestedPickupDate
+    );
+    const canBook = Boolean(
+      selectedContractLane &&
+      selectedDriver &&
+      String(contractLaneBookingDraft.emptyMiles).trim() !== '' &&
+      Number(contractLaneBookingDraft.emptyMiles) >= 0 &&
+      contractLaneBookingDraft.startingLocation.trim() &&
+      contractLaneBookingDraft.freightDescription.trim() &&
+      contractLaneBookingDraft.requestedPickupDate &&
+      contractLaneBookingDraft.expectedDeliveryDate &&
+      contractLaneBookingDraft.expectedDeliveryDate >= contractLaneBookingDraft.requestedPickupDate &&
+      pricingMatchesPickup &&
+      duplicateReviewComplete &&
+      contractLaneBookingDraft.confirmBook &&
+      !contractLaneBookingResult
+    );
+
+    return (
+      <div className="modal-overlay quote-engine-overlay contract-lanes-overlay" onMouseDown={(event) => {
+        if (event.target === event.currentTarget) closeContractLanes();
+      }}>
+        <section
+          className="detail-modal contract-lanes-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="contract-lanes-title"
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <div className="detail-header quote-engine-header contract-lanes-header">
+            <div>
+              <span className="quote-engine-eyebrow">Pratt &amp; Whitney / RTX · Won-order workflow</span>
+              <h2 id="contract-lanes-title">
+                {selectedContractLane ? 'Book Contract Lane Order' : 'Contract Lanes'}
+              </h2>
+              <p>
+                {selectedContractLane
+                  ? `${selectedContractLane.origin} → ${selectedContractLane.destination}`
+                  : 'Awarded lane economics from Contract Lanes with PW fuel pricing from DOE.'}
+              </p>
+            </div>
+            <div className="contract-lanes-header-actions">
+              {selectedContractLane && !contractLaneBookingResult && (
+                <button type="button" className="secondary-button" onClick={returnToContractLaneTable} disabled={contractLaneBookingSubmitting}>
+                  Back to lanes
+                </button>
+              )}
+              <button
+                ref={contractLanesCloseButtonRef}
+                type="button"
+                className="close-button"
+                onClick={closeContractLanes}
+                disabled={contractLaneBookingSubmitting}
+                aria-label="Close Contract Lanes"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+
+          {!selectedContractLane ? (
+            <div className="modal-body contract-lanes-body">
+              <div className="contract-lanes-toolbar">
+                <label className="contract-lanes-search">
+                  <span>Find a lane</span>
+                  <input
+                    value={contractLaneFilter}
+                    onChange={(event) => setContractLaneFilter(event.target.value)}
+                    placeholder="Lane, city, state, equipment..."
+                  />
+                </label>
+                <div>
+                  {contractLanesData?.generatedAt && <span>Updated {contractLanesData.generatedAt}</span>}
+                  <button type="button" onClick={() => loadContractLanes({ forceRefresh: true })} disabled={contractLanesLoading}>
+                    {contractLanesLoading ? 'Refreshing...' : 'Refresh lanes & PW FSC'}
+                  </button>
+                </div>
+              </div>
+
+              {(contractLanesData?.warnings || []).map((warning, index) => (
+                <div className="report-alert warning contract-lanes-warning" role="status" key={`${warning}-${index}`}>
+                  <p>{warning}</p>
+                </div>
+              ))}
+
+              {contractLanesError && <div className="msg error" role="alert">{contractLanesError}</div>}
+              {contractLanesLoading && !contractLanesData && (
+                <div className="quote-engine-loading" role="status">
+                  <span className="login-spinner" aria-hidden="true" />
+                  <div><strong>Loading awarded lanes and current PW fuel pricing...</strong></div>
+                </div>
+              )}
+
+              {contractLanesData && (
+                <>
+                  <div className="contract-lanes-summary" aria-live="polite">
+                    <div><span>Active lanes</span><strong>{lanes.length}</strong></div>
+                    <div><span>Visible</span><strong>{filteredLanes.length}</strong></div>
+                    <div><span>Eligible drivers</span><strong>{drivers.length}</strong></div>
+                    <div><span>Pricing date</span><strong>{formatDateOnly(contractLanesData.asOfDate)}</strong></div>
+                  </div>
+
+                  {filteredLanes.length === 0 ? (
+                    <div className="msg">No active Contract Lanes match this filter.</div>
+                  ) : (
+                    <div className="contract-lanes-table-wrap">
+                      <table className="contract-lanes-table">
+                        <thead>
+                          <tr>
+                            <th>Lane</th>
+                            <th>Allocation</th>
+                            <th>Origin</th>
+                            <th>Destination</th>
+                            <th>Equipment</th>
+                            <th>Miles</th>
+                            <th>Base</th>
+                            <th>PW FSC / mi</th>
+                            <th>Fuel</th>
+                            <th>Current Total</th>
+                            <th>Volume</th>
+                            <th>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredLanes.map((lane) => {
+                            const pricing = lane.currentPricing;
+                            return (
+                              <tr key={lane.id}>
+                                <td className="contract-lane-name-cell">
+                                  <strong>{lane.laneName || lane.contractLaneId}</strong>
+                                  <small>{lane.contractLaneId} · {lane.contractProgram || 'PWUS'} · {lane.rateVersion || 'Current version'}</small>
+                                  <details>
+                                    <summary>Business requirements</summary>
+                                    <p>{lane.businessRequirements || 'No additional requirements were provided.'}</p>
+                                  </details>
+                                </td>
+                                <td><span className={`contract-allocation-badge ${String(lane.allocationType || '').toLowerCase()}`}>{lane.allocationType || '-'}</span></td>
+                                <td>{lane.origin || '-'}</td>
+                                <td>{lane.destination || '-'}</td>
+                                <td>{lane.equipmentType || '-'}</td>
+                                <td>{Number(lane.contractMiles || 0).toLocaleString('en-US')}</td>
+                                <td>{formatQuoteEngineMoney(lane.basePrice)}</td>
+                                <td>
+                                  {pricing ? formatContractFscRate(pricing.fscRate) : 'Unavailable'}
+                                  {pricing?.provisional && <small className="contract-pricing-estimate">Latest known estimate</small>}
+                                </td>
+                                <td>{pricing ? formatQuoteEngineMoney(pricing.fscAmount) : 'Unavailable'}</td>
+                                <td className="contract-lane-total">{pricing ? formatQuoteEngineMoney(pricing.quotedTotal) : 'Unavailable'}</td>
+                                <td>{lane.allocatedVolume ?? '-'}</td>
+                                <td>
+                                  <button type="button" className="contract-lane-book-button" onClick={() => openContractLaneBooking(lane)}>
+                                    Book New Order
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  <div className="contract-lanes-source-note">
+                    Contract terms come from {contractLanesData.source?.contractLanes || 'Contract Lanes'}; PW fuel comes from {contractLanesData.source?.fuel || 'DOE Average Diesel Price'}. Booking creates a standard Won order in {contractLanesData.source?.orders || 'Bid Listing'}.
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="modal-body contract-booking-body">
+              <section className="contract-booking-lane-banner">
+                <div>
+                  <span className={`contract-allocation-badge ${String(selectedContractLane.allocationType || '').toLowerCase()}`}>
+                    {selectedContractLane.allocationType || 'Contract lane'}
+                  </span>
+                  <h3>{selectedContractLane.laneName || selectedContractLane.contractLaneId}</h3>
+                  <p>{selectedContractLane.origin} → {selectedContractLane.destination}</p>
+                </div>
+                <dl>
+                  <div><dt>Equipment</dt><dd>{selectedContractLane.equipmentType || '-'}</dd></div>
+                  <div><dt>Contract miles</dt><dd>{Number(selectedContractLane.contractMiles || 0).toLocaleString('en-US')}</dd></div>
+                  <div><dt>Base price</dt><dd>{formatQuoteEngineMoney(selectedContractLane.basePrice)}</dd></div>
+                  <div><dt>Rate version</dt><dd>{selectedContractLane.rateVersion || '-'}</dd></div>
+                </dl>
+              </section>
+
+              <section className="contract-requirements-panel">
+                <div aria-hidden="true">!</div>
+                <section>
+                  <span>Business requirements</span>
+                  <p>{selectedContractLane.businessRequirements || 'No additional business requirements were provided for this lane.'}</p>
+                </section>
+              </section>
+
+              {!contractLaneBookingResult ? (
+                <form className="contract-booking-form" onSubmit={(event) => {
+                  event.preventDefault();
+                  void bookContractLaneOrder();
+                }}>
+                  <section className="quote-engine-form-section">
+                    <div className="quote-engine-section-heading">
+                      <span>01</span>
+                      <div>
+                        <h3>Shipment-specific information</h3>
+                        <p>Contract terms stay locked. Enter only what is unique to this shipment.</p>
+                      </div>
+                    </div>
+                    <div className="quote-engine-field-grid">
+                      <label className="quote-engine-field">
+                        <span>Driver Name <em>Required</em></span>
+                        <select
+                          value={contractLaneBookingDraft.rosterDriverKey}
+                          onChange={(event) => updateContractLaneBookingDraft('rosterDriverKey', event.target.value)}
+                          required
+                        >
+                          <option value="">Choose an active Driver Roster entry</option>
+                          {drivers.map((driver) => (
+                            <option key={driver.key} value={driver.key}>
+                              {driver.driverName} · Truck {driver.unitNo}{driver.equipmentType ? ` · ${driver.equipmentType}` : ''}
+                            </option>
+                          ))}
+                        </select>
+                        {selectedDriver && <small>Bid Listing assignment: {selectedDriver.driverName} · Truck {selectedDriver.unitNo}</small>}
+                      </label>
+
+                      <label className="quote-engine-field">
+                        <span>Empty Miles <em>Required</em></span>
+                        <QuoteEngineBufferedField
+                          type="number"
+                          min="0"
+                          max="10000"
+                          step="1"
+                          value={contractLaneBookingDraft.emptyMiles}
+                          onCommit={(value) => updateContractLaneBookingDraft('emptyMiles', value)}
+                          required
+                        />
+                      </label>
+
+                      <label className="quote-engine-field">
+                        <span>Starting Location <em>Required</em></span>
+                        <QuoteEngineBufferedField
+                          value={contractLaneBookingDraft.startingLocation}
+                          onCommit={(value) => updateContractLaneBookingDraft('startingLocation', value)}
+                          placeholder="City, State or current staging point"
+                          required
+                        />
+                      </label>
+
+                      <label className="quote-engine-field">
+                        <span>Freight Description <em>Required</em></span>
+                        <QuoteEngineBufferedField
+                          as="textarea"
+                          rows="3"
+                          value={contractLaneBookingDraft.freightDescription}
+                          onCommit={(value) => updateContractLaneBookingDraft('freightDescription', value)}
+                          placeholder="Describe the shipment freight"
+                          required
+                        />
+                      </label>
+
+                      <label className="quote-engine-field">
+                        <span>Requested Pickup Date <em>Required</em></span>
+                        <input
+                          type="date"
+                          value={contractLaneBookingDraft.requestedPickupDate}
+                          min={selectedContractLane.effectiveDate || undefined}
+                          max={selectedContractLane.expirationDate || undefined}
+                          onChange={(event) => handleContractLanePickupDateChange(event.target.value)}
+                          required
+                        />
+                        <small>This also becomes the order's Ready / planned pickup date.</small>
+                      </label>
+
+                      <label className="quote-engine-field">
+                        <span>Expected Delivery Date <em>Required</em></span>
+                        <input
+                          type="date"
+                          value={contractLaneBookingDraft.expectedDeliveryDate}
+                          min={contractLaneBookingDraft.requestedPickupDate || undefined}
+                          onChange={(event) => updateContractLaneBookingDraft('expectedDeliveryDate', event.target.value)}
+                          required
+                        />
+                      </label>
+                    </div>
+                  </section>
+
+                  <section className="quote-engine-form-section contract-pricing-review">
+                    <div className="quote-engine-section-heading">
+                      <span>02</span>
+                      <div>
+                        <h3>Contract pricing review</h3>
+                        <p>Calculated by Kole Connect from the locked lane and the applicable PW FSC record.</p>
+                      </div>
+                    </div>
+
+                    {!contractLaneBookingDraft.requestedPickupDate && (
+                      <div className="msg">Choose the requested pickup date to resolve PW fuel pricing.</div>
+                    )}
+                    {contractLanePricingLoading && <div className="msg" role="status">Resolving the applicable PW FSC...</div>}
+                    {contractLanePricingError && <div className="msg error" role="alert">{contractLanePricingError}</div>}
+
+                    {pricingMatchesPickup && (
+                      <>
+                        {contractLanePricing.provisional && (
+                          <div className="report-alert warning contract-fsc-provisional" role="status">
+                            <h4>Latest known FSC will be booked as an estimate</h4>
+                            <p>{contractLanePricing.provisionalMessage}</p>
+                            <small>Billing will finalize the PW FSC when the job is completed.</small>
+                          </div>
+                        )}
+                        <dl className="contract-pricing-grid">
+                          <div><dt>Base Price</dt><dd>{formatQuoteEngineMoney(selectedContractLane.basePrice)}</dd></div>
+                          <div><dt>Contract Miles</dt><dd>{Number(selectedContractLane.contractMiles || 0).toLocaleString('en-US')}</dd></div>
+                          <div><dt>PW FSC</dt><dd>{formatContractFscRate(contractLanePricing.fscRate)} / mile</dd></div>
+                          <div><dt>FSC Effective</dt><dd>{formatDateOnly(contractLanePricing.fscEffectiveDate)}</dd></div>
+                          <div><dt>FSC Amount</dt><dd>{formatQuoteEngineMoney(contractLanePricing.fscAmount)}</dd></div>
+                          <div className="total"><dt>Quoted Total</dt><dd>{formatQuoteEngineMoney(contractLanePricing.quotedTotal)}</dd></div>
+                        </dl>
+                      </>
+                    )}
+                  </section>
+
+                  <section className="quote-engine-form-section contract-snapshot-panel">
+                    <div className="quote-engine-section-heading">
+                      <span>03</span>
+                      <div>
+                        <h3>Won-order snapshot</h3>
+                        <p>These contract values are written to the normal Bid Listing order and cannot be edited here.</p>
+                      </div>
+                    </div>
+                    <dl>
+                      <div><dt>Contract Order</dt><dd>Yes</dd></div>
+                      <div><dt>Contract Lane ID</dt><dd>{selectedContractLane.contractLaneId}</dd></div>
+                      <div><dt>RTX Item</dt><dd>{selectedContractLane.rtxItemId || '-'}</dd></div>
+                      <div><dt>Program</dt><dd>{selectedContractLane.contractProgram || '-'}</dd></div>
+                      <div><dt>FSC Program</dt><dd>{selectedContractLane.fscProgram || '-'}</dd></div>
+                      <div><dt>Status</dt><dd><span className="status won">Won</span></dd></div>
+                    </dl>
+                  </section>
+
+                  {contractLaneBookingDuplicates.length > 0 && (
+                    <section className="quote-engine-review-panel warning-panel contract-duplicate-review">
+                      <h3>Existing booking review</h3>
+                      <p>An order already uses this contract lane and pickup date.</p>
+                      <div className="quote-engine-duplicate-list">
+                        {contractLaneBookingDuplicates.map((duplicate) => (
+                          <article key={duplicate.id}>
+                            <strong>{duplicate.bidId || `SharePoint item ${duplicate.id}`}</strong>
+                            <span>{duplicate.driverName || 'Driver pending'} · Truck {duplicate.truck || '-'}</span>
+                            <small>{formatDateOnly(duplicate.pickupDate)} · {duplicate.status || 'No status'} · {formatQuoteEngineMoney(duplicate.quotedTotal)}</small>
+                          </article>
+                        ))}
+                      </div>
+                      <label className="quote-engine-confirm-row">
+                        <input
+                          type="checkbox"
+                          checked={contractLaneBookingDraft.duplicateAcknowledged}
+                          onChange={(event) => updateContractLaneBookingDraft('duplicateAcknowledged', event.target.checked)}
+                        />
+                        <span>I reviewed the existing order and intend to create a separate Won order.</span>
+                      </label>
+                    </section>
+                  )}
+
+                  <section className="quote-engine-publish-confirmation">
+                    <label className="quote-engine-confirm-row final-confirm">
+                      <input
+                        type="checkbox"
+                        checked={contractLaneBookingDraft.confirmBook}
+                        onChange={(event) => updateContractLaneBookingDraft('confirmBook', event.target.checked)}
+                      />
+                      <span>
+                        <strong>Create this standard Won Bid Listing order</strong>
+                        <small>
+                          {contractLanePricing?.provisional
+                            ? 'The latest known FSC estimate will be saved for billing to finalize later.'
+                            : 'Contract pricing and shipment details will be snapshotted at booking.'}
+                        </small>
+                      </span>
+                    </label>
+                  </section>
+
+                  {contractLaneBookingError && <div className="msg error" role="alert">{contractLaneBookingError}</div>}
+
+                  <div className="quote-engine-footer">
+                    <button type="button" className="secondary-button" onClick={returnToContractLaneTable} disabled={contractLaneBookingSubmitting}>
+                      Back to lanes
+                    </button>
+                    <button type="submit" disabled={!canBook || contractLaneBookingSubmitting}>
+                      {contractLaneBookingSubmitting ? 'Creating Won order...' : 'Book Order'}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div className="contract-booking-success">
+                  <section className={`quote-engine-publish-result ${contractLaneBookingResult.pendingBidId ? 'pending' : 'success'}`} role="status">
+                    <div>
+                      <span aria-hidden="true">{contractLaneBookingResult.pendingBidId ? '…' : '✓'}</span>
+                      <div>
+                        <h3>{contractLaneBookingResult.pendingBidId ? 'Won order created; Bid ID is pending' : 'Contract order booked'}</h3>
+                        <p>{contractLaneBookingResult.message}</p>
+                        {contractLaneBookingResult.pricing?.provisional && (
+                          <small>Booked with the latest known PW FSC estimate for billing to finalize.</small>
+                        )}
+                      </div>
+                    </div>
+                    <strong>{contractLaneBookingResult.BidID || `SharePoint item ${contractLaneBookingResult.itemId}`}</strong>
+                  </section>
+
+                  <dl className="contract-pricing-grid contract-success-summary">
+                    <div><dt>Lane</dt><dd>{selectedContractLane.contractLaneId}</dd></div>
+                    <div><dt>Driver</dt><dd>{selectedDriver?.driverName || '-'}</dd></div>
+                    <div><dt>Pickup</dt><dd>{formatDateOnly(contractLaneBookingDraft.requestedPickupDate)}</dd></div>
+                    <div><dt>PW FSC</dt><dd>{formatContractFscRate(contractLaneBookingResult.pricing?.fscRate)}</dd></div>
+                    <div><dt>FSC Amount</dt><dd>{formatQuoteEngineMoney(contractLaneBookingResult.pricing?.fscAmount)}</dd></div>
+                    <div className="total"><dt>Quoted Total</dt><dd>{formatQuoteEngineMoney(contractLaneBookingResult.pricing?.quotedTotal)}</dd></div>
+                  </dl>
+
+                  {contractLaneBookingError && <div className="msg error" role="alert">{contractLaneBookingError}</div>}
+
+                  <div className="quote-engine-footer">
+                    <button type="button" className="secondary-button" onClick={returnToContractLaneTable} disabled={contractLaneBookingSubmitting}>
+                      Return to lanes
+                    </button>
+                    {contractLaneBookingResult.pendingBidId && (
+                      <button type="button" onClick={checkContractLaneBidId} disabled={contractLaneBookingSubmitting}>
+                        {contractLaneBookingSubmitting ? 'Checking...' : 'Check Bid ID'}
+                      </button>
+                    )}
+                    {contractLaneBookingResult.record && (
+                      <button type="button" onClick={openCreatedContractLaneOrder}>Open created order</button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      </div>
+    );
+  }
+
   function renderQuoteEngineModal() {
     if (!quoteEngineOpen) return null;
 
@@ -20746,6 +21510,7 @@ function openReportLoadDetails(load) {
     <>
       {renderPreferencesModal()}
       {renderQuoteEngineModal()}
+      {renderContractLanesModal()}
       {RecruitingProfileModal()}
       {RecruitingSnapshotModal()}
       {RecruitingDriverRosterPortModal()}
@@ -20823,6 +21588,17 @@ function openReportLoadDetails(load) {
             aria-expanded={quoteEngineOpen}
           >
             New Quote
+          </button>
+
+          <button
+            ref={contractLanesButtonRef}
+            type="button"
+            className="contract-lanes-launch"
+            onClick={openContractLanes}
+            aria-haspopup="dialog"
+            aria-expanded={contractLanesOpen}
+          >
+            Contract Lanes
           </button>
 
           <button
