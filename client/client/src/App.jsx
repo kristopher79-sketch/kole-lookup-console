@@ -180,6 +180,7 @@ function createContractLaneBookingDraft(lane = {}) {
     freightDescription: '',
     requestedPickupDate: '',
     expectedDeliveryDate: '',
+    teamRequired: false,
     duplicateAcknowledged: false,
     confirmBook: false,
     requestId: ''
@@ -4037,7 +4038,7 @@ export default function App() {
     setContractLaneBookingResult(null);
   }
 
-  async function loadContractLanePricing(lane, requestedPickupDate) {
+  async function loadContractLanePricing(lane, requestedPickupDate, teamRequired) {
     contractLanePricingControllerRef.current?.abort();
     const controller = new AbortController();
     contractLanePricingControllerRef.current = controller;
@@ -4048,7 +4049,8 @@ export default function App() {
     try {
       const params = new URLSearchParams({
         laneItemId: lane.id,
-        requestedPickupDate
+        requestedPickupDate,
+        teamRequired: String(Boolean(teamRequired))
       });
       const res = await authedFetch(`${API}/contract-lanes/pricing?${params.toString()}`, {
         signal: controller.signal
@@ -4077,7 +4079,26 @@ export default function App() {
     setContractLanePricingError('');
     setContractLaneBookingResult(null);
     if (selectedContractLane && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-      void loadContractLanePricing(selectedContractLane, value);
+      void loadContractLanePricing(
+        selectedContractLane,
+        value,
+        contractLaneBookingDraftRef.current.teamRequired
+      );
+    } else {
+      contractLanePricingControllerRef.current?.abort();
+      setContractLanePricingLoading(false);
+    }
+  }
+
+  function handleContractLaneTeamRequiredChange(teamRequired) {
+    updateContractLaneBookingDraft('teamRequired', teamRequired);
+    setContractLanePricing(null);
+    setContractLanePricingError('');
+    setContractLaneBookingResult(null);
+
+    const requestedPickupDate = contractLaneBookingDraftRef.current.requestedPickupDate;
+    if (selectedContractLane && /^\d{4}-\d{2}-\d{2}$/.test(requestedPickupDate)) {
+      void loadContractLanePricing(selectedContractLane, requestedPickupDate, teamRequired);
     } else {
       contractLanePricingControllerRef.current?.abort();
       setContractLanePricingLoading(false);
@@ -20416,7 +20437,8 @@ function openReportLoadDetails(load) {
     );
     const pricingMatchesPickup = Boolean(
       contractLanePricing &&
-      contractLanePricing.requestedPickupDate === contractLaneBookingDraft.requestedPickupDate
+      contractLanePricing.requestedPickupDate === contractLaneBookingDraft.requestedPickupDate &&
+      contractLanePricing.teamRequired === Boolean(contractLaneBookingDraft.teamRequired)
     );
     const canBook = Boolean(
       selectedContractLane &&
@@ -20514,7 +20536,7 @@ function openReportLoadDetails(load) {
                   <div className="contract-lanes-summary" aria-live="polite">
                     <div><span>Active lanes</span><strong>{lanes.length}</strong></div>
                     <div><span>Visible</span><strong>{filteredLanes.length}</strong></div>
-                    <div><span>Eligible drivers</span><strong>{drivers.length}</strong></div>
+                    <div><span>Active drivers</span><strong>{drivers.length}</strong></div>
                     <div><span>Pricing date</span><strong>{formatDateOnly(contractLanesData.asOfDate)}</strong></div>
                   </div>
 
@@ -20638,8 +20660,33 @@ function openReportLoadDetails(load) {
                             </option>
                           ))}
                         </select>
-                        {selectedDriver && <small>Bid Listing assignment: {selectedDriver.driverName} · Truck {selectedDriver.unitNo}</small>}
+                        {selectedDriver && <small>Driver Roster assignment: {selectedDriver.driverName} · Truck {selectedDriver.unitNo}</small>}
                       </label>
+
+                      <fieldset className="contract-team-required-field">
+                        <legend>Team Required? <em>Required</em></legend>
+                        <div className="contract-team-required-options">
+                          <label>
+                            <input
+                              type="radio"
+                              name="contract-team-required"
+                              checked={!contractLaneBookingDraft.teamRequired}
+                              onChange={() => handleContractLaneTeamRequiredChange(false)}
+                            />
+                            <span>No</span>
+                          </label>
+                          <label>
+                            <input
+                              type="radio"
+                              name="contract-team-required"
+                              checked={contractLaneBookingDraft.teamRequired}
+                              onChange={() => handleContractLaneTeamRequiredChange(true)}
+                            />
+                            <span>Yes</span>
+                          </label>
+                        </div>
+                        <small>Customer-required service level. This is independent of the selected driver.</small>
+                      </fieldset>
 
                       <label className="quote-engine-field">
                         <span>Empty Miles <em>Required</em></span>
@@ -20730,8 +20777,15 @@ function openReportLoadDetails(load) {
                           <div><dt>Base Price</dt><dd>{formatQuoteEngineMoney(selectedContractLane.basePrice)}</dd></div>
                           <div><dt>Contract Miles</dt><dd>{Number(selectedContractLane.contractMiles || 0).toLocaleString('en-US')}</dd></div>
                           <div><dt>PW FSC</dt><dd>{formatContractFscRate(contractLanePricing.fscRate)} / mile</dd></div>
-                          <div><dt>FSC Effective</dt><dd>{formatDateOnly(contractLanePricing.fscEffectiveDate)}</dd></div>
                           <div><dt>FSC Amount</dt><dd>{formatQuoteEngineMoney(contractLanePricing.fscAmount)}</dd></div>
+                          <div>
+                            <dt>Team Service</dt>
+                            <dd>
+                              {contractLanePricing.teamRequired
+                                ? `${formatQuoteEngineMoney(contractLanePricing.teamAccessorial)} (${formatQuoteEngineRate(contractLanePricing.teamServiceRate)} × ${Number(selectedContractLane.contractMiles || 0).toLocaleString('en-US')} mi)`
+                                : 'Not Required · $0.00'}
+                            </dd>
+                          </div>
                           <div className="total"><dt>Quoted Total</dt><dd>{formatQuoteEngineMoney(contractLanePricing.quotedTotal)}</dd></div>
                         </dl>
                       </>
@@ -20752,6 +20806,7 @@ function openReportLoadDetails(load) {
                       <div><dt>RTX Item</dt><dd>{selectedContractLane.rtxItemId || '-'}</dd></div>
                       <div><dt>Program</dt><dd>{selectedContractLane.contractProgram || '-'}</dd></div>
                       <div><dt>FSC Program</dt><dd>{selectedContractLane.fscProgram || '-'}</dd></div>
+                      <div><dt>Team Required</dt><dd>{contractLaneBookingDraft.teamRequired ? 'Yes' : 'No'}</dd></div>
                       <div><dt>Status</dt><dd><span className="status won">Won</span></dd></div>
                     </dl>
                   </section>
@@ -20831,6 +20886,7 @@ function openReportLoadDetails(load) {
                     <div><dt>Pickup</dt><dd>{formatDateOnly(contractLaneBookingDraft.requestedPickupDate)}</dd></div>
                     <div><dt>PW FSC</dt><dd>{formatContractFscRate(contractLaneBookingResult.pricing?.fscRate)}</dd></div>
                     <div><dt>FSC Amount</dt><dd>{formatQuoteEngineMoney(contractLaneBookingResult.pricing?.fscAmount)}</dd></div>
+                    <div><dt>Team Service</dt><dd>{contractLaneBookingResult.pricing?.teamRequired ? formatQuoteEngineMoney(contractLaneBookingResult.pricing?.teamAccessorial) : 'Not Required · $0.00'}</dd></div>
                     <div className="total"><dt>Quoted Total</dt><dd>{formatQuoteEngineMoney(contractLaneBookingResult.pricing?.quotedTotal)}</dd></div>
                   </dl>
 

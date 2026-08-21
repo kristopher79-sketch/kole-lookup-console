@@ -44,6 +44,7 @@ const QUOTE_ENGINE_OPTIONS_CACHE_MS = 5 * 60 * 1000;
 const QUOTE_ENGINE_COMPARABLE_CACHE_MS = 5 * 60 * 1000;
 const QUOTE_ENGINE_PUBLISH_CACHE_MS = 30 * 60 * 1000;
 const CONTRACT_LANES_CACHE_MS = 5 * 60 * 1000;
+const CONTRACT_LANE_TEAM_SERVICE_RATE = 0.25;
 const QUOTE_ENGINE_BID_ID_POLL_TIMEOUT_MS = Math.min(
   60 * 1000,
   Math.max(5 * 1000, Number(process.env.QUOTE_ENGINE_BID_ID_POLL_TIMEOUT_MS) || 20 * 1000)
@@ -2752,6 +2753,7 @@ const CONTRACT_LANE_REQUIRED_BID_COLUMNS = Object.freeze([
   'ContractMiles',
   'ContractFSCRate',
   'ContractFSCAmount',
+  'ContractTeamACC',
   'ContractRateVersion'
 ]);
 
@@ -2961,8 +2963,12 @@ function resolveContractLanePricing(lane, doeRecords, requestedPickupDate, optio
     );
   }
 
+  const teamRequired = options.teamRequired === true;
   const fscAmount = roundContractCurrency(lane.contractMiles * applicable.rate);
-  const quotedTotal = roundContractCurrency(lane.basePrice + fscAmount);
+  const teamAccessorial = roundContractCurrency(
+    teamRequired ? lane.contractMiles * CONTRACT_LANE_TEAM_SERVICE_RATE : 0
+  );
+  const quotedTotal = roundContractCurrency(lane.basePrice + fscAmount + teamAccessorial);
   const provisional = requestedPickupDate > latestAvailable.effectiveDate;
 
   return {
@@ -2971,6 +2977,9 @@ function resolveContractLanePricing(lane, doeRecords, requestedPickupDate, optio
     fscEffectiveDate: applicable.effectiveDate,
     latestAvailableEffectiveDate: latestAvailable.effectiveDate,
     fscAmount,
+    teamRequired,
+    teamServiceRate: CONTRACT_LANE_TEAM_SERVICE_RATE,
+    teamAccessorial,
     quotedTotal,
     provisional,
     pricingStatus: provisional ? 'estimate' : 'final',
@@ -3001,6 +3010,15 @@ function assertContractLaneBidSchema(schema) {
       'CONTRACT_BID_SCHEMA_MISMATCH'
     );
   }
+
+  const teamAccessorialColumn = schema.columnsByName.get('ContractTeamACC');
+  if (!teamAccessorialColumn?.currency && !teamAccessorialColumn?.number) {
+    throw getContractLaneError(
+      'Contract Lane booking is unavailable because ContractTeamACC is not configured as a numeric Bid Listing field.',
+      503,
+      'CONTRACT_BID_SCHEMA_MISMATCH'
+    );
+  }
 }
 
 function resolveContractBidChoice(schema, columnName, label, requestedValue) {
@@ -3014,18 +3032,7 @@ function resolveContractBidChoice(schema, columnName, label, requestedValue) {
   return resolveQuoteChoiceValue({ label, choices }, requestedValue);
 }
 
-function getContractLaneDriverChoice(option, schema) {
-  try {
-    return {
-      operator: resolveQuoteChoiceValue(schema.quoteChoices.operator, option.driverName),
-      truck: resolveQuoteChoiceValue(schema.quoteChoices.truck, option.unitNo)
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function getContractLaneDriverOptions(token, schema) {
+async function getContractLaneDriverOptions(token) {
   if (!process.env.DRIVER_ROSTER_LIST_ID) {
     return {
       options: [],
@@ -3034,28 +3041,15 @@ async function getContractLaneDriverOptions(token, schema) {
   }
 
   const rosterOptions = await getAvailableTruckRosterOptions(token);
-  const mappedOptions = rosterOptions
-    .map((option) => {
-      const choice = getContractLaneDriverChoice(option, schema);
-      if (!choice) return null;
-      return {
-        key: option.key,
-        driverName: choice.operator,
-        unitNo: choice.truck,
-        equipmentType: option.equipmentType || '',
-        trailerType: option.trailerType || '',
-        soloOrTeam: option.soloOrTeam || '',
-        tmsName: option.tmsName || ''
-      };
-    })
-    .filter(Boolean);
-  const excludedCount = rosterOptions.length - mappedOptions.length;
 
   return {
-    options: mappedOptions,
-    warning: excludedCount > 0
-      ? `${excludedCount} active Driver Roster option${excludedCount === 1 ? ' is' : 's are'} hidden because its driver or truck choice is not unambiguous in Bid Listing.`
-      : ''
+    options: rosterOptions.map((option) => ({
+      key: option.key,
+      driverName: option.driverName,
+      unitNo: option.unitNo,
+      equipmentType: option.equipmentType || ''
+    })),
+    warning: ''
   };
 }
 
@@ -3071,7 +3065,7 @@ async function getContractLanesPayload(token, options = {}) {
   let drivers = [];
   let driverWarning = '';
   try {
-    const driverBundle = await getContractLaneDriverOptions(token, schema);
+    const driverBundle = await getContractLaneDriverOptions(token);
     drivers = driverBundle.options;
     driverWarning = driverBundle.warning;
   } catch {
@@ -3083,7 +3077,10 @@ async function getContractLanesPayload(token, options = {}) {
     try {
       return {
         ...lane,
-        currentPricing: resolveContractLanePricing(lane, source.doeRecords, today, { validateLaneWindow: false })
+        currentPricing: resolveContractLanePricing(lane, source.doeRecords, today, {
+          validateLaneWindow: false,
+          teamRequired: false
+        })
       };
     } catch {
       return { ...lane, currentPricing: null };
@@ -3126,6 +3123,7 @@ function normalizeContractLaneBooking(input = {}) {
     freightDescription: getQuoteEngineText(input, 'freightDescription', 'Freight Description', 1000),
     requestedPickupDate,
     expectedDeliveryDate,
+    teamRequired: getQuoteEngineBoolean(input.teamRequired, 'Team Required'),
     duplicateAcknowledged: getQuoteEngineBoolean(input.duplicateAcknowledged, 'Duplicate acknowledgement', false) === true,
     confirmBook: getQuoteEngineBoolean(input.confirmBook, 'Booking confirmation', false) === true,
     requestId: getQuoteEngineText(input, 'requestId', 'Booking request ID', 100, false)
@@ -3147,19 +3145,51 @@ async function resolveContractLaneBookingDriver(token, schema, rosterDriverKey) 
     );
   }
 
-  const choice = getContractLaneDriverChoice(roster, schema);
-  if (!choice) {
+  const resolveRosterChoice = (definition, value, fieldLabel, codePrefix) => {
+    const requestedValue = String(value || '').trim();
+    const choices = Array.isArray(definition?.choices)
+      ? definition.choices.map((choice) => String(choice || '').trim()).filter(Boolean)
+      : [];
+    const exactMatch = choices.find((choice) => choice === requestedValue);
+    if (exactMatch) return exactMatch;
+
+    const normalized = normalizeQuoteChoiceValue(requestedValue);
+    const normalizedMatches = [...new Set(
+      choices.filter((choice) => normalizeQuoteChoiceValue(choice) === normalized)
+    )];
+
+    if (normalizedMatches.length === 1) return normalizedMatches[0];
+    if (normalizedMatches.length === 0) {
+      throw getContractLaneError(
+        `${fieldLabel} "${requestedValue || '(blank)'}" from Driver Roster is not an approved Bid Listing choice. Add that exact value to Bid Listing or correct the Driver Roster entry, then retry.`,
+        409,
+        `${codePrefix}_CHOICE_NOT_FOUND`
+      );
+    }
+
     throw getContractLaneError(
-      'The selected driver or truck does not map unambiguously to the approved Bid Listing choices.',
+      `${fieldLabel} "${requestedValue}" from Driver Roster matches multiple Bid Listing choices. Remove or rename the duplicate choices, then retry.`,
       409,
-      'CONTRACT_DRIVER_CHOICE_MISMATCH'
+      `${codePrefix}_CHOICE_AMBIGUOUS`
     );
-  }
+  };
+
+  const operator = resolveRosterChoice(
+    schema.quoteChoices.operator,
+    roster.driverName,
+    'Driver Name / Operator Team',
+    'CONTRACT_DRIVER'
+  );
+  const truck = resolveRosterChoice(
+    schema.quoteChoices.truck,
+    roster.unitNo,
+    'Truck Number',
+    'CONTRACT_TRUCK'
+  );
 
   return {
-    ...roster,
-    driverName: choice.operator,
-    unitNo: choice.truck
+    driverName: operator,
+    unitNo: truck
   };
 }
 
@@ -3238,7 +3268,7 @@ function buildContractLaneCreateFields(booking, lane, pricing, driver, schema) {
     Team_x0020_Required: getQuoteEngineYesNoWriteValue(
       schema,
       'Team_x0020_Required',
-      normalizeText(driver.soloOrTeam).includes('team')
+      booking.teamRequired
     ),
     Permits_x002f_Escort_x0020_Fees_: 0,
     Quoted_x0020_Total: pricing.quotedTotal,
@@ -3254,6 +3284,7 @@ function buildContractLaneCreateFields(booking, lane, pricing, driver, schema) {
     ContractMiles: lane.contractMiles,
     ContractFSCRate: pricing.fscRate,
     ContractFSCAmount: pricing.fscAmount,
+    ContractTeamACC: pricing.teamAccessorial,
     ContractRateVersion: lane.rateVersion
   };
 
@@ -3304,7 +3335,9 @@ async function publishContractLaneBooking(token, booking, currentList, schema) {
     );
   }
 
-  const pricing = resolveContractLanePricing(lane, source.doeRecords, booking.requestedPickupDate);
+  const pricing = resolveContractLanePricing(lane, source.doeRecords, booking.requestedPickupDate, {
+    teamRequired: booking.teamRequired
+  });
 
   const [driver, duplicates] = await Promise.all([
     resolveContractLaneBookingDriver(token, schema, booking.rosterDriverKey),
@@ -12364,6 +12397,7 @@ app.get('/contract-lanes/pricing', requireLookupAccess, async (req, res) => {
   try {
     const laneItemId = String(req.query.laneItemId || '').trim();
     const requestedPickupDate = String(req.query.requestedPickupDate || '').trim();
+    const teamRequired = getQuoteEngineBoolean(req.query.teamRequired, 'Team Required');
 
     if (!/^\d+$/.test(laneItemId)) {
       throw getContractLaneError('Choose a valid active Contract Lane.', 400, 'CONTRACT_LANE_REQUIRED');
@@ -12397,7 +12431,7 @@ app.get('/contract-lanes/pricing', requireLookupAccess, async (req, res) => {
         basePrice: lane.basePrice,
         rateVersion: lane.rateVersion
       },
-      pricing: resolveContractLanePricing(lane, source.doeRecords, requestedPickupDate)
+      pricing: resolveContractLanePricing(lane, source.doeRecords, requestedPickupDate, { teamRequired })
     });
   } catch (error) {
     console.error('Contract Lane pricing could not be resolved.');

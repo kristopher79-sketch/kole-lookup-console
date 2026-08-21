@@ -2186,6 +2186,73 @@ tbody tr:hover {
   gap: 16px;
 }
 
+.contract-team-required-field {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--kole-text-soft);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.contract-team-required-field legend {
+  width: 100%;
+  margin: 0 0 7px;
+  padding: 0;
+}
+
+.contract-team-required-field legend em {
+  float: right;
+  color: var(--kole-muted-subtle);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.contract-team-required-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.contract-team-required-options label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  border: 1px solid var(--kole-control-border);
+  border-radius: 9px;
+  background: var(--kole-control-bg);
+  color: var(--kole-text);
+  cursor: pointer;
+}
+
+.contract-team-required-options label:has(input:checked) {
+  border-color: var(--kole-action);
+  background: color-mix(in srgb, var(--kole-action) 14%, var(--kole-control-bg));
+  box-shadow: 0 0 0 2px var(--kole-focus);
+}
+
+.contract-team-required-options input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--kole-action);
+}
+
+.contract-team-required-field > small {
+  color: var(--kole-muted-subtle);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
 .contract-pricing-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
