@@ -5,6 +5,11 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const multer = require('multer');
+const {
+  DRIVER_IMPACTING_FIELDS,
+  createBidListingNotificationEvents,
+  findActiveMobileDriverForTruck
+} = require('./notification-events');
 
 const app = express();
 app.use(cors());
@@ -2677,6 +2682,12 @@ async function publishQuoteEngineBid(token, draft, recommendation, currentList, 
   }
 
   clearQuoteEngineMutationCaches();
+  const notificationResult = await recordCreatedBidListingNotificationChangeSafely(
+    token,
+    currentList,
+    createdItem,
+    itemId
+  );
 
   const pendingResult = {
     success: true,
@@ -2686,7 +2697,10 @@ async function publishQuoteEngineBid(token, draft, recommendation, currentList, 
     itemId,
     BidID: '',
     message: 'The Bid Listing record was created. Power Automate is still assigning its Bid ID; do not publish it again.',
-    recommendation
+    recommendation,
+    notificationEventCount: notificationResult.createdCount,
+    notificationEventTypes: notificationResult.eventTypes,
+    notificationWarning: notificationResult.warning
   };
   setCacheRecord(cachedQuotePublishResults, requestCacheKey, pendingResult, 40);
   setCacheRecord(pendingQuoteAuditContexts, itemId, { draft, recommendation, requestCacheKey }, 40);
@@ -2712,7 +2726,10 @@ async function publishQuoteEngineBid(token, draft, recommendation, currentList, 
     record,
     recommendation,
     auditNote: audit.auditNote,
-    noteWarning: audit.noteWarning
+    noteWarning: audit.noteWarning,
+    notificationEventCount: notificationResult.createdCount,
+    notificationEventTypes: notificationResult.eventTypes,
+    notificationWarning: notificationResult.warning
   };
 
   setCacheRecord(cachedQuotePublishResults, requestCacheKey, finalResult, 40);
@@ -3383,6 +3400,12 @@ async function publishContractLaneBooking(token, booking, currentList, schema) {
   }
 
   clearQuoteEngineMutationCaches();
+  const notificationResult = await recordCreatedBidListingNotificationChangeSafely(
+    token,
+    currentList,
+    createdItem,
+    itemId
+  );
 
   const pendingResult = {
     success: true,
@@ -3397,7 +3420,10 @@ async function publishContractLaneBooking(token, booking, currentList, schema) {
       laneName: lane.laneName,
       contractLaneId: lane.contractLaneId
     },
-    pricing
+    pricing,
+    notificationEventCount: notificationResult.createdCount,
+    notificationEventTypes: notificationResult.eventTypes,
+    notificationWarning: notificationResult.warning
   };
   setCacheRecord(cachedContractLaneBookingResults, requestCacheKey, pendingResult, 40);
   setCacheRecord(pendingContractLaneBookings, itemId, { requestCacheKey }, 40);
@@ -13322,6 +13348,11 @@ app.patch('/record/:id', requireLookupAccess, async (req, res) => {
 
     const updatedItem = await graphGet(token, readUrl);
     const updatedRecord = buildRecordResponse(updatedItem, currentList);
+    const notificationResult = await recordBidListingNotificationChangeSafely(token, {
+      currentList,
+      previousItem: currentItem,
+      currentItem: updatedItem
+    });
     let auditNote = null;
     let noteWarning = '';
 
@@ -13351,7 +13382,10 @@ app.patch('/record/:id', requireLookupAccess, async (req, res) => {
       changedFields: changedRows.map((row) => row.key),
       record: updatedRecord,
       auditNote,
-      noteWarning
+      noteWarning,
+      notificationEventCount: notificationResult.createdCount,
+      notificationEventTypes: notificationResult.eventTypes,
+      notificationWarning: notificationResult.warning
     });
   } catch (error) {
     console.error(error);
@@ -19882,6 +19916,635 @@ app.patch('/service-locations/:id', requireLookupAccess, async (req, res) => {
     res.status(error.statusCode || 400).json({
       success: false,
       error: error.message || 'Unable to update Service Location.'
+    });
+  }
+});
+
+// ============================================================
+// KOLE CONNECT MOBILE - NOTIFICATION EVENT TRIGGERS
+// ============================================================
+
+const MOBILE_NOTIFICATION_SCHEMA_CACHE_MS = 5 * 60 * 1000;
+const MOBILE_NOTIFICATION_REQUIRED_COLUMNS = Object.freeze([
+  'Title',
+  'NotificationID',
+  'EventType',
+  'BidID',
+  'LoadID',
+  'BOLNumber',
+  'TruckNumber',
+  'PreviousTruckNumber',
+  'DriverRosterItemID',
+  'ChangedFields',
+  'CreatedAt',
+  'DeliveryStatus',
+  'DeliveredAt',
+  'SourceListID',
+  'SourceItemID',
+  'SourceModified',
+  'SourceVersion',
+  'Status',
+  'PreviousStatus',
+  'Origin',
+  'Destination',
+  'PickupDate',
+  'PickupTime',
+  'DeliveryDate',
+  'DeliveryTime',
+  'EventPayload'
+]);
+let cachedMobileNotificationSchema = null;
+let cachedMobileNotificationSchemaAt = 0;
+
+function createMobileNotificationError(message, statusCode = 500, code = '') {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  if (code) error.code = code;
+  return error;
+}
+
+function getMobileNotificationEventConfig() {
+  return {
+    siteId: String(process.env.MOBILE_NOTIFICATION_EVENTS_SITE_ID || process.env.SITE_ID || '').trim(),
+    listId: String(process.env.MOBILE_NOTIFICATION_EVENTS_LIST_ID || '').trim()
+  };
+}
+
+function isMobileNotificationEventStoreConfigured() {
+  const config = getMobileNotificationEventConfig();
+  return Boolean(config.siteId && config.listId);
+}
+
+function getMobileNotificationIngestSecret() {
+  return String(process.env.MOBILE_NOTIFICATION_INGEST_SECRET || '').trim();
+}
+
+function mobileNotificationSecretsMatch(expected, supplied) {
+  const expectedBuffer = Buffer.from(String(expected || ''), 'utf8');
+  const suppliedBuffer = Buffer.from(String(supplied || ''), 'utf8');
+
+  return (
+    expectedBuffer.length > 0 &&
+    expectedBuffer.length === suppliedBuffer.length &&
+    crypto.timingSafeEqual(expectedBuffer, suppliedBuffer)
+  );
+}
+
+function requireMobileNotificationIngestAccess(req, res, next) {
+  const expectedSecret = getMobileNotificationIngestSecret();
+
+  if (!expectedSecret) {
+    return res.status(500).json({
+      success: false,
+      error: 'Mobile notification change ingestion is not configured on the server.'
+    });
+  }
+
+  const suppliedSecret = String(req.headers['x-kole-notification-secret'] || '').trim();
+  if (!mobileNotificationSecretsMatch(expectedSecret, suppliedSecret)) {
+    return res.status(401).json({
+      success: false,
+      error: 'Invalid or missing notification ingestion credentials.'
+    });
+  }
+
+  next();
+}
+
+async function getMobileNotificationEventSchema(token, forceRefresh = false) {
+  const { siteId, listId } = getMobileNotificationEventConfig();
+
+  if (!siteId || !listId) {
+    throw createMobileNotificationError(
+      'Notification event persistence is not configured. Provision the approved SharePoint list and set MOBILE_NOTIFICATION_EVENTS_LIST_ID.',
+      503,
+      'MOBILE_NOTIFICATION_STORE_UNAVAILABLE'
+    );
+  }
+
+  const now = Date.now();
+  if (
+    !forceRefresh &&
+    cachedMobileNotificationSchema?.siteId === siteId &&
+    cachedMobileNotificationSchema?.listId === listId &&
+    now - cachedMobileNotificationSchemaAt < MOBILE_NOTIFICATION_SCHEMA_CACHE_MS
+  ) {
+    return cachedMobileNotificationSchema;
+  }
+
+  const data = await graphGet(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/columns?$select=name,displayName,hidden,readOnly,indexed,enforceUniqueValues&$top=999`
+  );
+  const columnsByName = new Map(
+    (data.value || [])
+      .filter((column) => column?.name)
+      .map((column) => [column.name, column])
+  );
+  const missing = MOBILE_NOTIFICATION_REQUIRED_COLUMNS.filter((name) => !columnsByName.has(name));
+  const readOnly = MOBILE_NOTIFICATION_REQUIRED_COLUMNS.filter((name) => columnsByName.get(name)?.readOnly === true);
+
+  if (missing.length > 0 || readOnly.length > 0) {
+    const details = [
+      missing.length ? `missing: ${missing.join(', ')}` : '',
+      readOnly.length ? `read-only: ${readOnly.join(', ')}` : ''
+    ].filter(Boolean).join('; ');
+
+    throw createMobileNotificationError(
+      `Notification Events list schema does not match the required contract (${details}).`,
+      503,
+      'MOBILE_NOTIFICATION_SCHEMA_MISMATCH'
+    );
+  }
+
+  const notificationIdColumn = columnsByName.get('NotificationID');
+  if (notificationIdColumn.indexed !== true || notificationIdColumn.enforceUniqueValues !== true) {
+    throw createMobileNotificationError(
+      'NotificationID must be indexed and enforce unique values before notification events can be persisted safely.',
+      503,
+      'MOBILE_NOTIFICATION_IDEMPOTENCY_NOT_ENFORCED'
+    );
+  }
+
+  cachedMobileNotificationSchema = { siteId, listId };
+  cachedMobileNotificationSchemaAt = now;
+  return cachedMobileNotificationSchema;
+}
+
+async function findPersistedMobileNotificationEvent(token, schema, eventId) {
+  const safeEventId = escapeODataString(eventId);
+  const data = await graphGet(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${schema.siteId}/lists/${schema.listId}/items` +
+      `?$select=id&$expand=fields($select=NotificationID)&$filter=fields/NotificationID eq '${safeEventId}'&$top=1`,
+    { Prefer: 'HonorNonIndexedQueriesWarningMayFailRandomly' }
+  );
+
+  return (data.value || [])[0] || null;
+}
+
+function buildMobileNotificationEventFields(event, target) {
+  const storedEvent = {
+    ...event,
+    driverRosterItemId: target.driverRosterItemId,
+    deliveryStatus: target.deliveryStatus
+  };
+  const titleReference = event.bidId || event.bolNumber || event.loadId;
+
+  return {
+    Title: `${event.eventType} ${titleReference}`.slice(0, 255),
+    NotificationID: event.eventId,
+    EventType: event.eventType,
+    BidID: event.bidId,
+    LoadID: event.loadId,
+    BOLNumber: event.bolNumber,
+    TruckNumber: event.truckNumber,
+    PreviousTruckNumber: event.previousTruckNumber,
+    DriverRosterItemID: target.driverRosterItemId,
+    ChangedFields: JSON.stringify(event.changedFields),
+    CreatedAt: event.createdAt,
+    DeliveryStatus: target.deliveryStatus,
+    SourceListID: event.sourceListId,
+    SourceItemID: event.sourceItemId,
+    SourceModified: event.sourceModified,
+    SourceVersion: event.sourceVersion,
+    Status: event.status,
+    PreviousStatus: event.previousStatus,
+    Origin: event.origin,
+    Destination: event.destination,
+    PickupDate: event.pickupDate,
+    PickupTime: event.pickupTime,
+    DeliveryDate: event.deliveryDate,
+    DeliveryTime: event.deliveryTime,
+    EventPayload: JSON.stringify(storedEvent)
+  };
+}
+
+async function persistMobileNotificationEvent(token, event, target) {
+  const schema = await getMobileNotificationEventSchema(token);
+  const existing = await findPersistedMobileNotificationEvent(token, schema, event.eventId);
+
+  if (existing) {
+    return {
+      itemId: String(existing.id || ''),
+      created: false,
+      idempotentReplay: true
+    };
+  }
+
+  let createdItem;
+
+  try {
+    createdItem = await graphPost(
+      token,
+      `https://graph.microsoft.com/v1.0/sites/${schema.siteId}/lists/${schema.listId}/items`,
+      { fields: buildMobileNotificationEventFields(event, target) }
+    );
+  } catch {
+    const duplicate = await findPersistedMobileNotificationEvent(token, schema, event.eventId).catch(() => null);
+    if (duplicate) {
+      return {
+        itemId: String(duplicate.id || ''),
+        created: false,
+        idempotentReplay: true
+      };
+    }
+
+    throw createMobileNotificationError(
+      'The notification event could not be stored. Retrying the same source change is safe.',
+      502,
+      'MOBILE_NOTIFICATION_PERSIST_FAILED'
+    );
+  }
+
+  const itemId = String(createdItem?.id || '').trim();
+  if (!itemId) {
+    throw createMobileNotificationError(
+      'SharePoint did not confirm the notification event item ID. Retry the same source change before processing newer changes.',
+      502,
+      'MOBILE_NOTIFICATION_CREATE_UNCONFIRMED'
+    );
+  }
+
+  return { itemId, created: true, idempotentReplay: false };
+}
+
+async function resolveMobileNotificationTargets(token, events) {
+  let rosterItems;
+
+  try {
+    rosterItems = await getDriverRosterItems(token);
+  } catch {
+    return events.map(() => ({
+      driverRosterItemId: '',
+      deliveryStatus: 'TargetLookupPending',
+      targetMatched: false
+    }));
+  }
+
+  return events.map((event) => {
+    const driver = findActiveMobileDriverForTruck(rosterItems, event.truckNumber);
+
+    return driver
+      ? {
+        driverRosterItemId: String(driver.id || ''),
+        deliveryStatus: 'Pending',
+        targetMatched: true
+      }
+      : {
+        driverRosterItemId: '',
+        deliveryStatus: 'NoActiveDriver',
+        targetMatched: false
+      };
+  });
+}
+
+async function recordBidListingNotificationChange(token, input) {
+  const currentList = input.currentList;
+  if (!currentList?.listId) {
+    throw createMobileNotificationError('Bid Listing was not found.', 404, 'MOBILE_NOTIFICATION_LIST_NOT_FOUND');
+  }
+
+  const currentItem = input.currentItem || {};
+  const events = createBidListingNotificationEvents({
+    previousItem: input.previousItem || null,
+    currentItem,
+    sourceListId: currentList.listId,
+    sourceItemId: String(input.sourceItemId || currentItem.id || '').trim(),
+    sourceModified: String(input.sourceModified || currentItem.lastModifiedDateTime || '').trim(),
+    sourceVersion: String(input.sourceVersion || currentItem.sourceVersion || '').trim()
+  });
+
+  if (events.length === 0) {
+    return { events: [], createdCount: 0, idempotentCount: 0 };
+  }
+
+  const targets = await resolveMobileNotificationTargets(token, events);
+  const persistedEvents = [];
+
+  for (let index = 0; index < events.length; index += 1) {
+    const event = events[index];
+    const target = targets[index];
+    const persistence = await persistMobileNotificationEvent(token, event, target);
+
+    persistedEvents.push({
+      ...event,
+      ...target,
+      persistedItemId: persistence.itemId,
+      idempotentReplay: persistence.idempotentReplay
+    });
+  }
+
+  return {
+    events: persistedEvents,
+    createdCount: persistedEvents.filter((event) => !event.idempotentReplay).length,
+    idempotentCount: persistedEvents.filter((event) => event.idempotentReplay).length
+  };
+}
+
+async function recordBidListingNotificationChangeSafely(token, input) {
+  if (!isMobileNotificationEventStoreConfigured()) {
+    return { createdCount: 0, eventTypes: [], warning: '' };
+  }
+
+  try {
+    const result = await recordBidListingNotificationChange(token, input);
+    return {
+      createdCount: result.createdCount,
+      eventTypes: result.events.map((event) => event.eventType),
+      warning: ''
+    };
+  } catch {
+    console.warn('Bid Listing change was saved, but its Mobile notification event could not be recorded.');
+    return {
+      createdCount: 0,
+      eventTypes: [],
+      warning: 'The order was saved, but its Mobile notification event could not be recorded. Retrying the source change is safe.'
+    };
+  }
+}
+
+async function recordCreatedBidListingNotificationChangeSafely(token, currentList, createdItem, itemId) {
+  if (!isMobileNotificationEventStoreConfigured()) {
+    return { createdCount: 0, eventTypes: [], warning: '' };
+  }
+
+  try {
+    let notificationItem = createdItem;
+
+    if (!notificationItem?.fields || !notificationItem?.lastModifiedDateTime) {
+      const fieldSelect = getMobileNotificationBidFieldSelect();
+      notificationItem = await graphGet(
+        token,
+        `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}` +
+          `/items/${encodeURIComponent(itemId)}?$select=id,createdDateTime,lastModifiedDateTime,eTag&$expand=fields($select=${fieldSelect})`
+      );
+    }
+
+    return recordBidListingNotificationChangeSafely(token, {
+      currentList,
+      previousItem: null,
+      currentItem: notificationItem,
+      sourceItemId: itemId
+    });
+  } catch {
+    console.warn('Bid Listing record was created, but its Mobile notification event could not be evaluated.');
+    return {
+      createdCount: 0,
+      eventTypes: [],
+      warning: 'The order was created, but its Mobile notification event could not be recorded. Retrying the source change is safe.'
+    };
+  }
+}
+
+function getMobileNotificationBidFieldSelect() {
+  return Array.from(new Set([
+    'BOLNumber_x0028_Won_x0029_',
+    'BidID',
+    'Status',
+    'Truck_x0020_Number',
+    ...DRIVER_IMPACTING_FIELDS
+  ])).join(',');
+}
+
+function compareSharePointVersionIdsDescending(a, b) {
+  const aParts = String(a?.id || '').split('.').map((value) => Number(value) || 0);
+  const bParts = String(b?.id || '').split('.').map((value) => Number(value) || 0);
+  const length = Math.max(aParts.length, bParts.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const difference = (bParts[index] || 0) - (aParts[index] || 0);
+    if (difference !== 0) return difference;
+  }
+
+  return 0;
+}
+
+function sharePointModifiedValuesMatch(a, b) {
+  const aTime = Date.parse(a || '');
+  const bTime = Date.parse(b || '');
+  if (!Number.isFinite(aTime) || !Number.isFinite(bTime)) return false;
+  return Math.abs(aTime - bTime) < 1000;
+}
+
+async function getBidListingVersionItem(token, currentList, itemId, versionId) {
+  const version = await graphGet(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}` +
+      `/items/${encodeURIComponent(itemId)}/versions/${encodeURIComponent(versionId)}?$expand=fields`
+  );
+
+  return {
+    ...version,
+    id: String(itemId),
+    sourceVersion: String(version.id || versionId)
+  };
+}
+
+async function getBidListingVersionsForNotification(token, currentList, itemId, options = {}) {
+  const requestedModified = String(options.sourceModified || '').trim();
+  const requestedVersion = String(options.sourceVersion || '').trim();
+  let url = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}` +
+    `/items/${encodeURIComponent(itemId)}/versions?$select=id,lastModifiedDateTime&$top=50`;
+  const versions = [];
+
+  while (url && versions.length < 1000) {
+    const data = await graphGet(token, url);
+    versions.push(...(data.value || []));
+    url = data['@odata.nextLink'] || null;
+
+    const sorted = versions.slice().sort(compareSharePointVersionIdsDescending);
+    const targetIndex = requestedVersion
+      ? sorted.findIndex((version) => String(version.id || '') === requestedVersion)
+      : requestedModified
+        ? sorted.findIndex((version) => sharePointModifiedValuesMatch(version.lastModifiedDateTime, requestedModified))
+        : 0;
+
+    if (targetIndex >= 0 && (targetIndex < sorted.length - 1 || !url)) break;
+    if (!requestedVersion && !requestedModified) break;
+  }
+
+  return versions.sort(compareSharePointVersionIdsDescending);
+}
+
+async function getBidListingNotificationChangeContext(token, currentList, itemId, options = {}) {
+  const fieldSelect = getMobileNotificationBidFieldSelect();
+  const itemUrl = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}` +
+    `/items/${encodeURIComponent(itemId)}?$select=id,createdDateTime,lastModifiedDateTime,eTag&$expand=fields($select=${fieldSelect})`;
+  const currentItem = await graphGet(token, itemUrl);
+  const requestedModified = String(options.sourceModified || '').trim();
+  const requestedVersion = String(options.sourceVersion || '').trim();
+  let versions = [];
+
+  try {
+    versions = await getBidListingVersionsForNotification(token, currentList, itemId, {
+      sourceModified: requestedModified && !sharePointModifiedValuesMatch(requestedModified, currentItem.lastModifiedDateTime)
+        ? requestedModified
+        : '',
+      sourceVersion: requestedVersion
+    });
+  } catch {
+    versions = [];
+  }
+
+  let observedItem = currentItem;
+  let observedVersion = null;
+
+  if (requestedVersion) {
+    observedVersion = versions.find((version) => String(version.id || '') === requestedVersion) || null;
+    if (!observedVersion) {
+      if (requestedModified && sharePointModifiedValuesMatch(requestedModified, currentItem.lastModifiedDateTime)) {
+        observedVersion = {
+          id: requestedVersion,
+          lastModifiedDateTime: currentItem.lastModifiedDateTime
+        };
+      } else {
+        throw createMobileNotificationError(
+          'The requested Bid Listing version is no longer available. Confirm item version history and retry this change.',
+          409,
+          'MOBILE_NOTIFICATION_VERSION_NOT_FOUND'
+        );
+      }
+    }
+
+    if (
+      requestedModified &&
+      !sharePointModifiedValuesMatch(requestedModified, observedVersion.lastModifiedDateTime)
+    ) {
+      throw createMobileNotificationError(
+        'sourceModified and sourceVersion refer to different Bid Listing changes.',
+        409,
+        'MOBILE_NOTIFICATION_SOURCE_MISMATCH'
+      );
+    }
+
+    if (!sharePointModifiedValuesMatch(observedVersion.lastModifiedDateTime, currentItem.lastModifiedDateTime)) {
+      observedItem = await getBidListingVersionItem(token, currentList, itemId, requestedVersion);
+    }
+  } else if (requestedModified && !sharePointModifiedValuesMatch(requestedModified, currentItem.lastModifiedDateTime)) {
+    observedVersion = versions.find((version) => (
+      sharePointModifiedValuesMatch(version.lastModifiedDateTime, requestedModified)
+    )) || null;
+
+    if (!observedVersion) {
+      throw createMobileNotificationError(
+        'The requested Bid Listing modification is no longer available in version history.',
+        409,
+        'MOBILE_NOTIFICATION_MODIFICATION_NOT_FOUND'
+      );
+    }
+
+    observedItem = await getBidListingVersionItem(token, currentList, itemId, observedVersion.id);
+  } else {
+    observedVersion = versions.find((version) => (
+      sharePointModifiedValuesMatch(version.lastModifiedDateTime, currentItem.lastModifiedDateTime)
+    )) || null;
+  }
+
+  const observedIndex = observedVersion
+    ? versions.findIndex((version) => String(version.id || '') === String(observedVersion.id || ''))
+    : -1;
+  const previousVersion = observedIndex >= 0
+    ? versions[observedIndex + 1] || null
+    : versions.find((version) => (
+      Date.parse(version.lastModifiedDateTime || '') < Date.parse(observedItem.lastModifiedDateTime || '')
+    )) || null;
+  let previousItem = null;
+
+  if (previousVersion) {
+    previousItem = await getBidListingVersionItem(token, currentList, itemId, previousVersion.id);
+  } else {
+    const observedVersionNumber = Number.parseFloat(String(observedVersion?.id || requestedVersion || ''));
+    const createdAt = Date.parse(currentItem.createdDateTime || '');
+    const observedAt = Date.parse(observedItem.lastModifiedDateTime || '');
+    const appearsNew = (
+      observedVersionNumber === 1 ||
+      (Number.isFinite(createdAt) && Number.isFinite(observedAt) && Math.abs(createdAt - observedAt) < 2000)
+    );
+
+    if (!appearsNew) {
+      throw createMobileNotificationError(
+        'Bid Listing version history is required to compare this change with its previous values.',
+        409,
+        'MOBILE_NOTIFICATION_VERSION_HISTORY_REQUIRED'
+      );
+    }
+  }
+
+  return {
+    previousItem,
+    currentItem: observedItem,
+    sourceItemId: String(itemId),
+    sourceModified: String(observedItem.lastModifiedDateTime || requestedModified || '').trim(),
+    sourceVersion: String(observedVersion?.id || requestedVersion || observedItem.sourceVersion || '').trim()
+  };
+}
+
+app.post('/mobile/notification-events/bid-listing-change', requireMobileNotificationIngestAccess, async (req, res) => {
+  try {
+    const itemId = String(req.body?.itemId || '').trim();
+    const sourceModified = String(req.body?.sourceModified || '').trim();
+    const sourceVersion = String(req.body?.sourceVersion || '').trim();
+
+    if (!/^\d{1,12}$/.test(itemId)) {
+      return res.status(400).json({ success: false, error: 'A valid Bid Listing item ID is required.' });
+    }
+
+    if (sourceModified && !Number.isFinite(Date.parse(sourceModified))) {
+      return res.status(400).json({ success: false, error: 'sourceModified must be a valid timestamp.' });
+    }
+
+    if (sourceVersion && !/^\d+(?:\.\d+)?$/.test(sourceVersion)) {
+      return res.status(400).json({ success: false, error: 'sourceVersion must be a valid SharePoint version.' });
+    }
+
+    const token = await getGraphToken();
+    const currentList = await getCurrentBidListingSource(token);
+    if (!currentList) {
+      return res.status(404).json({ success: false, error: 'Bid Listing was not found.' });
+    }
+
+    const change = await getBidListingNotificationChangeContext(token, currentList, itemId, {
+      sourceModified,
+      sourceVersion
+    });
+    const result = await recordBidListingNotificationChange(token, {
+      currentList,
+      ...change
+    });
+
+    const events = result.events.map((event) => ({
+      eventId: event.eventId,
+      eventType: event.eventType,
+      loadId: event.loadId,
+      bidId: event.bidId,
+      truckNumber: event.truckNumber,
+      previousTruckNumber: event.previousTruckNumber,
+      changedFields: event.changedFields,
+      targetMatched: event.targetMatched,
+      deliveryStatus: event.deliveryStatus,
+      idempotentReplay: event.idempotentReplay
+    }));
+
+    res.status(result.createdCount > 0 ? 201 : 200).json({
+      success: true,
+      sourceItemId: itemId,
+      sourceModified: change.sourceModified,
+      sourceVersion: change.sourceVersion,
+      createdCount: result.createdCount,
+      idempotentCount: result.idempotentCount,
+      events
+    });
+  } catch (error) {
+    console.error('Mobile notification change ingestion failed.');
+    const isExpected = Boolean(error?.statusCode && error?.code);
+
+    res.status(isExpected ? error.statusCode : 502).json({
+      success: false,
+      code: isExpected ? error.code : 'MOBILE_NOTIFICATION_PROCESSING_FAILED',
+      error: isExpected
+        ? error.message
+        : 'Unable to process this Bid Listing notification change. Retrying the same change is safe.'
     });
   }
 });
