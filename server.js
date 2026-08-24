@@ -5,17 +5,47 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const multer = require('multer');
+const webpush = require('web-push');
 const {
   DRIVER_IMPACTING_FIELDS,
   createBidListingNotificationEvents,
   findActiveMobileDriverForTruck
 } = require('./notification-events');
+const {
+  MOBILE_PUSH_DELIVERY_STATUSES,
+  buildMobilePushPublicConfiguration,
+  createMobilePushError,
+  createMobilePushService
+} = require('./mobile-push');
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '256kb' }));
 
 const PORT = process.env.PORT || 5000;
+const MOBILE_PUSH_SEND_TIMEOUT_MS = 5000;
+const MOBILE_PUSH_TTL_SECONDS = 24 * 60 * 60;
+let mobilePushConfigured = false;
+
+function configureMobileWebPush() {
+  const subject = String(process.env.VAPID_SUBJECT || '').trim();
+  const publicKey = String(process.env.VAPID_PUBLIC_KEY || '').trim();
+  const privateKey = String(process.env.VAPID_PRIVATE_KEY || '').trim();
+
+  if (!subject || !publicKey || !privateKey) {
+    console.warn('Mobile Web Push delivery is disabled because VAPID configuration is incomplete.');
+    return;
+  }
+
+  try {
+    webpush.setVapidDetails(subject, publicKey, privateKey);
+    mobilePushConfigured = true;
+  } catch {
+    console.warn('Mobile Web Push delivery is disabled because VAPID configuration is invalid.');
+  }
+}
+
+configureMobileWebPush();
 
 const ARCHIVE_YEAR_MIN = 2024;
 const ARCHIVE_YEAR_MAX = 2030;
@@ -2682,12 +2712,6 @@ async function publishQuoteEngineBid(token, draft, recommendation, currentList, 
   }
 
   clearQuoteEngineMutationCaches();
-  const notificationResult = await recordCreatedBidListingNotificationChangeSafely(
-    token,
-    currentList,
-    createdItem,
-    itemId
-  );
 
   const pendingResult = {
     success: true,
@@ -2697,10 +2721,7 @@ async function publishQuoteEngineBid(token, draft, recommendation, currentList, 
     itemId,
     BidID: '',
     message: 'The Bid Listing record was created. Power Automate is still assigning its Bid ID; do not publish it again.',
-    recommendation,
-    notificationEventCount: notificationResult.createdCount,
-    notificationEventTypes: notificationResult.eventTypes,
-    notificationWarning: notificationResult.warning
+    recommendation
   };
   setCacheRecord(cachedQuotePublishResults, requestCacheKey, pendingResult, 40);
   setCacheRecord(pendingQuoteAuditContexts, itemId, { draft, recommendation, requestCacheKey }, 40);
@@ -2726,10 +2747,7 @@ async function publishQuoteEngineBid(token, draft, recommendation, currentList, 
     record,
     recommendation,
     auditNote: audit.auditNote,
-    noteWarning: audit.noteWarning,
-    notificationEventCount: notificationResult.createdCount,
-    notificationEventTypes: notificationResult.eventTypes,
-    notificationWarning: notificationResult.warning
+    noteWarning: audit.noteWarning
   };
 
   setCacheRecord(cachedQuotePublishResults, requestCacheKey, finalResult, 40);
@@ -3400,12 +3418,6 @@ async function publishContractLaneBooking(token, booking, currentList, schema) {
   }
 
   clearQuoteEngineMutationCaches();
-  const notificationResult = await recordCreatedBidListingNotificationChangeSafely(
-    token,
-    currentList,
-    createdItem,
-    itemId
-  );
 
   const pendingResult = {
     success: true,
@@ -3420,10 +3432,7 @@ async function publishContractLaneBooking(token, booking, currentList, schema) {
       laneName: lane.laneName,
       contractLaneId: lane.contractLaneId
     },
-    pricing,
-    notificationEventCount: notificationResult.createdCount,
-    notificationEventTypes: notificationResult.eventTypes,
-    notificationWarning: notificationResult.warning
+    pricing
   };
   setCacheRecord(cachedContractLaneBookingResults, requestCacheKey, pendingResult, 40);
   setCacheRecord(pendingContractLaneBookings, itemId, { requestCacheKey }, 40);
@@ -13348,11 +13357,6 @@ app.patch('/record/:id', requireLookupAccess, async (req, res) => {
 
     const updatedItem = await graphGet(token, readUrl);
     const updatedRecord = buildRecordResponse(updatedItem, currentList);
-    const notificationResult = await recordBidListingNotificationChangeSafely(token, {
-      currentList,
-      previousItem: currentItem,
-      currentItem: updatedItem
-    });
     let auditNote = null;
     let noteWarning = '';
 
@@ -13382,10 +13386,7 @@ app.patch('/record/:id', requireLookupAccess, async (req, res) => {
       changedFields: changedRows.map((row) => row.key),
       record: updatedRecord,
       auditNote,
-      noteWarning,
-      notificationEventCount: notificationResult.createdCount,
-      notificationEventTypes: notificationResult.eventTypes,
-      notificationWarning: notificationResult.warning
+      noteWarning
     });
   } catch (error) {
     console.error(error);
@@ -19955,6 +19956,348 @@ const MOBILE_NOTIFICATION_REQUIRED_COLUMNS = Object.freeze([
 ]);
 let cachedMobileNotificationSchema = null;
 let cachedMobileNotificationSchemaAt = 0;
+const MOBILE_PUSH_SUBSCRIPTION_REQUIRED_COLUMNS = Object.freeze([
+  'Title',
+  'SubscriptionID',
+  'DriverRosterItemID',
+  'TruckNumber',
+  'Endpoint',
+  'P256dh',
+  'Auth',
+  'UserAgent',
+  'Platform',
+  'Active',
+  'CreatedAt',
+  'LastSeenAt',
+  'LastDeliveredAt',
+  'DisabledAt',
+  'LastError'
+]);
+let cachedMobilePushSubscriptionSchema = null;
+let cachedMobilePushSubscriptionSchemaAt = 0;
+
+function getMobilePushSubscriptionConfig() {
+  return {
+    siteId: String(process.env.SITE_ID || '').trim(),
+    listId: String(process.env.MOBILE_PUSH_SUBSCRIPTIONS_LIST_ID || '').trim()
+  };
+}
+
+async function getMobilePushSubscriptionSchema(token, forceRefresh = false) {
+  const { siteId, listId } = getMobilePushSubscriptionConfig();
+
+  if (!siteId || !listId) {
+    throw createMobilePushError(
+      'Mobile Push Subscriptions storage is not configured on the server.',
+      503,
+      'MOBILE_PUSH_STORE_UNAVAILABLE'
+    );
+  }
+
+  const now = Date.now();
+  if (
+    !forceRefresh &&
+    cachedMobilePushSubscriptionSchema?.siteId === siteId &&
+    cachedMobilePushSubscriptionSchema?.listId === listId &&
+    now - cachedMobilePushSubscriptionSchemaAt < MOBILE_NOTIFICATION_SCHEMA_CACHE_MS
+  ) {
+    return cachedMobilePushSubscriptionSchema;
+  }
+
+  const data = await graphGet(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/columns` +
+      '?$select=name,displayName,hidden,readOnly,indexed,enforceUniqueValues&$top=999'
+  );
+  const columnsByName = new Map(
+    (data.value || [])
+      .filter((column) => column?.name)
+      .map((column) => [column.name, column])
+  );
+  const missing = MOBILE_PUSH_SUBSCRIPTION_REQUIRED_COLUMNS.filter((name) => !columnsByName.has(name));
+  const readOnly = MOBILE_PUSH_SUBSCRIPTION_REQUIRED_COLUMNS.filter((name) => columnsByName.get(name)?.readOnly === true);
+
+  if (missing.length > 0 || readOnly.length > 0) {
+    throw createMobilePushError(
+      'Mobile Push Subscriptions list schema does not match the configured contract.',
+      503,
+      'MOBILE_PUSH_SCHEMA_MISMATCH'
+    );
+  }
+
+  const subscriptionIdColumn = columnsByName.get('SubscriptionID');
+  if (subscriptionIdColumn.indexed !== true || subscriptionIdColumn.enforceUniqueValues !== true) {
+    throw createMobilePushError(
+      'SubscriptionID must be indexed and enforce unique values.',
+      503,
+      'MOBILE_PUSH_IDEMPOTENCY_NOT_ENFORCED'
+    );
+  }
+
+  cachedMobilePushSubscriptionSchema = { siteId, listId };
+  cachedMobilePushSubscriptionSchemaAt = now;
+  return cachedMobilePushSubscriptionSchema;
+}
+
+function getMobilePushSubscriptionFieldSelect() {
+  return [
+    'SubscriptionID',
+    'DriverRosterItemID',
+    'TruckNumber',
+    'Endpoint',
+    'P256dh',
+    'Auth',
+    'UserAgent',
+    'Platform',
+    'Active',
+    'CreatedAt',
+    'LastSeenAt',
+    'LastDeliveredAt',
+    'DisabledAt',
+    'LastError'
+  ].join(',');
+}
+
+function cleanMobilePushSubscriptionItem(item) {
+  const fields = item?.fields || {};
+
+  return {
+    itemId: String(item?.id || ''),
+    eTag: String(item?.eTag || item?.['@odata.etag'] || ''),
+    subscriptionId: String(fields.SubscriptionID || '').trim(),
+    driverRosterItemId: String(fields.DriverRosterItemID || '').trim(),
+    truckNumber: String(fields.TruckNumber || '').trim(),
+    endpoint: String(fields.Endpoint || '').trim(),
+    p256dh: String(fields.P256dh || '').trim(),
+    auth: String(fields.Auth || '').trim(),
+    userAgent: String(fields.UserAgent || '').trim(),
+    platform: String(fields.Platform || '').trim(),
+    active: fields.Active === undefined ? true : parseBoolean(fields.Active),
+    createdAt: fields.CreatedAt || '',
+    lastSeenAt: fields.LastSeenAt || '',
+    lastDeliveredAt: fields.LastDeliveredAt || '',
+    disabledAt: fields.DisabledAt || null,
+    lastError: String(fields.LastError || '').trim()
+  };
+}
+
+async function getMobilePushSubscriptionById(token, subscriptionId) {
+  const schema = await getMobilePushSubscriptionSchema(token);
+  const safeId = escapeODataString(subscriptionId);
+  const fieldSelect = getMobilePushSubscriptionFieldSelect();
+  const data = await graphGet(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${schema.siteId}/lists/${schema.listId}/items` +
+      `?$select=id,eTag&$expand=fields($select=${fieldSelect})` +
+      `&$filter=fields/SubscriptionID eq '${safeId}'&$top=1`,
+    { Prefer: 'HonorNonIndexedQueriesWarningMayFailRandomly' }
+  );
+
+  const item = (data.value || [])[0];
+  return item ? cleanMobilePushSubscriptionItem(item) : null;
+}
+
+function buildMobilePushSubscriptionFields(record, includeCreatedAt = false) {
+  const fields = {
+    Title: `Mobile Push ${String(record.subscriptionId || '').slice(-10)}`,
+    SubscriptionID: record.subscriptionId,
+    DriverRosterItemID: record.driverRosterItemId,
+    TruckNumber: record.truckNumber,
+    Endpoint: record.endpoint,
+    P256dh: record.p256dh,
+    Auth: record.auth,
+    UserAgent: record.userAgent,
+    Platform: record.platform,
+    Active: true,
+    LastSeenAt: record.lastSeenAt,
+    DisabledAt: null,
+    LastError: ''
+  };
+
+  if (includeCreatedAt) fields.CreatedAt = record.createdAt;
+  return fields;
+}
+
+async function patchMobilePushSubscription(token, schema, existing, fields) {
+  await graphPatch(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${schema.siteId}/lists/${schema.listId}` +
+      `/items/${encodeURIComponent(existing.itemId)}/fields`,
+    fields,
+    { 'If-Match': existing.eTag || '*' }
+  );
+
+  return { ...existing, ...cleanMobilePushSubscriptionItem({ fields }), ...fields };
+}
+
+async function saveMobilePushSubscription(token, record, existing = null) {
+  const schema = await getMobilePushSubscriptionSchema(token);
+
+  if (existing) {
+    await patchMobilePushSubscription(
+      token,
+      schema,
+      existing,
+      buildMobilePushSubscriptionFields(record, false)
+    );
+    return { ...existing, ...record };
+  }
+
+  try {
+    const createdItem = await graphPost(
+      token,
+      `https://graph.microsoft.com/v1.0/sites/${schema.siteId}/lists/${schema.listId}/items`,
+      { fields: buildMobilePushSubscriptionFields(record, true) }
+    );
+    const itemId = String(createdItem?.id || '').trim();
+
+    if (!itemId) {
+      throw createMobilePushError(
+        'SharePoint did not confirm the Mobile Push subscription item ID.',
+        502,
+        'MOBILE_PUSH_CREATE_UNCONFIRMED'
+      );
+    }
+
+    return { ...record, itemId, eTag: String(createdItem.eTag || '') };
+  } catch (error) {
+    if (error?.code === 'MOBILE_PUSH_CREATE_UNCONFIRMED') throw error;
+
+    const raced = await getMobilePushSubscriptionById(token, record.subscriptionId).catch(() => null);
+    if (!raced) {
+      throw createMobilePushError(
+        'The Mobile Push subscription could not be stored.',
+        502,
+        'MOBILE_PUSH_PERSIST_FAILED'
+      );
+    }
+
+    if (raced.driverRosterItemId !== record.driverRosterItemId) {
+      throw createMobilePushError(
+        'This push subscription belongs to a different Mobile session.',
+        403,
+        'MOBILE_PUSH_SUBSCRIPTION_OWNERSHIP'
+      );
+    }
+
+    await patchMobilePushSubscription(
+      token,
+      schema,
+      raced,
+      buildMobilePushSubscriptionFields(record, false)
+    );
+    return { ...raced, ...record };
+  }
+}
+
+async function listActiveMobilePushSubscriptions(token, driverRosterItemId) {
+  const schema = await getMobilePushSubscriptionSchema(token);
+  const fieldSelect = getMobilePushSubscriptionFieldSelect();
+  const safeDriverId = escapeODataString(driverRosterItemId);
+  const filteredUrl = `https://graph.microsoft.com/v1.0/sites/${schema.siteId}/lists/${schema.listId}/items` +
+    `?$select=id,eTag&$expand=fields($select=${fieldSelect})` +
+    `&$filter=fields/DriverRosterItemID eq '${safeDriverId}'&$top=999`;
+  let items;
+
+  try {
+    const data = await graphGet(token, filteredUrl, {
+      Prefer: 'HonorNonIndexedQueriesWarningMayFailRandomly'
+    });
+    items = data.value || [];
+  } catch {
+    items = await getAllListItemsWithFields(token, schema.listId, fieldSelect);
+  }
+
+  return items
+    .map(cleanMobilePushSubscriptionItem)
+    .filter((subscription) => (
+      subscription.driverRosterItemId === String(driverRosterItemId) &&
+      subscription.active &&
+      subscription.endpoint &&
+      subscription.p256dh &&
+      subscription.auth
+    ));
+}
+
+async function updateMobilePushSubscriptionDelivery(token, subscription, patch) {
+  const schema = await getMobilePushSubscriptionSchema(token);
+  const fields = {};
+
+  if (Object.prototype.hasOwnProperty.call(patch, 'active')) fields.Active = Boolean(patch.active);
+  if (Object.prototype.hasOwnProperty.call(patch, 'disabledAt')) fields.DisabledAt = patch.disabledAt || null;
+  if (Object.prototype.hasOwnProperty.call(patch, 'lastDeliveredAt')) fields.LastDeliveredAt = patch.lastDeliveredAt || null;
+  if (Object.prototype.hasOwnProperty.call(patch, 'lastSeenAt')) fields.LastSeenAt = patch.lastSeenAt || null;
+  if (Object.prototype.hasOwnProperty.call(patch, 'lastError')) fields.LastError = String(patch.lastError || '').slice(0, 500);
+
+  if (Object.keys(fields).length === 0) return;
+
+  await graphPatch(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${schema.siteId}/lists/${schema.listId}` +
+      `/items/${encodeURIComponent(subscription.itemId)}/fields`,
+    fields,
+    { 'If-Match': subscription.eTag || '*' }
+  );
+}
+
+async function updateMobileNotificationEventDelivery(token, itemId, patch) {
+  const schema = await getMobileNotificationEventSchema(token);
+  const current = await graphGet(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${schema.siteId}/lists/${schema.listId}` +
+      `/items/${encodeURIComponent(itemId)}?$select=id,eTag&$expand=fields($select=DeliveryStatus,DeliveredAt)`
+  );
+
+  await graphPatch(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${schema.siteId}/lists/${schema.listId}` +
+      `/items/${encodeURIComponent(itemId)}/fields`,
+    {
+      DeliveryStatus: patch.deliveryStatus,
+      DeliveredAt: patch.deliveredAt || null
+    },
+    { 'If-Match': current.eTag || current['@odata.etag'] || '*' }
+  );
+}
+
+function createGraphMobilePushRepository(token) {
+  return {
+    getSubscriptionById: (subscriptionId) => getMobilePushSubscriptionById(token, subscriptionId),
+    saveSubscription: (record, existing) => saveMobilePushSubscription(token, record, existing),
+    deactivateSubscription: (existing, patch) => updateMobilePushSubscriptionDelivery(token, existing, patch),
+    listActiveSubscriptions: (driverRosterItemId) => listActiveMobilePushSubscriptions(token, driverRosterItemId),
+    updateSubscriptionDelivery: (subscription, patch) => updateMobilePushSubscriptionDelivery(token, subscription, patch),
+    updateEventDelivery: (itemId, patch) => updateMobileNotificationEventDelivery(token, itemId, patch)
+  };
+}
+
+function getMobilePushPlatform(userAgent = '') {
+  const normalized = String(userAgent || '').toLowerCase();
+  if (/iphone|ipad|ipod/.test(normalized)) return 'iOS';
+  if (normalized.includes('android')) return 'Android';
+  if (normalized.includes('windows')) return 'Windows';
+  if (normalized.includes('macintosh') || normalized.includes('mac os')) return 'macOS';
+  if (normalized.includes('linux')) return 'Linux';
+  return 'Web';
+}
+
+function sendConfiguredMobilePush(subscription, payload, event) {
+  const topic = String(event?.eventId || '').replace(/[^A-Za-z0-9_-]/g, '').slice(-32);
+
+  return webpush.sendNotification(subscription, payload, {
+    timeout: MOBILE_PUSH_SEND_TIMEOUT_MS,
+    TTL: MOBILE_PUSH_TTL_SECONDS,
+    urgency: 'high',
+    ...(topic ? { topic } : {})
+  });
+}
+
+function getGraphMobilePushService(token) {
+  return createMobilePushService({
+    repository: createGraphMobilePushRepository(token),
+    sendNotification: mobilePushConfigured ? sendConfiguredMobilePush : null
+  });
+}
 
 function createMobileNotificationError(message, statusCode = 500, code = '') {
   const error = new Error(message);
@@ -19968,11 +20311,6 @@ function getMobileNotificationEventConfig() {
     siteId: String(process.env.MOBILE_NOTIFICATION_EVENTS_SITE_ID || process.env.SITE_ID || '').trim(),
     listId: String(process.env.MOBILE_NOTIFICATION_EVENTS_LIST_ID || '').trim()
   };
-}
-
-function isMobileNotificationEventStoreConfigured() {
-  const config = getMobileNotificationEventConfig();
-  return Boolean(config.siteId && config.listId);
 }
 
 function getMobileNotificationIngestSecret() {
@@ -20076,11 +20414,20 @@ async function findPersistedMobileNotificationEvent(token, schema, eventId) {
   const data = await graphGet(
     token,
     `https://graph.microsoft.com/v1.0/sites/${schema.siteId}/lists/${schema.listId}/items` +
-      `?$select=id&$expand=fields($select=NotificationID)&$filter=fields/NotificationID eq '${safeEventId}'&$top=1`,
+      `?$select=id&$expand=fields($select=NotificationID,DriverRosterItemID,DeliveryStatus,DeliveredAt)` +
+      `&$filter=fields/NotificationID eq '${safeEventId}'&$top=1`,
     { Prefer: 'HonorNonIndexedQueriesWarningMayFailRandomly' }
   );
 
-  return (data.value || [])[0] || null;
+  const item = (data.value || [])[0];
+  if (!item) return null;
+
+  return {
+    itemId: String(item.id || ''),
+    driverRosterItemId: String(item.fields?.DriverRosterItemID || '').trim(),
+    deliveryStatus: String(item.fields?.DeliveryStatus || '').trim(),
+    deliveredAt: item.fields?.DeliveredAt || null
+  };
 }
 
 function buildMobileNotificationEventFields(event, target) {
@@ -20126,9 +20473,12 @@ async function persistMobileNotificationEvent(token, event, target) {
 
   if (existing) {
     return {
-      itemId: String(existing.id || ''),
+      itemId: existing.itemId,
       created: false,
-      idempotentReplay: true
+      idempotentReplay: true,
+      driverRosterItemId: existing.driverRosterItemId,
+      deliveryStatus: existing.deliveryStatus,
+      deliveredAt: existing.deliveredAt
     };
   }
 
@@ -20144,9 +20494,12 @@ async function persistMobileNotificationEvent(token, event, target) {
     const duplicate = await findPersistedMobileNotificationEvent(token, schema, event.eventId).catch(() => null);
     if (duplicate) {
       return {
-        itemId: String(duplicate.id || ''),
+        itemId: duplicate.itemId,
         created: false,
-        idempotentReplay: true
+        idempotentReplay: true,
+        driverRosterItemId: duplicate.driverRosterItemId,
+        deliveryStatus: duplicate.deliveryStatus,
+        deliveredAt: duplicate.deliveredAt
       };
     }
 
@@ -20166,7 +20519,14 @@ async function persistMobileNotificationEvent(token, event, target) {
     );
   }
 
-  return { itemId, created: true, idempotentReplay: false };
+  return {
+    itemId,
+    created: true,
+    idempotentReplay: false,
+    driverRosterItemId: target.driverRosterItemId,
+    deliveryStatus: target.deliveryStatus,
+    deliveredAt: null
+  };
 }
 
 async function resolveMobileNotificationTargets(token, events) {
@@ -20226,12 +20586,42 @@ async function recordBidListingNotificationChange(token, input) {
     const event = events[index];
     const target = targets[index];
     const persistence = await persistMobileNotificationEvent(token, event, target);
+    const driverRosterItemId = persistence.driverRosterItemId || target.driverRosterItemId;
+    const initialDeliveryStatus = persistence.deliveryStatus || target.deliveryStatus;
+    let deliveryResult = {
+      attempted: false,
+      deliveryStatus: initialDeliveryStatus
+    };
+
+    if (initialDeliveryStatus === MOBILE_PUSH_DELIVERY_STATUSES.PENDING) {
+      try {
+        deliveryResult = await getGraphMobilePushService(token).deliverEvent({
+          ...event,
+          itemId: persistence.itemId,
+          driverRosterItemId,
+          deliveryStatus: initialDeliveryStatus
+        });
+      } catch {
+        console.warn('A persisted Mobile notification event could not complete its push delivery attempt.');
+        deliveryResult = {
+          attempted: false,
+          deliveryStatus: MOBILE_PUSH_DELIVERY_STATUSES.PENDING,
+          warning: 'Push delivery did not complete; the durable event remains pending.'
+        };
+      }
+    }
 
     persistedEvents.push({
       ...event,
       ...target,
+      driverRosterItemId,
       persistedItemId: persistence.itemId,
-      idempotentReplay: persistence.idempotentReplay
+      idempotentReplay: persistence.idempotentReplay,
+      deliveryStatus: deliveryResult.deliveryStatus,
+      deliveryAttempted: deliveryResult.attempted === true,
+      deliveredCount: Number(deliveryResult.deliveredCount || 0),
+      failedCount: Number(deliveryResult.failedCount || 0),
+      deliveryWarning: deliveryResult.warning || ''
     });
   }
 
@@ -20240,61 +20630,6 @@ async function recordBidListingNotificationChange(token, input) {
     createdCount: persistedEvents.filter((event) => !event.idempotentReplay).length,
     idempotentCount: persistedEvents.filter((event) => event.idempotentReplay).length
   };
-}
-
-async function recordBidListingNotificationChangeSafely(token, input) {
-  if (!isMobileNotificationEventStoreConfigured()) {
-    return { createdCount: 0, eventTypes: [], warning: '' };
-  }
-
-  try {
-    const result = await recordBidListingNotificationChange(token, input);
-    return {
-      createdCount: result.createdCount,
-      eventTypes: result.events.map((event) => event.eventType),
-      warning: ''
-    };
-  } catch {
-    console.warn('Bid Listing change was saved, but its Mobile notification event could not be recorded.');
-    return {
-      createdCount: 0,
-      eventTypes: [],
-      warning: 'The order was saved, but its Mobile notification event could not be recorded. Retrying the source change is safe.'
-    };
-  }
-}
-
-async function recordCreatedBidListingNotificationChangeSafely(token, currentList, createdItem, itemId) {
-  if (!isMobileNotificationEventStoreConfigured()) {
-    return { createdCount: 0, eventTypes: [], warning: '' };
-  }
-
-  try {
-    let notificationItem = createdItem;
-
-    if (!notificationItem?.fields || !notificationItem?.lastModifiedDateTime) {
-      const fieldSelect = getMobileNotificationBidFieldSelect();
-      notificationItem = await graphGet(
-        token,
-        `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}` +
-          `/items/${encodeURIComponent(itemId)}?$select=id,createdDateTime,lastModifiedDateTime,eTag&$expand=fields($select=${fieldSelect})`
-      );
-    }
-
-    return recordBidListingNotificationChangeSafely(token, {
-      currentList,
-      previousItem: null,
-      currentItem: notificationItem,
-      sourceItemId: itemId
-    });
-  } catch {
-    console.warn('Bid Listing record was created, but its Mobile notification event could not be evaluated.');
-    return {
-      createdCount: 0,
-      eventTypes: [],
-      warning: 'The order was created, but its Mobile notification event could not be recorded. Retrying the source change is safe.'
-    };
-  }
 }
 
 function getMobileNotificationBidFieldSelect() {
@@ -20523,6 +20858,9 @@ app.post('/mobile/notification-events/bid-listing-change', requireMobileNotifica
       changedFields: event.changedFields,
       targetMatched: event.targetMatched,
       deliveryStatus: event.deliveryStatus,
+      deliveryAttempted: event.deliveryAttempted,
+      deliveredCount: event.deliveredCount,
+      failedCount: event.failedCount,
       idempotentReplay: event.idempotentReplay
     }));
 
@@ -20819,6 +21157,81 @@ async function requireMobileSession(req, res, next) {
     });
   }
 }
+
+app.get('/mobile/push/public-key', requireMobileSession, (req, res) => {
+  const publicConfiguration = buildMobilePushPublicConfiguration({
+    configured: mobilePushConfigured,
+    publicKey: process.env.VAPID_PUBLIC_KEY
+  });
+
+  if (!publicConfiguration.configured) {
+    return res.status(503).json({
+      success: false,
+      configured: false,
+      publicKey: '',
+      error: 'Mobile notifications are not configured on the server.'
+    });
+  }
+
+  res.json({ success: true, ...publicConfiguration });
+});
+
+app.post('/mobile/push/subscribe', requireMobileSession, async (req, res) => {
+  try {
+    const graphToken = await getGraphToken();
+    const service = getGraphMobilePushService(graphToken);
+    const userAgent = String(req.headers['user-agent'] || '').trim();
+    const result = await service.subscribe({
+      driver: req.mobileDriver,
+      subscription: req.body?.subscription || {},
+      userAgent,
+      platform: getMobilePushPlatform(userAgent)
+    });
+
+    res.status(result.created ? 201 : 200).json({
+      success: true,
+      subscriptionId: result.subscriptionId,
+      created: result.created,
+      active: true
+    });
+  } catch (error) {
+    console.error('Mobile Push subscription registration failed.');
+    const isExpected = Boolean(error?.statusCode && error?.code);
+
+    res.status(isExpected ? error.statusCode : 502).json({
+      success: false,
+      code: isExpected ? error.code : 'MOBILE_PUSH_SUBSCRIBE_FAILED',
+      error: isExpected ? error.message : 'Unable to enable notifications on this device.'
+    });
+  }
+});
+
+app.post('/mobile/push/unsubscribe', requireMobileSession, async (req, res) => {
+  try {
+    const graphToken = await getGraphToken();
+    const service = getGraphMobilePushService(graphToken);
+    const result = await service.unsubscribe({
+      driver: req.mobileDriver,
+      endpoint: req.body?.endpoint || req.body?.subscription?.endpoint || ''
+    });
+
+    res.json({
+      success: true,
+      subscriptionId: result.subscriptionId,
+      deactivated: result.deactivated,
+      idempotentReplay: result.idempotentReplay
+    });
+  } catch (error) {
+    console.error('Mobile Push subscription deactivation failed.');
+    const isExpected = Boolean(error?.statusCode && error?.code);
+
+    res.status(isExpected ? error.statusCode : 502).json({
+      success: false,
+      code: isExpected ? error.code : 'MOBILE_PUSH_UNSUBSCRIBE_FAILED',
+      error: isExpected ? error.message : 'Unable to disable notifications on this device.'
+    });
+  }
+});
 
 const MOBILE_HOME_PRIMARY_ACTIONS = Object.freeze({
   pickup_upload_needed: Object.freeze({ type: 'upload_pickup', label: 'Upload Pickup Photos' }),
