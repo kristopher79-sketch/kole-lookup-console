@@ -150,7 +150,7 @@ The push payload contains `eventType`, a friendly `title` and `body`, `loadId`, 
 
 The Mobile web client registers `/sw.js` and exposes notification settings on the **Me** tab. Browser permission is requested only after the signed-in driver taps **Enable Notifications**. The screen distinguishes enabled, off, blocked, unsupported, checking, and error states, and provides a device-level disable action.
 
-The service worker displays pushes and focuses or opens the Mobile app when a notification is tapped. Sign-out deactivates and removes the local browser subscription so a shared device cannot continue receiving the prior driver's notifications. The web manifest supports installed-app behavior; on platforms that restrict Web Push to installed web apps, install Kole Connect Mobile before enabling notifications.
+The service worker displays pushes and tells every open Mobile window to refresh its authenticated Home data immediately, without changing the active tab. It also focuses or opens the Mobile app when a notification is tapped. Sign-out deactivates and removes the local browser subscription so a shared device cannot continue receiving the prior driver's notifications. The web manifest supports installed-app behavior; on platforms that restrict Web Push to installed web apps, install Kole Connect Mobile before enabling notifications.
 
 ## Rollout and verification
 
