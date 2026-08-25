@@ -57,6 +57,8 @@ Example body:
 
 The event vocabulary is `NEW_LOAD`, `LOAD_UPDATED`, `LOAD_CANCELLED`, `LOAD_TONU`, and `LOAD_REMOVED`. Status and `Truck_x0020_Number` are transition controls, not ordinary edit notifications.
 
+Registration is treated as one transition rather than a series of field edits. Driver-impacting fields filled while a Won order still has only a Bid ID remain silent. When `BOLNumber_x0028_Won_x0029_` changes from blank to populated, the driver receives one registration-summary push titled **Load Details Have Been Added**. Follow-up field-fill revisions within 15 minutes of that BOL transition remain silent; later edits resume normal `LOAD_UPDATED` behavior. The durable event remains a `LOAD_UPDATED` event with `loadDetailsAdded: true` in `EventPayload`, so this behavior does not require a new SharePoint choice value.
+
 `LOAD_UPDATED` uses this exact allowlist:
 
 - Route summary: `Shipment_x0020_Origin`, `Shipment_x0020_Destination`
@@ -159,7 +161,7 @@ The service worker displays pushes and tells every open Mobile window to refresh
 3. Deploy the Node server and Mobile web client over HTTPS.
 4. Sign in to Mobile, open **Me**, and enable notifications from a user gesture.
 5. Confirm one active Push Subscriptions row is created for the authenticated Driver Roster item.
-6. Make one allowlisted Bid Listing change and verify Power Automate receives a successful ingestion response.
+6. Register a Won Bid-ID-only order and verify the BOL transition creates one **Load Details Have Been Added** push without field-by-field pushes.
 7. Confirm the durable event is created first, then reaches the expected delivery status.
 8. Tap the notification and confirm the intended `LoadID` opens.
 9. Disable notifications and confirm the subscription row becomes inactive without being deleted.

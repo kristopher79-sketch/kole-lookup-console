@@ -123,6 +123,89 @@ test('pickup time edit creates one LOAD_UPDATED event', () => {
   assert.deepEqual(events[0].changedFields, ['Pickup1PickupTime']);
 });
 
+test('registration field fills stay silent until a BOL is assigned', () => {
+  const events = detect(
+    {
+      Status: 'Won',
+      Truck_x0020_Number: '123',
+      BOLNumber_x0028_Won_x0029_: '',
+      No_x002e_ofTarpsNeeded: ''
+    },
+    {
+      Status: 'Won',
+      Truck_x0020_Number: '123',
+      BOLNumber_x0028_Won_x0029_: '',
+      No_x002e_ofTarpsNeeded: 2
+    }
+  );
+
+  assert.deepEqual(events, []);
+});
+
+test('a real edit to existing Bid-ID-only load details still notifies', () => {
+  const events = detect(
+    {
+      Status: 'Won',
+      Truck_x0020_Number: '123',
+      BOLNumber_x0028_Won_x0029_: '',
+      Pickup1PickupTime: '8:00'
+    },
+    {
+      Status: 'Won',
+      Truck_x0020_Number: '123',
+      BOLNumber_x0028_Won_x0029_: '',
+      Pickup1PickupTime: '9:00'
+    }
+  );
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0].eventType, 'LOAD_UPDATED');
+  assert.deepEqual(events[0].changedFields, ['Pickup1PickupTime']);
+});
+
+test('bid-to-BOL registration creates one consolidated load-details event', () => {
+  const events = detect(
+    {
+      Status: 'Won',
+      Truck_x0020_Number: '123',
+      BOLNumber_x0028_Won_x0029_: '',
+      No_x002e_ofTarpsNeeded: ''
+    },
+    {
+      Status: 'Won',
+      Truck_x0020_Number: '123',
+      BOLNumber_x0028_Won_x0029_: 'BOL-42',
+      No_x002e_ofTarpsNeeded: 2
+    }
+  );
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0].eventType, 'LOAD_UPDATED');
+  assert.equal(events[0].loadDetailsAdded, true);
+  assert.equal(events[0].bolNumber, 'BOL-42');
+  assert.deepEqual(events[0].changedFields, ['No_x002e_ofTarpsNeeded']);
+});
+
+test('registration window suppresses follow-up detail-fill revisions', () => {
+  const events = detect(
+    {
+      Status: 'Won',
+      Truck_x0020_Number: '123',
+      Pickup1PickupTime: '',
+      Pickup1Name: ''
+    },
+    {
+      Status: 'Won',
+      Truck_x0020_Number: '123',
+      Pickup1PickupTime: '8:00',
+      Pickup1Name: 'Kole Terminal'
+    },
+    { registrationWindowActive: true }
+  );
+
+  assert.deepEqual(events, []);
+});
+
 test('delivery date edit compares business date rather than timestamp suffix', () => {
   const unchanged = detect(
     { Status: 'Won', Truck_x0020_Number: '123', Expected_x0020_Delivery_x0020_Da: '2026-08-27T04:00:00Z' },

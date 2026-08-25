@@ -19926,6 +19926,8 @@ app.patch('/service-locations/:id', requireLookupAccess, async (req, res) => {
 // ============================================================
 
 const MOBILE_NOTIFICATION_SCHEMA_CACHE_MS = 5 * 60 * 1000;
+const MOBILE_NOTIFICATION_REGISTRATION_WINDOW_MS = 15 * 60 * 1000;
+const MOBILE_NOTIFICATION_REGISTRATION_MAX_VERSIONS = 20;
 const MOBILE_NOTIFICATION_REQUIRED_COLUMNS = Object.freeze([
   'Title',
   'NotificationID',
@@ -20572,7 +20574,8 @@ async function recordBidListingNotificationChange(token, input) {
     sourceListId: currentList.listId,
     sourceItemId: String(input.sourceItemId || currentItem.id || '').trim(),
     sourceModified: String(input.sourceModified || currentItem.lastModifiedDateTime || '').trim(),
-    sourceVersion: String(input.sourceVersion || currentItem.sourceVersion || '').trim()
+    sourceVersion: String(input.sourceVersion || currentItem.sourceVersion || '').trim(),
+    registrationWindowActive: input.registrationWindowActive === true
   });
 
   if (events.length === 0) {
@@ -20660,6 +20663,86 @@ function sharePointModifiedValuesMatch(a, b) {
   const bTime = Date.parse(b || '');
   if (!Number.isFinite(aTime) || !Number.isFinite(bTime)) return false;
   return Math.abs(aTime - bTime) < 1000;
+}
+
+function getBidListingNotificationField(item, fieldName) {
+  const fields = item?.fields && typeof item.fields === 'object' ? item.fields : {};
+  return String(fields[fieldName] ?? '').trim();
+}
+
+async function isBidListingRegistrationWindowActive(
+  token,
+  currentList,
+  itemId,
+  versions,
+  observedItem,
+  previousItem,
+  previousVersion
+) {
+  const currentBolNumber = getBidListingNotificationField(
+    observedItem,
+    'BOLNumber_x0028_Won_x0029_'
+  );
+  const previousBolNumber = getBidListingNotificationField(
+    previousItem,
+    'BOLNumber_x0028_Won_x0029_'
+  );
+  const currentStatus = getBidListingNotificationField(observedItem, 'Status').toUpperCase();
+  const previousStatus = getBidListingNotificationField(previousItem, 'Status').toUpperCase();
+  const currentTruck = getBidListingNotificationField(observedItem, 'Truck_x0020_Number').toUpperCase();
+  const previousTruck = getBidListingNotificationField(previousItem, 'Truck_x0020_Number').toUpperCase();
+
+  if (
+    !currentBolNumber ||
+    currentStatus !== 'WON' ||
+    previousStatus !== 'WON' ||
+    !currentTruck ||
+    currentTruck !== previousTruck
+  ) {
+    return false;
+  }
+
+  if (!previousBolNumber) return true;
+
+  const observedAt = Date.parse(observedItem?.lastModifiedDateTime || '');
+  const previousVersionIndex = versions.findIndex((version) => (
+    String(version.id || '') === String(previousVersion?.id || '')
+  ));
+
+  if (!Number.isFinite(observedAt) || previousVersionIndex < 0) return false;
+
+  const maximumIndex = Math.min(
+    versions.length,
+    previousVersionIndex + 1 + MOBILE_NOTIFICATION_REGISTRATION_MAX_VERSIONS
+  );
+
+  for (let index = previousVersionIndex + 1; index < maximumIndex; index += 1) {
+    const candidateVersion = versions[index];
+    const candidateAt = Date.parse(candidateVersion.lastModifiedDateTime || '');
+
+    if (
+      !Number.isFinite(candidateAt) ||
+      observedAt - candidateAt > MOBILE_NOTIFICATION_REGISTRATION_WINDOW_MS
+    ) {
+      break;
+    }
+
+    const candidateItem = await getBidListingVersionItem(
+      token,
+      currentList,
+      itemId,
+      candidateVersion.id
+    );
+    const candidateBolNumber = getBidListingNotificationField(
+      candidateItem,
+      'BOLNumber_x0028_Won_x0029_'
+    );
+
+    if (!candidateBolNumber) return true;
+    if (candidateBolNumber !== currentBolNumber) return false;
+  }
+
+  return false;
 }
 
 async function getBidListingVersionItem(token, currentList, itemId, versionId) {
@@ -20806,12 +20889,23 @@ async function getBidListingNotificationChangeContext(token, currentList, itemId
     }
   }
 
+  const registrationWindowActive = await isBidListingRegistrationWindowActive(
+    token,
+    currentList,
+    itemId,
+    versions,
+    observedItem,
+    previousItem,
+    previousVersion
+  ).catch(() => false);
+
   return {
     previousItem,
     currentItem: observedItem,
     sourceItemId: String(itemId),
     sourceModified: String(observedItem.lastModifiedDateTime || requestedModified || '').trim(),
-    sourceVersion: String(observedVersion?.id || requestedVersion || observedItem.sourceVersion || '').trim()
+    sourceVersion: String(observedVersion?.id || requestedVersion || observedItem.sourceVersion || '').trim(),
+    registrationWindowActive
   };
 }
 

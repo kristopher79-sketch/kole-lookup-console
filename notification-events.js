@@ -147,6 +147,20 @@ function getDriverImpactingChangedFields(previousFields = {}, currentFields = {}
     .map((definition) => definition.field);
 }
 
+function areDriverImpactingChangesOnlyAdditions(previousFields, currentFields, changedFields) {
+  if (changedFields.length === 0) return false;
+
+  return changedFields.every((field) => {
+    const definition = DRIVER_IMPACTING_FIELD_DEFINITIONS.find((candidate) => candidate.field === field);
+    if (!definition) return false;
+
+    return (
+      normalizeComparableFieldValue(definition, previousFields[field]) === '' &&
+      normalizeComparableFieldValue(definition, currentFields[field]) !== ''
+    );
+  });
+}
+
 function normalizeStatus(value) {
   return normalizeTextValue(value).toUpperCase();
 }
@@ -223,6 +237,7 @@ function createNotificationEvent(context, eventType, truckNumber, options = {}) 
     pickupTime: getPayloadTime(currentFields, previousFields, 'Pickup1PickupTime', 'Pickup1AMorPM'),
     deliveryDate: getPayloadDate(currentFields, previousFields, 'Expected_x0020_Delivery_x0020_Da'),
     deliveryTime: getPayloadTime(currentFields, previousFields, 'Delivery1Time', 'Delivery1AMorPM'),
+    loadDetailsAdded: options.loadDetailsAdded === true,
     changedFields: Array.from(new Set(options.changedFields || [])),
     status,
     previousStatus,
@@ -257,6 +272,9 @@ function createBidListingNotificationEvents(input = {}) {
   const status = normalizeStatus(currentFields.Status);
   const previousTruckNumber = normalizeTruckNumber(previousFields.Truck_x0020_Number);
   const truckNumber = normalizeTruckNumber(currentFields.Truck_x0020_Number);
+  const previousBolNumber = normalizeTextValue(previousFields.BOLNumber_x0028_Won_x0029_);
+  const bolNumber = normalizeTextValue(currentFields.BOLNumber_x0028_Won_x0029_);
+  const loadDetailsAdded = !previousBolNumber && Boolean(bolNumber);
   const wasWon = previousStatus === 'WON';
   const isWon = status === 'WON';
   const statusChanged = status !== previousStatus;
@@ -333,6 +351,25 @@ function createBidListingNotificationEvents(input = {}) {
 
   if (wasWon && isWon && truckNumber && truckNumber === previousTruckNumber) {
     const changedFields = getDriverImpactingChangedFields(previousFields, currentFields);
+
+    if (loadDetailsAdded) {
+      return [createNotificationEvent(
+        context,
+        NOTIFICATION_EVENT_TYPES.LOAD_UPDATED,
+        truckNumber,
+        { changedFields, previousTruckNumber, loadDetailsAdded: true }
+      )];
+    }
+
+    if (
+      input.registrationWindowActive === true ||
+      (
+        !bolNumber &&
+        areDriverImpactingChangesOnlyAdditions(previousFields, currentFields, changedFields)
+      )
+    ) {
+      return [];
+    }
 
     if (changedFields.length > 0) {
       return [createNotificationEvent(

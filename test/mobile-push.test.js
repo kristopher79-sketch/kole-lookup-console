@@ -198,6 +198,20 @@ test('push payload keeps the required fields and uses driver-friendly change wor
   assert.equal(payload.url, '/?loadId=42');
 });
 
+test('registered load payload uses one consolidated notification message', () => {
+  const payload = buildMobilePushPayload(createPendingEvent({
+    loadDetailsAdded: true,
+    changedFields: [
+      'No_x002e_ofTarpsNeeded',
+      'Pickup1PickupTime',
+      'Pickup1Name'
+    ]
+  }));
+
+  assert.equal(payload.title, 'Load Details Have Been Added');
+  assert.equal(payload.body, 'Open Kole Connect to review this load.');
+});
+
 test('Pending event without a subscription becomes NoSubscription', async () => {
   const repository = createFakeRepository();
   const service = createMobilePushService({

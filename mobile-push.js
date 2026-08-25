@@ -171,6 +171,10 @@ function buildMobilePushBody(event = {}) {
     return route.length === 2 ? `${route[0]} → ${route[1]}` : 'A new load is ready to review.';
   }
 
+  if (event.loadDetailsAdded === true) {
+    return 'Open Kole Connect to review this load.';
+  }
+
   if (event.eventType === 'LOAD_UPDATED') {
     return formatChangedFieldList(Array.isArray(event.changedFields) ? event.changedFields : []);
   }
@@ -187,7 +191,9 @@ function buildMobilePushPayload(event = {}) {
 
   return {
     eventType,
-    title: MOBILE_PUSH_EVENT_TITLES[eventType] || 'Kole Connect Mobile',
+    title: event.loadDetailsAdded === true
+      ? 'Load Details Have Been Added'
+      : MOBILE_PUSH_EVENT_TITLES[eventType] || 'Kole Connect Mobile',
     body: buildMobilePushBody(event),
     loadId,
     bidId: cleanMobilePushText(event.bidId, 100),
