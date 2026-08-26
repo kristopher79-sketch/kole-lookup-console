@@ -7,12 +7,28 @@ const isTauriRuntime = Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
 const isViteDev = import.meta.env?.DEV === true;
 const configuredApiBase = String(import.meta.env?.VITE_KOLE_API_BASE || '').trim();
 const isLocalDevHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+const MOBILE_LAYOUT_QUERY = '(max-width: 760px), (max-width: 950px) and (pointer: coarse)';
 
 const API =
   configuredApiBase ||
   ((isViteDev || isLocalDevHost)
     ? 'http://localhost:5000'
     : 'https://kole-lookup-console.onrender.com');
+
+function useMediaQuery(query) {
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(query);
+    const handleChange = (event) => setMatches(event.matches);
+
+    mediaQuery.addEventListener('change', handleChange);
+
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, [query]);
+
+  return matches;
+}
 
 const SALES_NOTE_MAX_LENGTH = 63000;
 const AVAILABLE_TRUCK_MAX_ROWS = 8;
@@ -1466,7 +1482,9 @@ export default function App() {
   const [brandRevealKey, setBrandRevealKey] = useState(0);
   const brandRevealTimerRef = useRef(null);
   const lastRefreshCueAtRef = useRef(0);
+  const isMobileLayout = useMediaQuery(MOBILE_LAYOUT_QUERY);
   const isAuthenticated = Boolean(accessToken);
+  const showOrderCards = isMobileLayout || userPrefs.orderCardView;
   const resolvedSeasonalTheme = useMemo(
     () => getResolvedKoleSeason(userPrefs.seasonalTheme, seasonalDateKey),
     [userPrefs.seasonalTheme, seasonalDateKey]
@@ -2694,8 +2712,8 @@ export default function App() {
                   onChange={(checked) => updateUserPreference('compactDashboardMode', checked)}
                 />
                 <PreferenceSwitch
-                  label="Order Card View"
-                  description="Shows order-oriented lists as cards instead of table rows. Search results and Operations Today are included first."
+                  label="Order Card View on larger screens"
+                  description="Phones use cards automatically. Turn this on to keep cards for search results and Operations Today on wider screens too."
                   checked={userPrefs.orderCardView}
                   onChange={(checked) => updateUserPreference('orderCardView', checked)}
                 />
@@ -21627,65 +21645,68 @@ function openReportLoadDetails(load) {
             onChange={(e) => handleQueryChange(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
             placeholder="Search BOL, Customer, Driver, Truck..."
+            aria-label="Search orders by BOL, customer, driver, or truck"
           />
 
-          <button onClick={handleSearch} disabled={loading}>
+          <button className="search-primary-button" onClick={handleSearch} disabled={loading}>
             {loading ? 'Searching...' : 'Search'}
           </button>
 
-          <button
-            type="button"
-            className="search-secondary-button"
-            onClick={clearOrderSearch}
-            disabled={loading && !hasSearched}
-          >
-            Clear
-          </button>
-
-          <button
-            ref={quoteEngineButtonRef}
-            type="button"
-            className="quote-engine-launch"
-            onClick={openQuoteEngine}
-            aria-haspopup="dialog"
-            aria-expanded={quoteEngineOpen}
-          >
-            New Quote
-          </button>
-
-          <button
-            ref={contractLanesButtonRef}
-            type="button"
-            className="contract-lanes-launch"
-            onClick={openContractLanes}
-            aria-haspopup="dialog"
-            aria-expanded={contractLanesOpen}
-          >
-            Contract Lanes
-          </button>
-
-          <button
-            ref={noBolBidsButtonRef}
-            type="button"
-            className="search-secondary-button no-bol-bids-launch"
-            onClick={openNoBolBids}
-            disabled={noBolBidsLoading}
-            aria-haspopup="dialog"
-            aria-expanded={noBolBidsOpen}
-            title="Show current Bid Listing entries without a BOL"
-          >
-            {noBolBidsLoading ? 'Loading Open Bids...' : 'Open Bids'}
-          </button>
-
-          {salesSearchReturnLead && (
+          <div className="search-action-strip" role="group" aria-label="Order and quote actions">
             <button
               type="button"
-              className="search-return-button"
-              onClick={returnToCustomerCard}
+              className="search-secondary-button"
+              onClick={clearOrderSearch}
+              disabled={loading && !hasSearched}
             >
-              Return to customer
+              Clear
             </button>
-          )}
+
+            <button
+              ref={quoteEngineButtonRef}
+              type="button"
+              className="quote-engine-launch"
+              onClick={openQuoteEngine}
+              aria-haspopup="dialog"
+              aria-expanded={quoteEngineOpen}
+            >
+              New Quote
+            </button>
+
+            <button
+              ref={contractLanesButtonRef}
+              type="button"
+              className="contract-lanes-launch"
+              onClick={openContractLanes}
+              aria-haspopup="dialog"
+              aria-expanded={contractLanesOpen}
+            >
+              Contract Lanes
+            </button>
+
+            <button
+              ref={noBolBidsButtonRef}
+              type="button"
+              className="search-secondary-button no-bol-bids-launch"
+              onClick={openNoBolBids}
+              disabled={noBolBidsLoading}
+              aria-haspopup="dialog"
+              aria-expanded={noBolBidsOpen}
+              title="Show current Bid Listing entries without a BOL"
+            >
+              {noBolBidsLoading ? 'Loading Open Bids...' : 'Open Bids'}
+            </button>
+
+            {salesSearchReturnLead && (
+              <button
+                type="button"
+                className="search-return-button"
+                onClick={returnToCustomerCard}
+              >
+                Return to customer
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="search-options">
@@ -21797,7 +21818,7 @@ function openReportLoadDetails(load) {
 
           {operationsData.activeToday.length === 0 ? (
             <div className="msg">No active shipments today.</div>
-          ) : userPrefs.orderCardView ? (
+          ) : showOrderCards ? (
             <div className="order-card-grid operations-order-card-grid">
               {operationsData.activeToday.map((r, i) => (
                 <OperationOrderCard key={`active-card-${r.id || i}`} record={r} index={i} variant="activeToday" />
@@ -21855,7 +21876,7 @@ function openReportLoadDetails(load) {
 
           {operationsData.loadingToday.length === 0 ? (
             <div className="msg">No loads scheduled to load today.</div>
-          ) : userPrefs.orderCardView ? (
+          ) : showOrderCards ? (
             <div className="order-card-grid operations-order-card-grid">
               {operationsData.loadingToday.map((r, i) => (
                 <OperationOrderCard key={`loading-card-${r.id || i}`} record={r} index={i} variant="loadingToday" />
@@ -21903,7 +21924,7 @@ function openReportLoadDetails(load) {
 
           {operationsData.deliveringToday.length === 0 ? (
             <div className="msg">No deliveries scheduled today.</div>
-          ) : userPrefs.orderCardView ? (
+          ) : showOrderCards ? (
             <div className="order-card-grid operations-order-card-grid">
               {operationsData.deliveringToday.map((r, i) => (
                 <OperationOrderCard key={`delivering-card-${r.id || i}`} record={r} index={i} variant="deliveringToday" />
@@ -21964,7 +21985,7 @@ function openReportLoadDetails(load) {
           {operationsNext7Open && (
             operationsData.loadingNext7.length === 0 ? (
               <div className="msg">No upcoming loads in the next 7 days.</div>
-            ) : userPrefs.orderCardView ? (
+            ) : showOrderCards ? (
               <div className="order-card-grid operations-order-card-grid">
                 {operationsData.loadingNext7.map((r, i) => (
                   <OperationOrderCard key={`next7-card-${r.id || i}`} record={r} index={i} variant="loadingNext7" />
@@ -22023,9 +22044,9 @@ function openReportLoadDetails(load) {
 )}
       </div>
 
-      <div className={`results-panel ${userPrefs.orderCardView ? 'order-card-results-panel' : ''}`.trim()}>
+      <div className={`results-panel ${showOrderCards ? 'order-card-results-panel' : ''}`.trim()}>
         {sortedResults.length > 0 && (
-          userPrefs.orderCardView ? (
+          showOrderCards ? (
             <div className="order-card-grid search-order-card-grid">
               {sortedResults.map((r, i) => (
                 <SearchOrderCard key={`${r.SourceListId || 'current'}-${r.id || i}`} record={r} index={i} />

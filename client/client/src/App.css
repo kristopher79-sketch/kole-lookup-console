@@ -555,6 +555,10 @@ body {
   gap: 10px;
 }
 
+.search-action-strip {
+  display: contents;
+}
+
 input {
   flex: 1;
   padding: 12px 14px;
@@ -1763,7 +1767,7 @@ tbody tr:hover {
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 760px), (max-width: 950px) and (pointer: coarse) {
   .quote-engine-overlay {
     padding: 0;
   }
@@ -2480,31 +2484,159 @@ tbody tr:hover {
   }
 }
 
-@media (max-width: 700px) {
+@media (max-width: 760px), (max-width: 950px) and (pointer: coarse) {
   .container {
-    margin: 20px auto;
-    padding: 12px;
+    margin: 16px auto;
+    padding:
+      12px
+      max(12px, env(safe-area-inset-right))
+      max(20px, env(safe-area-inset-bottom))
+      max(12px, env(safe-area-inset-left));
   }
 
   .search-bar {
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: stretch;
+  }
+
+  .search-bar input {
+    grid-column: 1;
+  }
+
+  .search-primary-button {
+    grid-column: 2;
+    min-width: 92px;
+  }
+
+  .search-action-strip {
+    grid-column: 1 / -1;
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 2px 1px 5px;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .search-action-strip::-webkit-scrollbar {
+    display: none;
+  }
+
+  .search-action-strip button {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
   }
 
   .modal-overlay {
-    padding: 12px;
+    padding: 0;
+    align-items: stretch;
   }
 
-  .detail-modal {
+  body .modal-overlay > .detail-modal {
     width: 100%;
-    max-height: 94vh;
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
   }
 
   .detail-header {
     flex-direction: column;
+    gap: 10px;
+    padding:
+      max(16px, env(safe-area-inset-top))
+      max(16px, env(safe-area-inset-right))
+      16px
+      max(16px, env(safe-area-inset-left));
+  }
+
+  .detail-header h2 {
+    font-size: clamp(20px, 6vw, 24px);
+  }
+
+  .preferences-modal-header {
+    align-items: flex-start;
+    flex-direction: row;
+    text-align: left;
+  }
+
+  .preferences-modal-header > div {
+    min-width: 0;
+  }
+
+  .preferences-modal-header .close-button {
+    flex: 0 0 auto;
   }
 
   .view-tabs {
-    flex-direction: column;
+    flex-direction: row;
+    gap: 7px;
+    overflow-x: auto;
+    padding: 10px max(16px, env(safe-area-inset-right)) 11px max(16px, env(safe-area-inset-left));
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .view-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .view-tabs button {
+    flex: 0 0 auto;
+    min-height: 44px;
+    white-space: nowrap;
+    scroll-snap-align: start;
+  }
+
+  .modal-body {
+    padding:
+      16px
+      max(16px, env(safe-area-inset-right))
+      max(24px, env(safe-area-inset-bottom))
+      max(16px, env(safe-area-inset-left));
+  }
+
+  .no-bol-bids-header {
+    padding-top: max(18px, env(safe-area-inset-top));
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-left: max(16px, env(safe-area-inset-left));
+  }
+
+  .no-bol-bids-body {
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-bottom: max(24px, env(safe-area-inset-bottom));
+    padding-left: max(16px, env(safe-area-inset-left));
+  }
+
+  button,
+  input:not([type='checkbox']):not([type='radio']),
+  select {
+    min-height: 44px;
+  }
+
+  input:not([type='checkbox']):not([type='radio']),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  .header-actions {
+    width: 100%;
+    gap: 8px;
+  }
+
+  .header-actions button {
+    flex: 1 1 0;
+    padding-right: 10px;
+    padding-left: 10px;
   }
 
   .detail-grid {
@@ -2549,6 +2681,27 @@ tbody tr:hover {
   color: #facc15;
   border-color: #0f172a;
 }
+
+@media (max-width: 760px), (max-width: 950px) and (pointer: coarse) {
+  .filter-bar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 5px;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .filter-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .filter-bar > * {
+    flex: 0 0 auto;
+  }
+}
+
 .search-options {
   margin-top: 12px;
   display: flex;
@@ -10267,7 +10420,7 @@ button.available-truck-distribution-summary-card:disabled {
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 760px), (max-width: 950px) and (pointer: coarse) {
   .kole-brand-title-zone {
     width: 100%;
     min-height: 78px;
@@ -10295,27 +10448,13 @@ button.available-truck-distribution-summary-card:disabled {
   .brand-season-glow {
     width: 86%;
     height: 72px;
-  }
-
-  .brand-season-symbol-one {
-    left: 0;
-  }
-
-  .brand-season-symbol-two {
-    right: 0;
+    border: 0;
+    opacity: 0.3;
   }
 
   .brand-season-symbol-one,
   .brand-season-symbol-two {
-    top: 23px;
-    width: 36px;
-    height: 36px;
-    border-radius: 12px;
-  }
-
-  .brand-season-icon {
-    width: 22px;
-    height: 22px;
+    display: none;
   }
 }
 
@@ -15971,10 +16110,25 @@ button.available-truck-distribution-summary-card:disabled {
   color: #92400e !important;
 }
 
-@media (max-width: 700px) {
+@media (max-width: 760px), (max-width: 950px) and (pointer: coarse) {
   .order-detail-modal {
     width: 100%;
-    height: min(720px, 94vh);
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+  }
+
+  .order-detail-modal .detail-header {
+    align-items: flex-start;
+    flex-direction: row;
+  }
+
+  .order-detail-modal .detail-header > div:first-child {
+    min-width: 0;
+  }
+
+  .order-detail-modal .detail-header .close-button {
+    flex: 0 0 auto;
   }
 }
 
