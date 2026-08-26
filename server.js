@@ -4,6 +4,8 @@ const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
 const multer = require('multer');
 const webpush = require('web-push');
 const {
@@ -20987,6 +20989,8 @@ app.post('/mobile/notification-events/bid-listing-change', requireMobileNotifica
 const MOBILE_SESSION_EXPIRES_IN = '30d';
 const MOBILE_UPLOAD_MAX_FILE_SIZE = 20 * 1024 * 1024;
 const MOBILE_UPLOAD_MAX_FILES = 10;
+const MOBILE_UPLOAD_HEADER_BYTES = 32;
+const MOBILE_UPLOAD_MAX_ACTIVE_FILE_BUFFERS = 1;
 const MOBILE_UPLOAD_TYPES = new Set(['pickup', 'delivery']);
 const MOBILE_UPLOAD_EXTENSIONS_BY_TYPE = new Map([
   ['image/jpeg', ['.jpg', '.jpeg']],
@@ -20997,6 +21001,8 @@ const MOBILE_UPLOAD_EXTENSIONS_BY_TYPE = new Map([
 ]);
 const MOBILE_UPLOAD_GENERIC_MIME_TYPES = new Set(['', 'application/octet-stream']);
 const MOBILE_UPLOAD_HEIF_BRANDS = new Set(['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'mif1', 'msf1']);
+let mobileUploadActiveFileBuffers = 0;
+const mobileUploadFileBufferWaiters = [];
 
 function getMobileUploadOriginalExtension(fileName) {
   const leafName = String(fileName || '').split(/[\\/]/).pop() || '';
@@ -21017,7 +21023,12 @@ function isMobileUploadFileCandidateAllowed(file) {
 }
 
 const mobileUploadParser = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: os.tmpdir(),
+    filename: (req, file, callback) => {
+      callback(null, `kole-mobile-${Date.now()}-${crypto.randomBytes(12).toString('hex')}.tmp`);
+    }
+  }),
   limits: {
     fileSize: MOBILE_UPLOAD_MAX_FILE_SIZE,
     files: MOBILE_UPLOAD_MAX_FILES,
@@ -21049,9 +21060,7 @@ function parseMobileUpload(req, res) {
   });
 }
 
-function getMobileUploadContentType(file) {
-  const buffer = file?.buffer;
-
+function getMobileUploadContentTypeFromHeader(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) return '';
 
   if (
@@ -21083,6 +21092,163 @@ function getMobileUploadContentType(file) {
   }
 
   return '';
+}
+
+async function getMobileUploadContentType(file) {
+  const fileHandle = await fs.promises.open(file.path, 'r');
+
+  try {
+    const header = Buffer.alloc(MOBILE_UPLOAD_HEADER_BYTES);
+    const { bytesRead } = await fileHandle.read(header, 0, header.length, 0);
+    return getMobileUploadContentTypeFromHeader(header.subarray(0, bytesRead));
+  } finally {
+    await fileHandle.close();
+  }
+}
+
+function acquireMobileUploadFileBufferSlot() {
+  return new Promise((resolve) => {
+    const grantSlot = () => {
+      let released = false;
+
+      resolve(() => {
+        if (released) return;
+        released = true;
+
+        const nextWaiter = mobileUploadFileBufferWaiters.shift();
+        if (nextWaiter) {
+          nextWaiter();
+        } else {
+          mobileUploadActiveFileBuffers -= 1;
+        }
+      });
+    };
+
+    if (mobileUploadActiveFileBuffers < MOBILE_UPLOAD_MAX_ACTIVE_FILE_BUFFERS) {
+      mobileUploadActiveFileBuffers += 1;
+      grantSlot();
+    } else {
+      mobileUploadFileBufferWaiters.push(grantSlot);
+    }
+  });
+}
+
+async function withMobileUploadFileBufferSlot(operation) {
+  const release = await acquireMobileUploadFileBufferSlot();
+
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
+
+function getMobileUploadMemoryUsage() {
+  const memory = process.memoryUsage();
+  const toMb = (bytes) => Math.round((Number(bytes || 0) / (1024 * 1024)) * 10) / 10;
+
+  return {
+    rssMb: toMb(memory.rss),
+    heapUsedMb: toMb(memory.heapUsed),
+    externalMb: toMb(memory.external),
+    ...(Number.isFinite(memory.arrayBuffers) ? { arrayBuffersMb: toMb(memory.arrayBuffers) } : {})
+  };
+}
+
+function getMobileUploadLogContext(req) {
+  const files = Array.isArray(req.files) ? req.files : [];
+  const loadId = String(req.body?.loadId || '').trim();
+  const uploadType = normalizeText(req.body?.uploadType);
+  const totalIncomingBytes = files.reduce((total, file) => total + Number(file?.size || 0), 0);
+  const requestContentLengthBytes = Number(req.headers?.['content-length'] || 0);
+
+  return {
+    loadId: /^\d{1,12}$/.test(loadId) ? loadId : 'invalid',
+    uploadType: MOBILE_UPLOAD_TYPES.has(uploadType) ? uploadType : 'invalid',
+    fileCount: files.length,
+    totalIncomingBytes,
+    totalIncomingMb: Math.round((totalIncomingBytes / (1024 * 1024)) * 10) / 10,
+    requestContentLengthBytes: Number.isFinite(requestContentLengthBytes)
+      ? requestContentLengthBytes
+      : 0,
+    driverId: String(req.mobileDriver?.id || ''),
+    truck: String(req.mobileDriver?.truck || ''),
+    memory: getMobileUploadMemoryUsage()
+  };
+}
+
+function getMobileUploadErrorDiagnostics(error) {
+  let code = String(error?.code || '').trim();
+  let message = String(error?.message || '').trim();
+
+  if (message.startsWith('{')) {
+    try {
+      const graphError = JSON.parse(message)?.error;
+      code = code || String(graphError?.code || '').trim();
+      message = String(graphError?.message || 'Microsoft Graph request failed.').trim();
+    } catch {
+      message = 'Upstream request failed.';
+    }
+  }
+
+  message = message
+    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/https?:\/\/\S+/gi, '[redacted-url]')
+    .slice(0, 500);
+
+  return {
+    errorName: String(error?.name || 'Error').slice(0, 100),
+    errorCode: code.slice(0, 100),
+    statusCode: Number(error?.statusCode || error?.status || 0) || null,
+    message: message || 'Mobile upload failed.',
+    stack: typeof error?.stack === 'string'
+      ? error.stack.split('\n').slice(1, 7).join('\n')
+      : ''
+  };
+}
+
+function logMobileUploadFailure(req, error) {
+  console.error('Mobile upload failed', {
+    ...getMobileUploadLogContext(req),
+    error: getMobileUploadErrorDiagnostics(error)
+  });
+}
+
+function sendMobileUploadFailure(req, res, status, message, code) {
+  logMobileUploadFailure(req, {
+    name: 'MobileUploadRequestError',
+    code,
+    statusCode: status,
+    message
+  });
+
+  return res.status(status).json({
+    success: false,
+    error: message
+  });
+}
+
+async function cleanupMobileUploadFiles(files, req) {
+  const cleanupErrors = [];
+
+  for (const file of Array.isArray(files) ? files : []) {
+    if (!file?.path) continue;
+
+    try {
+      await fs.promises.unlink(file.path);
+      file.path = '';
+    } catch (error) {
+      if (error?.code !== 'ENOENT') cleanupErrors.push(error);
+    }
+  }
+
+  if (cleanupErrors.length > 0) {
+    console.warn('Mobile upload temp cleanup failed', {
+      ...getMobileUploadLogContext(req),
+      cleanupFailureCount: cleanupErrors.length,
+      error: getMobileUploadErrorDiagnostics(cleanupErrors[0])
+    });
+  }
 }
 
 function getMobileUploadSafeFileName(file, contentType) {
@@ -22057,57 +22223,81 @@ app.post('/mobile/upload', requireMobileSession, async (req, res) => {
   try {
     await parseMobileUpload(req, res);
 
+    console.info('Mobile upload parsed', getMobileUploadLogContext(req));
+
     const loadId = String(req.body?.loadId || '').trim();
     const uploadType = normalizeText(req.body?.uploadType);
 
     if (!/^\d{1,12}$/.test(loadId)) {
-      return res.status(400).json({
-        success: false,
-        error: 'A valid load is required.'
-      });
+      return sendMobileUploadFailure(
+        req,
+        res,
+        400,
+        'A valid load is required.',
+        'INVALID_LOAD_ID'
+      );
     }
 
     if (!MOBILE_UPLOAD_TYPES.has(uploadType)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Upload type must be Pickup or Delivery.'
-      });
+      return sendMobileUploadFailure(
+        req,
+        res,
+        400,
+        'Upload type must be Pickup or Delivery.',
+        'INVALID_UPLOAD_TYPE'
+      );
     }
 
     if (!Array.isArray(req.files) || req.files.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Select at least one photo or PDF to upload.'
+      return sendMobileUploadFailure(
+        req,
+        res,
+        400,
+        'Select at least one photo or PDF to upload.',
+        'NO_UPLOAD_FILES'
+      );
+    }
+
+    const preparedFiles = [];
+
+    for (const file of req.files) {
+      preparedFiles.push({
+        file,
+        contentType: await getMobileUploadContentType(file)
       });
     }
 
-    const preparedFiles = req.files.map((file) => ({
-      file,
-      contentType: getMobileUploadContentType(file)
-    }));
-
     if (preparedFiles.some((entry) => !entry.contentType)) {
-      return res.status(415).json({
-        success: false,
-        error: 'One or more files are not a valid JPEG, PNG, HEIC/HEIF, or PDF.'
-      });
+      return sendMobileUploadFailure(
+        req,
+        res,
+        415,
+        'One or more files are not a valid JPEG, PNG, HEIC/HEIF, or PDF.',
+        'INVALID_FILE_CONTENT'
+      );
     }
 
     if (!process.env.DISPATCH_ONEDRIVE_ID || !getLoadPicturesFolderId()) {
-      return res.status(500).json({
-        success: false,
-        error: 'Mobile upload storage is not configured on the server.'
-      });
+      return sendMobileUploadFailure(
+        req,
+        res,
+        500,
+        'Mobile upload storage is not configured on the server.',
+        'UPLOAD_STORAGE_NOT_CONFIGURED'
+      );
     }
 
     const graphToken = await getGraphToken();
     const currentList = await getCurrentBidListingSource(graphToken);
 
     if (!currentList) {
-      return res.status(404).json({
-        success: false,
-        error: 'The current Bid Listing is not available.'
-      });
+      return sendMobileUploadFailure(
+        req,
+        res,
+        404,
+        'The current Bid Listing is not available.',
+        'CURRENT_LIST_NOT_AVAILABLE'
+      );
     }
 
     const items = await getDashboardBidSource(graphToken, currentList, {
@@ -22116,20 +22306,26 @@ app.post('/mobile/upload', requireMobileSession, async (req, res) => {
     const selectedItem = items.find((item) => String(item?.id || '') === loadId);
 
     if (!selectedItem || !isMobileLoadEligibleForRoster(req.mobileDriver, selectedItem)) {
-      return res.status(404).json({
-        success: false,
-        error: 'That load is not available for this Mobile session.'
-      });
+      return sendMobileUploadFailure(
+        req,
+        res,
+        404,
+        'That load is not available for this Mobile session.',
+        'LOAD_NOT_AVAILABLE'
+      );
     }
 
     const fields = selectedItem.fields || {};
     const bol = getMobileHomeText(fields.BOLNumber_x0028_Won_x0029_);
 
     if (!bol) {
-      return res.status(409).json({
-        success: false,
-        error: 'This load does not have a BOL folder reference yet.'
-      });
+      return sendMobileUploadFailure(
+        req,
+        res,
+        409,
+        'This load does not have a BOL folder reference yet.',
+        'BOL_NOT_AVAILABLE'
+      );
     }
 
     const candidateDrivers = uniqueNonEmpty([
@@ -22143,10 +22339,13 @@ app.post('/mobile/upload', requireMobileSession, async (req, res) => {
     });
 
     if (!photoMatch) {
-      return res.status(404).json({
-        success: false,
-        error: 'The load photo folder could not be found for this BOL.'
-      });
+      return sendMobileUploadFailure(
+        req,
+        res,
+        404,
+        'The load photo folder could not be found for this BOL.',
+        'LOAD_PHOTO_FOLDER_NOT_FOUND'
+      );
     }
 
     const loadFolderChildren = await getAllChildrenFromFolder(
@@ -22157,31 +22356,49 @@ app.post('/mobile/upload', requireMobileSession, async (req, res) => {
     const targetFolder = findUploadTypeFolder(loadFolderChildren, uploadType);
 
     if (!targetFolder) {
-      return res.status(404).json({
-        success: false,
-        error: `The ${uploadType === 'pickup' ? 'Pickup' : 'Delivery'} photo folder could not be found for this load.`
-      });
+      return sendMobileUploadFailure(
+        req,
+        res,
+        404,
+        `The ${uploadType === 'pickup' ? 'Pickup' : 'Delivery'} photo folder could not be found for this load.`,
+        'UPLOAD_TYPE_FOLDER_NOT_FOUND'
+      );
     }
 
-    const uploaded = await Promise.all(preparedFiles.map(async ({ file, contentType }) => {
+    const uploaded = [];
+
+    for (const { file, contentType } of preparedFiles) {
       const safeName = getMobileUploadSafeFileName(file, contentType);
       const uploadUrl =
         `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(process.env.DISPATCH_ONEDRIVE_ID)}` +
         `/items/${encodeURIComponent(targetFolder.id)}:/${encodeURIComponent(safeName)}:/content`;
-      const storedFile = await graphPutBinary(
-        graphToken,
-        uploadUrl,
-        file.buffer,
-        contentType
-      );
 
-      return {
-        name: storedFile.name || safeName,
-        size: Number(storedFile.size || file.size || 0)
-      };
-    }));
+      try {
+        const storedFile = await withMobileUploadFileBufferSlot(async () => {
+          const fileBuffer = await fs.promises.readFile(file.path);
+          return graphPutBinary(
+            graphToken,
+            uploadUrl,
+            fileBuffer,
+            contentType
+          );
+        });
 
-    res.status(201).json({
+        uploaded.push({
+          name: storedFile.name || safeName,
+          size: Number(storedFile.size || file.size || 0)
+        });
+      } finally {
+        await cleanupMobileUploadFiles([file], req);
+      }
+    }
+
+    console.info('Mobile upload completed', {
+      ...getMobileUploadLogContext(req),
+      uploadedCount: uploaded.length
+    });
+
+    return res.status(201).json({
       success: true,
       load: {
         id: String(selectedItem.id || ''),
@@ -22193,13 +22410,17 @@ app.post('/mobile/upload', requireMobileSession, async (req, res) => {
       uploaded
     });
   } catch (error) {
-    console.error('Mobile upload failed.');
+    logMobileUploadFailure(req, error);
     const failure = getMobileUploadErrorResponse(error);
 
-    res.status(failure.status).json({
-      success: false,
-      error: failure.message
-    });
+    if (!res.headersSent) {
+      return res.status(failure.status).json({
+        success: false,
+        error: failure.message
+      });
+    }
+  } finally {
+    await cleanupMobileUploadFiles(req.files, req);
   }
 });
 
