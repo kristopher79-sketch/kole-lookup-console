@@ -2511,25 +2511,38 @@ tbody tr:hover {
 
   .search-action-strip {
     grid-column: 1 / -1;
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
     min-width: 0;
     gap: 8px;
-    overflow-x: auto;
-    padding: 2px 1px 5px;
-    overscroll-behavior-x: contain;
-    scroll-snap-type: x proximity;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .search-action-strip::-webkit-scrollbar {
-    display: none;
+    padding: 2px 0 0;
   }
 
   .search-action-strip button {
-    flex: 0 0 auto;
-    scroll-snap-align: start;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .search-action-strip .quote-engine-launch {
+    order: 1;
+  }
+
+  .search-action-strip .contract-lanes-launch {
+    order: 2;
+  }
+
+  .search-action-strip .no-bol-bids-launch {
+    order: 3;
+  }
+
+  .search-action-strip .search-clear-button {
+    order: 4;
+  }
+
+  .search-action-strip .search-return-button {
+    grid-column: 1 / -1;
+    order: 5;
   }
 
   .modal-overlay {

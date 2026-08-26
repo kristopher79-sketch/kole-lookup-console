@@ -21655,7 +21655,7 @@ function openReportLoadDetails(load) {
           <div className="search-action-strip" role="group" aria-label="Order and quote actions">
             <button
               type="button"
-              className="search-secondary-button"
+              className="search-secondary-button search-clear-button"
               onClick={clearOrderSearch}
               disabled={loading && !hasSearched}
             >
