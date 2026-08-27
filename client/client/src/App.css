@@ -9893,6 +9893,116 @@ button.available-truck-distribution-summary-card:disabled {
   justify-content: flex-end;
 }
 
+.driver-termination-button {
+  border: 1px solid color-mix(in srgb, var(--kole-danger) 34%, transparent);
+}
+
+.driver-termination-overlay {
+  z-index: var(--kole-z-modal-performance);
+  background: color-mix(in srgb, var(--kole-overlay) 86%, var(--kole-control-deep));
+}
+
+.driver-termination-modal {
+  width: min(580px, 94vw);
+}
+
+.driver-termination-modal .detail-header h2 {
+  color: var(--kole-danger);
+}
+
+.driver-termination-form {
+  display: grid;
+  gap: 16px;
+}
+
+.driver-termination-warning {
+  display: grid;
+  gap: 5px;
+  padding: 13px 14px;
+  border: 1px solid color-mix(in srgb, var(--kole-danger) 30%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--kole-danger-bg) 42%, transparent);
+  color: var(--kole-text-soft);
+}
+
+.driver-termination-warning strong {
+  color: var(--kole-danger);
+}
+
+.driver-termination-warning span {
+  color: var(--kole-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.driver-termination-date-field {
+  display: grid;
+  gap: 7px;
+}
+
+.driver-termination-date-field > span {
+  color: var(--kole-text-soft);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.driver-termination-date-field input {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--kole-control-border);
+  border-radius: 8px;
+  background: var(--kole-control-bg);
+  color: var(--kole-text);
+  font-size: 15px;
+  outline: none;
+}
+
+.driver-termination-date-field input:focus {
+  border-color: var(--kole-action);
+  box-shadow: 0 0 0 3px var(--kole-focus);
+}
+
+.driver-termination-confirm-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 13px;
+  border: 1px solid var(--kole-border);
+  border-radius: 10px;
+  background: var(--kole-surface-2);
+  color: var(--kole-text-soft);
+  font-weight: 750;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.driver-termination-confirm-row input {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  accent-color: var(--kole-danger-bg);
+}
+
+.driver-termination-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.driver-termination-success {
+  margin-bottom: 14px;
+}
+
+@media (max-width: 700px) {
+  .driver-termination-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+}
+
 .driver-performance-button {
   background: #facc15;
   color: #111827;

@@ -1572,6 +1572,15 @@ export default function App() {
   const [driverTimeOffAccordionOpen, setDriverTimeOffAccordionOpen] = useState(() => userPrefs.driverTimeOffDefaultOpen);
   const [driverTimeOffPaneFilter, setDriverTimeOffPaneFilter] = useState(() => userPrefs.driverTimeOffDefaultPane);
   const [selectedDriverRoster, setSelectedDriverRoster] = useState(null);
+  const [driverTerminationModalOpen, setDriverTerminationModalOpen] = useState(false);
+  const [driverTerminationDate, setDriverTerminationDate] = useState(getEasternDateInputValue);
+  const [driverTerminationConfirmed, setDriverTerminationConfirmed] = useState(false);
+  const [driverTerminationSaving, setDriverTerminationSaving] = useState(false);
+  const [driverTerminationError, setDriverTerminationError] = useState('');
+  const [driverTerminationMessage, setDriverTerminationMessage] = useState('');
+  const driverTerminationSavingRef = useRef(false);
+  const driverTerminationDateInputRef = useRef(null);
+  const driverTerminationButtonRef = useRef(null);
   const [driverHistoryModalOpen, setDriverHistoryModalOpen] = useState(false);
   const [driverHistorySnapshot, setDriverHistorySnapshot] = useState(null);
   const [driverHistoryLoading, setDriverHistoryLoading] = useState(false);
@@ -1877,6 +1886,7 @@ export default function App() {
     contractLanesOpen ||
     selected ||
     selectedDriverRoster ||
+    driverTerminationModalOpen ||
     driverHistoryModalOpen ||
     grossRevenueModalOpen ||
     yearlyProjectionModalOpen ||
@@ -2905,6 +2915,20 @@ export default function App() {
   }, [contractLaneBookingSubmitting]);
 
   useEffect(() => {
+    driverTerminationSavingRef.current = driverTerminationSaving;
+  }, [driverTerminationSaving]);
+
+  useEffect(() => {
+    if (!driverTerminationModalOpen) return undefined;
+
+    const frame = window.requestAnimationFrame(() => {
+      driverTerminationDateInputRef.current?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [driverTerminationModalOpen]);
+
+  useEffect(() => {
     if (!quoteEngineOpen) return undefined;
 
     const frame = window.requestAnimationFrame(() => {
@@ -2985,7 +3009,12 @@ export default function App() {
         setCustomerTrendModalOpen(false);
         setSelectedCustomerTrend(null);
         setDriverHistoryModalOpen(false);
-        setSelectedDriverRoster(null);
+        if (!driverTerminationSavingRef.current) {
+          setDriverTerminationModalOpen(false);
+          setDriverTerminationConfirmed(false);
+          setDriverTerminationError('');
+          setSelectedDriverRoster(null);
+        }
         setSelectedSalesLead(null);
         setSelectedRecruitingProfile(null);
         setRecruitingCreateModalOpen(false);
@@ -5387,12 +5416,222 @@ async function refreshOperationsAndTracking() {
 }
 
 function closeDriverRosterModal() {
+  if (driverTerminationSavingRef.current) return;
+
+  setDriverTerminationModalOpen(false);
+  setDriverTerminationConfirmed(false);
+  setDriverTerminationError('');
+  setDriverTerminationMessage('');
   setDriverHistoryModalOpen(false);
   setSelectedDriverRoster(null);
   setDriverHistorySnapshot(null);
   setDriverHistoryLoading(false);
   setDriverHistoryError('');
   setOrderDrilldownReturn(null);
+}
+
+function getDriverRosterDateInputValue(value) {
+  const match = String(value || '').trim().match(/^(\d{4}-\d{2}-\d{2})/);
+  return match?.[1] || '';
+}
+
+function canTerminateDriverRoster(roster = {}) {
+  return Boolean(
+    roster.id &&
+    String(roster.status || '').trim().toLowerCase() === 'active' &&
+    !getDriverRosterDateInputValue(roster.termDate)
+  );
+}
+
+function closeDriverTerminationModal() {
+  if (driverTerminationSavingRef.current) return;
+
+  setDriverTerminationModalOpen(false);
+  setDriverTerminationConfirmed(false);
+  setDriverTerminationError('');
+  window.requestAnimationFrame(() => driverTerminationButtonRef.current?.focus());
+}
+
+function openDriverTerminationModal() {
+  const roster = selectedDriverRoster?.roster || {};
+  if (!canTerminateDriverRoster(roster)) return;
+
+  const displayName = roster.tmsName || roster.operatorTeamName || 'this driver';
+  const confirmed = window.confirm(`Are you sure you want to terminate ${displayName}?`);
+  if (!confirmed) return;
+
+  setDriverTerminationDate(getEasternDateInputValue());
+  setDriverTerminationConfirmed(false);
+  setDriverTerminationError('');
+  setDriverTerminationMessage('');
+  setDriverTerminationModalOpen(true);
+}
+
+function sortClientRosterRows(rows = []) {
+  return [...rows].sort((a, b) => {
+    const aName = String(a.tmsName || a.operatorTeamName || '').trim();
+    const bName = String(b.tmsName || b.operatorTeamName || '').trim();
+    const nameCompare = aName.localeCompare(bName);
+    if (nameCompare !== 0) return nameCompare;
+    return String(a.truck || '').localeCompare(String(b.truck || ''), undefined, { numeric: true });
+  });
+}
+
+function applyDriverTerminationToClient(updatedRoster) {
+  const rosterId = String(updatedRoster?.id || '');
+  const rosterTruck = normalizeDriverHistoryTruckKey(updatedRoster?.truck);
+  const isSameRoster = (roster = {}) => rosterId
+    ? String(roster.id || '') === rosterId
+    : Boolean(rosterTruck && normalizeDriverHistoryTruckKey(roster.truck) === rosterTruck);
+  const isSameRosterOption = (option = {}) => rosterId
+    ? String(option.id || '') === rosterId
+    : Boolean(rosterTruck && normalizeDriverHistoryTruckKey(option.unitNo) === rosterTruck);
+  const inactiveRoster = {
+    ...updatedRoster,
+    displayName: updatedRoster.tmsName || updatedRoster.operatorTeamName || '-',
+    statusLabel: 'Inactive'
+  };
+
+  setSelectedDriverRoster((current) => current ? {
+    ...current,
+    currentCityState: 'Inactive Driver',
+    rosterModalTitle: 'Inactive Driver Roster',
+    rosterModalSubtitle: `${inactiveRoster.displayName} · Truck ${updatedRoster.truck || '-'}`,
+    roster: updatedRoster
+  } : current);
+
+  setDriverPositionsData((current) => current ? {
+    ...current,
+    positions: (current.positions || []).map((position) => (
+      isSameRoster(position.roster) ? { ...position, roster: updatedRoster } : position
+    ))
+  } : current);
+
+  setActiveDriverRosterReport((current) => {
+    if (!current) return current;
+    const rows = (current.rows || []).filter((row) => !isSameRoster(row));
+    return {
+      ...current,
+      rows,
+      count: rows.length,
+      activeCount: Math.max(0, Number(current.activeCount ?? current.count ?? 0) - 1),
+      inactiveCount: Number(current.inactiveCount || 0) + 1
+    };
+  });
+
+  setInactiveDriverRosterReport((current) => {
+    if (!current) return current;
+    const hadRoster = (current.rows || []).some(isSameRoster);
+    const rows = sortClientRosterRows([
+      ...(current.rows || []).filter((row) => !isSameRoster(row)),
+      inactiveRoster
+    ]);
+    return {
+      ...current,
+      rows,
+      count: rows.length,
+      activeCount: Math.max(0, Number(current.activeCount || 0) - (hadRoster ? 0 : 1)),
+      inactiveCount: Number(current.inactiveCount ?? current.count ?? 0) + (hadRoster ? 0 : 1)
+    };
+  });
+
+  setFleetEquipmentReport((current) => {
+    if (!current) return current;
+    const hadRoster = (current.rows || []).some(isSameRoster);
+    let rows = (current.rows || []).filter((row) => !isSameRoster(row));
+    if (current.status === 'inactive' || current.status === 'all') {
+      rows = sortClientRosterRows([...rows, inactiveRoster]);
+    }
+    return {
+      ...current,
+      rows,
+      count: rows.length,
+      activeCount: Math.max(0, Number(current.activeCount || 0) - 1),
+      inactiveCount: Number(current.inactiveCount || 0) + (hadRoster && current.status === 'inactive' ? 0 : 1)
+    };
+  });
+
+  setAvailableTrucksData((current) => current ? {
+    ...current,
+    activeDriverOptions: (current.activeDriverOptions || []).filter((option) => !isSameRosterOption(option))
+  } : current);
+
+  setDriverTimeOffReport((current) => current ? {
+    ...current,
+    activeDriverOptions: (current.activeDriverOptions || []).filter((option) => !isSameRosterOption(option))
+  } : current);
+
+  setOperationsData((current) => current?.driverTimeOff ? {
+    ...current,
+    driverTimeOff: {
+      ...current.driverTimeOff,
+      activeDriverOptions: (current.driverTimeOff.activeDriverOptions || []).filter((option) => !isSameRosterOption(option))
+    }
+  } : current);
+
+  setContractLanesData(null);
+}
+
+async function submitDriverTermination(event) {
+  event.preventDefault();
+  if (driverTerminationSavingRef.current) return;
+
+  const roster = selectedDriverRoster?.roster || {};
+  const terminationDate = getDriverRosterDateInputValue(driverTerminationDate);
+  const today = getEasternDateInputValue();
+  const startDate = getDriverRosterDateInputValue(roster.startDate);
+
+  if (!canTerminateDriverRoster(roster)) {
+    setDriverTerminationError('This driver is no longer active. Close the confirmation and refresh the Driver Roster.');
+    return;
+  }
+  if (!terminationDate) {
+    setDriverTerminationError('Enter a termination date.');
+    return;
+  }
+  if (terminationDate > today) {
+    setDriverTerminationError('Termination date cannot be in the future.');
+    return;
+  }
+  if (startDate && terminationDate < startDate) {
+    setDriverTerminationError('Termination date cannot be earlier than the driver start date.');
+    return;
+  }
+  if (!driverTerminationConfirmed) {
+    setDriverTerminationError('Check the final confirmation before terminating this driver.');
+    return;
+  }
+
+  driverTerminationSavingRef.current = true;
+  setDriverTerminationSaving(true);
+  setDriverTerminationError('');
+  setDriverTerminationMessage('');
+
+  try {
+    const res = await authedFetch(`${API}/driver-roster/${encodeURIComponent(roster.id)}/terminate`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ terminationDate })
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success || !data.roster) {
+      throw new Error(data.error || 'Unable to terminate this driver.');
+    }
+
+    applyDriverTerminationToClient(data.roster);
+    setDriverTerminationMessage(data.message || `Driver terminated effective ${terminationDate}.`);
+    setDriverTerminationModalOpen(false);
+    setDriverTerminationConfirmed(false);
+    void loadDashboardBootstrap({
+      moduleKeys: ['operations', 'driverPositions', 'availableTrucks', 'availableTruckDistribution']
+    });
+  } catch (err) {
+    setDriverTerminationError(err.message || 'Unable to terminate this driver.');
+  } finally {
+    driverTerminationSavingRef.current = false;
+    setDriverTerminationSaving(false);
+  }
 }
 
 function getOrderDrilldownReturnLabel(snapshot = orderDrilldownReturn) {
@@ -13802,6 +14041,17 @@ function openReportLoadDetails(load) {
             </div>
 
             <div className="driver-roster-header-actions">
+              {hasRoster && canTerminateDriverRoster(roster) && (
+                <button
+                  ref={driverTerminationButtonRef}
+                  type="button"
+                  className="danger-button driver-termination-button"
+                  onClick={openDriverTerminationModal}
+                  disabled={driverTerminationSaving}
+                >
+                  Terminate Driver
+                </button>
+              )}
               {hasRoster && (
                 <button
                   type="button"
@@ -13819,6 +14069,11 @@ function openReportLoadDetails(load) {
           </div>
 
           <div className="modal-body">
+            {driverTerminationMessage && (
+              <div className="msg success driver-termination-success" role="status" aria-live="polite">
+                {driverTerminationMessage}
+              </div>
+            )}
             {!hasRoster ? (
               <div className="report-alert locked">
                 <h4>No roster details matched this active position.</h4>
@@ -13888,6 +14143,106 @@ function openReportLoadDetails(load) {
               </div>
             )}
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderDriverTerminationModal() {
+    if (!driverTerminationModalOpen || !selectedDriverRoster?.roster) return null;
+
+    const roster = selectedDriverRoster.roster;
+    const displayName = roster.tmsName || roster.operatorTeamName || 'this driver';
+    const startDate = getDriverRosterDateInputValue(roster.startDate);
+    const today = getEasternDateInputValue();
+
+    return (
+      <div
+        className="modal-overlay driver-termination-overlay"
+        role="presentation"
+        onClick={closeDriverTerminationModal}
+      >
+        <div
+          className="detail-modal driver-termination-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="driver-termination-title"
+          aria-describedby="driver-termination-description"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="detail-header">
+            <div>
+              <h2 id="driver-termination-title">Confirm Driver Termination</h2>
+              <p>{displayName} · Truck {roster.truck || '-'}</p>
+            </div>
+            <button
+              type="button"
+              className="close-button"
+              onClick={closeDriverTerminationModal}
+              disabled={driverTerminationSaving}
+            >
+              Close
+            </button>
+          </div>
+
+          <form className="modal-body driver-termination-form" onSubmit={submitDriverTermination}>
+            <div className="driver-termination-warning" id="driver-termination-description">
+              <strong>This removes the driver from the active roster.</strong>
+              <span>The roster status will change to Inactive and the termination date will be recorded.</span>
+            </div>
+
+            <label className="driver-termination-date-field">
+              <span>Termination Date</span>
+              <input
+                ref={driverTerminationDateInputRef}
+                type="date"
+                value={driverTerminationDate}
+                min={startDate || undefined}
+                max={today}
+                onChange={(event) => {
+                  setDriverTerminationDate(event.target.value);
+                  setDriverTerminationError('');
+                }}
+                disabled={driverTerminationSaving}
+                required
+              />
+            </label>
+
+            <label className="driver-termination-confirm-row">
+              <input
+                type="checkbox"
+                checked={driverTerminationConfirmed}
+                onChange={(event) => {
+                  setDriverTerminationConfirmed(event.target.checked);
+                  setDriverTerminationError('');
+                }}
+                disabled={driverTerminationSaving}
+              />
+              <span>I confirm that I want to terminate {displayName}.</span>
+            </label>
+
+            {driverTerminationError && (
+              <div className="msg error" role="alert">{driverTerminationError}</div>
+            )}
+
+            <div className="driver-termination-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={closeDriverTerminationModal}
+                disabled={driverTerminationSaving}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="danger-button"
+                disabled={driverTerminationSaving || !driverTerminationConfirmed || !driverTerminationDate}
+              >
+                {driverTerminationSaving ? 'Terminating...' : 'Terminate Driver'}
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     );
@@ -22674,6 +23029,7 @@ function openReportLoadDetails(load) {
 
       {DriverTimeOffFormModal()}
       <DriverRosterModal />
+      {renderDriverTerminationModal()}
       <DriverPerformanceModal />
       {SalesLeadProfileModal()}
 

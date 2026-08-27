@@ -9721,6 +9721,51 @@ async function getDriverRosterItemById(token, itemId) {
   );
 }
 
+function getDriverRosterDateOnly(value) {
+  const match = String(value || '').trim().match(/^(\d{4}-\d{2}-\d{2})/);
+  return match?.[1] || '';
+}
+
+function clearDriverRosterMutationCaches() {
+  cachedOperationsToday = null;
+  cachedOperationsTodayAt = 0;
+}
+
+function getDriverRosterTerminationDate(value) {
+  const terminationDate = cleanRosterText(value);
+
+  if (!isValidDateInput(terminationDate)) {
+    const error = new Error('Termination date must be provided as YYYY-MM-DD.');
+    error.statusCode = 400;
+    error.safeForClient = true;
+    throw error;
+  }
+
+  const [year, month, day] = terminationDate.split('-').map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  const isRealDate = (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
+
+  if (!isRealDate) {
+    const error = new Error('Termination date must be a valid calendar date.');
+    error.statusCode = 400;
+    error.safeForClient = true;
+    throw error;
+  }
+
+  if (terminationDate > formatEasternDate()) {
+    const error = new Error('Termination date cannot be in the future.');
+    error.statusCode = 400;
+    error.safeForClient = true;
+    throw error;
+  }
+
+  return terminationDate;
+}
+
 
 
 function normalizeDriverSnapshotTruckKey(value) {
@@ -19024,6 +19069,88 @@ app.get('/driver-roster/lookup', requireLookupAccess, async (req, res) => {
     res.status(error.statusCode || 500).json({
       success: false,
       error: error.message || 'Unable to lookup Driver Roster record.'
+    });
+  }
+});
+
+app.patch('/driver-roster/:itemId/terminate', requireLookupAccess, async (req, res) => {
+  try {
+    const itemId = String(req.params.itemId || '').trim();
+
+    if (!/^\d+$/.test(itemId)) {
+      return res.status(400).json({ success: false, error: 'A valid Driver Roster item ID is required.' });
+    }
+
+    const terminationDate = getDriverRosterTerminationDate(req.body?.terminationDate);
+    const token = await getGraphToken();
+    const currentItem = await getDriverRosterItemById(token, itemId);
+    const currentRoster = cleanDriverRosterItem(currentItem);
+    const currentStatus = normalizeText(currentRoster.status);
+    const currentTermDate = getDriverRosterDateOnly(currentRoster.termDate);
+    const startDate = getDriverRosterDateOnly(currentRoster.startDate);
+
+    if (startDate && terminationDate < startDate) {
+      const error = new Error('Termination date cannot be earlier than the driver start date.');
+      error.statusCode = 400;
+      error.safeForClient = true;
+      throw error;
+    }
+
+    if ((currentStatus === 'inactive' || currentStatus === 'terminated') && currentTermDate === terminationDate) {
+      return res.json({
+        success: true,
+        alreadyTerminated: true,
+        message: `${currentRoster.tmsName || currentRoster.operatorTeamName || 'Driver'} was already terminated effective ${terminationDate}.`,
+        roster: currentRoster
+      });
+    }
+
+    if (currentStatus !== 'active' || currentTermDate) {
+      return res.status(409).json({
+        success: false,
+        code: 'DRIVER_ROSTER_NOT_ACTIVE',
+        error: 'This driver is no longer active. Refresh the Driver Roster before trying again.'
+      });
+    }
+
+    const { siteId, listId } = assertDriverRosterConfig();
+    const patchUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${encodeURIComponent(itemId)}/fields`;
+
+    await graphPatch(token, patchUrl, {
+      Status: 'Inactive',
+      TermDate: terminationDate
+    }, {
+      'If-Match': currentItem.eTag || currentItem['@odata.etag'] || '*'
+    });
+
+    clearDriverRosterMutationCaches();
+
+    const updatedItem = await getDriverRosterItemById(token, itemId);
+    const updatedRoster = cleanDriverRosterItem(updatedItem);
+
+    res.json({
+      success: true,
+      message: `${updatedRoster.tmsName || updatedRoster.operatorTeamName || 'Driver'} was terminated effective ${terminationDate}.`,
+      roster: updatedRoster
+    });
+  } catch (error) {
+    const conflict = /412|precondition/i.test(error.message || '');
+    const statusCode = conflict ? 409 : (error.safeForClient ? error.statusCode : 500);
+
+    console.error('Driver Roster termination failed.', {
+      name: error.name || 'Error',
+      statusCode: error.statusCode || 500,
+      conflict
+    });
+
+    res.status(statusCode).json({
+      success: false,
+      code: conflict ? 'DRIVER_ROSTER_CHANGED' : undefined,
+      error: conflict
+        ? 'This Driver Roster record changed while it was being terminated. Refresh it and try again.'
+        : error.safeForClient
+          ? error.message
+          : 'Unable to terminate this driver right now.'
     });
   }
 });
