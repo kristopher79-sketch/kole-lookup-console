@@ -13561,6 +13561,324 @@ function normalizeSalesLeadAction(value) {
   return normalizeText(value).replace(/[^a-z0-9]+/g, '');
 }
 
+const SALES_LEAD_TRACKING_EMAIL_DEFINITIONS = Object.freeze([
+  { key: 'Email1', field: 'TrackingEmail1', label: 'Email 1' },
+  { key: 'Email2', field: 'TrackingEmail2', label: 'Email 2' },
+  { key: 'Email3', field: 'TrackingEmail3', label: 'Email 3' },
+  { key: 'Email4', field: 'TrackingEmail4', label: 'Email 4' },
+  { key: 'Email5', field: 'TrackingEmail5', label: 'Email 5' },
+  { key: 'Email6', field: 'TrackingEmail6', label: 'Email 6' }
+]);
+
+const SALES_LEAD_TRACKING_EMAIL_BY_KEY = new Map(
+  SALES_LEAD_TRACKING_EMAIL_DEFINITIONS.map((definition) => [definition.key, definition])
+);
+
+const SALES_LEAD_TRACKING_PREFERENCE_KEYS = Object.freeze([
+  ...SALES_LEAD_TRACKING_EMAIL_DEFINITIONS.map((definition) => definition.key),
+  'UpdateInterval'
+]);
+
+const SALES_LEAD_TRACKING_SOURCE_FIELDS = Object.freeze([
+  ...SALES_LEAD_TRACKING_EMAIL_DEFINITIONS.map((definition) => definition.field),
+  'UpdateInterval'
+]);
+
+const SALES_LEAD_TRACKING_INTERVAL_ALLOWED_VALUES = Object.freeze([2, 3, 4]);
+
+function createSalesLeadTrackingPreferencesError(message, statusCode = 400, code = '') {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.safeForClient = true;
+  if (code) error.code = code;
+  return error;
+}
+
+function getCleanSalesLeadId(value) {
+  const leadId = String(value || '').trim();
+
+  if (!/^\d+$/.test(leadId)) {
+    throw createSalesLeadTrackingPreferencesError('A valid Sales Leads item id is required.');
+  }
+
+  return leadId;
+}
+
+function cleanSalesLeadTrackingPreferences(fields = {}) {
+  const preferences = {};
+
+  SALES_LEAD_TRACKING_EMAIL_DEFINITIONS.forEach((definition) => {
+    preferences[definition.key] = String(fields[definition.field] || '').trim();
+  });
+
+  const updateInterval = getChoiceValue(fields.UpdateInterval);
+  preferences.UpdateInterval = updateInterval === null || updateInterval === undefined
+    ? ''
+    : String(updateInterval).trim();
+  return preferences;
+}
+
+function getSalesLeadUpdateIntervalNumberStep(decimalPlaces) {
+  const decimalSteps = {
+    none: 1,
+    one: 0.1,
+    two: 0.01,
+    three: 0.001,
+    four: 0.0001,
+    five: 0.00001
+  };
+
+  return decimalSteps[normalizeText(decimalPlaces)] || 'any';
+}
+
+function getFiniteSalesLeadColumnNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+async function getSalesLeadTrackingPreferencesSchema(token, listId) {
+  const columns = await getAllQuoteEngineColumns(token, listId);
+  const columnsByName = new Map(
+    columns
+      .filter((column) => column?.name)
+      .map((column) => [column.name, column])
+  );
+  const unavailableFields = SALES_LEAD_TRACKING_SOURCE_FIELDS.filter((fieldName) => {
+    const column = columnsByName.get(fieldName);
+    return !column || column.readOnly === true;
+  });
+
+  if (unavailableFields.length > 0) {
+    throw createSalesLeadTrackingPreferencesError(
+      'Customer tracking preferences are unavailable because the Sales Leads field mapping is incomplete or read-only.',
+      503,
+      'SALES_LEAD_TRACKING_SCHEMA_MISMATCH'
+    );
+  }
+
+  const updateIntervalColumn = columnsByName.get('UpdateInterval');
+  const updateIntervalChoices = Array.isArray(updateIntervalColumn?.choice?.choices)
+    ? updateIntervalColumn.choice.choices.map((value) => String(value || '').trim()).filter(Boolean)
+    : [];
+  let updateInterval;
+
+  if (updateIntervalChoices.length > 0) {
+    updateInterval = {
+      column: updateIntervalColumn,
+      mode: 'choice',
+      choices: updateIntervalChoices,
+      min: null,
+      max: null,
+      step: null,
+      required: updateIntervalColumn.required === true
+    };
+  } else if (updateIntervalColumn?.number) {
+    updateInterval = {
+      column: updateIntervalColumn,
+      mode: 'number',
+      choices: [],
+      min: getFiniteSalesLeadColumnNumber(updateIntervalColumn.number.minimum),
+      max: getFiniteSalesLeadColumnNumber(updateIntervalColumn.number.maximum),
+      step: getSalesLeadUpdateIntervalNumberStep(updateIntervalColumn.number.decimalPlaces),
+      required: updateIntervalColumn.required === true
+    };
+  } else {
+    throw createSalesLeadTrackingPreferencesError(
+      'Customer tracking preferences are unavailable because Update Interval is not configured as a number or choice field.',
+      503,
+      'SALES_LEAD_TRACKING_INTERVAL_SCHEMA_MISMATCH'
+    );
+  }
+
+  return {
+    columnsByName,
+    updateInterval
+  };
+}
+
+function normalizeSalesLeadTrackingEmail(value, definition, column) {
+  const email = String(value ?? '').trim();
+
+  if (!email) {
+    if (column?.required === true) {
+      throw createSalesLeadTrackingPreferencesError(`${definition.label} is required.`);
+    }
+    return '';
+  }
+
+  const maxLength = Number(column?.text?.maxLength || 320);
+  if (email.length > maxLength) {
+    throw createSalesLeadTrackingPreferencesError(`${definition.label} must be ${maxLength} characters or fewer.`);
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw createSalesLeadTrackingPreferencesError(`${definition.label} must contain one valid email address.`);
+  }
+
+  return email;
+}
+
+function normalizeSalesLeadUpdateInterval(value, schema) {
+  const requestedValue = String(value ?? '').trim();
+  const intervalDefinition = schema.updateInterval;
+
+  if (!requestedValue) {
+    throw createSalesLeadTrackingPreferencesError('Update Interval must be 2, 3, or 4.');
+  }
+
+  const requestedNumber = Number(requestedValue);
+
+  if (!Number.isFinite(requestedNumber) || !SALES_LEAD_TRACKING_INTERVAL_ALLOWED_VALUES.includes(requestedNumber)) {
+    throw createSalesLeadTrackingPreferencesError('Update Interval must be 2, 3, or 4.');
+  }
+
+  if (intervalDefinition.mode === 'number') {
+    const interval = requestedNumber;
+
+    if (intervalDefinition.min !== null && interval < intervalDefinition.min) {
+      throw createSalesLeadTrackingPreferencesError(`Update Interval cannot be less than ${intervalDefinition.min}.`);
+    }
+
+    if (intervalDefinition.max !== null && interval > intervalDefinition.max) {
+      throw createSalesLeadTrackingPreferencesError(`Update Interval cannot be greater than ${intervalDefinition.max}.`);
+    }
+
+    if (
+      intervalDefinition.step !== 'any' &&
+      Math.abs(interval / intervalDefinition.step - Math.round(interval / intervalDefinition.step)) > 1e-8
+    ) {
+      throw createSalesLeadTrackingPreferencesError(`Update Interval must use increments of ${intervalDefinition.step}.`);
+    }
+
+    return interval;
+  }
+
+  const normalizedValue = normalizeQuoteChoiceValue(requestedValue);
+  const matches = intervalDefinition.choices.filter(
+    (choice) => normalizeQuoteChoiceValue(choice) === normalizedValue
+  );
+
+  if (matches.length === 0) {
+    throw createSalesLeadTrackingPreferencesError(
+      `Update Interval "${requestedValue}" is not an approved Sales Leads choice.`
+    );
+  }
+
+  if (matches.length > 1) {
+    throw createSalesLeadTrackingPreferencesError(
+      `Update Interval "${requestedValue}" matches more than one configured choice.`,
+      409,
+      'SALES_LEAD_TRACKING_CHOICE_AMBIGUOUS'
+    );
+  }
+
+  return matches[0];
+}
+
+function buildSalesLeadTrackingPreferencesPatch(input, currentFields, schema) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw createSalesLeadTrackingPreferencesError('Tracking preferences are required.');
+  }
+
+  const requestedKeys = Object.keys(input);
+  const unknownKeys = requestedKeys.filter(
+    (key) => !SALES_LEAD_TRACKING_PREFERENCE_KEYS.includes(key)
+  );
+
+  if (unknownKeys.length > 0) {
+    throw createSalesLeadTrackingPreferencesError(
+      `Kole Connect cannot edit these tracking preference fields: ${unknownKeys.join(', ')}.`
+    );
+  }
+
+  if (requestedKeys.length === 0) {
+    throw createSalesLeadTrackingPreferencesError('No tracking preference changes were supplied.');
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(input, 'UpdateInterval')) {
+    throw createSalesLeadTrackingPreferencesError('Update Interval must be supplied and must be 2, 3, or 4.');
+  }
+
+  const patch = {};
+
+  requestedKeys.forEach((preferenceKey) => {
+    const emailDefinition = SALES_LEAD_TRACKING_EMAIL_BY_KEY.get(preferenceKey);
+    const sourceField = emailDefinition?.field || 'UpdateInterval';
+    const rawCurrentValue = preferenceKey === 'UpdateInterval'
+      ? getChoiceValue(currentFields[sourceField])
+      : currentFields[sourceField];
+    const currentValue = rawCurrentValue === null || rawCurrentValue === undefined
+      ? ''
+      : String(rawCurrentValue).trim();
+    const requestedValue = String(input[preferenceKey] ?? '').trim();
+
+    if (emailDefinition && requestedValue === currentValue) return;
+
+    const normalizedValue = emailDefinition
+      ? normalizeSalesLeadTrackingEmail(
+          input[preferenceKey],
+          emailDefinition,
+          schema.columnsByName.get(sourceField)
+        )
+      : normalizeSalesLeadUpdateInterval(input[preferenceKey], schema);
+    const normalizedComparisonValue = normalizedValue === null || normalizedValue === undefined
+      ? ''
+      : String(normalizedValue).trim();
+
+    if (normalizedComparisonValue !== currentValue) {
+      patch[sourceField] = preferenceKey === 'UpdateInterval' && normalizedValue === ''
+        ? null
+        : normalizedValue;
+    }
+  });
+
+  return patch;
+}
+
+function getSalesLeadTrackingPreferencesReadUrl(listId, leadId) {
+  const fieldSelect = SALES_LEAD_TRACKING_SOURCE_FIELDS.join(',');
+  return `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/items/${encodeURIComponent(leadId)}?$expand=fields($select=${fieldSelect})`;
+}
+
+function buildSalesLeadTrackingPreferencesResponse(item, schema) {
+  const preferences = cleanSalesLeadTrackingPreferences(item?.fields || {});
+  const updateInterval = {
+    mode: schema.updateInterval.mode,
+    choices: SALES_LEAD_TRACKING_INTERVAL_ALLOWED_VALUES.map(String),
+    min: schema.updateInterval.min,
+    max: schema.updateInterval.max,
+    step: schema.updateInterval.step,
+    required: true
+  };
+
+  return {
+    id: String(item?.id || '').trim(),
+    lastModifiedDateTime: item?.lastModifiedDateTime || '',
+    preferences,
+    updateInterval
+  };
+}
+
+function getSalesLeadTrackingPreferencesClientError(error, fallbackMessage) {
+  const rawMessage = String(error?.message || '');
+  const conflict = /412|precondition/i.test(rawMessage);
+
+  if (conflict) {
+    return {
+      statusCode: 409,
+      code: 'SALES_LEAD_TRACKING_CHANGED',
+      message: 'These customer tracking preferences changed while they were open. Close and reopen the editor before saving.'
+    };
+  }
+
+  return {
+    statusCode: error?.statusCode || 500,
+    code: error?.code || '',
+    message: error?.safeForClient === true ? error.message : fallbackMessage
+  };
+}
+
 async function updateSalesLeadSuppression(token, leadId, input = {}) {
   const salesLeadsListId = getSalesLeadsListId();
 
@@ -13637,6 +13955,126 @@ async function updateSalesLeadSuppression(token, leadId, input = {}) {
     generatedAt: baseReport.generatedAt
   };
 }
+
+app.get('/sales-leads/:id/tracking-preferences', requireLookupAccess, async (req, res) => {
+  try {
+    const salesLeadsListId = getSalesLeadsListId();
+
+    if (!salesLeadsListId) {
+      throw createSalesLeadTrackingPreferencesError(
+        'Customer tracking preferences are unavailable because Sales Leads is not configured.',
+        503,
+        'SALES_LEADS_NOT_CONFIGURED'
+      );
+    }
+
+    const leadId = getCleanSalesLeadId(req.params.id);
+    const token = await getGraphToken();
+    const schema = await getSalesLeadTrackingPreferencesSchema(token, salesLeadsListId);
+    const item = await graphGet(
+      token,
+      getSalesLeadTrackingPreferencesReadUrl(salesLeadsListId, leadId)
+    );
+
+    res.json({
+      success: true,
+      ...buildSalesLeadTrackingPreferencesResponse(item, schema)
+    });
+  } catch (error) {
+    console.error(
+      'Customer tracking preferences load failed:',
+      error?.safeForClient === true ? error.message : 'Upstream request failed.'
+    );
+    const clientError = getSalesLeadTrackingPreferencesClientError(
+      error,
+      'Unable to load customer tracking preferences.'
+    );
+
+    res.status(clientError.statusCode).json({
+      success: false,
+      code: clientError.code || undefined,
+      error: clientError.message
+    });
+  }
+});
+
+app.patch('/sales-leads/:id/tracking-preferences', requireLookupAccess, async (req, res) => {
+  try {
+    const salesLeadsListId = getSalesLeadsListId();
+
+    if (!salesLeadsListId) {
+      throw createSalesLeadTrackingPreferencesError(
+        'Customer tracking preferences are unavailable because Sales Leads is not configured.',
+        503,
+        'SALES_LEADS_NOT_CONFIGURED'
+      );
+    }
+
+    const leadId = getCleanSalesLeadId(req.params.id);
+    const expectedModified = String(req.body?.expectedModified || '').trim();
+    const token = await getGraphToken();
+    const schema = await getSalesLeadTrackingPreferencesSchema(token, salesLeadsListId);
+    const readUrl = getSalesLeadTrackingPreferencesReadUrl(salesLeadsListId, leadId);
+    const currentItem = await graphGet(token, readUrl);
+
+    if (
+      expectedModified &&
+      currentItem.lastModifiedDateTime &&
+      expectedModified !== currentItem.lastModifiedDateTime
+    ) {
+      throw createSalesLeadTrackingPreferencesError(
+        'These customer tracking preferences changed after the editor opened. Close and reopen it before saving.',
+        409,
+        'SALES_LEAD_TRACKING_CHANGED'
+      );
+    }
+
+    const patch = buildSalesLeadTrackingPreferencesPatch(
+      req.body?.preferences,
+      currentItem.fields || {},
+      schema
+    );
+    let updatedItem = currentItem;
+
+    if (Object.keys(patch).length > 0) {
+      const patchUrl = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${salesLeadsListId}/items/${encodeURIComponent(leadId)}/fields`;
+      await graphPatch(token, patchUrl, patch, {
+        'If-Match': currentItem.eTag || currentItem['@odata.etag'] || '*'
+      });
+      clearSalesLeadsReportCache();
+      updatedItem = await graphGet(token, readUrl);
+    }
+
+    const trackingPreferences = buildSalesLeadTrackingPreferencesResponse(updatedItem, schema);
+
+    res.json({
+      success: true,
+      message: Object.keys(patch).length > 0
+        ? 'Customer tracking preferences saved.'
+        : 'Customer tracking preferences are already up to date.',
+      ...trackingPreferences,
+      record: {
+        id: trackingPreferences.id,
+        ...trackingPreferences.preferences
+      }
+    });
+  } catch (error) {
+    console.error(
+      'Customer tracking preferences save failed:',
+      error?.safeForClient === true ? error.message : 'Upstream request failed.'
+    );
+    const clientError = getSalesLeadTrackingPreferencesClientError(
+      error,
+      'Unable to save customer tracking preferences.'
+    );
+
+    res.status(clientError.statusCode).json({
+      success: false,
+      code: clientError.code || undefined,
+      error: clientError.message
+    });
+  }
+});
 
 app.patch('/sales-leads/:id/suppression', requireLookupAccess, async (req, res) => {
   try {

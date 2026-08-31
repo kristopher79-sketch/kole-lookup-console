@@ -4638,6 +4638,99 @@ body {
   z-index: var(--kole-z-modal-nested);
 }
 
+.sales-tracking-preferences-overlay {
+  z-index: var(--kole-z-modal-deep);
+}
+
+.sales-tracking-preferences-modal {
+  width: min(760px, 94vw);
+}
+
+.sales-tracking-preferences-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.sales-tracking-preferences-guidance {
+  margin: 0;
+  color: var(--kole-muted);
+  line-height: 1.5;
+}
+
+.sales-tracking-preferences-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.sales-tracking-preferences-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.sales-tracking-preferences-grid label span {
+  color: var(--kole-text-soft);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sales-tracking-preferences-grid input,
+.sales-tracking-preferences-grid select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--kole-control-border);
+  border-radius: 10px;
+  background: var(--kole-control-bg);
+  color: var(--kole-text);
+  font: inherit;
+  padding: 10px 12px;
+  outline: none;
+}
+
+.sales-tracking-preferences-grid input:focus,
+.sales-tracking-preferences-grid select:focus {
+  border-color: var(--kole-light-blue);
+  box-shadow: 0 0 0 3px var(--kole-focus);
+}
+
+.sales-tracking-interval-field {
+  grid-column: 1 / -1;
+}
+
+.sales-tracking-preferences-message {
+  margin: 0;
+}
+
+.sales-tracking-preferences-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+@media (max-width: 700px) {
+  .sales-tracking-preferences-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-tracking-interval-field {
+    grid-column: auto;
+  }
+
+  .sales-tracking-preferences-actions {
+    flex-direction: column-reverse;
+  }
+
+  .sales-tracking-preferences-actions button {
+    width: 100%;
+  }
+}
+
 
 /*  Sales customer cards load-first view buttons */
 .sales-report-start,

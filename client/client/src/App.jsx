@@ -84,6 +84,32 @@ const ORDER_EDIT_FIELD_KEYS = [
   'Contract'
 ];
 
+function createSalesLeadTrackingPreferencesDraft(preferences = {}) {
+  return {
+    Email1: String(preferences.Email1 || ''),
+    Email2: String(preferences.Email2 || ''),
+    Email3: String(preferences.Email3 || ''),
+    Email4: String(preferences.Email4 || ''),
+    Email5: String(preferences.Email5 || ''),
+    Email6: String(preferences.Email6 || ''),
+    UpdateInterval: String(preferences.UpdateInterval || '')
+  };
+}
+
+function createSalesLeadTrackingIntervalConfig(config = {}) {
+  const min = config.min === null || config.min === undefined || config.min === '' ? null : Number(config.min);
+  const max = config.max === null || config.max === undefined || config.max === '' ? null : Number(config.max);
+
+  return {
+    mode: config.mode === 'choice' || config.mode === 'number' ? config.mode : '',
+    choices: Array.isArray(config.choices) ? config.choices : [],
+    min: Number.isFinite(min) ? min : null,
+    max: Number.isFinite(max) ? max : null,
+    step: config.step === 'any' || Number(config.step) > 0 ? config.step : 1,
+    required: config.required === true
+  };
+}
+
 
 function createServiceLocationDraft(location = {}) {
   return {
@@ -1771,7 +1797,16 @@ export default function App() {
   const [salesLeadSuppressionSaving, setSalesLeadSuppressionSaving] = useState(false);
   const [salesLeadSuppressionMessage, setSalesLeadSuppressionMessage] = useState('');
   const [salesLeadSuppressionError, setSalesLeadSuppressionError] = useState('');
+  const [trackingPreferencesLead, setTrackingPreferencesLead] = useState(null);
+  const [trackingPreferencesDraft, setTrackingPreferencesDraft] = useState(() => createSalesLeadTrackingPreferencesDraft());
+  const [trackingPreferencesIntervalConfig, setTrackingPreferencesIntervalConfig] = useState(() => createSalesLeadTrackingIntervalConfig());
+  const [trackingPreferencesLastModified, setTrackingPreferencesLastModified] = useState('');
+  const [trackingPreferencesLoading, setTrackingPreferencesLoading] = useState(false);
+  const [trackingPreferencesSaving, setTrackingPreferencesSaving] = useState(false);
+  const [trackingPreferencesMessage, setTrackingPreferencesMessage] = useState('');
+  const [trackingPreferencesError, setTrackingPreferencesError] = useState('');
   const salesLeadsPrewarmStartedRef = useRef(false);
+  const trackingPreferencesRequestRef = useRef(0);
   const searchCacheRef = useRef(new Map());
   const pendingSearchControllerRef = useRef(null);
   const onThisDayReportCacheRef = useRef(new Map());
@@ -1910,6 +1945,7 @@ export default function App() {
     customerTrendModalOpen ||
     selectedCustomerTrend ||
     selectedSalesLead ||
+    trackingPreferencesLead ||
     selectedRecruitingProfile ||
     recruitingCreateModalOpen ||
     recruitingSnapshotModalOpen ||
@@ -3016,6 +3052,11 @@ export default function App() {
           setSelectedDriverRoster(null);
         }
         setSelectedSalesLead(null);
+        setTrackingPreferencesLead(null);
+        setTrackingPreferencesLoading(false);
+        setTrackingPreferencesSaving(false);
+        setTrackingPreferencesMessage('');
+        setTrackingPreferencesError('');
         setSelectedRecruitingProfile(null);
         setRecruitingCreateModalOpen(false);
         setAvailableTruckDrilldown(null);
@@ -3597,6 +3638,14 @@ export default function App() {
     setSalesLeadsReport(null);
     setSalesLeadsLoading(false);
     setSalesLeadsError(null);
+    setTrackingPreferencesLead(null);
+    setTrackingPreferencesDraft(createSalesLeadTrackingPreferencesDraft());
+    setTrackingPreferencesIntervalConfig(createSalesLeadTrackingIntervalConfig());
+    setTrackingPreferencesLastModified('');
+    setTrackingPreferencesLoading(false);
+    setTrackingPreferencesSaving(false);
+    setTrackingPreferencesMessage('');
+    setTrackingPreferencesError('');
     setSalesActivityReport(null);
     setSalesActivityLoading(false);
     setSalesActivityError(null);
@@ -8679,6 +8728,114 @@ function getPositionStatusLabel(position) {
         YearDetails: updatedLead.YearDetails || current.YearDetails
       };
     });
+  }
+
+  async function openSalesLeadTrackingPreferences(lead) {
+    if (!lead?.id) return;
+
+    const requestId = trackingPreferencesRequestRef.current + 1;
+    trackingPreferencesRequestRef.current = requestId;
+    setTrackingPreferencesLead(lead);
+    setTrackingPreferencesDraft(createSalesLeadTrackingPreferencesDraft(lead));
+    setTrackingPreferencesIntervalConfig(createSalesLeadTrackingIntervalConfig());
+    setTrackingPreferencesLastModified('');
+    setTrackingPreferencesLoading(true);
+    setTrackingPreferencesSaving(false);
+    setTrackingPreferencesMessage('');
+    setTrackingPreferencesError('');
+
+    try {
+      const res = await authedFetch(
+        `${API}/sales-leads/${encodeURIComponent(lead.id)}/tracking-preferences`
+      );
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to load customer tracking preferences.');
+      }
+
+      if (trackingPreferencesRequestRef.current !== requestId) return;
+
+      setTrackingPreferencesDraft(createSalesLeadTrackingPreferencesDraft(data.preferences));
+      setTrackingPreferencesIntervalConfig(createSalesLeadTrackingIntervalConfig(data.updateInterval));
+      setTrackingPreferencesLastModified(data.lastModifiedDateTime || '');
+    } catch (err) {
+      if (trackingPreferencesRequestRef.current !== requestId) return;
+      setTrackingPreferencesError(err.message || 'Unable to load customer tracking preferences.');
+    } finally {
+      if (trackingPreferencesRequestRef.current === requestId) {
+        setTrackingPreferencesLoading(false);
+      }
+    }
+  }
+
+  function closeSalesLeadTrackingPreferences() {
+    if (trackingPreferencesSaving) return;
+
+    trackingPreferencesRequestRef.current += 1;
+    setTrackingPreferencesLead(null);
+    setTrackingPreferencesDraft(createSalesLeadTrackingPreferencesDraft());
+    setTrackingPreferencesIntervalConfig(createSalesLeadTrackingIntervalConfig());
+    setTrackingPreferencesLastModified('');
+    setTrackingPreferencesLoading(false);
+    setTrackingPreferencesMessage('');
+    setTrackingPreferencesError('');
+  }
+
+  function updateSalesLeadTrackingPreference(fieldName, value) {
+    setTrackingPreferencesDraft((current) => ({
+      ...current,
+      [fieldName]: value
+    }));
+    setTrackingPreferencesMessage('');
+    setTrackingPreferencesError('');
+  }
+
+  async function saveSalesLeadTrackingPreferences(event) {
+    event.preventDefault();
+
+    if (!trackingPreferencesLead?.id || trackingPreferencesLoading || trackingPreferencesSaving) return;
+
+    setTrackingPreferencesSaving(true);
+    setTrackingPreferencesMessage('');
+    setTrackingPreferencesError('');
+
+    try {
+      const res = await authedFetch(
+        `${API}/sales-leads/${encodeURIComponent(trackingPreferencesLead.id)}/tracking-preferences`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            expectedModified: trackingPreferencesLastModified,
+            preferences: trackingPreferencesDraft
+          })
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to save customer tracking preferences.');
+      }
+
+      if (data.record) {
+        mergeUpdatedSalesLead(data.record);
+        setTrackingPreferencesLead((current) => current ? { ...current, ...data.record } : current);
+      }
+
+      setTrackingPreferencesDraft(createSalesLeadTrackingPreferencesDraft(data.preferences || data.record));
+      if (data.updateInterval) {
+        setTrackingPreferencesIntervalConfig(createSalesLeadTrackingIntervalConfig(data.updateInterval));
+      }
+      setTrackingPreferencesLastModified(data.lastModifiedDateTime || '');
+      setTrackingPreferencesMessage(data.message || 'Customer tracking preferences saved.');
+    } catch (err) {
+      setTrackingPreferencesError(err.message || 'Unable to save customer tracking preferences.');
+    } finally {
+      setTrackingPreferencesSaving(false);
+    }
   }
 
   async function updateSelectedSalesLeadSuppression(action) {
@@ -17337,9 +17494,19 @@ function openReportLoadDetails(load) {
               <p>{lead.CustomerCode || 'No customer code'} · {lead.Status || 'No status'}</p>
             </div>
 
-            <button className="close-button" onClick={closeSalesLeadModal}>
-              Close
-            </button>
+            <div className="report-modal-actions">
+              <button
+                type="button"
+                className="secondary-action-button"
+                onClick={() => openSalesLeadTrackingPreferences(lead)}
+                disabled={!lead.id}
+              >
+                Edit Order Tracking Preferences (IntelliTrack)
+              </button>
+              <button className="close-button" onClick={closeSalesLeadModal}>
+                Close
+              </button>
+            </div>
           </div>
 
           <div className="modal-body report-modal-body" id="sales-profile-modal-body">
@@ -17567,6 +17734,141 @@ function openReportLoadDetails(load) {
               )}
             </div>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  function SalesLeadTrackingPreferencesModal() {
+    if (!trackingPreferencesLead) return null;
+
+    const emailFields = ['Email1', 'Email2', 'Email3', 'Email4', 'Email5', 'Email6'];
+    const intervalMode = trackingPreferencesIntervalConfig.mode;
+    const intervalChoices = trackingPreferencesIntervalConfig.choices;
+    const editorReady = !trackingPreferencesLoading && (
+      intervalChoices.length > 0 ||
+      intervalMode === 'number'
+    );
+
+    return (
+      <div
+        className="modal-overlay report-modal-overlay sales-tracking-preferences-overlay"
+        onClick={closeSalesLeadTrackingPreferences}
+      >
+        <div
+          className="detail-modal report-modal sales-tracking-preferences-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="sales-tracking-preferences-title"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="detail-header report-modal-header">
+            <div>
+              <h2 id="sales-tracking-preferences-title">Edit Order Tracking Preferences (IntelliTrack)</h2>
+              <p>
+                {trackingPreferencesLead.CompanyName || 'Customer'}
+                {trackingPreferencesLead.CustomerCode ? ` · ${trackingPreferencesLead.CustomerCode}` : ''}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              className="close-button"
+              onClick={closeSalesLeadTrackingPreferences}
+              disabled={trackingPreferencesSaving}
+            >
+              Close
+            </button>
+          </div>
+
+          <form className="modal-body report-modal-body sales-tracking-preferences-form" onSubmit={saveSalesLeadTrackingPreferences}>
+            <p className="sales-tracking-preferences-guidance">
+              Add up to six customer recipients and choose how often tracking updates should be sent. Leave unused email fields blank.
+            </p>
+
+            {trackingPreferencesLoading ? (
+              <div className="sales-report-loading" role="status">
+                Loading current tracking preferences...
+              </div>
+            ) : (
+              <>
+                <div className="sales-tracking-preferences-grid">
+                  {emailFields.map((fieldName, index) => (
+                    <label key={fieldName}>
+                      <span>Email {index + 1}</span>
+                      <input
+                        type="email"
+                        value={trackingPreferencesDraft[fieldName]}
+                        maxLength={320}
+                        placeholder={`customer${index + 1}@example.com`}
+                        autoComplete="email"
+                        autoFocus={index === 0}
+                        onChange={(event) => updateSalesLeadTrackingPreference(fieldName, event.target.value)}
+                        disabled={trackingPreferencesSaving}
+                      />
+                    </label>
+                  ))}
+
+                  <label className="sales-tracking-interval-field">
+                    <span>Update Interval</span>
+                    {intervalChoices.length > 0 ? (
+                      <select
+                        value={trackingPreferencesDraft.UpdateInterval}
+                        required={trackingPreferencesIntervalConfig.required}
+                        onChange={(event) => updateSalesLeadTrackingPreference('UpdateInterval', event.target.value)}
+                        disabled={trackingPreferencesSaving || intervalChoices.length === 0}
+                      >
+                        <option value="">Select an update interval</option>
+                        {intervalChoices.map((choice, index) => (
+                          <option key={`${choice}-${index}`} value={choice}>{choice}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="number"
+                        value={trackingPreferencesDraft.UpdateInterval}
+                        min={trackingPreferencesIntervalConfig.min ?? undefined}
+                        max={trackingPreferencesIntervalConfig.max ?? undefined}
+                        step={trackingPreferencesIntervalConfig.step}
+                        required={trackingPreferencesIntervalConfig.required}
+                        placeholder="e.g. 4"
+                        onChange={(event) => updateSalesLeadTrackingPreference('UpdateInterval', event.target.value)}
+                        disabled={trackingPreferencesSaving || intervalMode !== 'number'}
+                      />
+                    )}
+                  </label>
+                </div>
+
+                {trackingPreferencesError && (
+                  <div className="msg error sales-tracking-preferences-message" role="alert">
+                    {trackingPreferencesError}
+                  </div>
+                )}
+                {trackingPreferencesMessage && (
+                  <div className="msg sales-tracking-preferences-message" role="status">
+                    {trackingPreferencesMessage}
+                  </div>
+                )}
+
+                <div className="sales-tracking-preferences-actions">
+                  <button
+                    type="button"
+                    className="secondary-action-button"
+                    onClick={closeSalesLeadTrackingPreferences}
+                    disabled={trackingPreferencesSaving}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!editorReady || trackingPreferencesSaving}
+                  >
+                    {trackingPreferencesSaving ? 'Saving Preferences...' : 'Save Tracking Preferences'}
+                  </button>
+                </div>
+              </>
+            )}
+          </form>
         </div>
       </div>
     );
@@ -23032,6 +23334,7 @@ function openReportLoadDetails(load) {
       {renderDriverTerminationModal()}
       <DriverPerformanceModal />
       {SalesLeadProfileModal()}
+      {SalesLeadTrackingPreferencesModal()}
 
       {noBolBidsOpen && (
         <div className="modal-overlay no-bol-bids-overlay" role="presentation" onClick={closeNoBolBids}>
