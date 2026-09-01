@@ -19,6 +19,10 @@ const {
   createMobilePushError,
   createMobilePushService
 } = require('./mobile-push');
+const {
+  isMobileLoadStatusEligible,
+  shouldKeepMobileLoadVisible
+} = require('./mobile-home');
 
 const app = express();
 app.use(cors());
@@ -22080,6 +22084,7 @@ function buildMobileHomeLoadSummary(item) {
     BidID: getMobileHomeText(fields.BidID),
     Origin: getMobileHomeText(fields.Shipment_x0020_Origin),
     Destination: getMobileHomeText(fields.Shipment_x0020_Destination),
+    Status: getMobileHomeText(fields.Status),
     PickupDate: normalizeSharePointBusinessDate(fields.Pickup_x0020_Offer_x0020_Date),
     DeliveryDate: normalizeSharePointBusinessDate(fields.Expected_x0020_Delivery_x0020_Da),
     PickupTime: getMobileHomeText(fields.Pickup1PickupTime),
@@ -22423,13 +22428,14 @@ function getMobileHomeLoadKey(load) {
 
 function isMobileLoadEligibleForRoster(roster, item) {
   const fields = item?.fields || {};
+  const status = normalizeText(getChoiceValue(fields.Status));
   const truckKey = normalizeTruckKey(roster?.truck);
   const itemTruckKey = normalizeTruckKey(
     getChoiceValue(fields.Truck_x0020_Number || fields['Truck_x0020_Number/Value'])
   );
 
   return (
-    normalizeText(getChoiceValue(fields.Status)) === 'won' &&
+    isMobileLoadStatusEligible(status) &&
     Boolean(truckKey) &&
     itemTruckKey === truckKey &&
     !parseBoolean(fields.Processed) &&
@@ -22448,13 +22454,19 @@ function getMobileHomeSelection(roster, items = [], uploadEvidenceSets = {}) {
       deliveryEvidenceBols: uploadEvidenceSets.deliveryEvidenceBols || new Set()
     }))
     .sort(compareMobileHomeLoads);
-  // Upload evidence advances the load in order: Pickup, then Delivery.
-  // A completed Delivery no longer competes with the truck's next active load.
-  const activeLoads = loads.filter((load) => !load.hasDeliveryEvidence);
+  // Upload evidence advances Won loads in order: Pickup, then Delivery. A TONU
+  // leaves the driver's view as soon as either folder has the required BOL.
+  const activeLoads = loads.filter((load) => shouldKeepMobileLoadVisible(load));
 
+  // TONU orders remain actionable until the cancelled BOL is logged. This must
+  // not depend on scheduled dates because cancellation can happen at any stage.
+  const cancelledBolUploadNeeded = activeLoads
+    .filter((load) => normalizeText(load.Status) === 'tonu')
+    .sort(compareMobileHomeLoads);
   const deliveryUploadNeeded = activeLoads
     .filter(
       (load) =>
+        normalizeText(load.Status) === 'won' &&
         load.DeliveryDate &&
         load.DeliveryDate <= today &&
         load.hasPickupEvidence &&
@@ -22489,7 +22501,10 @@ function getMobileHomeSelection(roster, items = [], uploadEvidenceSets = {}) {
   let homeState = 'no_load';
   let currentLoad = null;
 
-  if (deliveryUploadNeeded.length) {
+  if (cancelledBolUploadNeeded.length) {
+    homeState = 'delivery_upload_needed';
+    currentLoad = cancelledBolUploadNeeded[0];
+  } else if (deliveryUploadNeeded.length) {
     homeState = 'delivery_upload_needed';
     currentLoad = deliveryUploadNeeded[0];
   } else if (pickupUploadNeeded.length) {
@@ -22539,6 +22554,10 @@ function getMobileHomeSelection(roster, items = [], uploadEvidenceSets = {}) {
 
 function buildMobileHomePayload(roster, items = [], uploadEvidenceSets = {}) {
   const selection = getMobileHomeSelection(roster, items, uploadEvidenceSets);
+  const primaryAction = selection.homeState === 'delivery_upload_needed' &&
+    normalizeText(selection.currentLoad?.Status) === 'tonu'
+    ? { type: 'upload_delivery', label: 'Upload Cancelled BOL' }
+    : MOBILE_HOME_PRIMARY_ACTIONS[selection.homeState] || null;
 
   return {
     success: true,
@@ -22554,7 +22573,7 @@ function buildMobileHomePayload(roster, items = [], uploadEvidenceSets = {}) {
     currentLoad: selection.currentLoad,
     nextLoad: selection.nextLoad,
     upcomingLoads: selection.upcomingLoads,
-    primaryAction: MOBILE_HOME_PRIMARY_ACTIONS[selection.homeState] || null
+    primaryAction
   };
 }
 
