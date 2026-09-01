@@ -77,6 +77,9 @@ const DRIVER_TIME_OFF_UPCOMING_DAYS = 30;
 const AVAILABLE_TRUCKS_DEFAULT_LOOKBACK_DAYS = 30;
 const AVAILABLE_TRUCKS_DEFAULT_ASSIGNMENT_LOOKAHEAD_DAYS = Number(process.env.AVAILABLE_TRUCKS_ASSIGNMENT_LOOKAHEAD_DAYS || 2);
 const SALES_LEAD_NOTE_MAX_LENGTH = 63000;
+const SALES_LEAD_SNOOZE_NOTE_MAX_LENGTH = 4000;
+const SALES_LEAD_SNOOZE_ALLOWED_DAYS = Object.freeze([30, 60, 90]);
+const SALES_LEAD_SNOOZE_CACHE_MS = 30 * 60 * 1000;
 const QUOTE_ENGINE_STANDARD_ALL_MILE_RATE = 3.25;
 const QUOTE_ENGINE_HIGH_DEADHEAD_ALL_MILE_RATE = 3.10;
 const QUOTE_ENGINE_HIGH_DEADHEAD_THRESHOLD_MILES = 250;
@@ -137,6 +140,8 @@ const pendingQuoteAuditContexts = new Map();
 const cachedContractLaneBookingResults = new Map();
 const inFlightContractLaneBookings = new Map();
 const pendingContractLaneBookings = new Map();
+const cachedSalesLeadSnoozeResults = new Map();
+const inFlightSalesLeadSnoozes = new Map();
 let cachedQuoteEngineSchema = null;
 let cachedQuoteEngineSchemaAt = 0;
 let cachedQuoteEngineOptions = null;
@@ -4378,6 +4383,8 @@ async function createSalesLeadNote(token, input) {
   const customerName = String(input.customerName || '').trim();
   const noteText = cleanSalesLeadNoteInput(input.note || input.notes || '');
   const touchDate = formatEasternDate();
+  const requestedTitle = String(input.title || '').trim();
+  const noteTitle = (requestedTitle || getSalesLeadNoteTitle(customerName, customerCode, touchDate)).slice(0, 255);
 
   if (!customerCode) {
     const error = new Error('Customer Code is required before adding a sales note.');
@@ -4402,7 +4409,7 @@ async function createSalesLeadNote(token, input) {
     `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${notesListId}/items`,
     {
       fields: {
-        Title: getSalesLeadNoteTitle(customerName, customerCode, touchDate),
+        Title: noteTitle,
         CustomerCode: customerCode,
         CustomerName: customerName,
         TouchDate: touchDate,
@@ -13960,6 +13967,234 @@ async function updateSalesLeadSuppression(token, leadId, input = {}) {
   };
 }
 
+function createSalesLeadSnoozeError(message, statusCode = 400, code = '') {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.safeForClient = true;
+  if (code) error.code = code;
+  return error;
+}
+
+function getSalesLeadSnoozeRequestCacheKey(leadId, requestId) {
+  const cleanRequestId = String(requestId || '').trim();
+
+  if (!/^[A-Za-z0-9-]{8,100}$/.test(cleanRequestId)) {
+    throw createSalesLeadSnoozeError(
+      'A valid snooze request id is required.',
+      400,
+      'SALES_LEAD_SNOOZE_REQUEST_ID_REQUIRED'
+    );
+  }
+
+  return `sales-lead-snooze:${leadId}:${cleanRequestId.toLowerCase()}`;
+}
+
+function getSalesLeadSnoozeReadUrl(listId, leadId) {
+  return `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/items/${encodeURIComponent(leadId)}?$select=id,eTag&$expand=fields($select=${getSalesLeadFieldSelect()})`;
+}
+
+function getSalesLeadSnoozeNoteTitle(customerName, customerCode, touchDate, requestId) {
+  const customer = String(customerName || customerCode || 'Customer').trim();
+  return `Follow-up snooze ${requestId} - ${customer} - ${touchDate}`.slice(0, 255);
+}
+
+async function createSalesLeadSnoozeNote(token, input) {
+  const touchDate = formatEasternDate();
+  const title = getSalesLeadSnoozeNoteTitle(
+    input.customerName,
+    input.customerCode,
+    touchDate,
+    input.requestId
+  );
+  const noteText = [
+    `Follow-up snoozed ${input.days} days to ${formatShortDate(input.targetDate)}.`,
+    `Reason: ${input.reason}`
+  ].join('\n');
+
+  try {
+    return await createSalesLeadNote(token, {
+      customerCode: input.customerCode,
+      customerName: input.customerName,
+      note: noteText,
+      title
+    });
+  } catch (error) {
+    // A timed-out POST can still have committed in Graph. Confirm the unique title before
+    // treating the note as failed so a retry cannot create a duplicate snooze note.
+    try {
+      const notesListId = await getSalesLeadsNotesListId(token);
+      const items = notesListId
+        ? await getAllListItemsWithFields(token, notesListId, 'Title,CustomerCode,CustomerName,TouchDate,Notes')
+        : [];
+      const existingItem = items.find((item) => String(item?.fields?.Title || '') === title);
+
+      if (existingItem) return cleanSalesLeadNoteItem(existingItem);
+    } catch {
+      // Preserve the original create failure; the caller will safely restore the due date.
+    }
+
+    throw error;
+  }
+}
+
+async function restoreSalesLeadSnoozeDate(token, readUrl, patchUrl, targetDate, originalValue) {
+  const latestItem = await graphGet(token, readUrl);
+  const latestDate = normalizeEasternDateOnly(latestItem?.fields?.NextTouchDate);
+
+  if (latestDate !== targetDate) return false;
+
+  await graphPatch(token, patchUrl, {
+    NextTouchDate: originalValue || null
+  }, {
+    'If-Match': latestItem.eTag || latestItem['@odata.etag'] || '*'
+  });
+
+  return true;
+}
+
+async function snoozeSalesLeadFollowUp(token, leadId, input = {}) {
+  const salesLeadsListId = getSalesLeadsListId();
+
+  if (!salesLeadsListId) {
+    throw createSalesLeadSnoozeError(
+      'Follow-up snoozing is unavailable because Sales Leads is not configured.',
+      503,
+      'SALES_LEADS_NOT_CONFIGURED'
+    );
+  }
+
+  const days = Number(input.days);
+  const reason = cleanSalesLeadNoteInput(input.note || input.reason || '');
+  const requestId = String(input.requestId || '').trim();
+
+  if (!SALES_LEAD_SNOOZE_ALLOWED_DAYS.includes(days)) {
+    throw createSalesLeadSnoozeError(
+      'Choose a snooze period of 30, 60, or 90 days.',
+      400,
+      'SALES_LEAD_SNOOZE_DAYS_INVALID'
+    );
+  }
+
+  if (!reason) {
+    throw createSalesLeadSnoozeError(
+      'Enter why you are snoozing this follow-up.',
+      400,
+      'SALES_LEAD_SNOOZE_NOTE_REQUIRED'
+    );
+  }
+
+  if (reason.length > SALES_LEAD_SNOOZE_NOTE_MAX_LENGTH) {
+    throw createSalesLeadSnoozeError(
+      `Snooze note is too long. Limit it to ${SALES_LEAD_SNOOZE_NOTE_MAX_LENGTH.toLocaleString('en-US')} characters.`,
+      400,
+      'SALES_LEAD_SNOOZE_NOTE_TOO_LONG'
+    );
+  }
+
+  const readUrl = getSalesLeadSnoozeReadUrl(salesLeadsListId, leadId);
+  const currentItem = await graphGet(token, readUrl);
+  const currentRecord = cleanSalesLeadItem(currentItem);
+
+  if (!isSalesFollowUpDue(currentRecord)) {
+    throw createSalesLeadSnoozeError(
+      'This follow-up is no longer due. Refresh the customer cards before trying again.',
+      409,
+      'SALES_LEAD_FOLLOW_UP_NOT_DUE'
+    );
+  }
+
+  if (!currentRecord.CustomerCode) {
+    throw createSalesLeadSnoozeError(
+      'This customer card does not have a Customer Code, so the required snooze note cannot be recorded.',
+      409,
+      'SALES_LEAD_SNOOZE_CUSTOMER_CODE_REQUIRED'
+    );
+  }
+
+  const targetDate = addDaysToDateKey(formatEasternDate(), days);
+  const originalNextTouchValue = currentItem?.fields?.NextTouchDate || null;
+  const patchUrl = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${salesLeadsListId}/items/${encodeURIComponent(leadId)}/fields`;
+
+  await graphPatch(token, patchUrl, {
+    NextTouchDate: targetDate
+  }, {
+    'If-Match': currentItem.eTag || currentItem['@odata.etag'] || '*'
+  });
+
+  let note;
+
+  try {
+    note = await createSalesLeadSnoozeNote(token, {
+      customerCode: currentRecord.CustomerCode,
+      customerName: currentRecord.CompanyName,
+      days,
+      targetDate,
+      reason,
+      requestId
+    });
+  } catch {
+    let restored = false;
+
+    try {
+      restored = await restoreSalesLeadSnoozeDate(
+        token,
+        readUrl,
+        patchUrl,
+        targetDate,
+        originalNextTouchValue
+      );
+    } catch {
+      restored = false;
+    }
+
+    clearSalesLeadsReportCache();
+
+    const error = createSalesLeadSnoozeError(
+      restored
+        ? 'The follow-up was not snoozed because its note could not be recorded. The original due date was restored.'
+        : 'The follow-up date changed, but the snooze note could not be confirmed. Refresh the customer cards before taking another action.',
+      502,
+      restored ? 'SALES_LEAD_SNOOZE_NOTE_FAILED' : 'SALES_LEAD_SNOOZE_PARTIAL'
+    );
+    error.snoozed = !restored;
+    error.targetDate = !restored ? targetDate : '';
+    throw error;
+  }
+
+  clearSalesLeadsReportCache();
+
+  let updatedRecord = {
+    ...currentRecord,
+    NextTouchDate: targetDate,
+    NextTouchDisplay: targetDate,
+    FollowUpDue: false
+  };
+  let summary = null;
+  let generatedAt = `${formatEasternTimestamp()} Eastern`;
+
+  try {
+    const baseReport = await getSalesLeadsBaseReportData(token, true);
+    updatedRecord = (baseReport.records || []).find((record) => String(record.id) === leadId) || updatedRecord;
+    summary = getSalesLeadSummary(baseReport.records || []);
+    generatedAt = baseReport.generatedAt || generatedAt;
+  } catch {
+    // The two requested writes succeeded. Leave the cache empty and return the normalized
+    // changed card instead of inviting a duplicate retry because report enrichment failed.
+    clearSalesLeadsReportCache();
+  }
+
+  return {
+    success: true,
+    message: `Follow-up snoozed ${days} days to ${formatShortDate(targetDate)}. The reason was added to the Sales Notes Log.`,
+    days,
+    targetDate,
+    note,
+    record: updatedRecord,
+    summary,
+    generatedAt
+  };
+}
+
 app.get('/sales-leads/:id/tracking-preferences', requireLookupAccess, async (req, res) => {
   try {
     const salesLeadsListId = getSalesLeadsListId();
@@ -14076,6 +14311,72 @@ app.patch('/sales-leads/:id/tracking-preferences', requireLookupAccess, async (r
       success: false,
       code: clientError.code || undefined,
       error: clientError.message
+    });
+  }
+});
+
+app.patch('/sales-leads/:id/snooze', requireLookupAccess, async (req, res) => {
+  let requestCacheKey = '';
+
+  try {
+    const leadId = getCleanSalesLeadId(req.params.id);
+    requestCacheKey = getSalesLeadSnoozeRequestCacheKey(leadId, req.body?.requestId);
+    const cachedResult = getCacheRecord(
+      cachedSalesLeadSnoozeResults,
+      requestCacheKey,
+      SALES_LEAD_SNOOZE_CACHE_MS
+    );
+
+    if (cachedResult) {
+      return res.json({ ...cachedResult, idempotentReplay: true });
+    }
+
+    const inFlightSnooze = inFlightSalesLeadSnoozes.get(requestCacheKey);
+
+    if (inFlightSnooze) {
+      const result = await inFlightSnooze;
+      return res.json({ ...result, idempotentReplay: true });
+    }
+
+    const snoozeOperation = (async () => {
+      const token = await getGraphToken();
+      return snoozeSalesLeadFollowUp(token, leadId, req.body || {});
+    })();
+
+    inFlightSalesLeadSnoozes.set(requestCacheKey, snoozeOperation);
+
+    let result;
+
+    try {
+      result = await snoozeOperation;
+    } finally {
+      if (inFlightSalesLeadSnoozes.get(requestCacheKey) === snoozeOperation) {
+        inFlightSalesLeadSnoozes.delete(requestCacheKey);
+      }
+    }
+
+    setCacheRecord(cachedSalesLeadSnoozeResults, requestCacheKey, result, 80);
+    return res.json(result);
+  } catch (error) {
+    const conflict = /412|precondition/i.test(String(error?.message || ''));
+    const statusCode = conflict ? 409 : (error?.safeForClient === true ? error.statusCode : 500);
+    const message = conflict
+      ? 'This follow-up changed while the snooze window was open. Refresh the customer cards before trying again.'
+      : (error?.safeForClient === true
+          ? error.message
+          : 'Unable to snooze this follow-up.');
+
+    console.error(
+      'Sales lead follow-up snooze failed:',
+      error?.safeForClient === true || conflict ? message : 'Upstream request failed.'
+    );
+
+    return res.status(statusCode).json({
+      success: false,
+      code: conflict ? 'SALES_LEAD_SNOOZE_CHANGED' : (error?.code || undefined),
+      error: message,
+      snoozed: error?.snoozed === true,
+      targetDate: error?.targetDate || undefined
     });
   }
 });

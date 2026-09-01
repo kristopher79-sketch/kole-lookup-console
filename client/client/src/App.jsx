@@ -31,6 +31,7 @@ function useMediaQuery(query) {
 }
 
 const SALES_NOTE_MAX_LENGTH = 63000;
+const SALES_SNOOZE_NOTE_MAX_LENGTH = 4000;
 const AVAILABLE_TRUCK_MAX_ROWS = 8;
 const SEARCH_RESULT_CACHE_MS = 2 * 60 * 1000;
 const ON_THIS_DAY_CLIENT_CACHE_MS = 5 * 60 * 1000;
@@ -237,6 +238,11 @@ function createContractLaneRequestId() {
 function createQuoteEngineRequestId() {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();
   return `quote-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createSalesLeadSnoozeRequestId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `sales-snooze-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function formatQuoteEngineMoney(value) {
@@ -1797,6 +1803,13 @@ export default function App() {
   const [salesLeadSuppressionSaving, setSalesLeadSuppressionSaving] = useState(false);
   const [salesLeadSuppressionMessage, setSalesLeadSuppressionMessage] = useState('');
   const [salesLeadSuppressionError, setSalesLeadSuppressionError] = useState('');
+  const [salesLeadSnoozeOpen, setSalesLeadSnoozeOpen] = useState(false);
+  const [salesLeadSnoozeDays, setSalesLeadSnoozeDays] = useState(30);
+  const [salesLeadSnoozeNote, setSalesLeadSnoozeNote] = useState('');
+  const [salesLeadSnoozeRequestId, setSalesLeadSnoozeRequestId] = useState('');
+  const [salesLeadSnoozeSaving, setSalesLeadSnoozeSaving] = useState(false);
+  const [salesLeadSnoozeMessage, setSalesLeadSnoozeMessage] = useState('');
+  const [salesLeadSnoozeError, setSalesLeadSnoozeError] = useState('');
   const [trackingPreferencesLead, setTrackingPreferencesLead] = useState(null);
   const [trackingPreferencesDraft, setTrackingPreferencesDraft] = useState(() => createSalesLeadTrackingPreferencesDraft());
   const [trackingPreferencesIntervalConfig, setTrackingPreferencesIntervalConfig] = useState(() => createSalesLeadTrackingIntervalConfig());
@@ -1945,6 +1958,7 @@ export default function App() {
     customerTrendModalOpen ||
     selectedCustomerTrend ||
     selectedSalesLead ||
+    salesLeadSnoozeOpen ||
     trackingPreferencesLead ||
     selectedRecruitingProfile ||
     recruitingCreateModalOpen ||
@@ -3052,6 +3066,13 @@ export default function App() {
           setSelectedDriverRoster(null);
         }
         setSelectedSalesLead(null);
+        setSalesLeadSnoozeOpen(false);
+        setSalesLeadSnoozeDays(30);
+        setSalesLeadSnoozeNote('');
+        setSalesLeadSnoozeRequestId('');
+        setSalesLeadSnoozeSaving(false);
+        setSalesLeadSnoozeMessage('');
+        setSalesLeadSnoozeError('');
         setTrackingPreferencesLead(null);
         setTrackingPreferencesLoading(false);
         setTrackingPreferencesSaving(false);
@@ -3638,6 +3659,13 @@ export default function App() {
     setSalesLeadsReport(null);
     setSalesLeadsLoading(false);
     setSalesLeadsError(null);
+    setSalesLeadSnoozeOpen(false);
+    setSalesLeadSnoozeDays(30);
+    setSalesLeadSnoozeNote('');
+    setSalesLeadSnoozeRequestId('');
+    setSalesLeadSnoozeSaving(false);
+    setSalesLeadSnoozeMessage('');
+    setSalesLeadSnoozeError('');
     setTrackingPreferencesLead(null);
     setTrackingPreferencesDraft(createSalesLeadTrackingPreferencesDraft());
     setTrackingPreferencesIntervalConfig(createSalesLeadTrackingIntervalConfig());
@@ -5744,6 +5772,13 @@ function restoreOrderFromDrilldown() {
   setSalesLeadSuppressionReason('');
   setSalesLeadSuppressionMessage('');
   setSalesLeadSuppressionError('');
+  setSalesLeadSnoozeOpen(false);
+  setSalesLeadSnoozeDays(30);
+  setSalesLeadSnoozeNote('');
+  setSalesLeadSnoozeRequestId('');
+  setSalesLeadSnoozeSaving(false);
+  setSalesLeadSnoozeMessage('');
+  setSalesLeadSnoozeError('');
   setSelected(snapshot.order);
   setSelectedView(snapshot.view || 'basic');
   if (snapshot.view === 'notes') {
@@ -8579,10 +8614,7 @@ function getPositionStatusLabel(position) {
         parkOrderDrilldownSnapshot(returnSnapshot);
       }
 
-      setSelectedSalesLead(data.matches[0]);
-      setSalesNoteDraft('');
-      setSalesNoteMessage('');
-      setSalesNoteError('');
+      openSalesLeadCard(data.matches[0]);
     } catch (err) {
       setCustomerLookupError(err.message || 'Unable to lookup customer card.');
     } finally {
@@ -8728,6 +8760,44 @@ function getPositionStatusLabel(position) {
         YearDetails: updatedLead.YearDetails || current.YearDetails
       };
     });
+  }
+
+  function mergeSalesLeadSnoozeNote(leadId, note) {
+    if (!leadId || !note) return;
+
+    const addNote = (lead) => {
+      const currentNotes = Array.isArray(lead.SalesNotes) ? lead.SalesNotes : [];
+      const alreadyIncluded = currentNotes.some((currentNote) => (
+        note.id
+          ? String(currentNote.id) === String(note.id)
+          : currentNote.Title === note.Title && currentNote.Note === note.Note
+      ));
+
+      if (alreadyIncluded) return lead;
+
+      const nextNotes = [note, ...currentNotes];
+      return {
+        ...lead,
+        SalesNotes: nextNotes,
+        SalesNotesCount: Math.max(Number(lead.SalesNotesCount || 0) + 1, nextNotes.length),
+        LastSalesNoteDate: note.NoteDate || lead.LastSalesNoteDate
+      };
+    };
+
+    setSalesLeadsReport((current) => {
+      if (!current?.records) return current;
+
+      return {
+        ...current,
+        records: current.records.map((record) => (
+          String(record.id) === String(leadId) ? addNote(record) : record
+        ))
+      };
+    });
+
+    setSelectedSalesLead((current) => (
+      current && String(current.id) === String(leadId) ? addNote(current) : current
+    ));
   }
 
   async function openSalesLeadTrackingPreferences(lead) {
@@ -8890,6 +8960,111 @@ function getPositionStatusLabel(position) {
     }
   }
 
+  function openSalesLeadSnooze() {
+    if (!selectedSalesLead?.id || selectedSalesLead.FollowUpDue !== true) return;
+
+    setSalesLeadSnoozeOpen(true);
+    setSalesLeadSnoozeDays(30);
+    setSalesLeadSnoozeNote('');
+    setSalesLeadSnoozeRequestId(createSalesLeadSnoozeRequestId());
+    setSalesLeadSnoozeSaving(false);
+    setSalesLeadSnoozeMessage('');
+    setSalesLeadSnoozeError('');
+  }
+
+  function closeSalesLeadSnooze() {
+    if (salesLeadSnoozeSaving) return;
+
+    setSalesLeadSnoozeOpen(false);
+    setSalesLeadSnoozeDays(30);
+    setSalesLeadSnoozeNote('');
+    setSalesLeadSnoozeRequestId('');
+    setSalesLeadSnoozeError('');
+  }
+
+  async function submitSalesLeadSnooze(event) {
+    event.preventDefault();
+
+    if (!selectedSalesLead?.id || salesLeadSnoozeSaving) return;
+
+    const note = salesLeadSnoozeNote.trim();
+
+    if (!note) {
+      setSalesLeadSnoozeError('Enter why you are snoozing this follow-up.');
+      return;
+    }
+
+    if (note.length > SALES_SNOOZE_NOTE_MAX_LENGTH) {
+      setSalesLeadSnoozeError(`Snooze note is too long. Limit it to ${SALES_SNOOZE_NOTE_MAX_LENGTH.toLocaleString('en-US')} characters.`);
+      return;
+    }
+
+    const requestId = salesLeadSnoozeRequestId || createSalesLeadSnoozeRequestId();
+    setSalesLeadSnoozeRequestId(requestId);
+    setSalesLeadSnoozeSaving(true);
+    setSalesLeadSnoozeMessage('');
+    setSalesLeadSnoozeError('');
+
+    try {
+      const res = await authedFetch(
+        `${API}/sales-leads/${encodeURIComponent(selectedSalesLead.id)}/snooze`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            days: salesLeadSnoozeDays,
+            note,
+            requestId
+          })
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        if (data.snoozed === true && data.targetDate) {
+          mergeUpdatedSalesLead({
+            id: selectedSalesLead.id,
+            NextTouchDate: data.targetDate,
+            NextTouchDisplay: data.targetDate,
+            FollowUpDue: false
+          });
+          setSalesLeadSnoozeOpen(false);
+          setSalesLeadSnoozeMessage('');
+          setSalesLeadSnoozeError(data.error || 'The follow-up date changed, but its snooze note could not be confirmed.');
+          return;
+        }
+
+        throw new Error(data.error || data.message || 'Unable to snooze this follow-up.');
+      }
+
+      if (data.record) {
+        mergeUpdatedSalesLead(data.record, data.summary || null, data.generatedAt || '');
+      } else {
+        mergeUpdatedSalesLead({
+          id: selectedSalesLead.id,
+          NextTouchDate: data.targetDate,
+          NextTouchDisplay: data.targetDate,
+          FollowUpDue: false
+        }, data.summary || null, data.generatedAt || '');
+      }
+
+      if (data.note) mergeSalesLeadSnoozeNote(selectedSalesLead.id, data.note);
+
+      setSalesLeadSnoozeOpen(false);
+      setSalesLeadSnoozeDays(30);
+      setSalesLeadSnoozeNote('');
+      setSalesLeadSnoozeRequestId('');
+      setSalesLeadSnoozeError('');
+      setSalesLeadSnoozeMessage(data.message || 'Follow-up snoozed and the reason was added to the Sales Notes Log.');
+    } catch (err) {
+      setSalesLeadSnoozeError(err.message || 'Unable to snooze this follow-up.');
+    } finally {
+      setSalesLeadSnoozeSaving(false);
+    }
+  }
+
   function openSalesLeadCard(lead) {
     setSelectedSalesLead(lead);
     setCustomerLookupError('');
@@ -8899,6 +9074,13 @@ function getPositionStatusLabel(position) {
     setSalesLeadSuppressionReason('');
     setSalesLeadSuppressionMessage('');
     setSalesLeadSuppressionError('');
+    setSalesLeadSnoozeOpen(false);
+    setSalesLeadSnoozeDays(30);
+    setSalesLeadSnoozeNote('');
+    setSalesLeadSnoozeRequestId('');
+    setSalesLeadSnoozeSaving(false);
+    setSalesLeadSnoozeMessage('');
+    setSalesLeadSnoozeError('');
   }
 
   function closeSalesLeadModal() {
@@ -8909,6 +9091,13 @@ function getPositionStatusLabel(position) {
     setSalesLeadSuppressionReason('');
     setSalesLeadSuppressionMessage('');
     setSalesLeadSuppressionError('');
+    setSalesLeadSnoozeOpen(false);
+    setSalesLeadSnoozeDays(30);
+    setSalesLeadSnoozeNote('');
+    setSalesLeadSnoozeRequestId('');
+    setSalesLeadSnoozeSaving(false);
+    setSalesLeadSnoozeMessage('');
+    setSalesLeadSnoozeError('');
     setOrderDrilldownReturn(null);
   }
 
@@ -17495,6 +17684,17 @@ function openReportLoadDetails(load) {
             </div>
 
             <div className="report-modal-actions">
+              {lead.FollowUpDue === true && (
+                <button
+                  type="button"
+                  className="sales-follow-up-snooze-button"
+                  onClick={openSalesLeadSnooze}
+                  disabled={!lead.id || !lead.CustomerCode}
+                  title={!lead.CustomerCode ? 'A Customer Code is required to record the snooze note.' : undefined}
+                >
+                  Snooze Follow-up
+                </button>
+              )}
               <button
                 type="button"
                 className="secondary-action-button"
@@ -17556,6 +17756,17 @@ function openReportLoadDetails(load) {
               <DetailItem label="Suppression Date" value={formatSalesDate(lead.SuppressionDate)} />
               <DetailItem label="Suppression Reason" value={lead.SuppressionReason} className="full" />
             </div>
+
+            {salesLeadSnoozeMessage && (
+              <div className="msg sales-follow-up-snooze-status" role="status">
+                {salesLeadSnoozeMessage}
+              </div>
+            )}
+            {!salesLeadSnoozeOpen && salesLeadSnoozeError && (
+              <div className="msg error sales-follow-up-snooze-status" role="alert">
+                {salesLeadSnoozeError}
+              </div>
+            )}
 
             <div className="driver-report-section sales-suppression-control-section">
               <div className="driver-report-section-header">
@@ -17734,6 +17945,137 @@ function openReportLoadDetails(load) {
               )}
             </div>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  function SalesLeadSnoozeModal() {
+    if (!salesLeadSnoozeOpen || !selectedSalesLead) return null;
+
+    const targetDate = addDaysToDateInput(getEasternDateInputValue(), Number(salesLeadSnoozeDays));
+
+    return (
+      <div
+        className="modal-overlay report-modal-overlay sales-follow-up-snooze-overlay"
+        onClick={closeSalesLeadSnooze}
+      >
+        <div
+          className="detail-modal report-modal sales-follow-up-snooze-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="sales-follow-up-snooze-title"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="detail-header report-modal-header">
+            <div>
+              <h2 id="sales-follow-up-snooze-title">Snooze Follow-up</h2>
+              <p>
+                {selectedSalesLead.CompanyName || 'Customer'}
+                {selectedSalesLead.CustomerCode ? ` · ${selectedSalesLead.CustomerCode}` : ''}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              className="close-button"
+              onClick={closeSalesLeadSnooze}
+              disabled={salesLeadSnoozeSaving}
+            >
+              Close
+            </button>
+          </div>
+
+          <form className="modal-body report-modal-body sales-follow-up-snooze-form" onSubmit={submitSalesLeadSnooze}>
+            <div className="sales-follow-up-snooze-date-summary">
+              <div>
+                <span>Currently due</span>
+                <strong>{formatSalesDate(selectedSalesLead.NextTouchDate)}</strong>
+              </div>
+              <div>
+                <span>New due date</span>
+                <strong>{formatDateInputLabel(targetDate)}</strong>
+              </div>
+            </div>
+
+            <label className="sales-follow-up-snooze-slider" htmlFor="sales-follow-up-snooze-days">
+              <span>Snooze from today</span>
+              <output htmlFor="sales-follow-up-snooze-days" aria-live="polite">
+                {salesLeadSnoozeDays} days
+              </output>
+              <input
+                id="sales-follow-up-snooze-days"
+                type="range"
+                min="30"
+                max="90"
+                step="30"
+                list="sales-follow-up-snooze-day-options"
+                value={salesLeadSnoozeDays}
+                aria-valuetext={`${salesLeadSnoozeDays} days from today`}
+                onChange={(event) => {
+                  setSalesLeadSnoozeDays(Number(event.target.value));
+                  setSalesLeadSnoozeError('');
+                }}
+                disabled={salesLeadSnoozeSaving}
+              />
+              <datalist id="sales-follow-up-snooze-day-options">
+                <option value="30" label="30 days" />
+                <option value="60" label="60 days" />
+                <option value="90" label="90 days" />
+              </datalist>
+              <span className="sales-follow-up-snooze-ticks" aria-hidden="true">
+                <span>30 days</span>
+                <span>60 days</span>
+                <span>90 days</span>
+              </span>
+            </label>
+
+            <label className="sales-follow-up-snooze-note">
+              <span>Why are you snoozing this follow-up?</span>
+              <textarea
+                value={salesLeadSnoozeNote}
+                maxLength={SALES_SNOOZE_NOTE_MAX_LENGTH}
+                required
+                autoFocus
+                placeholder="Enter the reason for delaying this follow-up..."
+                onChange={(event) => {
+                  setSalesLeadSnoozeNote(event.target.value);
+                  setSalesLeadSnoozeError('');
+                }}
+                disabled={salesLeadSnoozeSaving}
+              />
+              <small>
+                Required · Saved in the Sales Notes Log · {salesLeadSnoozeNote.length.toLocaleString('en-US')} / {SALES_SNOOZE_NOTE_MAX_LENGTH.toLocaleString('en-US')}
+              </small>
+            </label>
+
+            <p className="sales-follow-up-snooze-guidance">
+              The new date is calculated from today in Eastern time, even when the current follow-up is overdue.
+            </p>
+
+            {salesLeadSnoozeError && (
+              <div className="msg error sales-follow-up-snooze-status" role="alert">
+                {salesLeadSnoozeError}
+              </div>
+            )}
+
+            <div className="sales-follow-up-snooze-actions">
+              <button
+                type="button"
+                className="secondary-action-button"
+                onClick={closeSalesLeadSnooze}
+                disabled={salesLeadSnoozeSaving}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={salesLeadSnoozeSaving || !salesLeadSnoozeNote.trim()}
+              >
+                {salesLeadSnoozeSaving ? 'Snoozing Follow-up...' : `Snooze ${salesLeadSnoozeDays} Days`}
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     );
@@ -23334,6 +23676,7 @@ function openReportLoadDetails(load) {
       {renderDriverTerminationModal()}
       <DriverPerformanceModal />
       {SalesLeadProfileModal()}
+      {SalesLeadSnoozeModal()}
       {SalesLeadTrackingPreferencesModal()}
 
       {noBolBidsOpen && (
