@@ -23,6 +23,13 @@ const {
   isMobileLoadStatusEligible,
   shouldKeepMobileLoadVisible
 } = require('./mobile-home');
+const {
+  cleanMobileStopEventItem,
+  createMobileCheckinError,
+  createMobileCheckinService,
+  toMobileStopEventResponse,
+  validateMobileStopEventInput
+} = require('./mobile-checkin');
 
 const app = express();
 app.use(cors());
@@ -61,6 +68,7 @@ const DEFAULT_SALES_LEADS_LIST_ID = '86cc3352-fb75-421d-a5e4-4b16d011fd1e';
 const DEFAULT_SALES_LEADS_NOTES_LIST_NAME = 'Sales Leads Notes Log';
 const DEFAULT_SERVICE_LOCATIONS_LIST_NAME = 'Service Locations';
 const DEFAULT_SERVICE_LOCATION_NOTES_LIST_NAME = 'Service Location Notes';
+const DEFAULT_CHECK_IN_TIMES_LIST_NAME = 'Check In Times';
 const ORDER_NOTES_DEFAULT_CACHE_MS = 60 * 1000;
 const ORDER_NOTE_MAX_LENGTH = 20000;
 const DEFAULT_CUSTOMER_BOOKING_TRENDS_LIST_ID = 'f899ef92-6489-43b1-9a9f-19c5f0ee83b9';
@@ -123,6 +131,10 @@ let cachedServiceLocationNotesListId = null;
 let cachedServiceLocationNotesListIdAt = 0;
 let cachedServiceLocationNotesByKey = null;
 let cachedServiceLocationNotesByKeyAt = 0;
+let cachedCheckInTimesListId = '';
+let cachedCheckInTimesListIdAt = 0;
+let cachedCheckInTimesSchema = null;
+let cachedCheckInTimesSchemaAt = 0;
 let cachedGraphToken = null;
 let cachedGraphTokenExpiresAt = 0;
 let graphTokenRefreshPromise = null;
@@ -21871,8 +21883,301 @@ const MOBILE_UPLOAD_EXTENSIONS_BY_TYPE = new Map([
 ]);
 const MOBILE_UPLOAD_GENERIC_MIME_TYPES = new Set(['', 'application/octet-stream']);
 const MOBILE_UPLOAD_HEIF_BRANDS = new Set(['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'mif1', 'msf1']);
+const CHECK_IN_TIMES_FIELD_DEFINITIONS = Object.freeze({
+  bol: Object.freeze({ label: 'BOL', aliases: Object.freeze(['BOL', 'Title']) }),
+  loadId: Object.freeze({ label: 'Load ID', aliases: Object.freeze(['Load ID']) }),
+  truck: Object.freeze({ label: 'Truck', aliases: Object.freeze(['Truck']) }),
+  operator: Object.freeze({ label: 'Operator', aliases: Object.freeze(['Operator']) }),
+  stop: Object.freeze({ label: 'Stop', aliases: Object.freeze(['Stop']) }),
+  stopSequence: Object.freeze({ label: 'Stop Sequence', aliases: Object.freeze(['Stop Sequence']) }),
+  action: Object.freeze({ label: 'Action', aliases: Object.freeze(['Action']) }),
+  time: Object.freeze({ label: 'Time', aliases: Object.freeze(['Time']) }),
+  latitude: Object.freeze({ label: 'Latitude', aliases: Object.freeze(['Latitude']) }),
+  longitude: Object.freeze({ label: 'Longitude', aliases: Object.freeze(['Longitude']) }),
+  accuracy: Object.freeze({
+    label: 'Accuracy',
+    aliases: Object.freeze(['Accuracy', 'GPS Accuracy in Meters'])
+  }),
+  locationStatus: Object.freeze({ label: 'Location Status', aliases: Object.freeze(['Location Status']) })
+});
 let mobileUploadActiveFileBuffers = 0;
 const mobileUploadFileBufferWaiters = [];
+
+async function getCheckInTimesListId(token, forceRefresh = false) {
+  const configured = String(process.env.CHECK_IN_TIMES_LIST_ID || '').trim();
+  if (configured) return configured;
+
+  const now = Date.now();
+  if (
+    !forceRefresh &&
+    cachedCheckInTimesListIdAt &&
+    now - cachedCheckInTimesListIdAt < BID_LIST_CACHE_MS
+  ) {
+    return cachedCheckInTimesListId;
+  }
+
+  let url = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists?$select=id,displayName,list&$top=999`;
+  let matchedListId = '';
+
+  while (url && !matchedListId) {
+    const data = await graphGet(token, url);
+    const matched = (data.value || []).find((list) => (
+      list?.list?.hidden !== true &&
+      String(list.displayName || '').trim() === DEFAULT_CHECK_IN_TIMES_LIST_NAME
+    ));
+
+    matchedListId = String(matched?.id || '').trim();
+    url = data['@odata.nextLink'] || null;
+  }
+
+  cachedCheckInTimesListId = matchedListId;
+  cachedCheckInTimesListIdAt = now;
+  return cachedCheckInTimesListId;
+}
+
+function getCheckInTimesColumnByAliases(columnsByAlias, aliases = []) {
+  for (const alias of aliases) {
+    const column = columnsByAlias.get(normalizeGraphName(alias));
+    if (column) return column;
+  }
+
+  return null;
+}
+
+async function getCheckInTimesSchema(token, forceRefresh = false) {
+  const siteId = String(process.env.SITE_ID || '').trim();
+  const listId = await getCheckInTimesListId(token, forceRefresh);
+
+  if (!siteId || !listId) {
+    throw createMobileCheckinError(
+      `${DEFAULT_CHECK_IN_TIMES_LIST_NAME} was not found. Set CHECK_IN_TIMES_LIST_ID or confirm the exact list display name.`,
+      503,
+      'CHECK_IN_TIMES_LIST_UNAVAILABLE'
+    );
+  }
+
+  const now = Date.now();
+  if (
+    !forceRefresh &&
+    cachedCheckInTimesSchema?.siteId === siteId &&
+    cachedCheckInTimesSchema?.listId === listId &&
+    now - cachedCheckInTimesSchemaAt < BID_LIST_CACHE_MS
+  ) {
+    return cachedCheckInTimesSchema;
+  }
+
+  const data = await graphGet(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${encodeURIComponent(listId)}/columns` +
+      '?$select=name,displayName,hidden,readOnly,text,number,choice,dateTime&$top=999'
+  );
+  const columnsByAlias = new Map();
+
+  (data.value || [])
+    .filter((column) => column?.hidden !== true && column?.name)
+    .forEach((column) => {
+      [column.name, column.displayName]
+        .filter(Boolean)
+        .forEach((name) => {
+          const key = normalizeGraphName(name);
+          if (!columnsByAlias.has(key)) columnsByAlias.set(key, column);
+        });
+    });
+
+  const columns = {};
+  const missing = [];
+  const readOnly = [];
+
+  Object.entries(CHECK_IN_TIMES_FIELD_DEFINITIONS).forEach(([key, definition]) => {
+    const column = getCheckInTimesColumnByAliases(columnsByAlias, definition.aliases);
+
+    if (!column) {
+      missing.push(definition.label);
+      return;
+    }
+    if (column.readOnly === true) {
+      readOnly.push(definition.label);
+      return;
+    }
+
+    columns[key] = column;
+  });
+
+  if (missing.length || readOnly.length) {
+    const details = [
+      missing.length ? `missing: ${missing.join(', ')}` : '',
+      readOnly.length ? `read-only: ${readOnly.join(', ')}` : ''
+    ].filter(Boolean).join('; ');
+
+    throw createMobileCheckinError(
+      `${DEFAULT_CHECK_IN_TIMES_LIST_NAME} columns do not match the required contract (${details}).`,
+      503,
+      'CHECK_IN_TIMES_SCHEMA_MISMATCH'
+    );
+  }
+
+  cachedCheckInTimesSchema = {
+    siteId,
+    listId,
+    columns,
+    fieldNames: Object.fromEntries(
+      Object.entries(columns).map(([key, column]) => [key, column.name])
+    )
+  };
+  cachedCheckInTimesSchemaAt = now;
+  return cachedCheckInTimesSchema;
+}
+
+function getCheckInTimesFieldSelect(schema) {
+  return [...new Set(Object.values(schema.fieldNames))].join(',');
+}
+
+function getCheckInTimesLoadFilter(schema, loadId) {
+  const loadIdColumn = schema.columns.loadId;
+  const isNumberColumn = loadIdColumn.number !== undefined && loadIdColumn.number !== null;
+
+  return isNumberColumn
+    ? String(Number(loadId))
+    : `'${escapeODataString(loadId)}'`;
+}
+
+async function getFilteredCheckInTimesItems(token, schema, loadId) {
+  const fieldSelect = getCheckInTimesFieldSelect(schema);
+  const loadFilter = getCheckInTimesLoadFilter(schema, loadId);
+  let url =
+    `https://graph.microsoft.com/v1.0/sites/${schema.siteId}/lists/${encodeURIComponent(schema.listId)}/items` +
+    `?$select=id&$expand=fields($select=${fieldSelect})` +
+    `&$filter=fields/${schema.fieldNames.loadId} eq ${loadFilter}&$top=999`;
+  const items = [];
+
+  while (url) {
+    const data = await graphGet(token, url, {
+      Prefer: 'HonorNonIndexedQueriesWarningMayFailRandomly'
+    });
+    items.push(...(data.value || []));
+    url = data['@odata.nextLink'] || null;
+  }
+
+  return items;
+}
+
+async function getCheckInTimesEventsForLoad(token, loadId) {
+  const schema = await getCheckInTimesSchema(token);
+  let items;
+
+  try {
+    items = await getFilteredCheckInTimesItems(token, schema, loadId);
+  } catch {
+    console.warn('Check In Times filtered lookup failed; retrying with a bounded-field list scan.');
+    const fallback = await getAllListItemsWithFieldsResilient(
+      token,
+      schema.listId,
+      getCheckInTimesFieldSelect(schema)
+    );
+    items = fallback.items;
+  }
+
+  return items
+    .map((item) => cleanMobileStopEventItem(item, schema.fieldNames))
+    .filter((event) => event.loadId === String(loadId))
+    .sort((left, right) => {
+      const timeDifference = (Date.parse(left.time || '') || 0) - (Date.parse(right.time || '') || 0);
+      if (timeDifference !== 0) return timeDifference;
+      return String(left.id).localeCompare(String(right.id), undefined, { numeric: true });
+    });
+}
+
+function getCheckInTimesWriteValue(column, value) {
+  if (value === null || value === undefined || value === '') return null;
+
+  if (column?.number !== undefined && column?.number !== null) {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) ? numericValue : null;
+  }
+
+  return String(value);
+}
+
+function buildCheckInTimesFields(schema, event) {
+  const fields = {};
+  const values = {
+    bol: event.bol,
+    loadId: event.loadId,
+    truck: event.truck,
+    operator: event.operator,
+    stop: event.stop,
+    stopSequence: event.stopSequence,
+    action: event.action,
+    time: event.time,
+    latitude: event.latitude,
+    longitude: event.longitude,
+    accuracy: event.accuracy,
+    locationStatus: event.locationStatus
+  };
+
+  Object.entries(values).forEach(([key, value]) => {
+    const storedValue = getCheckInTimesWriteValue(schema.columns[key], value);
+    if (storedValue !== null) fields[schema.fieldNames[key]] = storedValue;
+  });
+
+  return fields;
+}
+
+async function createCheckInTimesEvent(token, event) {
+  const schema = await getCheckInTimesSchema(token);
+  const created = await graphPost(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${schema.siteId}/lists/${encodeURIComponent(schema.listId)}/items`,
+    { fields: buildCheckInTimesFields(schema, event) }
+  );
+
+  if (!created?.fields) {
+    return { ...event, id: String(created?.id || '') };
+  }
+
+  return cleanMobileStopEventItem(created, schema.fieldNames);
+}
+
+const mobileCheckinService = createMobileCheckinService({
+  repository: {
+    listEvents: (context, loadId) => getCheckInTimesEventsForLoad(context.token, loadId),
+    createEvent: (context, event) => createCheckInTimesEvent(context.token, event)
+  }
+});
+
+async function getMobileStopEventsHydration(token, loadId) {
+  try {
+    const events = await getCheckInTimesEventsForLoad(token, loadId);
+    return {
+      stopEvents: events.map(toMobileStopEventResponse),
+      stopEventsAvailable: true,
+      stopEventsError: ''
+    };
+  } catch {
+    console.warn('Check In Times hydration failed; the load will continue without stop-event controls.');
+    return {
+      stopEvents: [],
+      stopEventsAvailable: false,
+      stopEventsError: 'Check-in is temporarily unavailable.'
+    };
+  }
+}
+
+function getMobileCheckinErrorResponse(error) {
+  if (Number(error?.statusCode) >= 400 && Number(error?.statusCode) < 600 && error?.code) {
+    return {
+      status: Number(error.statusCode),
+      code: error.code,
+      message: error.message
+    };
+  }
+
+  return {
+    status: 503,
+    code: 'CHECK_IN_TEMPORARILY_UNAVAILABLE',
+    message: 'Check-in is temporarily unavailable.'
+  };
+}
 
 function getMobileUploadOriginalExtension(fileName) {
   const leafName = String(fileName || '').split(/[\\/]/).pop() || '';
@@ -23054,9 +23359,14 @@ app.get('/mobile/my-load', requireMobileSession, async (req, res) => {
       pickupServiceLocation: null,
       deliveryServiceLocation: null
     };
+    let stopEventsHydration = {
+      stopEvents: [],
+      stopEventsAvailable: false,
+      stopEventsError: 'Check-in is temporarily unavailable.'
+    };
 
     if (selectedItem) {
-      [serviceLocationDetails, permitFolderWebUrl] = await Promise.all([
+      [serviceLocationDetails, permitFolderWebUrl, stopEventsHydration] = await Promise.all([
         getMobileServiceLocationDetails(graphToken, selectedItem).catch(() => {
           console.warn('Mobile Service Location hydration failed; the load will continue without location notes.');
           return { pickupServiceLocation: null, deliveryServiceLocation: null };
@@ -23066,7 +23376,8 @@ app.get('/mobile/my-load', requireMobileSession, async (req, res) => {
             console.warn('Mobile permit folder lookup failed.');
             return '';
           })
-          : Promise.resolve('')
+          : Promise.resolve(''),
+        getMobileStopEventsHydration(graphToken, selectedLoadId)
       ]);
     }
 
@@ -23086,7 +23397,8 @@ app.get('/mobile/my-load', requireMobileSession, async (req, res) => {
         ? {
           ...selectedLoad,
           ...serviceLocationDetails,
-          PermitFolderWebUrl: permitFolderWebUrl
+          PermitFolderWebUrl: permitFolderWebUrl,
+          ...stopEventsHydration
         }
         : null
     });
@@ -23096,6 +23408,74 @@ app.get('/mobile/my-load', requireMobileSession, async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Unable to load your current load right now.'
+    });
+  }
+});
+
+// ------------------------------------------------------------
+// POST /mobile/stop-event
+// ------------------------------------------------------------
+
+app.post('/mobile/stop-event', requireMobileSession, async (req, res) => {
+  try {
+    const input = validateMobileStopEventInput(req.body);
+    const graphToken = await getGraphToken();
+    const currentList = await getCurrentBidListingSource(graphToken);
+
+    if (!currentList) {
+      throw createMobileCheckinError(
+        'The current Bid Listing is not available.',
+        404,
+        'CURRENT_LIST_NOT_AVAILABLE'
+      );
+    }
+
+    const items = await getDashboardBidSource(graphToken, currentList, {
+      waitForRefresh: true
+    });
+    const selectedItem = items.find((item) => String(item?.id || '') === input.loadId);
+
+    if (!selectedItem || !isMobileLoadEligibleForRoster(req.mobileDriver, selectedItem)) {
+      throw createMobileCheckinError(
+        'That load is not available for this Mobile session.',
+        404,
+        'LOAD_NOT_AVAILABLE'
+      );
+    }
+
+    const fields = selectedItem.fields || {};
+    const result = await mobileCheckinService.recordEvent({
+      input,
+      driver: {
+        truck: req.mobileDriver.truck,
+        operator:
+          req.mobileDriver.operatorTeamName ||
+          req.mobileDriver.tmsName ||
+          `Truck ${req.mobileDriver.truck}`
+      },
+      load: {
+        id: String(selectedItem.id || ''),
+        bol: getMobileHomeText(fields.BOLNumber_x0028_Won_x0029_),
+        truck: getMobileHomeText(
+          fields.Truck_x0020_Number || fields['Truck_x0020_Number/Value']
+        )
+      },
+      context: { token: graphToken }
+    });
+
+    return res.status(result.idempotentReplay ? 200 : 201).json({
+      success: true,
+      event: toMobileStopEventResponse(result.event),
+      idempotentReplay: result.idempotentReplay
+    });
+  } catch (error) {
+    const failure = getMobileCheckinErrorResponse(error);
+    console.error('Mobile stop event failed.', { code: failure.code });
+
+    return res.status(failure.status).json({
+      success: false,
+      code: failure.code,
+      error: failure.message
     });
   }
 });
