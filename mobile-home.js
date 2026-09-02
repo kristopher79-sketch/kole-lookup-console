@@ -9,12 +9,10 @@ function isMobileLoadStatusEligible(status) {
   return normalized === 'won' || normalized === 'tonu';
 }
 
-function shouldKeepMobileLoadVisible({
-  status,
-  hasPickupEvidence = false,
-  hasDeliveryEvidence = false
-} = {}) {
-  const normalized = normalizeMobileLoadStatus(status);
+function shouldKeepMobileLoadVisible(load = {}) {
+  const normalized = normalizeMobileLoadStatus(load.Status ?? load.status);
+  const hasPickupEvidence = load.hasPickupEvidence === true;
+  const hasDeliveryEvidence = load.hasDeliveryEvidence === true;
 
   if (!isMobileLoadStatusEligible(normalized)) return false;
 

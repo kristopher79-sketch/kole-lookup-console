@@ -25,3 +25,22 @@ test('Won loads continue to require Delivery evidence before leaving the mobile 
   assert.equal(shouldKeepMobileLoadVisible({ status: 'Won', hasPickupEvidence: true }), true);
   assert.equal(shouldKeepMobileLoadVisible({ status: 'Won', hasDeliveryEvidence: true }), false);
 });
+
+test('production load summaries use Status when applying upload visibility', () => {
+  assert.equal(
+    shouldKeepMobileLoadVisible({
+      Status: 'Won',
+      hasPickupEvidence: true,
+      hasDeliveryEvidence: false
+    }),
+    true
+  );
+  assert.equal(
+    shouldKeepMobileLoadVisible({
+      Status: 'TONU',
+      hasPickupEvidence: true,
+      hasDeliveryEvidence: false
+    }),
+    false
+  );
+});
