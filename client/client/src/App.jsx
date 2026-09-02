@@ -2966,6 +2966,17 @@ export default function App() {
   }, [resolvedSeasonalTheme]);
 
   useEffect(() => {
+    const root = document.documentElement;
+    const pageBackground = window.getComputedStyle(root).getPropertyValue('--kole-page-bg').trim();
+
+    root.style.setProperty('--kole-prepaint-bg', pageBackground || (colorTheme === 'light' ? '#eef2f7' : '#0f172a'));
+    document.querySelector('meta[name="theme-color"]')?.setAttribute(
+      'content',
+      pageBackground || (colorTheme === 'light' ? '#eef2f7' : '#0f172a')
+    );
+  }, [colorTheme, resolvedSeasonalTheme]);
+
+  useEffect(() => {
     document.body.classList.toggle('compact-dashboard-mode', Boolean(userPrefs.compactDashboardMode));
 
     return () => document.body.classList.remove('compact-dashboard-mode');

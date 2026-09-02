@@ -1,10 +1,82 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0b1220" />
+    <script>
+      (() => {
+        const root = document.documentElement;
+        const paletteNames = new Set([
+          'winter', 'valentine', 'spring', 'summer', 'americana',
+          'harvest', 'halloween', 'holiday', 'aurora'
+        ]);
+        const paletteBackgrounds = {
+          winter: { dark: '#0b1120', light: '#eff6ff' },
+          valentine: { dark: '#1f0a14', light: '#fff1f2' },
+          spring: { dark: '#071a14', light: '#f0fdf4' },
+          summer: { dark: '#082f49', light: '#f0f9ff' },
+          americana: { dark: '#172554', light: '#f8fafc' },
+          harvest: { dark: '#1c1917', light: '#fffbeb' },
+          halloween: { dark: '#0c0a09', light: '#fff7ed' },
+          holiday: { dark: '#052e2b', light: '#f0fdf4' },
+          aurora: { dark: '#0f172a', light: '#eef2ff' }
+        };
+
+        let theme = 'dark';
+        let requestedSeason = 'auto';
+
+        try {
+          theme = localStorage.getItem('koleConnectTheme') === 'light' ? 'light' : 'dark';
+          const preferences = JSON.parse(localStorage.getItem('koleConnectUserPreferences') || '{}');
+          requestedSeason = String(preferences.seasonalTheme || 'auto').trim().toLowerCase();
+        } catch {
+          // The normal app initialization will apply defaults if storage is unavailable.
+        }
+
+        let season = paletteNames.has(requestedSeason) ? requestedSeason : '';
+
+        if (!season && requestedSeason !== 'off') {
+          const easternDate = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'America/New_York',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+          }).format(new Date());
+          const [, month = 1, day = 1] = easternDate.split('-').map(Number);
+          const monthDay = (month * 100) + day;
+
+          if (monthDay >= 1226 || monthDay <= 107) season = 'aurora';
+          else if (monthDay <= 207) season = 'winter';
+          else if (monthDay <= 215) season = 'valentine';
+          else if (monthDay <= 319) season = 'winter';
+          else if (monthDay <= 515) season = 'spring';
+          else if (monthDay <= 627) season = 'summer';
+          else if (monthDay <= 707) season = 'americana';
+          else if (monthDay <= 831) season = 'summer';
+          else if (monthDay <= 1020) season = 'harvest';
+          else if (monthDay <= 1101) season = 'halloween';
+          else if (monthDay <= 1130) season = 'harvest';
+          else season = 'holiday';
+        }
+
+        root.dataset.theme = theme;
+        root.style.colorScheme = theme;
+        if (season) root.dataset.season = season;
+
+        const background = paletteBackgrounds[season]?.[theme]
+          || (theme === 'light' ? '#eef2f7' : '#0f172a');
+        root.style.setProperty('--kole-prepaint-bg', background);
+        document.querySelector('meta[name="theme-color"]')?.setAttribute('content', background);
+      })();
+    </script>
+    <style>
+      html,
+      body {
+        background-color: var(--kole-prepaint-bg, #0f172a);
+      }
+    </style>
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Kole Connect" />
