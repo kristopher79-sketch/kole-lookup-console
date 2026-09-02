@@ -11135,7 +11135,6 @@ function openReportLoadDetails(load) {
               onChange={handleLoadPaperworkInputChange}
               disabled={uploadDisabled}
             />
-            <span className="load-paperwork-drop-icon" aria-hidden="true">＋</span>
             <div>
               <strong>{loadPaperworkUploading ? 'Uploading paperwork...' : 'Drop files here from File Explorer'}</strong>
               <span>PDF, JPG, PNG, or HEIC · up to 10 files · 20 MB each</span>

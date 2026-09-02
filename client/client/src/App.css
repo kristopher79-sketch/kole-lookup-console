@@ -14069,7 +14069,6 @@ button.available-truck-distribution-summary-card:disabled {
   opacity: 0.68;
 }
 
-.load-paperwork-drop-icon,
 .load-paperwork-file-badge {
   display: inline-flex;
   align-items: center;
@@ -14079,13 +14078,6 @@ button.available-truck-distribution-summary-card:disabled {
   background: var(--kole-focus);
   color: var(--kole-info);
   font-weight: 950;
-}
-
-.load-paperwork-drop-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 15px;
-  font-size: 25px;
 }
 
 .load-paperwork-dropzone > div {
@@ -14099,7 +14091,7 @@ button.available-truck-distribution-summary-card:disabled {
   font-weight: 900;
 }
 
-.load-paperwork-dropzone span:not(.load-paperwork-drop-icon) {
+.load-paperwork-dropzone span {
   margin-top: 4px;
   color: var(--kole-muted);
   font-size: 12px;
@@ -14419,7 +14411,6 @@ button.available-truck-distribution-summary-card:disabled {
     width: 100%;
   }
 
-  .load-paperwork-drop-icon,
   .load-paperwork-file-badge {
     align-self: flex-start;
   }
