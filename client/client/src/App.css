@@ -13987,6 +13987,226 @@ button.available-truck-distribution-summary-card:disabled {
   font-weight: 700;
 }
 
+.load-paperwork-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--kole-border);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.08), transparent 38%),
+    linear-gradient(180deg, var(--kole-surface), var(--kole-surface-gradient-end));
+  box-shadow: var(--kole-panel-shadow);
+}
+
+.load-paperwork-heading-row,
+.load-paperwork-heading-actions,
+.load-paperwork-dropzone,
+.load-paperwork-file,
+.load-paperwork-state {
+  display: flex;
+  align-items: center;
+}
+
+.load-paperwork-heading-row {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.load-paperwork-heading-row > div:first-child,
+.load-paperwork-file-copy {
+  min-width: 0;
+}
+
+.load-paperwork-heading-row strong,
+.load-paperwork-heading-row span,
+.load-paperwork-dropzone strong,
+.load-paperwork-dropzone span,
+.load-paperwork-file-copy strong,
+.load-paperwork-file-copy span {
+  display: block;
+}
+
+.load-paperwork-heading-row strong {
+  color: var(--kole-text);
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.load-paperwork-heading-row span {
+  margin-top: 4px;
+  color: var(--kole-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.load-paperwork-heading-actions {
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.load-paperwork-input {
+  display: none;
+}
+
+.load-paperwork-dropzone {
+  gap: 14px;
+  min-height: 104px;
+  padding: 16px;
+  border: 2px dashed var(--kole-border-strong);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--kole-control-bg) 76%, transparent);
+}
+
+.load-paperwork-dropzone.is-dragging {
+  border-color: var(--kole-action);
+  background: var(--kole-focus);
+  box-shadow: 0 0 0 4px var(--kole-focus);
+}
+
+.load-paperwork-dropzone.is-disabled {
+  opacity: 0.68;
+}
+
+.load-paperwork-drop-icon,
+.load-paperwork-file-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--kole-action) 52%, var(--kole-border));
+  background: var(--kole-focus);
+  color: var(--kole-info);
+  font-weight: 950;
+}
+
+.load-paperwork-drop-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 15px;
+  font-size: 25px;
+}
+
+.load-paperwork-dropzone > div {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.load-paperwork-dropzone strong {
+  color: var(--kole-text);
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.load-paperwork-dropzone span:not(.load-paperwork-drop-icon) {
+  margin-top: 4px;
+  color: var(--kole-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.load-paperwork-browse-button {
+  min-width: 126px;
+}
+
+.load-paperwork-state,
+.load-paperwork-upload-result {
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border: 1px solid var(--kole-border);
+  border-radius: 12px;
+  background: var(--kole-control-bg);
+  color: var(--kole-message-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.load-paperwork-state.is-error,
+.load-paperwork-upload-result.is-error {
+  border-color: color-mix(in srgb, var(--kole-danger) 55%, var(--kole-border));
+  background: color-mix(in srgb, var(--kole-danger-bg) 44%, var(--kole-control-bg));
+  color: var(--kole-danger);
+}
+
+.load-paperwork-upload-result.is-success {
+  border-color: color-mix(in srgb, var(--kole-success) 48%, var(--kole-border));
+}
+
+.load-paperwork-upload-result > strong {
+  color: inherit;
+}
+
+.load-paperwork-upload-result ul {
+  display: grid;
+  gap: 5px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.load-paperwork-upload-result li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--kole-text-soft);
+  font-size: 12px;
+}
+
+.load-paperwork-upload-result li span {
+  flex: 0 0 auto;
+  color: inherit;
+}
+
+.load-paperwork-file-list {
+  display: grid;
+  gap: 8px;
+}
+
+.load-paperwork-file {
+  gap: 13px;
+  min-height: 72px;
+  padding: 11px 12px;
+  border: 1px solid var(--kole-border-subtle);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--kole-control-bg) 82%, transparent);
+}
+
+.load-paperwork-file-badge {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.load-paperwork-file-badge.is-dispatch {
+  border-color: color-mix(in srgb, var(--kole-gold-bright) 55%, var(--kole-border));
+  background: color-mix(in srgb, var(--kole-gold) 18%, transparent);
+  color: var(--kole-gold-bright);
+}
+
+.load-paperwork-file-copy {
+  flex: 1 1 auto;
+}
+
+.load-paperwork-file-copy strong {
+  overflow: hidden;
+  color: var(--kole-text);
+  font-size: 14px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.load-paperwork-file-copy span {
+  margin-top: 4px;
+  color: var(--kole-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .document-launch-card {
   position: relative;
   display: flex;
@@ -14113,6 +14333,23 @@ button.available-truck-distribution-summary-card:disabled {
   color: #52627a !important;
 }
 
+:root[data-theme='light'] .load-paperwork-panel {
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.055), transparent 38%),
+    #ffffff;
+}
+
+:root[data-theme='light'] .load-paperwork-dropzone,
+:root[data-theme='light'] .load-paperwork-file,
+:root[data-theme='light'] .load-paperwork-state,
+:root[data-theme='light'] .load-paperwork-upload-result {
+  background: #f8fafc;
+}
+
+:root[data-theme='light'] .load-paperwork-dropzone.is-dragging {
+  background: #eff6ff;
+}
+
 :root[data-theme='light'] .document-launch-card {
   border-color: #d3dce8 !important;
   background:
@@ -14166,6 +14403,25 @@ button.available-truck-distribution-summary-card:disabled {
 @media (max-width: 900px) {
   .documents-grid {
     grid-template-columns: 1fr;
+  }
+
+  .load-paperwork-heading-row,
+  .load-paperwork-dropzone,
+  .load-paperwork-file {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .load-paperwork-heading-actions,
+  .load-paperwork-heading-actions .document-launch-button,
+  .load-paperwork-browse-button,
+  .load-paperwork-file .document-launch-button {
+    width: 100%;
+  }
+
+  .load-paperwork-drop-icon,
+  .load-paperwork-file-badge {
+    align-self: flex-start;
   }
 
   .document-launch-card {

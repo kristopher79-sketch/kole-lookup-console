@@ -30,6 +30,13 @@ const {
   toMobileStopEventResponse,
   validateMobileStopEventInput
 } = require('./mobile-checkin');
+const {
+  cleanLoadPaperworkFiles,
+  findLoadPaperworkLoadFolder,
+  findLoadPaperworkTmsFolder,
+  getUniqueLoadPaperworkFileName,
+  sanitizeLoadPaperworkFileName
+} = require('./load-paperwork');
 
 const app = express();
 app.use(cors());
@@ -97,6 +104,8 @@ const QUOTE_ENGINE_OPTIONS_CACHE_MS = 5 * 60 * 1000;
 const QUOTE_ENGINE_COMPARABLE_CACHE_MS = 5 * 60 * 1000;
 const QUOTE_ENGINE_PUBLISH_CACHE_MS = 30 * 60 * 1000;
 const CONTRACT_LANES_CACHE_MS = 5 * 60 * 1000;
+const LOAD_PAPERWORK_ROOT_CACHE_MS = 5 * 60 * 1000;
+const DEFAULT_LOAD_PAPERWORK_FOLDER_NAME = 'Load Paperwork';
 const CONTRACT_LANE_TEAM_SERVICE_RATE = 0.25;
 const QUOTE_ENGINE_BID_ID_POLL_TIMEOUT_MS = Math.min(
   60 * 1000,
@@ -138,6 +147,8 @@ let cachedCheckInTimesSchemaAt = 0;
 let cachedGraphToken = null;
 let cachedGraphTokenExpiresAt = 0;
 let graphTokenRefreshPromise = null;
+let cachedLoadPaperworkRootFolder = null;
+let cachedLoadPaperworkRootFolderAt = 0;
 let cachedOperationsToday = null;
 let cachedOperationsTodayAt = 0;
 let cachedDashboardBidSource = null;
@@ -480,12 +491,13 @@ async function graphPost(token, url, body) {
   return data;
 }
 
-async function graphPutBinary(token, url, body, contentType) {
+async function graphPutBinary(token, url, body, contentType, extraHeaders = {}) {
   const response = await fetchWithTimeoutAndRetry(url, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${token}`,
-      'Content-Type': contentType
+      'Content-Type': contentType,
+      ...extraHeaders
     },
     body
   }, { maxRetries: 0 });
@@ -495,6 +507,7 @@ async function graphPutBinary(token, url, body, contentType) {
   if (!response.ok) {
     const error = new Error('Microsoft Graph could not store the uploaded file.');
     error.statusCode = 502;
+    error.graphStatus = response.status;
     throw error;
   }
 
@@ -530,7 +543,20 @@ function setCacheRecord(cache, key, value, maxEntries = 40) {
 }
 
 async function getAllChildrenFromFolder(token, driveId, folderId) {
-  let url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}/children?$select=id,name,webUrl,file,folder,lastModifiedDateTime&$top=999`;
+  let url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}/children?$select=id,name,webUrl,size,file,folder,lastModifiedDateTime&$top=999`;
+  const allItems = [];
+
+  while (url) {
+    const data = await graphGet(token, url);
+    allItems.push(...(data.value || []));
+    url = data['@odata.nextLink'] || null;
+  }
+
+  return allItems;
+}
+
+async function getAllChildrenFromDriveRoot(token, driveId) {
+  let url = `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/root/children?$select=id,name,webUrl,size,file,folder,lastModifiedDateTime&$top=999`;
   const allItems = [];
 
   while (url) {
@@ -915,6 +941,213 @@ async function findLoadPhotoFolderForBol(token, bol, options = {}) {
   }
 
   return null;
+}
+
+function createLoadPaperworkError(message, statusCode, code) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
+}
+
+function getLoadPaperworkErrorResponse(error) {
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return {
+        status: 413,
+        message: `Each file must be ${Math.round(MOBILE_UPLOAD_MAX_FILE_SIZE / (1024 * 1024))} MB or smaller.`
+      };
+    }
+
+    if (error.code === 'LIMIT_FILE_COUNT' || error.code === 'LIMIT_UNEXPECTED_FILE') {
+      return {
+        status: 400,
+        message: `Upload no more than ${MOBILE_UPLOAD_MAX_FILES} files at once.`
+      };
+    }
+
+    return { status: 400, message: 'The upload form is invalid.' };
+  }
+
+  if (Number(error?.statusCode) >= 400 && Number(error?.statusCode) < 500) {
+    return { status: Number(error.statusCode), message: error.message };
+  }
+
+  return {
+    status: Number(error?.statusCode) === 503 ? 503 : 502,
+    message: 'Load Paperwork storage is temporarily unavailable.'
+  };
+}
+
+async function getLoadPaperworkRootFolder(token) {
+  const driveId = String(process.env.DISPATCH_ONEDRIVE_ID || '').trim();
+  const configuredFolderId = String(process.env.LOAD_PAPERWORK_FOLDER_ID || '').trim();
+
+  if (!driveId) {
+    throw createLoadPaperworkError(
+      'Load Paperwork storage is not configured on the server.',
+      503,
+      'LOAD_PAPERWORK_STORAGE_NOT_CONFIGURED'
+    );
+  }
+
+  if (configuredFolderId) {
+    return { id: configuredFolderId, name: DEFAULT_LOAD_PAPERWORK_FOLDER_NAME };
+  }
+
+  const now = Date.now();
+  if (
+    cachedLoadPaperworkRootFolder?.driveId === driveId &&
+    now - cachedLoadPaperworkRootFolderAt < LOAD_PAPERWORK_ROOT_CACHE_MS
+  ) {
+    return cachedLoadPaperworkRootFolder;
+  }
+
+  const rootItems = await getAllChildrenFromDriveRoot(token, driveId);
+  const folder = findFolderByExactName(rootItems, DEFAULT_LOAD_PAPERWORK_FOLDER_NAME);
+
+  if (!folder) {
+    throw createLoadPaperworkError(
+      'The Load Paperwork folder was not found in the Dispatch OneDrive.',
+      404,
+      'LOAD_PAPERWORK_ROOT_NOT_FOUND'
+    );
+  }
+
+  cachedLoadPaperworkRootFolder = { ...folder, driveId };
+  cachedLoadPaperworkRootFolderAt = now;
+  return cachedLoadPaperworkRootFolder;
+}
+
+async function getLoadPaperworkOrder(token, orderIdValue, sourceListIdValue) {
+  const orderId = String(orderIdValue || '').trim();
+  const sourceListId = String(sourceListIdValue || '').trim();
+
+  if (!/^\d{1,12}$/.test(orderId) || !sourceListId) {
+    throw createLoadPaperworkError(
+      'A valid order reference is required.',
+      400,
+      'LOAD_PAPERWORK_INVALID_ORDER_REFERENCE'
+    );
+  }
+
+  const lists = await getSearchableBidLists(token);
+  const sourceList = lists.find((list) => normalizeText(list.listId) === normalizeText(sourceListId));
+
+  if (!sourceList) {
+    throw createLoadPaperworkError(
+      'That order source is not available to Kole Connect.',
+      404,
+      'LOAD_PAPERWORK_ORDER_SOURCE_NOT_FOUND'
+    );
+  }
+
+  const fields = [
+    'BOLNumber_x0028_Won_x0029_',
+    'BidID',
+    'Operator_x002f_Team',
+    'TMSName',
+    'Route',
+    'Shipment_x0020_Origin',
+    'Shipment_x0020_Destination'
+  ].join(',');
+  const item = await graphGet(
+    token,
+    `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${encodeURIComponent(sourceList.listId)}` +
+      `/items/${encodeURIComponent(orderId)}?$select=id&$expand=fields($select=${fields})`
+  );
+  const itemFields = item.fields || {};
+
+  return {
+    id: String(item.id || orderId),
+    SourceListId: sourceList.listId,
+    SourceList: sourceList.label,
+    BOL: String(itemFields.BOLNumber_x0028_Won_x0029_ || '').trim(),
+    BidID: String(itemFields.BidID || '').trim(),
+    Driver: String(getChoiceValue(itemFields.Operator_x002f_Team) || '').trim(),
+    TMSName: String(itemFields.TMSName || '').trim(),
+    Route: String(itemFields.Route || '').trim(),
+    Origin: String(itemFields.Shipment_x0020_Origin || '').trim(),
+    Destination: String(itemFields.Shipment_x0020_Destination || '').trim()
+  };
+}
+
+async function resolveLoadPaperworkContext(token, orderId, sourceListId) {
+  const driveId = String(process.env.DISPATCH_ONEDRIVE_ID || '').trim();
+  const order = await getLoadPaperworkOrder(token, orderId, sourceListId);
+
+  if (!order.BOL) {
+    throw createLoadPaperworkError(
+      'This order does not have a BOL number yet.',
+      409,
+      'LOAD_PAPERWORK_BOL_NOT_AVAILABLE'
+    );
+  }
+
+  if (!order.TMSName) {
+    throw createLoadPaperworkError(
+      'This order does not have a TMS Name for its Load Paperwork folder.',
+      409,
+      'LOAD_PAPERWORK_TMS_NAME_NOT_AVAILABLE'
+    );
+  }
+
+  const rootFolder = await getLoadPaperworkRootFolder(token);
+  const tmsFolders = await getAllChildrenFromFolder(token, driveId, rootFolder.id);
+  const tmsFolder = findLoadPaperworkTmsFolder(tmsFolders, order.TMSName);
+
+  if (!tmsFolder) {
+    throw createLoadPaperworkError(
+      'The TMS Load Paperwork folder has not been created for this order.',
+      404,
+      'LOAD_PAPERWORK_TMS_FOLDER_NOT_FOUND'
+    );
+  }
+
+  const loadFolders = await getAllChildrenFromFolder(token, driveId, tmsFolder.id);
+  const loadMatch = findLoadPaperworkLoadFolder(loadFolders, order);
+
+  if (!loadMatch.folder) {
+    throw createLoadPaperworkError(
+      loadMatch.ambiguous
+        ? 'More than one Load Paperwork folder matches this order. Check the OneDrive folder names before uploading.'
+        : 'The Load Paperwork folder has not been created for this order yet.',
+      loadMatch.ambiguous ? 409 : 404,
+      loadMatch.ambiguous ? 'LOAD_PAPERWORK_FOLDER_AMBIGUOUS' : 'LOAD_PAPERWORK_FOLDER_NOT_FOUND'
+    );
+  }
+
+  const items = await getAllChildrenFromFolder(token, driveId, loadMatch.folder.id);
+
+  return {
+    driveId,
+    order,
+    rootFolder,
+    tmsFolder,
+    loadFolder: loadMatch.folder,
+    matchStrategy: loadMatch.matchStrategy,
+    items
+  };
+}
+
+function buildLoadPaperworkResponse(context) {
+  return {
+    success: true,
+    order: {
+      id: context.order.id,
+      sourceListId: context.order.SourceListId,
+      BOL: context.order.BOL,
+      BidID: context.order.BidID
+    },
+    folder: {
+      id: String(context.loadFolder.id || ''),
+      name: String(context.loadFolder.name || ''),
+      webUrl: String(context.loadFolder.webUrl || ''),
+      tmsFolderName: String(context.tmsFolder.name || '')
+    },
+    files: cleanLoadPaperworkFiles(context.items),
+    matchStrategy: context.matchStrategy
+  };
 }
 
 function getArchiveYear(displayName) {
@@ -12913,6 +13146,143 @@ app.get('/documents/dispatchsheet', requireLookupAccess, async (req, res) => {
   }
 });
 
+app.get('/documents/load-paperwork', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const context = await resolveLoadPaperworkContext(
+      token,
+      req.query.orderId,
+      req.query.sourceListId
+    );
+
+    return res.json(buildLoadPaperworkResponse(context));
+  } catch (error) {
+    const failure = getLoadPaperworkErrorResponse(error);
+    console.error('Load Paperwork listing failed.', {
+      code: String(error?.code || 'LOAD_PAPERWORK_LIST_FAILED'),
+      statusCode: failure.status
+    });
+
+    return res.status(failure.status).json({
+      success: false,
+      error: failure.message
+    });
+  }
+});
+
+app.post('/documents/load-paperwork', requireLookupAccess, async (req, res) => {
+  try {
+    await parseLoadPaperworkUpload(req, res);
+
+    if (!Array.isArray(req.files) || req.files.length === 0) {
+      throw createLoadPaperworkError(
+        'Select at least one PDF or supported image to upload.',
+        400,
+        'LOAD_PAPERWORK_FILES_REQUIRED'
+      );
+    }
+
+    const preparedFiles = [];
+
+    for (const file of req.files) {
+      preparedFiles.push({
+        file,
+        contentType: await getMobileUploadContentType(file)
+      });
+    }
+
+    if (preparedFiles.some((entry) => !entry.contentType)) {
+      throw createLoadPaperworkError(
+        'One or more files are not a valid PDF, JPEG, PNG, or HEIC/HEIF file.',
+        415,
+        'LOAD_PAPERWORK_INVALID_FILE_CONTENT'
+      );
+    }
+
+    const token = await getGraphToken();
+    const context = await resolveLoadPaperworkContext(
+      token,
+      req.body?.orderId,
+      req.body?.sourceListId
+    );
+    const existingNames = new Set(
+      context.items.map((item) => String(item?.name || '').toLowerCase()).filter(Boolean)
+    );
+    const uploaded = [];
+    const uploadedItems = [];
+    const failed = [];
+
+    for (const { file, contentType } of preparedFiles) {
+      try {
+        const storedFile = await uploadLoadPaperworkFile(
+          token,
+          context,
+          file,
+          contentType,
+          existingNames
+        );
+
+        uploadedItems.push(storedFile);
+        uploaded.push({
+          originalName: String(file.originalname || ''),
+          id: String(storedFile.id || ''),
+          name: String(storedFile.name || ''),
+          size: Number(storedFile.size || file.size || 0),
+          webUrl: String(storedFile.webUrl || '')
+        });
+      } catch {
+        failed.push({
+          originalName: String(file.originalname || ''),
+          error: 'OneDrive could not store this file.'
+        });
+      } finally {
+        await cleanupLoadPaperworkUploadFiles([file]);
+      }
+    }
+
+    if (uploaded.length === 0) {
+      return res.status(502).json({
+        success: false,
+        error: 'OneDrive could not store the selected files.',
+        uploaded,
+        failed
+      });
+    }
+
+    const response = buildLoadPaperworkResponse({
+      ...context,
+      items: [...context.items, ...uploadedItems]
+    });
+    const partial = failed.length > 0;
+
+    return res.status(partial ? 207 : 201).json({
+      ...response,
+      partial,
+      uploaded,
+      failed,
+      message: partial
+        ? `${uploaded.length} file${uploaded.length === 1 ? '' : 's'} uploaded; ${failed.length} failed.`
+        : `${uploaded.length} file${uploaded.length === 1 ? '' : 's'} uploaded.`
+    });
+  } catch (error) {
+    const failure = getLoadPaperworkErrorResponse(error);
+    console.error('Load Paperwork upload failed.', {
+      code: String(error?.code || 'LOAD_PAPERWORK_UPLOAD_FAILED'),
+      statusCode: failure.status,
+      fileCount: Array.isArray(req.files) ? req.files.length : 0
+    });
+
+    if (!res.headersSent) {
+      return res.status(failure.status).json({
+        success: false,
+        error: failure.message
+      });
+    }
+  } finally {
+    await cleanupLoadPaperworkUploadFiles(req.files);
+  }
+});
+
 
 app.get('/documents/loadphotos/by-bol', requireLookupAccess, async (req, res) => {
   try {
@@ -21902,6 +22272,7 @@ const CHECK_IN_TIMES_FIELD_DEFINITIONS = Object.freeze({
 });
 let mobileUploadActiveFileBuffers = 0;
 const mobileUploadFileBufferWaiters = [];
+let loadPaperworkUploadParser = null;
 
 async function getCheckInTimesListId(token, forceRefresh = false) {
   const configured = String(process.env.CHECK_IN_TIMES_LIST_ID || '').trim();
@@ -22445,6 +22816,109 @@ function getMobileUploadSafeFileName(file, contentType) {
   const collisionToken = crypto.randomBytes(4).toString('hex');
 
   return `${timestamp}-${collisionToken}-${safeBaseName}${extension}`;
+}
+
+function getLoadPaperworkUploadParser() {
+  if (loadPaperworkUploadParser) return loadPaperworkUploadParser;
+
+  loadPaperworkUploadParser = multer({
+    storage: multer.diskStorage({
+      destination: os.tmpdir(),
+      filename: (req, file, callback) => {
+        callback(null, `kole-paperwork-${Date.now()}-${crypto.randomBytes(12).toString('hex')}.tmp`);
+      }
+    }),
+    limits: {
+      fileSize: MOBILE_UPLOAD_MAX_FILE_SIZE,
+      files: MOBILE_UPLOAD_MAX_FILES,
+      fields: 4,
+      fieldSize: 2048
+    },
+    fileFilter: (req, file, callback) => {
+      if (isMobileUploadFileCandidateAllowed(file)) {
+        callback(null, true);
+        return;
+      }
+
+      const error = new Error('Only PDF, JPEG, PNG, and HEIC/HEIF files are supported.');
+      error.statusCode = 415;
+      callback(error);
+    }
+  }).array('files', MOBILE_UPLOAD_MAX_FILES);
+
+  return loadPaperworkUploadParser;
+}
+
+function parseLoadPaperworkUpload(req, res) {
+  return new Promise((resolve, reject) => {
+    getLoadPaperworkUploadParser()(req, res, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
+async function cleanupLoadPaperworkUploadFiles(files) {
+  for (const file of Array.isArray(files) ? files : []) {
+    if (!file?.path) continue;
+
+    try {
+      await fs.promises.unlink(file.path);
+      file.path = '';
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        console.warn('Load Paperwork upload temp cleanup failed.');
+      }
+    }
+  }
+}
+
+function getLoadPaperworkSafeFileName(file, contentType) {
+  const originalName = String(file?.originalname || 'upload').split(/[\\/]/).pop() || 'upload';
+  const originalExtension = getMobileUploadOriginalExtension(originalName);
+  const allowedExtensions = MOBILE_UPLOAD_EXTENSIONS_BY_TYPE.get(contentType) || [''];
+  const extension = allowedExtensions.includes(originalExtension)
+    ? originalExtension
+    : allowedExtensions[0];
+
+  return sanitizeLoadPaperworkFileName(originalName, extension);
+}
+
+async function uploadLoadPaperworkFile(token, context, file, contentType, existingNames) {
+  const preferredName = getLoadPaperworkSafeFileName(file, contentType);
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const candidateName = getUniqueLoadPaperworkFileName(preferredName, existingNames);
+    existingNames.add(candidateName.toLowerCase());
+    const uploadUrl =
+      `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(context.driveId)}` +
+      `/items/${encodeURIComponent(context.loadFolder.id)}:/${encodeURIComponent(candidateName)}:/content`;
+
+    try {
+      return await withMobileUploadFileBufferSlot(async () => {
+        const fileBuffer = await fs.promises.readFile(file.path);
+        return graphPutBinary(
+          token,
+          uploadUrl,
+          fileBuffer,
+          contentType,
+          { 'If-None-Match': '*' }
+        );
+      });
+    } catch (error) {
+      if (![409, 412].includes(Number(error?.graphStatus)) || attempt === 3) throw error;
+    }
+  }
+
+  throw createLoadPaperworkError(
+    'A unique filename could not be reserved for this upload.',
+    409,
+    'LOAD_PAPERWORK_FILENAME_CONFLICT'
+  );
 }
 
 function getMobileUploadErrorResponse(error) {

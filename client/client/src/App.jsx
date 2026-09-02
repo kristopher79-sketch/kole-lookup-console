@@ -39,6 +39,10 @@ const ON_THIS_DAY_CLIENT_CACHE_LIMIT = 10;
 const ORDER_NOTES_CLIENT_CACHE_MS = 60 * 1000;
 const ORDER_NOTE_MAX_LENGTH = 20000;
 const ORDER_NOTE_TYPE_OPTIONS = ['Dispatch', 'Paperwork', 'Permits', 'Billing', 'Operations'];
+const LOAD_PAPERWORK_MAX_FILE_SIZE = 20 * 1024 * 1024;
+const LOAD_PAPERWORK_MAX_FILES = 10;
+const LOAD_PAPERWORK_ACCEPT = '.pdf,.jpg,.jpeg,.png,.heic,.heif';
+const LOAD_PAPERWORK_ALLOWED_EXTENSIONS = new Set(['.pdf', '.jpg', '.jpeg', '.png', '.heic', '.heif']);
 const ORDER_EDIT_STATUS_OPTIONS = ['-', 'Won', 'Lost', 'CAN', 'TONU'];
 const ORDER_EDIT_TERMINAL_STATUSES = new Set(['CAN', 'TONU']);
 const ORDER_EDIT_DATE_FIELDS = new Set(['PickupDate', 'DeliveryDate']);
@@ -84,6 +88,56 @@ const ORDER_EDIT_FIELD_KEYS = [
   'ShipperNumber',
   'Contract'
 ];
+
+function getLoadPaperworkFileExtension(fileName) {
+  const match = String(fileName || '').toLowerCase().match(/\.[a-z0-9]{1,10}$/);
+  return match ? match[0] : '';
+}
+
+function validateLoadPaperworkFiles(files) {
+  if (!files.length) return 'Choose at least one file.';
+  if (files.length > LOAD_PAPERWORK_MAX_FILES) {
+    return `Choose no more than ${LOAD_PAPERWORK_MAX_FILES} files at once.`;
+  }
+
+  const unsupported = files.find((file) => (
+    !LOAD_PAPERWORK_ALLOWED_EXTENSIONS.has(getLoadPaperworkFileExtension(file?.name))
+  ));
+  if (unsupported) {
+    return `${unsupported.name || 'One file'} is not a supported PDF or image.`;
+  }
+
+  const oversized = files.find((file) => Number(file?.size || 0) > LOAD_PAPERWORK_MAX_FILE_SIZE);
+  if (oversized) {
+    return `${oversized.name || 'One file'} is larger than 20 MB.`;
+  }
+
+  return '';
+}
+
+function formatLoadPaperworkFileSize(value) {
+  const bytes = Number(value || 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) return 'Size unavailable';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+}
+
+function formatLoadPaperworkModified(value) {
+  if (!value) return 'Modified date unavailable';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Modified date unavailable';
+
+  return date.toLocaleString('en-US', {
+    timeZone: 'America/New_York',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+}
 
 function createSalesLeadTrackingPreferencesDraft(preferences = {}) {
   return {
@@ -1537,6 +1591,16 @@ export default function App() {
   const [includeArchives, setIncludeArchives] = useState(false);
   const [documentLoading, setDocumentLoading] = useState('');
   const [documentError, setDocumentError] = useState('');
+  const [loadPaperworkData, setLoadPaperworkData] = useState(null);
+  const [loadPaperworkLoading, setLoadPaperworkLoading] = useState(false);
+  const [loadPaperworkError, setLoadPaperworkError] = useState('');
+  const [loadPaperworkUploading, setLoadPaperworkUploading] = useState(false);
+  const [loadPaperworkUploadResult, setLoadPaperworkUploadResult] = useState(null);
+  const [loadPaperworkOpeningId, setLoadPaperworkOpeningId] = useState('');
+  const [loadPaperworkDragActive, setLoadPaperworkDragActive] = useState(false);
+  const loadPaperworkInputRef = useRef(null);
+  const loadPaperworkRequestRef = useRef(0);
+  const loadPaperworkDragDepthRef = useRef(0);
   const [orderNotesData, setOrderNotesData] = useState(null);
   const [orderNotesLoading, setOrderNotesLoading] = useState(false);
   const [orderNotesError, setOrderNotesError] = useState('');
@@ -3016,6 +3080,7 @@ export default function App() {
         setSelected(null);
         setOrderReturnTrailLabel('');
         setOrderDrilldownReturn(null);
+        resetLoadPaperworkState();
         setOrderNotesData(null);
         setOrderNotesLoading(false);
         setOrderNotesError('');
@@ -3488,6 +3553,7 @@ export default function App() {
     setError('');
     setAuthError('');
     setDocumentError('');
+    resetLoadPaperworkState();
     setOperationsData(null);
     setOperationsLoading(false);
     setOperationsError('');
@@ -5783,6 +5849,8 @@ function restoreOrderFromDrilldown() {
   setSelectedView(snapshot.view || 'basic');
   if (snapshot.view === 'notes') {
     loadOrderNotes(snapshot.order);
+  } else if (snapshot.view === 'documents') {
+    void loadLoadPaperwork(snapshot.order);
   }
   setOrderDrilldownReturn(null);
 }
@@ -5931,6 +5999,212 @@ function getPositionStatusLabel(position) {
   if (Number(position?.speed || 0) > 0) return 'Moving';
   return 'Stopped';
 }
+  function resetLoadPaperworkState() {
+    loadPaperworkRequestRef.current += 1;
+    loadPaperworkDragDepthRef.current = 0;
+    setLoadPaperworkData(null);
+    setLoadPaperworkLoading(false);
+    setLoadPaperworkError('');
+    setLoadPaperworkUploading(false);
+    setLoadPaperworkUploadResult(null);
+    setLoadPaperworkOpeningId('');
+    setLoadPaperworkDragActive(false);
+    if (loadPaperworkInputRef.current) loadPaperworkInputRef.current.value = '';
+  }
+
+  function isLoadPaperworkForOrder(data, record) {
+    return (
+      String(data?.order?.id || '') === String(record?.id || '') &&
+      String(data?.order?.sourceListId || '').toLowerCase() === String(record?.SourceListId || '').toLowerCase()
+    );
+  }
+
+  async function loadLoadPaperwork(record = selected, options = {}) {
+    const preserveUploadResult = options.preserveUploadResult === true;
+
+    if (!record?.id || !record?.SourceListId) {
+      setLoadPaperworkData(null);
+      setLoadPaperworkError('This order does not have a complete paperwork reference.');
+      return null;
+    }
+
+    const requestId = loadPaperworkRequestRef.current + 1;
+    loadPaperworkRequestRef.current = requestId;
+    setLoadPaperworkLoading(true);
+    setLoadPaperworkError('');
+    setLoadPaperworkData((current) => isLoadPaperworkForOrder(current, record) ? current : null);
+    if (!preserveUploadResult) setLoadPaperworkUploadResult(null);
+
+    try {
+      const params = new URLSearchParams({
+        orderId: String(record.id),
+        sourceListId: String(record.SourceListId)
+      });
+      const res = await authedFetch(`${API}/documents/load-paperwork?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Unable to load this order\'s paperwork.');
+      }
+
+      if (loadPaperworkRequestRef.current !== requestId) return null;
+      setLoadPaperworkData(data);
+      return data;
+    } catch (err) {
+      if (loadPaperworkRequestRef.current !== requestId) return null;
+      setLoadPaperworkData(null);
+      setLoadPaperworkError(err.message || 'Unable to load this order\'s paperwork.');
+      return null;
+    } finally {
+      if (loadPaperworkRequestRef.current === requestId) {
+        setLoadPaperworkLoading(false);
+      }
+    }
+  }
+
+  function openDocumentsTab() {
+    setSelectedView('documents');
+    void loadLoadPaperwork(selected);
+  }
+
+  async function uploadLoadPaperworkFiles(fileList) {
+    const files = Array.from(fileList || []);
+    const validationError = validateLoadPaperworkFiles(files);
+
+    if (validationError) {
+      setLoadPaperworkUploadResult({
+        message: '',
+        uploaded: [],
+        failed: files.map((file) => ({ originalName: file.name, error: validationError })),
+        error: validationError
+      });
+      return;
+    }
+
+    if (!selected?.id || !selected?.SourceListId || !isLoadPaperworkForOrder(loadPaperworkData, selected)) {
+      setLoadPaperworkUploadResult({
+        message: '',
+        uploaded: [],
+        failed: [],
+        error: 'Load this order\'s paperwork folder before uploading.'
+      });
+      return;
+    }
+
+    const order = selected;
+    const requestId = loadPaperworkRequestRef.current + 1;
+    loadPaperworkRequestRef.current = requestId;
+    const formData = new FormData();
+    formData.append('orderId', String(order.id));
+    formData.append('sourceListId', String(order.SourceListId));
+    files.forEach((file) => formData.append('files', file, file.name));
+
+    setLoadPaperworkUploading(true);
+    setLoadPaperworkError('');
+    setLoadPaperworkUploadResult({
+      message: `Uploading ${files.length} file${files.length === 1 ? '' : 's'}...`,
+      uploaded: [],
+      failed: [],
+      error: ''
+    });
+
+    let responseData = {};
+
+    try {
+      const res = await authedFetch(`${API}/documents/load-paperwork`, {
+        method: 'POST',
+        body: formData
+      });
+      responseData = await res.json().catch(() => ({}));
+
+      if (!res.ok || !responseData.success) {
+        throw new Error(responseData.error || 'Unable to upload the selected paperwork.');
+      }
+
+      if (loadPaperworkRequestRef.current !== requestId) return;
+      setLoadPaperworkData(responseData);
+      setLoadPaperworkUploadResult({
+        message: responseData.message || `${files.length} file${files.length === 1 ? '' : 's'} uploaded.`,
+        uploaded: responseData.uploaded || [],
+        failed: responseData.failed || [],
+        error: ''
+      });
+    } catch (err) {
+      if (loadPaperworkRequestRef.current !== requestId) return;
+      setLoadPaperworkUploadResult({
+        message: '',
+        uploaded: responseData.uploaded || [],
+        failed: responseData.failed?.length
+          ? responseData.failed
+          : files.map((file) => ({ originalName: file.name, error: err.message || 'Upload failed.' })),
+        error: err.message || 'Unable to upload the selected paperwork.'
+      });
+    } finally {
+      if (loadPaperworkRequestRef.current === requestId) {
+        setLoadPaperworkUploading(false);
+      }
+    }
+  }
+
+  function handleLoadPaperworkInputChange(event) {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    void uploadLoadPaperworkFiles(files);
+  }
+
+  function handleLoadPaperworkDragEnter(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (loadPaperworkUploading || !isLoadPaperworkForOrder(loadPaperworkData, selected)) return;
+    loadPaperworkDragDepthRef.current += 1;
+    setLoadPaperworkDragActive(true);
+  }
+
+  function handleLoadPaperworkDragOver(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+  }
+
+  function handleLoadPaperworkDragLeave(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    loadPaperworkDragDepthRef.current = Math.max(0, loadPaperworkDragDepthRef.current - 1);
+    if (loadPaperworkDragDepthRef.current === 0) setLoadPaperworkDragActive(false);
+  }
+
+  function handleLoadPaperworkDrop(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    loadPaperworkDragDepthRef.current = 0;
+    setLoadPaperworkDragActive(false);
+    if (loadPaperworkUploading || !isLoadPaperworkForOrder(loadPaperworkData, selected)) return;
+    void uploadLoadPaperworkFiles(event.dataTransfer?.files || []);
+  }
+
+  async function openLoadPaperworkTarget(target, loadingId) {
+    if (!target?.webUrl) {
+      setLoadPaperworkError('OneDrive did not return a link for this item.');
+      return;
+    }
+
+    const requestId = loadPaperworkRequestRef.current;
+    setLoadPaperworkOpeningId(loadingId);
+    setLoadPaperworkError('');
+
+    try {
+      await openExternalLink(target.webUrl);
+    } catch (err) {
+      if (loadPaperworkRequestRef.current === requestId) {
+        setLoadPaperworkError(err.message || 'Unable to open this OneDrive item.');
+      }
+    } finally {
+      if (loadPaperworkRequestRef.current === requestId) {
+        setLoadPaperworkOpeningId('');
+      }
+    }
+  }
+
   async function loadDetails(id, view = 'basic', sourceListId = '', options = {}) {
     if (!id) {
       setError('This row does not have a record ID.');
@@ -5953,6 +6227,7 @@ function getPositionStatusLabel(position) {
     setOrderEditError('');
     setOrderEditMessage('');
     setOrderEditNoteWarning('');
+    resetLoadPaperworkState();
     orderNotesRequestRef.current += 1;
     setLoadingDetail(true);
     setError('');
@@ -5972,6 +6247,8 @@ function getPositionStatusLabel(position) {
 
       if (view === 'notes') {
         loadOrderNotes(data);
+      } else if (view === 'documents') {
+        void loadLoadPaperwork(data);
       }
     } catch (err) {
       setError(err.message);
@@ -6163,6 +6440,7 @@ function getPositionStatusLabel(position) {
     setOrderReturnTrailLabel('');
     setOrderDrilldownReturn(null);
     setDocumentError('');
+    resetLoadPaperworkState();
     setOrderNotesData(null);
     setOrderNotesLoading(false);
     setOrderNotesError('');
@@ -10799,15 +11077,170 @@ function openReportLoadDetails(load) {
   function DocumentsView() {
     const bolLabel = selected.BOL || 'No BOL number found';
     const driverLabel = selected.TMSName || selected.Driver || '';
+    const paperworkFiles = loadPaperworkData?.files || [];
+    const paperworkReady = isLoadPaperworkForOrder(loadPaperworkData, selected);
+    const uploadDisabled = loadPaperworkUploading || loadPaperworkLoading || !paperworkReady;
 
     return (
       <div className="detail-grid documents-grid">
-        <SectionTitle>Order Documents</SectionTitle>
+        <SectionTitle>Load Paperwork</SectionTitle>
+
+        <section className="load-paperwork-panel" aria-labelledby="load-paperwork-heading">
+          <div className="load-paperwork-heading-row">
+            <div>
+              <strong id="load-paperwork-heading">Paperwork sent with this load</strong>
+              <span>
+                {paperworkReady
+                  ? `${paperworkFiles.length} file${paperworkFiles.length === 1 ? '' : 's'} · ${loadPaperworkData.folder?.name || bolLabel}`
+                  : 'Customer BOLs, packing lists, instructions, and the Dispatch Sheet'}
+              </span>
+            </div>
+
+            <div className="load-paperwork-heading-actions">
+              <button
+                type="button"
+                className="document-launch-button"
+                onClick={() => void loadLoadPaperwork(selected, { preserveUploadResult: true })}
+                disabled={loadPaperworkLoading || loadPaperworkUploading}
+              >
+                {loadPaperworkLoading ? 'Refreshing...' : 'Refresh'}
+              </button>
+              {paperworkReady && loadPaperworkData.folder?.webUrl && (
+                <button
+                  type="button"
+                  className="document-launch-button"
+                  onClick={() => void openLoadPaperworkTarget(loadPaperworkData.folder, 'folder')}
+                  disabled={loadPaperworkOpeningId === 'folder'}
+                >
+                  {loadPaperworkOpeningId === 'folder' ? 'Opening...' : 'Open folder'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div
+            className={`load-paperwork-dropzone ${loadPaperworkDragActive ? 'is-dragging' : ''} ${uploadDisabled ? 'is-disabled' : ''}`}
+            onDragEnter={handleLoadPaperworkDragEnter}
+            onDragOver={handleLoadPaperworkDragOver}
+            onDragLeave={handleLoadPaperworkDragLeave}
+            onDrop={handleLoadPaperworkDrop}
+            aria-disabled={uploadDisabled}
+          >
+            <input
+              ref={loadPaperworkInputRef}
+              className="load-paperwork-input"
+              type="file"
+              accept={LOAD_PAPERWORK_ACCEPT}
+              multiple
+              onChange={handleLoadPaperworkInputChange}
+              disabled={uploadDisabled}
+            />
+            <span className="load-paperwork-drop-icon" aria-hidden="true">＋</span>
+            <div>
+              <strong>{loadPaperworkUploading ? 'Uploading paperwork...' : 'Drop files here from File Explorer'}</strong>
+              <span>PDF, JPG, PNG, or HEIC · up to 10 files · 20 MB each</span>
+            </div>
+            <button
+              type="button"
+              className="document-launch-button load-paperwork-browse-button"
+              onClick={() => loadPaperworkInputRef.current?.click()}
+              disabled={uploadDisabled}
+            >
+              Choose Files
+            </button>
+          </div>
+
+          {loadPaperworkLoading && !paperworkReady && (
+            <div className="load-paperwork-state" role="status">Loading this order's paperwork...</div>
+          )}
+
+          {loadPaperworkError && (
+            <div className="load-paperwork-state is-error" role="alert">
+              <span>{loadPaperworkError}</span>
+              <button
+                type="button"
+                className="view-button"
+                onClick={() => void loadLoadPaperwork(selected, { preserveUploadResult: true })}
+                disabled={loadPaperworkLoading}
+              >
+                Try again
+              </button>
+            </div>
+          )}
+
+          {loadPaperworkUploadResult && (
+            <div
+              className={`load-paperwork-upload-result ${loadPaperworkUploadResult.error || loadPaperworkUploadResult.failed?.length ? 'is-error' : 'is-success'}`}
+              aria-live="polite"
+            >
+              <strong>{loadPaperworkUploadResult.error || loadPaperworkUploadResult.message}</strong>
+              {loadPaperworkUploadResult.uploaded?.length > 0 && (
+                <ul>
+                  {loadPaperworkUploadResult.uploaded.map((file, index) => (
+                    <li key={`${file.name || file.originalName}-${index}`}>
+                      {file.originalName && file.originalName !== file.name
+                        ? `${file.originalName} → ${file.name}`
+                        : (file.name || file.originalName)}
+                      <span>Uploaded</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {loadPaperworkUploadResult.failed?.length > 0 && (
+                <ul>
+                  {loadPaperworkUploadResult.failed.map((file, index) => (
+                    <li key={`${file.originalName || 'failed'}-${index}`}>
+                      {file.originalName || 'File'}
+                      <span>{file.error || 'Upload failed'}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {paperworkReady && !loadPaperworkLoading && paperworkFiles.length === 0 && (
+            <div className="load-paperwork-state">This load's paperwork folder is empty.</div>
+          )}
+
+          {paperworkReady && paperworkFiles.length > 0 && (
+            <div className="load-paperwork-file-list" role="list" aria-label="Load Paperwork files">
+              {paperworkFiles.map((file) => {
+                const extension = getLoadPaperworkFileExtension(file.name).replace('.', '').toUpperCase();
+                const loadingId = `file-${file.id}`;
+
+                return (
+                  <div className="load-paperwork-file" role="listitem" key={file.id || file.name}>
+                    <span className={`load-paperwork-file-badge ${file.isDispatchSheet ? 'is-dispatch' : ''}`}>
+                      {file.isDispatchSheet ? 'DSP' : (extension || 'FILE')}
+                    </span>
+                    <div className="load-paperwork-file-copy">
+                      <strong>{file.name}</strong>
+                      <span>
+                        {formatLoadPaperworkFileSize(file.size)} · {formatLoadPaperworkModified(file.lastModifiedDateTime)}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="document-launch-button"
+                      onClick={() => void openLoadPaperworkTarget(file, loadingId)}
+                      disabled={!file.webUrl || loadPaperworkOpeningId === loadingId}
+                    >
+                      {loadPaperworkOpeningId === loadingId ? 'Opening...' : 'Open'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        <SectionTitle>Other Document Locations</SectionTitle>
 
         <div className="documents-intro">
           <div>
-            <strong>{selected.BOL ? `Quick links for ${selected.BOL}` : 'Quick document links'}</strong>
-            <span>Open the source file or folder in SharePoint / OneDrive.</span>
+            <strong>{selected.BOL ? `Existing shortcuts for ${selected.BOL}` : 'Existing document shortcuts'}</strong>
+            <span>Load Photos remains the separate driver-to-KOLE return folder.</span>
           </div>
         </div>
 
@@ -23830,7 +24263,7 @@ function openReportLoadDetails(load) {
 
                   <button
                     className={selectedView === 'documents' ? 'active-tab' : ''}
-                    onClick={() => setSelectedView('documents')}
+                    onClick={openDocumentsTab}
                   >
                     Documents
                   </button>
