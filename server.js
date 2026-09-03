@@ -6,6 +6,8 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
+const { Readable } = require('stream');
+const { pipeline } = require('stream/promises');
 const multer = require('multer');
 const webpush = require('web-push');
 const {
@@ -20,6 +22,8 @@ const {
   createMobilePushService
 } = require('./mobile-push');
 const {
+  getMobileAvailableLoadItem,
+  isMobileLoadEligibleForRoster,
   isMobileLoadStatusEligible,
   shouldKeepMobileLoadVisible
 } = require('./mobile-home');
@@ -37,6 +41,10 @@ const {
   getUniqueLoadPaperworkFileName,
   sanitizeLoadPaperworkFileName
 } = require('./load-paperwork');
+const {
+  createMobilePaperworkService,
+  getMobilePaperworkErrorResponse
+} = require('./mobile-paperwork');
 
 const app = express();
 app.use(cors());
@@ -1128,6 +1136,54 @@ async function resolveLoadPaperworkContext(token, orderId, sourceListId) {
     matchStrategy: loadMatch.matchStrategy,
     items
   };
+}
+
+async function getMobilePaperworkContentResponse(token, paperworkContext, document) {
+  const response = await fetchWithTimeoutAndRetry(
+    `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(paperworkContext.driveId)}` +
+      `/items/${encodeURIComponent(paperworkContext.loadFolder.id)}` +
+      `:/${encodeURIComponent(document.name)}:/content`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/pdf'
+      }
+    },
+    { maxRetries: GRAPH_READ_RETRIES }
+  );
+
+  if (!response.ok || !response.body) {
+    await response.arrayBuffer().catch(() => null);
+
+    if (response.status === 404) {
+      throw createLoadPaperworkError(
+        'That paperwork is not available for this load.',
+        404,
+        'MOBILE_PAPERWORK_DOCUMENT_NOT_AVAILABLE'
+      );
+    }
+
+    throw createLoadPaperworkError(
+      'Microsoft Graph could not read this paperwork.',
+      502,
+      'MOBILE_PAPERWORK_CONTENT_UNAVAILABLE'
+    );
+  }
+
+  return response;
+}
+
+function getMobilePaperworkContentDisposition(name) {
+  const normalizedName = String(name || 'paperwork.pdf')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .trim();
+  const asciiName = normalizedName
+    .replace(/[^\x20-\x7e]/g, '_')
+    .replace(/["\\]/g, '_') || 'paperwork.pdf';
+  const encodedName = encodeURIComponent(normalizedName || 'paperwork.pdf')
+    .replace(/['()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+
+  return `inline; filename="${asciiName}"; filename*=UTF-8''${encodedName}`;
 }
 
 function buildLoadPaperworkResponse(context) {
@@ -23506,23 +23562,6 @@ function getMobileHomeLoadKey(load) {
   return String(load?.id || `${load?.BOL || ''}|${load?.BidID || ''}|${load?.PickupDate || ''}`);
 }
 
-function isMobileLoadEligibleForRoster(roster, item) {
-  const fields = item?.fields || {};
-  const status = normalizeText(getChoiceValue(fields.Status));
-  const truckKey = normalizeTruckKey(roster?.truck);
-  const itemTruckKey = normalizeTruckKey(
-    getChoiceValue(fields.Truck_x0020_Number || fields['Truck_x0020_Number/Value'])
-  );
-
-  return (
-    isMobileLoadStatusEligible(status) &&
-    Boolean(truckKey) &&
-    itemTruckKey === truckKey &&
-    !parseBoolean(fields.Processed) &&
-    !parseBoolean(fields.FinalSettleSent)
-  );
-}
-
 function getMobileHomeSelection(roster, items = [], uploadEvidenceSets = {}) {
   const today = formatEasternDate();
 
@@ -23631,6 +23670,54 @@ function getMobileHomeSelection(roster, items = [], uploadEvidenceSets = {}) {
     loads: activeLoads
   };
 }
+
+async function getMobilePaperworkAccessibleLoad({ driver, loadId, context, forceRefresh }) {
+  const graphToken = context?.graphToken || await getGraphToken();
+  const currentList = await getCurrentBidListingSource(graphToken);
+
+  if (!currentList) {
+    throw createLoadPaperworkError(
+      'The current Bid Listing is not available.',
+      404,
+      'MOBILE_PAPERWORK_CURRENT_LIST_NOT_AVAILABLE'
+    );
+  }
+
+  const [items, uploadEvidenceSets] = await Promise.all([
+    getDashboardBidSource(graphToken, currentList, {
+      forceRefresh: forceRefresh === true,
+      waitForRefresh: true
+    }),
+    getUploadEvidenceSets(graphToken)
+  ]);
+  const selection = getMobileHomeSelection(driver, items, uploadEvidenceSets);
+  const selectedItem = getMobileAvailableLoadItem(selection, items, loadId);
+
+  if (!selectedItem) return null;
+
+  return {
+    graphToken,
+    currentList,
+    selectedItem,
+    selection
+  };
+}
+
+const mobilePaperworkService = createMobilePaperworkService({
+  getAccessibleLoad: getMobilePaperworkAccessibleLoad,
+  resolvePaperworkContext: ({ access }) => resolveLoadPaperworkContext(
+    access.graphToken,
+    access.selectedItem.id,
+    access.currentList.listId
+  ),
+  getDocumentContent: ({ access, paperworkContext, document }) => (
+    getMobilePaperworkContentResponse(
+      access.graphToken,
+      paperworkContext,
+      document
+    )
+  )
+});
 
 function buildMobileHomePayload(roster, items = [], uploadEvidenceSets = {}) {
   const selection = getMobileHomeSelection(roster, items, uploadEvidenceSets);
@@ -23815,7 +23902,7 @@ app.get('/mobile/my-load', requireMobileSession, async (req, res) => {
     }
 
     const selectedItem = selectedSummary
-      ? items.find((item) => String(item?.id || '') === String(selectedSummary.id || ''))
+      ? getMobileAvailableLoadItem(selection, items, selectedSummary.id)
       : null;
     const selectedLoadId = String(selectedSummary?.id || '');
     const currentLoadId = String(selection.currentLoad?.id || '');
@@ -23882,6 +23969,83 @@ app.get('/mobile/my-load', requireMobileSession, async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Unable to load your current load right now.'
+    });
+  }
+});
+
+// ------------------------------------------------------------
+// GET /mobile/loads/:loadId/paperwork
+// ------------------------------------------------------------
+
+app.get('/mobile/loads/:loadId/paperwork', requireMobileSession, async (req, res) => {
+  try {
+    const result = await mobilePaperworkService.list({
+      driver: req.mobileDriver,
+      loadId: req.params.loadId,
+      context: { graphToken: await getGraphToken() }
+    });
+
+    res.set('Cache-Control', 'private, no-store');
+    return res.json({
+      success: true,
+      documents: result.documents
+    });
+  } catch (error) {
+    const failure = getMobilePaperworkErrorResponse(error, 'list');
+    console.error('Mobile paperwork listing failed.', {
+      code: failure.code,
+      statusCode: failure.status
+    });
+
+    return res.status(failure.status).json({
+      success: false,
+      code: failure.code,
+      error: failure.message
+    });
+  }
+});
+
+// ------------------------------------------------------------
+// GET /mobile/loads/:loadId/paperwork/:documentId
+// ------------------------------------------------------------
+
+app.get('/mobile/loads/:loadId/paperwork/:documentId', requireMobileSession, async (req, res) => {
+  try {
+    const result = await mobilePaperworkService.open({
+      driver: req.mobileDriver,
+      loadId: req.params.loadId,
+      documentId: req.params.documentId,
+      context: { graphToken: await getGraphToken() }
+    });
+
+    res.status(200);
+    res.set({
+      'Cache-Control': 'private, no-store',
+      'Content-Disposition': getMobilePaperworkContentDisposition(result.document.name),
+      'Content-Type': 'application/pdf',
+      Pragma: 'no-cache',
+      'X-Content-Type-Options': 'nosniff'
+    });
+
+    await pipeline(Readable.fromWeb(result.content.body), res);
+  } catch (error) {
+    if (res.headersSent) {
+      if (!['ABORT_ERR', 'ERR_STREAM_PREMATURE_CLOSE'].includes(String(error?.code || ''))) {
+        console.error('Mobile paperwork stream ended unexpectedly.');
+      }
+      return;
+    }
+
+    const failure = getMobilePaperworkErrorResponse(error, 'open');
+    console.error('Mobile paperwork open failed.', {
+      code: failure.code,
+      statusCode: failure.status
+    });
+
+    return res.status(failure.status).json({
+      success: false,
+      code: failure.code,
+      error: failure.message
     });
   }
 });

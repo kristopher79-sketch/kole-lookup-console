@@ -4,6 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  getMobileAvailableLoadItem,
+  isMobileLoadEligibleForRoster,
   isMobileLoadStatusEligible,
   shouldKeepMobileLoadVisible
 } = require('../mobile-home');
@@ -43,4 +45,52 @@ test('production load summaries use Status when applying upload visibility', () 
     }),
     false
   );
+});
+
+test('load eligibility requires the assigned truck and a live operational status', () => {
+  const assignedLoad = {
+    id: '42',
+    fields: {
+      Status: 'Won',
+      Truck_x0020_Number: '0042',
+      Processed: false,
+      FinalSettleSent: false
+    }
+  };
+
+  assert.equal(isMobileLoadEligibleForRoster({ truck: '42' }, assignedLoad), true);
+  assert.equal(isMobileLoadEligibleForRoster({ truck: '77' }, assignedLoad), false);
+  assert.equal(
+    isMobileLoadEligibleForRoster(
+      { truck: '42' },
+      { ...assignedLoad, fields: { ...assignedLoad.fields, Status: 'CAN' } }
+    ),
+    false
+  );
+  assert.equal(
+    isMobileLoadEligibleForRoster(
+      { truck: '42' },
+      { ...assignedLoad, fields: { ...assignedLoad.fields, Processed: true } }
+    ),
+    false
+  );
+  assert.equal(
+    isMobileLoadEligibleForRoster(
+      { truck: '42' },
+      { ...assignedLoad, fields: { ...assignedLoad.fields, FinalSettleSent: 'Yes' } }
+    ),
+    false
+  );
+});
+
+test('available-load lookup only returns current or upcoming Mobile selections', () => {
+  const items = [{ id: '1' }, { id: '2' }, { id: '3' }];
+  const selection = {
+    currentLoad: { id: '1' },
+    upcomingLoads: [{ id: '2' }]
+  };
+
+  assert.equal(getMobileAvailableLoadItem(selection, items, '1')?.id, '1');
+  assert.equal(getMobileAvailableLoadItem(selection, items, '2')?.id, '2');
+  assert.equal(getMobileAvailableLoadItem(selection, items, '3'), null);
 });

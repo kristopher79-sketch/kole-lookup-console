@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "test:load-paperwork": "node test/load-paperwork.test.js",
+    "test:mobile-paperwork": "node test/mobile-home.test.js && node test/mobile-paperwork.test.js",
     "test:notifications": "node -e \"require('./test/notification-events.test.js'); require('./test/mobile-push.test.js')\""
   },
   "keywords": [],
