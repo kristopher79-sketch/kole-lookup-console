@@ -14189,41 +14189,6 @@ button.available-truck-distribution-summary-card:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.documents-intro {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 12px 16px;
-  border: 1px solid rgba(148, 163, 184, 0.20);
-  border-radius: 14px;
-  background:
-    linear-gradient(90deg, rgba(59, 130, 246, 0.14), transparent 34%),
-    rgba(15, 23, 42, 0.72);
-  color: #f8fafc;
-  text-align: center;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-}
-
-.documents-intro strong,
-.documents-intro span {
-  display: block;
-}
-
-.documents-intro strong {
-  color: #ffffff;
-  font-size: 15px;
-  font-weight: 900;
-  letter-spacing: -0.01em;
-}
-
-.documents-intro span {
-  margin-top: 3px;
-  color: #b7c3d5;
-  font-size: 12px;
-  font-weight: 700;
-}
-
 .load-paperwork-panel {
   grid-column: 1 / -1;
   display: grid;
@@ -14543,23 +14508,6 @@ button.available-truck-distribution-summary-card:disabled {
 
 .document-launch-button:hover:not(:disabled) {
   background: #475569;
-}
-
-:root[data-theme='light'] .documents-intro {
-  border-color: #cbd5e1 !important;
-  background:
-    linear-gradient(90deg, rgba(37, 99, 235, 0.10), transparent 34%),
-    #f8fafc !important;
-  color: #0f172a !important;
-  box-shadow: inset 0 1px 0 #ffffff !important;
-}
-
-:root[data-theme='light'] .documents-intro strong {
-  color: #08111f !important;
-}
-
-:root[data-theme='light'] .documents-intro span {
-  color: #52627a !important;
 }
 
 :root[data-theme='light'] .load-paperwork-panel {
@@ -16946,6 +16894,11 @@ button.available-truck-distribution-summary-card:disabled {
 
 .detail-item .view-button {
   margin-top: 10px;
+}
+
+.detail-item .customer-card-button,
+.detail-item .driver-card-button {
+  align-self: center;
 }
 
 :root[data-theme='light'] .modal-return-trail {

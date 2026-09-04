@@ -11247,13 +11247,6 @@ function openReportLoadDetails(load) {
 
         <SectionTitle>Other Document Locations</SectionTitle>
 
-        <div className="documents-intro">
-          <div>
-            <strong>{selected.BOL ? `Existing shortcuts for ${selected.BOL}` : 'Existing document shortcuts'}</strong>
-            <span>Load Photos remains the separate driver-to-KOLE return folder.</span>
-          </div>
-        </div>
-
         <DocumentCard
           badge="BOL"
           title="Bill of Lading"
