@@ -15197,18 +15197,18 @@ function openReportLoadDetails(load) {
                   <tbody>
                     {rows.map((record, index) => (
                       <tr key={record.id || `${record.driverName}-${record.unitNo}-${index}`}>
-                        <td>
+                        <td data-label="Driver">
                           <strong>{record.driverName || '-'}</strong>
                           <small>{record.equipmentType || '-'}</small>
                         </td>
-                        <td>{record.unitNo || '-'}</td>
-                        <td>{formatAvailableTruckPosted(record)}</td>
-                        <td>{record.currentLocation || '-'}</td>
-                        <td>
+                        <td data-label="Unit">{record.unitNo || '-'}</td>
+                        <td data-label="Posted Available">{formatAvailableTruckPosted(record)}</td>
+                        <td data-label="Location">{record.currentLocation || '-'}</td>
+                        <td data-label="First Pickup After Posting">
                           <strong>{formatAvailableTruckNextPickup(record)}</strong>
                           {record.nextAssignment?.matchType && <small>Matched by {record.nextAssignment.matchType}</small>}
                         </td>
-                        <td>{renderAvailableTruckGap(record)}</td>
+                        <td data-label="Time to Next Pickup">{renderAvailableTruckGap(record)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -15352,22 +15352,22 @@ function openReportLoadDetails(load) {
                           <tbody>
                             {records.map((record) => (
                               <tr key={record.id || `${record.driverName}-${record.unitNo}-${record.dateSent}-${record.timeOfDay}`}>
-                                <td>
+                                <td data-label="Driver">
                                   <strong>{record.driverName || '-'}</strong>
                                   <small>{record.teamType || '-'}</small>
                                 </td>
-                                <td>{record.unitNo || '-'}</td>
-                                <td>
+                                <td data-label="Unit">{record.unitNo || '-'}</td>
+                                <td data-label="Equipment">
                                   <strong>{record.equipmentType || '-'}</strong>
                                   <small>{record.equipmentFamily || '-'}</small>
                                 </td>
-                                <td>{record.currentLocation || '-'}</td>
-                                <td><AvailableTruckProximityList stops={record.proximityStops} /></td>
-                                <td>
+                                <td data-label="Current Location">{record.currentLocation || '-'}</td>
+                                <td data-label="Advertised Proximity"><AvailableTruckProximityList stops={record.proximityStops} /></td>
+                                <td data-label="Last Posting">
                                   <strong>{formatAvailableTruckLastPosting(record)}</strong>
                                   <small>Last posting date</small>
                                 </td>
-                                <td className="available-trucks-republish-cell">
+                                <td className="available-trucks-republish-cell" data-label="Actions">
                                   <button
                                     type="button"
                                     className="secondary-button compact-action-button available-trucks-republish-button"
@@ -22966,12 +22966,13 @@ function openReportLoadDetails(load) {
       <div className="container">
         <header className="app-header app-header-branded">
   <div className="brand-stack">
-    <img
-  src={koleLogo}
-  alt="Kole Trucking"
-  className="brand-logo-large"
-  style={{ width: '520px' }}
-/>
+    <div className="brand-logo-frame">
+      <img
+        src={koleLogo}
+        alt="Kole Trucking"
+        className="brand-logo-large"
+      />
+    </div>
 
     <KoleBrandTitle season={resolvedSeasonalTheme} subtitle="Enter your Kole Connect access token to continue." />
   </div>
@@ -23056,18 +23057,19 @@ function openReportLoadDetails(load) {
       <div className="container">
         <header className="app-header app-header-branded">
   <div className="brand-stack">
-    <img
-  src={koleLogo}
-  alt="Kole Trucking"
-  className="brand-logo-large"
-  style={{ width: '520px' }}
-/>
+    <div className="brand-logo-frame">
+      <img
+        src={koleLogo}
+        alt="Kole Trucking"
+        className="brand-logo-large"
+      />
+    </div>
 
     <KoleBrandTitle
       animate={brandRevealActive}
       revealKey={brandRevealKey}
       season={resolvedSeasonalTheme}
-      subtitle="Search by order, BOLs, customers, or driver last name."
+      subtitle="One workspace for operations, sales, drivers, and reporting."
     />
   </div>
 
@@ -23080,8 +23082,8 @@ function openReportLoadDetails(load) {
   </div>
 </header>
 
-      <div className="search-card">
-        <div className="search-bar">
+      <div className="search-card order-search-card">
+        <div className="search-bar order-search-bar">
           <input
             value={query}
             onChange={(e) => handleQueryChange(e.target.value)}
@@ -23094,61 +23096,14 @@ function openReportLoadDetails(load) {
             {loading ? 'Searching...' : 'Search'}
           </button>
 
-          <div className="search-action-strip" role="group" aria-label="Order and quote actions">
-            <button
-              type="button"
-              className="search-secondary-button search-clear-button"
-              onClick={clearOrderSearch}
-              disabled={loading && !hasSearched}
-            >
-              Clear
-            </button>
-
-            <button
-              ref={quoteEngineButtonRef}
-              type="button"
-              className="quote-engine-launch"
-              onClick={openQuoteEngine}
-              aria-haspopup="dialog"
-              aria-expanded={quoteEngineOpen}
-            >
-              New Quote
-            </button>
-
-            <button
-              ref={contractLanesButtonRef}
-              type="button"
-              className="contract-lanes-launch"
-              onClick={openContractLanes}
-              aria-haspopup="dialog"
-              aria-expanded={contractLanesOpen}
-            >
-              Contract Lanes
-            </button>
-
-            <button
-              ref={noBolBidsButtonRef}
-              type="button"
-              className="search-secondary-button no-bol-bids-launch"
-              onClick={openNoBolBids}
-              disabled={noBolBidsLoading}
-              aria-haspopup="dialog"
-              aria-expanded={noBolBidsOpen}
-              title="Show current Bid Listing entries without a BOL"
-            >
-              {noBolBidsLoading ? 'Loading Open Bids...' : 'Open Bids'}
-            </button>
-
-            {salesSearchReturnLead && (
-              <button
-                type="button"
-                className="search-return-button"
-                onClick={returnToCustomerCard}
-              >
-                Return to customer
-              </button>
-            )}
-          </div>
+          <button
+            type="button"
+            className="search-secondary-button search-clear-button"
+            onClick={clearOrderSearch}
+            disabled={loading && !hasSearched}
+          >
+            Clear
+          </button>
         </div>
 
         <div className="search-options">
@@ -23172,6 +23127,59 @@ function openReportLoadDetails(load) {
             />
             <span>Include archive years</span>
           </label>
+        </div>
+
+        <div className="search-toolbar">
+          <div className="search-quick-actions">
+            <span className="search-toolbar-label">Quick actions</span>
+            <div className="search-action-strip" role="group" aria-label="Quote and bid actions">
+
+              <button
+                ref={quoteEngineButtonRef}
+                type="button"
+                className="quote-engine-launch"
+                onClick={openQuoteEngine}
+                aria-haspopup="dialog"
+                aria-expanded={quoteEngineOpen}
+              >
+                New Quote
+              </button>
+
+              <button
+                ref={contractLanesButtonRef}
+                type="button"
+                className="contract-lanes-launch"
+                onClick={openContractLanes}
+                aria-haspopup="dialog"
+                aria-expanded={contractLanesOpen}
+              >
+                Contract Lanes
+              </button>
+
+              <button
+                ref={noBolBidsButtonRef}
+                type="button"
+                className="search-secondary-button no-bol-bids-launch"
+                onClick={openNoBolBids}
+                disabled={noBolBidsLoading}
+                aria-haspopup="dialog"
+                aria-expanded={noBolBidsOpen}
+                title="Show current Bid Listing entries without a BOL"
+              >
+                {noBolBidsLoading ? 'Loading Open Bids...' : 'Open Bids'}
+              </button>
+            </div>
+          </div>
+
+          {salesSearchReturnLead && (
+            <button
+              type="button"
+              className="search-return-button"
+              onClick={returnToCustomerCard}
+            >
+              Return to customer
+            </button>
+          )}
         </div>
 
         {hasSearched && !loading && !error && (
