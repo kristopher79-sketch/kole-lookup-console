@@ -4,7 +4,7 @@ const OPERATION_SLICES = [
   { key: 'activeToday', label: 'Active Today', empty: 'No active shipments today.' },
   { key: 'loadingToday', label: 'Loading Today', empty: 'No loads scheduled to load today.' },
   { key: 'deliveringToday', label: 'Delivering Today', empty: 'No deliveries scheduled today.' },
-  { key: 'loadingNext7', label: 'Loading Next 7 Days', empty: 'No upcoming loads in the next 7 days.' }
+  { key: 'loadingNext7', label: 'Upcoming Loads', empty: 'No upcoming loads in the next 7 days.' }
 ];
 
 // Keep the shared search visible if a customer lookup is refined with another search.
