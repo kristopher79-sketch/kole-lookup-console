@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import './App.css?seasonal-modals=v9';
 import koleLogo from './assets/kole-logo.png';
+import BetaDashboard from './BetaDashboard';
 
 const isTauriRuntime = Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
 const isViteDev = import.meta.env?.DEV === true;
@@ -843,6 +844,7 @@ const DEFAULT_KOLE_USER_PREFERENCES = {
   reportsDefaultOpen: false,
   hideSalesAndLeads: false,
   compactDashboardMode: false,
+  betaDashboardEnabled: false,
   orderCardView: false,
   hideYearlyProjection: false,
   hideOnThisDay: false,
@@ -2834,6 +2836,12 @@ export default function App() {
                   description="Tightens spacing and table padding for power-user scanning."
                   checked={userPrefs.compactDashboardMode}
                   onChange={(checked) => updateUserPreference('compactDashboardMode', checked)}
+                />
+                <PreferenceSwitch
+                  label="Beta Dashboard View"
+                  description="Try the new Kole Connect command-center layout. You can return to Classic View at any time."
+                  checked={userPrefs.betaDashboardEnabled}
+                  onChange={(checked) => updateUserPreference('betaDashboardEnabled', checked)}
                 />
                 <PreferenceSwitch
                   label="Order Card View on larger screens"
@@ -14450,16 +14458,20 @@ function openReportLoadDetails(load) {
     );
   }
 
-  function DriverPositionTrackingPanel() {
+  function DriverPositionTrackingPanel({ workspace = false } = {}) {
     const positions = driverPositionsData?.positions || [];
+    const expanded = workspace || driverRosterAccordionOpen;
+    const RosterHeading = workspace ? 'div' : 'button';
 
     return (
-      <div className={`driver-position-panel ${driverRosterAccordionOpen ? 'is-open' : 'is-closed'}`}>
-        <button
-          type="button"
+      <div className={`driver-position-panel ${expanded ? 'is-open' : 'is-closed'}`}>
+        <RosterHeading
+          {...(!workspace ? {
+            type: 'button',
+            onClick: () => setDriverRosterAccordionOpen((current) => !current),
+            'aria-expanded': expanded
+          } : {})}
           className="driver-position-header driver-position-header-button"
-          onClick={() => setDriverRosterAccordionOpen((current) => !current)}
-          aria-expanded={driverRosterAccordionOpen}
         >
           <div>
             <h3>Active Driver Roster</h3>
@@ -14476,10 +14488,10 @@ function openReportLoadDetails(load) {
             </div>
           )}
 
-          <span className="driver-position-accordion-chevron" aria-hidden="true">{driverRosterAccordionOpen ? '▲' : '▼'}</span>
-        </button>
+          {!workspace && <span className="driver-position-accordion-chevron" aria-hidden="true">{expanded ? '▲' : '▼'}</span>}
+        </RosterHeading>
 
-        {driverRosterAccordionOpen && (
+        {expanded && (
           <div className="driver-position-accordion-body">
             {driverPositionsError && <div className="msg error">{driverPositionsError}</div>}
             {driverPositionsLoading && !driverPositionsData && <div className="msg">Loading active driver roster...</div>}
@@ -14509,6 +14521,15 @@ function openReportLoadDetails(load) {
                         key={position.id || position.equipmentId}
                         className={`driver-position-row ${position.hasRosterDetails ? 'has-roster-details' : 'missing-roster-details'}`}
                         onClick={() => setSelectedDriverRoster(position)}
+                        {...(workspace ? {
+                          tabIndex: 0,
+                          onKeyDown: (event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              setSelectedDriverRoster(position);
+                            }
+                          }
+                        } : {})}
                         title={position.hasRosterDetails ? 'Open driver roster details' : 'Open active position details'}
                       >
                         <td>
@@ -15220,7 +15241,54 @@ function openReportLoadDetails(load) {
     );
   }
 
-  function AvailableTrucksPanel() {
+  function renderDashboardQuickActions() {
+    return (<>
+
+
+              <button
+                ref={quoteEngineButtonRef}
+                type="button"
+                className="quote-engine-launch"
+                onClick={openQuoteEngine}
+                aria-haspopup="dialog"
+                aria-expanded={quoteEngineOpen}
+              >
+                New Quote
+              </button>
+
+              <button
+                ref={contractLanesButtonRef}
+                type="button"
+                className="contract-lanes-launch"
+                onClick={openContractLanes}
+                aria-haspopup="dialog"
+                aria-expanded={contractLanesOpen}
+              >
+                Contract Lanes
+              </button>
+
+              <button
+                ref={noBolBidsButtonRef}
+                type="button"
+                className={userPrefs.betaDashboardEnabled ? 'no-bol-bids-launch' : 'search-secondary-button no-bol-bids-launch'}
+                onClick={openNoBolBids}
+                disabled={noBolBidsLoading}
+                aria-haspopup="dialog"
+                aria-expanded={noBolBidsOpen}
+                title="Show current Bid Listing entries without a BOL"
+              >
+                {noBolBidsLoading ? 'Loading Open Bids...' : 'Open Bids'}
+              </button>
+
+    </>);
+  }
+
+  function getAvailableEquipmentCount() {
+    return availableTrucksData?.summary?.currentRecordCount
+      ?? availableTrucksData?.count ?? availableTrucksData?.records?.length ?? 0;
+  }
+
+  function AvailableTrucksPanel({ workspace = false } = {}) {
     const records = availableTrucksData?.records || [];
     const recordsWithin24Hours = availableTrucksData?.recordsWithin24Hours || [];
     const assignmentExcludedRecords = availableTrucksData?.assignmentExcludedRecords || [];
@@ -15229,7 +15297,7 @@ function openReportLoadDetails(load) {
     const insights = availableTrucksData?.insights || {};
     const batchLabel = formatAvailableTruckBatchLabel(summary);
     const attentionItems = (insights.attention || []).filter((item) => !['No availability from the last 24 hours', 'No current unassigned trucks', 'Repost collapsed'].includes(item.label));
-    const currentCount = summary.currentRecordCount ?? availableTrucksData?.count ?? records.length;
+    const currentCount = getAvailableEquipmentCount();
     const excludedCount = summary.activeFutureAssignmentExclusions || 0;
     const assignmentLookaheadDays = Number(summary.assignmentLookaheadDays ?? availableTrucksData?.assignmentLookaheadDays ?? 2);
     const distributionRows = availableTruckDistributionData?.rows || [];
@@ -15246,10 +15314,11 @@ function openReportLoadDetails(load) {
         )
       : null;
     const showAvailableTrucksStatusPill = !availableTrucksSectionOpen || availableTrucksLoading;
-    const showCurrentAvailableEquipmentMarker = availableTrucksSectionOpen && !availableTrucksCurrentOpen && currentCount > 0;
+    const showCurrentAvailableEquipmentMarker = (workspace || availableTrucksSectionOpen) && !availableTrucksCurrentOpen && currentCount > 0;
 
     return (
-      <div className="search-card feature-accordion-panel available-trucks-panel">
+      <div className={workspace ? 'beta-dashboard-equipment-panel' : 'search-card feature-accordion-panel available-trucks-panel'}>
+        {!workspace && (
         <button
           type="button"
           className="feature-section-header-button available-trucks-section-header-button"
@@ -15266,12 +15335,23 @@ function openReportLoadDetails(load) {
           )}
           <span className="feature-section-chevron">{availableTrucksSectionOpen ? '▲' : '▼'}</span>
         </button>
+        )}
 
         {availableTrucksError && <div className="msg error">{availableTrucksError}</div>}
         {availableTruckActionError && <div className="msg error">{availableTruckActionError}</div>}
         {availableTruckActionMessage && <div className="msg success">{availableTruckActionMessage}</div>}
 
-        {availableTrucksSectionOpen && (
+        {workspace && (
+          <div className="beta-dashboard-heading">
+            <p role="status">{availableTrucksLoading ? 'Loading available equipment...' : availableTrucksData
+              ? `${formatReportNumber(currentCount)} currently available equipment row(s)` : 'Availability data is unavailable.'}</p>
+            <button type="button" onClick={() => loadAvailableTrucks()} disabled={availableTrucksLoading}>
+              {availableTrucksLoading ? 'Refreshing...' : 'Refresh Available Equipment'}
+            </button>
+          </div>
+        )}
+
+        {(workspace || availableTrucksSectionOpen) && (
           <div className="feature-section-body available-trucks-body">
             <button
               type="button"
@@ -15807,21 +15887,26 @@ function openReportLoadDetails(load) {
     );
   }
 
-  function IntelliTrackPanel() {
+  function getVisibleIntelliTrackRecords() {
     const suppressedBolSet = new Set(intelliTrackSuppressedBols);
-    const records = (intelliTrackData?.records || []).filter((record) => {
+    return (intelliTrackData?.records || []).filter((record) => {
       const bol = String(record?.BOLNumber || '').trim().toUpperCase();
       return !bol || !suppressedBolSet.has(bol);
     });
+  }
+
+  function IntelliTrackPanel({ workspace = false } = {}) {
+    const records = getVisibleIntelliTrackRecords();
     const count = records.length;
     const order = intelliTrackSearchResult;
     const buttonState = getIntelliTrackButtonState(order);
     const orderLoadingKey = order?.id ? `${order.id}-${buttonState.enabled ? 'on' : 'off'}` : '';
     const showIntelliTrackStatusPill = !intelliTrackSectionOpen || intelliTrackLoading;
-    const showActiveIntelliTrackMarker = intelliTrackSectionOpen && !intelliTrackOpen && count > 0;
+    const showActiveIntelliTrackMarker = (workspace || intelliTrackSectionOpen) && !intelliTrackOpen && count > 0;
 
     return (
-      <div className="search-card feature-accordion-panel intellitrack-panel">
+      <div className={workspace ? 'beta-dashboard-tracking-panel' : 'search-card feature-accordion-panel intellitrack-panel'}>
+        {!workspace && (
         <button
           type="button"
           className="feature-section-header-button intellitrack-section-header-button"
@@ -15838,12 +15923,23 @@ function openReportLoadDetails(load) {
           )}
           <span className="feature-section-chevron">{intelliTrackSectionOpen ? '▲' : '▼'}</span>
         </button>
+        )}
 
         {intelliTrackError && <div className="msg error">{intelliTrackError}</div>}
         {intelliTrackActionError && <div className="msg error">{intelliTrackActionError}</div>}
         {intelliTrackActionMessage && <div className="msg success">{intelliTrackActionMessage}</div>}
 
-        {intelliTrackSectionOpen && (
+        {workspace && (
+          <div className="beta-dashboard-heading">
+            <p role="status">{intelliTrackLoading ? 'Loading IntelliTrack...' : intelliTrackData
+              ? `${formatReportNumber(count)} active tracking order(s)` : 'Tracking data is unavailable.'}</p>
+            <button type="button" onClick={() => loadIntelliTrack()} disabled={intelliTrackLoading}>
+              {intelliTrackLoading ? 'Refreshing...' : 'Refresh IntelliTrack'}
+            </button>
+          </div>
+        )}
+
+        {(workspace || intelliTrackSectionOpen) && (
           <div className="feature-section-body intellitrack-body">
             <button
               type="button"
@@ -15887,7 +15983,11 @@ function openReportLoadDetails(load) {
                   </button>
                 </div>
 
-                {records.length === 0 ? (
+                {workspace && intelliTrackLoading && records.length === 0 ? (
+                  <div className="msg">Loading active tracking orders...</div>
+                ) : workspace && !intelliTrackData ? (
+                  <div className="msg">Use Refresh IntelliTrack to load tracking orders.</div>
+                ) : records.length === 0 ? (
                   <div className="intellitrack-empty">
                     <strong>No orders are currently being tracked.</strong>
                   </div>
@@ -16071,7 +16171,7 @@ function openReportLoadDetails(load) {
   }
 
 
-  function UploadDigestPanel() {
+  function UploadDigestPanel({ workspace = false } = {}) {
     const records = uploadDigestData?.records || [];
     const count = uploadDigestData?.count ?? records.length;
     const activeDigestDate = uploadDigestData?.targetDate || uploadDigestDate;
@@ -16080,7 +16180,8 @@ function openReportLoadDetails(load) {
     const showUploadDigestStatusPill = !uploadDigestSectionOpen || uploadDigestLoading;
 
     return (
-      <div className="search-card feature-accordion-panel upload-digest-panel">
+      <div className={workspace ? 'beta-dashboard-photo-panel' : 'search-card feature-accordion-panel upload-digest-panel'}>
+        {!workspace && (
         <button
           type="button"
           className="feature-section-header-button upload-digest-section-header-button"
@@ -16097,11 +16198,23 @@ function openReportLoadDetails(load) {
           )}
           <span className="feature-section-chevron">{uploadDigestSectionOpen ? '▲' : '▼'}</span>
         </button>
+        )}
 
         {uploadDigestError && <div className="msg error">{uploadDigestError}</div>}
         {uploadDigestActionError && <div className="msg error">{uploadDigestActionError}</div>}
 
-        {uploadDigestSectionOpen && (
+        {workspace && (
+          <div className="beta-dashboard-heading">
+            <p role="status">{uploadDigestLoading
+              ? 'Loading photo uploads...'
+              : uploadDigestData ? `${formatReportNumber(count)} upload record(s) for ${dateLabel}` : 'Photo uploads are unavailable.'}</p>
+            <button type="button" onClick={() => loadUploadDigest(uploadDigestDate)} disabled={uploadDigestLoading}>
+              {uploadDigestLoading ? 'Refreshing...' : 'Refresh Uploads'}
+            </button>
+          </div>
+        )}
+
+        {(workspace || uploadDigestSectionOpen) && (
           <div className="feature-section-body upload-digest-section-body">
             <div className="upload-digest-header-row">
               <button
@@ -16148,7 +16261,11 @@ function openReportLoadDetails(load) {
 
             {!uploadDigestError && (
               <div className="upload-digest-body">
-                {records.length === 0 ? (
+                {workspace && uploadDigestLoading && records.length === 0 ? (
+                  <div className="msg">Loading pickup and delivery uploads...</div>
+                ) : workspace && !uploadDigestData ? (
+                  <div className="msg">Use Refresh Uploads to load this date.</div>
+                ) : records.length === 0 ? (
                   <div className="msg">No pickup or delivery uploads logged for this date.</div>
                 ) : (
                   <div className="operations-table-wrap upload-digest-table-wrap">
@@ -19865,7 +19982,12 @@ function openReportLoadDetails(load) {
     );
   }
 
-  function RecruitingPanel() {
+  function getRecruitingAlertCount() {
+    return Number(recruitingData?.summary?.readyToQualify || 0)
+      + Number(recruitingData?.summary?.followUpDue || 0);
+  }
+
+  function RecruitingPanel({ workspace = false } = {}) {
     const summary = recruitingData?.summary || {};
     const sourceCandidates = recruitingData?.candidates || [];
     const sourceCandidateIds = new Set(sourceCandidates.map((candidate) => candidate.candidateId).filter(Boolean));
@@ -19903,7 +20025,7 @@ function openReportLoadDetails(load) {
     });
     const previewCandidates = filteredCandidates.slice(0, RECRUITING_PREVIEW_ROW_LIMIT);
     const hiddenPreviewCount = Math.max(filteredCandidates.length - previewCandidates.length, 0);
-    const alertCount = Number(summary.readyToQualify || 0) + Number(summary.followUpDue || 0);
+    const alertCount = getRecruitingAlertCount();
     const showRecruitingPill = !recruitingSectionOpen || recruitingLoading;
     const setRecruitingTileView = (view) => {
       setRecruitingStatusFilter(view);
@@ -19911,7 +20033,8 @@ function openReportLoadDetails(load) {
     };
 
     return (
-      <div className="search-card feature-accordion-panel recruiting-panel">
+      <div className={workspace ? 'beta-dashboard-recruiting-panel' : 'search-card feature-accordion-panel recruiting-panel'}>
+        {!workspace && (
         <button
           type="button"
           className="feature-section-header-button recruiting-section-header-button"
@@ -19928,13 +20051,14 @@ function openReportLoadDetails(load) {
           )}
           <span className="feature-section-chevron">{recruitingSectionOpen ? '▲' : '▼'}</span>
         </button>
+        )}
 
         {recruitingError && <div className="msg error">{recruitingError}</div>}
         {recruitingActionMessage && !selectedRecruitingProfile && <div className="msg success-message">{recruitingActionMessage}</div>}
         {recruitingActionError && !selectedRecruitingProfile && <div className="msg error">{recruitingActionError}</div>}
         {recruitingProfileError && <div className="msg error">{recruitingProfileError}</div>}
 
-        {recruitingSectionOpen && (
+        {(workspace || recruitingSectionOpen) && (
           <div className="feature-section-body recruiting-body">
             <div className="recruiting-toolbar">
               <div>
@@ -19952,7 +20076,7 @@ function openReportLoadDetails(load) {
               </div>
             </div>
 
-            <div className="recruiting-kpi-grid" aria-label="Recruiting quick filters">
+            {(!workspace || recruitingData) && <div className="recruiting-kpi-grid" aria-label="Recruiting quick filters">
               <button type="button" className={`recruiting-kpi-card ${recruitingStatusFilter === 'Applied' ? 'active' : ''}`} onClick={() => setRecruitingTileView('Applied')}>
                 <strong>{formatReportNumber(summary.applied || 0)}</strong><span>Applied</span>
               </button>
@@ -19975,6 +20099,7 @@ function openReportLoadDetails(load) {
               </button>
             </div>
 
+            }
             <div className="recruiting-filters">
               <input
                 value={recruitingSearch}
@@ -19988,6 +20113,8 @@ function openReportLoadDetails(load) {
 
             {recruitingLoading && !recruitingData ? (
               <div className="msg">Loading recruiting pipeline...</div>
+            ) : workspace && !recruitingData ? (
+              <div className="msg">Recruiting data is unavailable. Use Refresh to try again.</div>
             ) : filteredCandidates.length === 0 ? (
               <div className="msg">No recruiting candidates match this view.</div>
             ) : (
@@ -20032,23 +20159,28 @@ function openReportLoadDetails(load) {
     );
   }
 
-  function SalesAndLeadsPanel() {
+  function getSalesAndLeadsAlertCount() {
+    return Number(salesLeadsReport?.summary?.followUpDue || 0)
+      || Number(salesActivityReport?.summary?.overdueFollowUps || 0);
+  }
+
+  function SalesAndLeadsPanel({ workspace = false } = {}) {
     const isCustomerTrendsOpen = activeReportPanel === 'customerBookingTrends';
     const isSalesActivityOpen = activeReportPanel === 'salesActivity';
     const isLeadSuppressionOpen = activeReportPanel === 'leadSuppression';
     const isSalesLeadsOpen = activeReportPanel === 'salesLeads';
 
     const salesLeadsFollowUpDueCount = Number(salesLeadsReport?.summary?.followUpDue || 0);
-    const salesActivityOverdueFollowUpsCount = Number(salesActivityReport?.summary?.overdueFollowUps || 0);
-    const salesAndLeadsPillCount = salesLeadsFollowUpDueCount || salesActivityOverdueFollowUpsCount;
+    const salesAndLeadsPillCount = getSalesAndLeadsAlertCount();
     const salesAndLeadsPillLabel = salesLeadsFollowUpDueCount
       ? `follow-up${salesLeadsFollowUpDueCount === 1 ? '' : 's'} due`
       : 'overdue';
     const showSalesAndLeadsPill = !salesAndLeadsSectionOpen && salesAndLeadsPillCount > 0;
-    const showCustomerCardsFollowUpMarker = salesAndLeadsSectionOpen && !isSalesLeadsOpen && salesLeadsFollowUpDueCount > 0;
+    const showCustomerCardsFollowUpMarker = (workspace || salesAndLeadsSectionOpen) && !isSalesLeadsOpen && salesLeadsFollowUpDueCount > 0;
 
     return (
-      <div className="search-card feature-accordion-panel sales-and-leads-panel">
+      <div className={workspace ? 'beta-dashboard-sales-panel' : 'search-card feature-accordion-panel sales-and-leads-panel'}>
+        {!workspace && (
         <button
           type="button"
           className="feature-section-header-button sales-and-leads-section-header-button"
@@ -20065,8 +20197,9 @@ function openReportLoadDetails(load) {
           )}
           <span className="feature-section-chevron">{salesAndLeadsSectionOpen ? '▲' : '▼'}</span>
         </button>
+        )}
 
-        {salesAndLeadsSectionOpen && (
+        {(workspace || salesAndLeadsSectionOpen) && (
           <div className="feature-section-body sales-and-leads-body reports-accordion-list">
             <div className={`report-accordion ${isCustomerTrendsOpen ? 'open' : ''}`}>
               <button
@@ -20514,7 +20647,7 @@ function openReportLoadDetails(load) {
     );
   }
 
-  function DriverSummaryReport() {
+  function DriverSummaryReport({ workspace = false } = {}) {
     const monthOptions = Array.from({ length: 12 }, (_, index) => index + 1);
     const isGrossRevenueOpen = activeReportPanel === 'grossRevenue';
     const isYearlyProjectionOpen = activeReportPanel === 'yearlyProjection';
@@ -20541,7 +20674,8 @@ function openReportLoadDetails(load) {
     const isDriverFleetReportsOpen = isReportGroupOpen('driverFleet');
 
     return (
-      <div className="search-card feature-accordion-panel reports-panel">
+      <div className={workspace ? 'beta-dashboard-reports-panel' : 'search-card feature-accordion-panel reports-panel'}>
+        {!workspace && (
         <button
           type="button"
           className="feature-section-header-button reports-section-header-button"
@@ -20568,8 +20702,10 @@ function openReportLoadDetails(load) {
           )}
           <span className="feature-section-chevron">{reportsSectionOpen ? '▲' : '▼'}</span>
         </button>
+        )}
 
-        {reportsSectionOpen && (
+        {workspace && <p role="status">{reportActionAlertSummary}</p>}
+        {(workspace || reportsSectionOpen) && (
           <div className="feature-section-body reports-accordion-list">
           <div className={`report-group-accordion ${isFinancialReportsOpen ? 'open' : ''}`}>
             <button
@@ -23048,7 +23184,7 @@ function openReportLoadDetails(load) {
       )}
 
       <div className="container">
-        <header className="app-header app-header-branded">
+        <header className={`app-header app-header-branded${userPrefs.betaDashboardEnabled ? ' beta-dashboard-header' : ''}`}>
   <div className="brand-stack">
     <div className="brand-logo-frame">
       <img
@@ -23067,14 +23203,64 @@ function openReportLoadDetails(load) {
   </div>
 
   <div className="header-actions">
-    <ThemeToggleButton />
-    <PreferencesButton />
+    {userPrefs.betaDashboardEnabled ? (
+      <><PreferencesButton /><ThemeToggleButton /></>
+    ) : (
+      <><ThemeToggleButton /><PreferencesButton /></>
+    )}
     <button type="button" className="close-button header-logoff" onClick={handleLogout}>
       Log Off
     </button>
   </div>
 </header>
 
+      <BetaDashboard
+        enabled={userPrefs.betaDashboardEnabled}
+        searching={hasSearched}
+        operationsHidden={userPrefs.hideOperationsToday}
+        operationsData={operationsData}
+        operationsLoading={operationsLoading}
+        operationsError={operationsError}
+        refreshing={operationsLoading || driverPositionsLoading}
+        onRefresh={refreshOperationsAndTracking}
+        photosHidden={userPrefs.hideUploadDigest}
+        trackingHidden={userPrefs.hideIntelliTrack}
+        equipmentHidden={userPrefs.hideAvailableTrucks}
+        recruitingHidden={userPrefs.hideRecruiting}
+        salesHidden={userPrefs.hideSalesAndLeads}
+        reportsCount={reportActionAlertsLoading && !reportActionAlerts ? '…'
+          : reportActionAlertsError && !reportActionAlerts ? '—' : reportActionAlertCounts.total}
+        reportsSummary={reportActionAlertSummary}
+        reports={userPrefs.betaDashboardEnabled ? DriverSummaryReport({ workspace: true }) : null}
+        salesCount={salesLeadsReport || salesActivityReport ? getSalesAndLeadsAlertCount() : '—'}
+        salesSearchActive={Boolean(salesSearchReturnLead)}
+        sales={userPrefs.betaDashboardEnabled && !userPrefs.hideSalesAndLeads ? <SalesAndLeadsPanel workspace /> : null}
+        recruitingCount={recruitingLoading ? '…' : recruitingData ? getRecruitingAlertCount() : '—'}
+        recruiting={userPrefs.betaDashboardEnabled && !userPrefs.hideRecruiting ? RecruitingPanel({ workspace: true }) : null}
+        equipmentCount={availableTrucksLoading ? '…' : availableTrucksData ? getAvailableEquipmentCount() : '—'}
+        equipment={userPrefs.betaDashboardEnabled && !userPrefs.hideAvailableTrucks ? AvailableTrucksPanel({ workspace: true }) : null}
+        trackingCount={intelliTrackLoading ? '…' : intelliTrackData ? getVisibleIntelliTrackRecords().length : '—'}
+        tracking={userPrefs.betaDashboardEnabled && !userPrefs.hideIntelliTrack ? IntelliTrackPanel({ workspace: true }) : null}
+        photoCount={uploadDigestLoading ? '…' : uploadDigestData
+          ? (uploadDigestData.count ?? uploadDigestData.records?.length ?? 0) : '—'}
+        photoDateLabel={formatDateInputLabel(uploadDigestData?.targetDate || uploadDigestDate)}
+        photos={userPrefs.betaDashboardEnabled && !userPrefs.hideUploadDigest ? <UploadDigestPanel workspace /> : null}
+        currentTimeOffCount={operationsData?.driverTimeOff ? getDriverTimeOffCurrentRecords().length : null}
+        quickActions={userPrefs.betaDashboardEnabled ? renderDashboardQuickActions() : null}
+        onOpenTimeOff={() => {
+          if (hasSearched) clearOrderSearch();
+          setDriverTimeOffPaneFilter('current');
+          setDriverTimeOffAccordionOpen(true);
+        }}
+        roster={userPrefs.betaDashboardEnabled && !userPrefs.hideOperationsToday
+          ? <DriverPositionTrackingPanel workspace /> : null}
+        timeOff={userPrefs.betaDashboardEnabled && !userPrefs.hideOperationsToday && operationsData
+          ? <DriverTimeOffCurrentPanel /> : null}
+        onOpenRecord={(record) => loadDetails(record.id, 'basic', record.SourceListId)}
+        renderRecord={(record, index, variant) => (
+          <OperationOrderCard key={`${record.SourceListId || 'current'}-${record.id || index}`} record={record} index={index} variant={variant} />
+        )}
+      >
       <div className="search-card order-search-card">
         <div className="search-bar order-search-bar">
           <input
@@ -23122,47 +23308,13 @@ function openReportLoadDetails(load) {
           </label>
         </div>
 
-        <div className="search-toolbar">
-          <div className="search-quick-actions">
+        {(!userPrefs.betaDashboardEnabled || salesSearchReturnLead) && <div className="search-toolbar">
+          {!userPrefs.betaDashboardEnabled && <div className="search-quick-actions">
             <span className="search-toolbar-label">Quick actions</span>
             <div className="search-action-strip" role="group" aria-label="Quote and bid actions">
-
-              <button
-                ref={quoteEngineButtonRef}
-                type="button"
-                className="quote-engine-launch"
-                onClick={openQuoteEngine}
-                aria-haspopup="dialog"
-                aria-expanded={quoteEngineOpen}
-              >
-                New Quote
-              </button>
-
-              <button
-                ref={contractLanesButtonRef}
-                type="button"
-                className="contract-lanes-launch"
-                onClick={openContractLanes}
-                aria-haspopup="dialog"
-                aria-expanded={contractLanesOpen}
-              >
-                Contract Lanes
-              </button>
-
-              <button
-                ref={noBolBidsButtonRef}
-                type="button"
-                className="search-secondary-button no-bol-bids-launch"
-                onClick={openNoBolBids}
-                disabled={noBolBidsLoading}
-                aria-haspopup="dialog"
-                aria-expanded={noBolBidsOpen}
-                title="Show current Bid Listing entries without a BOL"
-              >
-                {noBolBidsLoading ? 'Loading Open Bids...' : 'Open Bids'}
-              </button>
+              {renderDashboardQuickActions()}
             </div>
-          </div>
+          </div>}
 
           {salesSearchReturnLead && (
             <button
@@ -23173,7 +23325,7 @@ function openReportLoadDetails(load) {
               Return to customer
             </button>
           )}
-        </div>
+        </div>}
 
         {hasSearched && !loading && !error && (
           <div className="summary">
@@ -23208,7 +23360,7 @@ function openReportLoadDetails(load) {
         {hasSearched && !loading && !error && results.length === 0 && (
           <div className="msg">No results found</div>
         )}
-{!hasSearched && (
+{!hasSearched && !userPrefs.betaDashboardEnabled && (
   <>
   {!userPrefs.hideOperationsToday && (
   <div className="search-card operations-panel">
@@ -23599,6 +23751,8 @@ function openReportLoadDetails(load) {
           )
         )}
       </div>
+
+      </BetaDashboard>
 
       {grossRevenueModalOpen && grossRevenueReport && (
         <div className="modal-overlay report-modal-overlay" onClick={closeGrossRevenueModal}>

@@ -17122,6 +17122,508 @@ button.available-truck-distribution-summary-card:disabled {
   line-height: 1.4;
 }
 
+/* Optional Beta presentation shell; Classic keeps its existing DOM and styles. */
+.app-header.beta-dashboard-header {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 780px) 180px;
+  align-items: center;
+  justify-content: center;
+  gap: 40px;
+  margin-bottom: 24px;
+}
+
+.beta-dashboard-header .brand-stack { display: contents; }
+
+.beta-dashboard-header .brand-logo-frame {
+  box-sizing: border-box;
+  width: 180px;
+  max-width: 100%;
+  padding: 5px;
+}
+
+.beta-dashboard-header .brand-logo-large {
+  box-sizing: border-box;
+  padding: 6px;
+}
+
+.beta-dashboard-header .kole-brand-title-zone {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.beta-dashboard-header .header-actions {
+  position: static;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin: 0;
+}
+
+.beta-dashboard-header .header-actions > button {
+  justify-content: center;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.beta-dashboard-header .header-actions > :is(.preferences-toggle-button, .theme-toggle-button, .header-logoff) {
+  align-self: center;
+  width: auto;
+  min-width: 124px;
+  min-height: 32px;
+  padding: 5px 10px;
+  font-size: 12px;
+  border-radius: 999px;
+}
+
+.beta-dashboard-header :is(.preferences-toggle-icon, .theme-toggle-icon) {
+  width: 16px;
+  height: 16px;
+  font-size: 11px;
+}
+
+@media (max-width: 900px) {
+  .app-header.beta-dashboard-header {
+    grid-template-columns: 130px minmax(0, 1fr) 140px;
+    gap: 12px;
+  }
+  .beta-dashboard-header .brand-logo-frame { width: 130px; }
+}
+
+@media (max-width: 600px) {
+  .app-header.beta-dashboard-header { grid-template-columns: 1fr 1fr; }
+  .beta-dashboard-header .brand-logo-frame { grid-column: 1; grid-row: 1; justify-self: center; }
+  .beta-dashboard-header .header-actions { grid-column: 2; grid-row: 1; }
+  .beta-dashboard-header .kole-brand-title-zone { grid-column: 1 / -1; grid-row: 2; }
+}
+
+.beta-dashboard {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+  width: 100%;
+  color: var(--kole-text);
+}
+
+.beta-dashboard-nav,
+.beta-dashboard-module,
+.beta-dashboard-quick-actions,
+.beta-dashboard-rail {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--kole-border);
+  border-radius: 14px;
+  background: var(--kole-surface);
+  overflow-wrap: anywhere;
+}
+
+.beta-dashboard-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.beta-dashboard-label {
+  color: var(--kole-muted);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.beta-dashboard-nav a,
+.beta-dashboard-quick-action-buttons > button,
+.beta-dashboard-rail-card h3 button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px;
+  min-height: 48px;
+  box-sizing: border-box;
+  border: 1px solid var(--kole-border-strong);
+  border-left: 4px solid var(--kole-secondary-rail);
+  border-radius: 10px;
+  background: var(--kole-surface-2);
+  color: var(--kole-text);
+  text-align: left;
+  line-height: 1.35;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.beta-dashboard-nav a[aria-current='page'],
+.beta-dashboard-quick-action-buttons > button[aria-pressed='true'],
+.beta-dashboard-quick-action-buttons > button[aria-expanded='true'],
+.beta-dashboard-rail-card h3 button[aria-expanded='true'] {
+  border-color: var(--kole-gold);
+  background: var(--kole-selection-bg);
+  box-shadow: inset 0 0 0 1px var(--kole-gold);
+}
+
+.beta-dashboard-nav a:hover,
+.beta-dashboard-quick-action-buttons > button:not(:disabled):hover,
+.beta-dashboard-rail-card h3 button:hover {
+  border-color: var(--kole-gold);
+  background: var(--kole-selection-bg);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.beta-dashboard-nav-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 2px 6px;
+  box-sizing: border-box;
+  border: 1px solid var(--kole-border-strong);
+  border-radius: 999px;
+  background: var(--kole-control-bg);
+  color: var(--kole-text);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.beta-dashboard-feature-workspace { margin-top: 16px; }
+.beta-dashboard-photo-panel,
+.beta-dashboard-tracking-panel,
+.beta-dashboard-equipment-panel,
+.beta-dashboard-recruiting-panel,
+.beta-dashboard-sales-panel,
+.beta-dashboard-reports-panel { min-width: 0; }
+
+.beta-dashboard-reports-panel :is(.report-table-wrap, .operations-table-wrap, .wide-report-table-wrap) {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.beta-dashboard-reports-panel .report-controls { flex-wrap: wrap; }
+
+.beta-dashboard-sales-panel :is(.report-table-wrap, .operations-table-wrap) {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.beta-dashboard-recruiting-panel .recruiting-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.beta-dashboard-recruiting-panel .recruiting-toolbar,
+.beta-dashboard-recruiting-panel .recruiting-toolbar-actions {
+  flex-wrap: wrap;
+}
+
+.beta-dashboard-equipment-panel .operations-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.beta-dashboard-equipment-panel .available-trucks-subheader {
+  flex-wrap: wrap;
+}
+
+.beta-dashboard-tracking-panel .intellitrack-table-wrap { overflow-x: auto; }
+.beta-dashboard-tracking-panel .intellitrack-table {
+  width: 100%;
+  min-width: 700px;
+  table-layout: fixed;
+}
+.beta-dashboard-tracking-panel .intellitrack-table :is(th, td) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.beta-dashboard-tracking-panel .intellitrack-search-row { flex-wrap: wrap; }
+.beta-dashboard-tracking-panel .intellitrack-search-row input { min-width: 0; }
+
+.beta-dashboard-photo-panel .upload-digest-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.beta-dashboard-photo-panel .upload-digest-table :is(th, td),
+.beta-dashboard-photo-panel .table-link-button {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.beta-dashboard-nav button {
+  white-space: normal;
+}
+
+.beta-dashboard-nav a:focus-visible,
+.beta-dashboard-nav button:focus-visible,
+.beta-dashboard-main:focus-visible {
+  outline: 2px solid var(--kole-gold-bright);
+  outline-offset: 3px;
+}
+
+.beta-dashboard h2 {
+  margin: 6px 0 10px;
+  color: var(--kole-text);
+  font-size: 20px;
+}
+
+.beta-dashboard .beta-dashboard-box-title {
+  margin: 0;
+  color: var(--kole-text);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: 0.04em;
+}
+
+.beta-dashboard-quick-actions > .beta-dashboard-box-title {
+  margin-bottom: 14px;
+}
+
+.beta-dashboard p {
+  margin: 0 0 12px;
+  color: var(--kole-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.beta-dashboard-main {
+  min-width: 0;
+}
+
+.beta-dashboard-prelude { min-width: 0; }
+
+.beta-dashboard .beta-dashboard-generated-at {
+  margin: 0;
+  text-align: center;
+}
+
+.beta-dashboard-notice:empty { display: none; }
+
+@media (min-width: 901px) {
+  .beta-dashboard:not(.beta-dashboard-feature) .beta-dashboard-generated-at {
+    transform: translateX(-128px);
+  }
+
+  .beta-dashboard-aligned-workspace {
+    grid-template-rows: auto auto;
+  }
+
+  .beta-dashboard-aligned-workspace > .beta-dashboard-main {
+    display: grid;
+    grid-template-rows: subgrid;
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: stretch;
+    align-items: start;
+  }
+
+  .beta-dashboard-aligned-workspace > .beta-dashboard-sidebar {
+    grid-column: 1;
+    grid-row: 2;
+  }
+}
+
+.beta-dashboard-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.beta-dashboard-notice {
+  margin-top: 12px;
+}
+
+.beta-dashboard-quick-action-buttons {
+  display: grid;
+  gap: 14px;
+}
+
+.beta-dashboard-quick-action-buttons > button {
+  min-width: 0;
+  width: 100%;
+  white-space: normal;
+}
+
+
+.beta-dashboard-workspace {
+  min-width: 0;
+  padding: 16px;
+  background: var(--kole-surface);
+  border: 1px solid var(--kole-border);
+  border-radius: 14px;
+}
+
+.beta-dashboard .driver-position-panel,
+.beta-dashboard .driver-time-off-panel {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.beta-dashboard .driver-position-table {
+  table-layout: fixed;
+  min-width: 0;
+  width: 100%;
+}
+
+.beta-dashboard .driver-position-table td,
+.beta-dashboard .driver-position-table th {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  padding: 8px 6px;
+}
+
+.beta-dashboard .driver-position-table :is(th, td):nth-child(1) { width: 12%; }
+.beta-dashboard .driver-position-table :is(th, td):nth-child(2) { width: 8%; }
+.beta-dashboard .driver-position-table :is(th, td):nth-child(3) { width: 20%; }
+.beta-dashboard .driver-position-table :is(th, td):nth-child(4) { width: 20%; }
+.beta-dashboard .driver-position-table :is(th, td):nth-child(5) { width: 9%; }
+.beta-dashboard .driver-position-table :is(th, td):nth-child(6) { width: 11%; }
+.beta-dashboard .driver-position-table :is(th, td):nth-child(7) { width: 20%; }
+.beta-dashboard .driver-position-table .tracking-pill { white-space: normal; }
+
+.beta-dashboard .driver-position-header {
+  flex-wrap: wrap;
+}
+
+.beta-dashboard .beta-dashboard-order-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.beta-dashboard-sidebar {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.beta-dashboard-content {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.beta-dashboard-content:empty { display: none; }
+
+.beta-dashboard-rail {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: start;
+  gap: 14px;
+}
+
+.beta-dashboard-rail > .beta-dashboard-box-title,
+.beta-dashboard-rail > p { grid-column: 1 / -1; }
+
+.beta-dashboard-rail > .beta-dashboard-box-title {
+  text-align: left;
+}
+
+.beta-dashboard-rail-card {
+  min-width: 0;
+}
+
+.beta-dashboard-rail-card h3 { margin: 0; }
+
+.beta-dashboard-rail-card h3 button {
+  width: 100%;
+  white-space: normal;
+  font-size: 14px;
+}
+
+.beta-dashboard-rail-card h3 button > span:first-child { flex: 1; }
+
+.beta-dashboard .beta-dashboard-view-all {
+  margin: 8px 0;
+  width: 100%;
+  white-space: normal;
+}
+
+.beta-dashboard-rail-records {
+  display: grid;
+  gap: 8px;
+  max-height: min(440px, 52dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.beta-dashboard .beta-dashboard-rail-record {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: 10px;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: var(--kole-text);
+  background: var(--kole-surface-2);
+  border: 1px solid var(--kole-border);
+}
+
+.beta-dashboard-rail-record small { color: var(--kole-muted); }
+
+.beta-dashboard button:focus-visible,
+.beta-dashboard [tabindex]:focus-visible {
+  outline: 2px solid var(--kole-gold-bright);
+  outline-offset: 2px;
+}
+
+.beta-dashboard .order-search-card {
+  box-sizing: border-box;
+  width: 100%;
+  /* Override the legacy shared search-card max-width: 100% !important. */
+  max-width: 780px !important;
+  margin: 16px auto 0;
+}
+
+.beta-dashboard .results-panel {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.beta-dashboard .results-panel:empty {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 780px;
+  margin-inline: auto;
+}
+
+.beta-dashboard .search-bar {
+  flex-wrap: wrap;
+}
+
+.beta-dashboard .search-bar input {
+  min-width: 0;
+}
+
+@media (max-width: 1200px) {
+  .beta-dashboard {
+    grid-template-columns: 210px minmax(0, 1fr);
+    gap: 12px;
+  }
+  .beta-dashboard-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 900px) {
+  .beta-dashboard {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .beta-dashboard-workspace { padding: 10px; }
+}
+
+@media (min-width: 901px) and (max-width: 1200px) {
+  .beta-dashboard:not(.beta-dashboard-feature) .beta-dashboard-generated-at {
+    transform: translateX(-111px);
+  }
+}
+
+@media (max-width: 600px) {
+  .beta-dashboard-rail { grid-template-columns: minmax(0, 1fr); }
+}
+
 .preferences-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
