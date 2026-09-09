@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getOperationsSummaryDetail } from './operationsSummary';
 
 const OPERATION_SLICES = [
@@ -31,6 +31,7 @@ export default function BetaDashboard({
   const [selectedModule, setSelectedModule] = useState('operations');
   const [workspace, setWorkspace] = useState('roster');
   const [expandedSummary, setExpandedSummary] = useState('');
+  const expandedSummaryRef = useRef(null);
   const workspaceRef = useRef(null);
   const moduleHeadingRef = useRef(null);
   const activeModule = (selectedModule === 'photos' && !photosHidden)
@@ -47,6 +48,22 @@ export default function BetaDashboard({
     : activeModule === 'reports' ? 'Reports' : 'Operations';
   const selectedSlice = OPERATION_SLICES.find((slice) => slice.key === workspace);
   const showOperations = activeModule === 'operations' && !operationsHidden;
+
+  useEffect(() => {
+    if (!enabled || !showOperations || !expandedSummary) return;
+
+    function closeSummaryOnOutsideClick(event) {
+      const accordion = expandedSummaryRef.current;
+      if (accordion && !event.composedPath().includes(accordion)) {
+        setExpandedSummary('');
+      }
+    }
+
+    // Capture clicks even when another control stops propagation. Using click
+    // lets the intended control receive its click before the layout collapses.
+    document.addEventListener('click', closeSummaryOnOutsideClick, true);
+    return () => document.removeEventListener('click', closeSummaryOnOutsideClick, true);
+  }, [enabled, showOperations, expandedSummary]);
 
   function anchorViewToTop(targetRef) {
     // Wait for the new view to mount, then focus without letting its size
@@ -168,7 +185,7 @@ export default function BetaDashboard({
             const records = operationsData?.[slice.key] || [];
             const expanded = expandedSummary === slice.key;
             return (
-              <section className="beta-dashboard-rail-card" key={slice.key}>
+              <section className="beta-dashboard-rail-card" key={slice.key} ref={expanded ? expandedSummaryRef : null}>
                 <h3>
                   <button type="button" aria-expanded={expanded} aria-controls={`beta-rail-${slice.key}`}
                     onClick={() => setExpandedSummary(expanded ? '' : slice.key)}>
@@ -194,6 +211,26 @@ export default function BetaDashboard({
                               <strong>{record.BOL || record.BidID || 'Order'}{detail ? ` - ${detail}` : ''}</strong>
                               <span>{record.Driver || 'Driver unavailable'}</span>
                               <small>{record.Origin || 'Origin unavailable'} → {record.Destination || 'Destination unavailable'}</small>
+                              {slice.key !== 'loadingNext7' && <span className="beta-dashboard-photo-cues" aria-label="Job photo status">
+                                {[
+                                  ['Pickup', record.hasPickupEvidence],
+                                  ['Delivery', record.hasDeliveryEvidence]
+                                ].filter(([label]) => slice.key === 'activeToday'
+                                  || (slice.key === 'loadingToday' && label === 'Pickup')
+                                  || (slice.key === 'deliveringToday' && label === 'Delivery')
+                                ).map(([label, received]) => {
+                                  const description = received === true ? `${label} photos received`
+                                    : received === false ? `No ${label.toLowerCase()} photos received yet`
+                                    : `${label} photo status unavailable`;
+                                  return (
+                                    <span key={label} className={`beta-dashboard-photo-cue${received === true ? ' has-photos' : ''}`}
+                                      title={description} aria-label={description}>
+                                      <span aria-hidden="true">{received === true ? '✓' : received === false ? '—' : '?'}</span>
+                                      {label} photos
+                                    </span>
+                                  );
+                                })}
+                              </span>}
                             </button>
                             );
                           })}
