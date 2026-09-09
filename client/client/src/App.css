@@ -17287,6 +17287,14 @@ button.available-truck-distribution-summary-card:disabled {
   flex-shrink: 0;
 }
 
+.beta-dashboard-sidebar .beta-dashboard-nav-count,
+.beta-dashboard-rail .beta-dashboard-nav-count {
+  background: var(--kole-action);
+  color: var(--kole-action-text);
+  border-color: var(--kole-action-hover);
+  font-weight: 800;
+}
+
 .beta-dashboard-feature-workspace { margin-top: 16px; }
 .beta-dashboard-photo-panel,
 .beta-dashboard-tracking-panel,
@@ -17422,6 +17430,11 @@ button.available-truck-distribution-summary-card:disabled {
   .beta-dashboard-aligned-workspace > .beta-dashboard-sidebar {
     grid-column: 1;
     grid-row: 2;
+  }
+
+  .beta-dashboard-aligned-workspace .beta-dashboard-content {
+    align-self: stretch;
+    grid-template-rows: auto 1fr;
   }
 }
 

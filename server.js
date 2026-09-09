@@ -1736,6 +1736,11 @@ function buildOperationsRecord(item, sourceList) {
     PickupDate: fields.Pickup_x0020_Offer_x0020_Date || '',
     DeliveryDate: fields.Expected_x0020_Delivery_x0020_Da || '',
 
+    PickupTime: fields.Pickup1PickupTime ?? '',
+    PickupAMPM: fields.Pickup1AMorPM ?? '',
+    DeliveryTime: fields.Delivery1Time ?? '',
+    DeliveryAMPM: fields.Delivery1AMorPM ?? '',
+
     Status: fields.Status || '',
     Processed: fields.Processed ?? false,
     IsProcessed: parseBoolean(fields.Processed),

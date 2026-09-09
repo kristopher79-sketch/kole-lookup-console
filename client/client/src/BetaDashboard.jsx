@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { getOperationsSummaryDetail } from './operationsSummary';
 
 const OPERATION_SLICES = [
   { key: 'activeToday', label: 'Active Today', empty: 'No active shipments today.' },
@@ -19,7 +20,7 @@ function SalesWorkspace({ searchActive, searching, search, sales }) {
 export default function BetaDashboard({
   enabled, children, searching, operationsHidden,
   operationsData, operationsLoading, operationsError, refreshing, onRefresh,
-  currentTimeOffCount, onOpenTimeOff, roster, timeOff, onOpenRecord, renderRecord, quickActions,
+  currentTimeOffCount, onOpenTimeOff, roster, timeOff, onOpenRecord, renderRecord, quickActions, formatSummaryDate,
   photosHidden, photoCount, photoDateLabel, photos,
   trackingHidden, trackingCount, tracking,
   equipmentHidden, equipmentCount, equipment,
@@ -90,7 +91,7 @@ export default function BetaDashboard({
       <nav className="beta-dashboard-nav" aria-label="Dashboard modules">
         <h2 className="beta-dashboard-box-title">Dashboard</h2>
         <a href="#beta-module-title" aria-current={activeModule === 'operations' ? 'page' : undefined}
-          onClick={(event) => openModule(event, 'operations')}>Operations</a>
+          onClick={(event) => openModule(event, 'operations')}>Operations (Home)</a>
         {!photosHidden && (
           <a href="#beta-module-title" aria-current={activeModule === 'photos' ? 'page' : undefined}
             onClick={(event) => openModule(event, 'photos')}>
@@ -182,14 +183,20 @@ export default function BetaDashboard({
                       <>
                         <button className="beta-dashboard-view-all" type="button" onClick={() => openWorkspace(slice.key)}>View all {slice.label.toLowerCase()}</button>
                         <div className="beta-dashboard-rail-records">
-                          {records.length === 0 ? <p>{slice.empty}</p> : records.map((record, index) => (
+                          {records.length === 0 ? <p>{slice.empty}</p> : records.map((record, index) => {
+                            const timeOrStatus = getOperationsSummaryDetail(record, slice.key, operationsData);
+                            const detail = slice.key === 'loadingNext7'
+                              ? `${record.PickupDate ? formatSummaryDate(record.PickupDate) : 'Date not set'} · ${timeOrStatus}`
+                              : timeOrStatus;
+                            return (
                             <button type="button" className="beta-dashboard-rail-record" key={`${record.SourceListId || 'current'}-${record.id || index}`}
                               onClick={() => onOpenRecord(record)}>
-                              <strong>{record.BOL || record.BidID || 'Order'}</strong>
+                              <strong>{record.BOL || record.BidID || 'Order'}{detail ? ` - ${detail}` : ''}</strong>
                               <span>{record.Driver || 'Driver unavailable'}</span>
                               <small>{record.Origin || 'Origin unavailable'} → {record.Destination || 'Destination unavailable'}</small>
                             </button>
-                          ))}
+                            );
+                          })}
                         </div>
                       </>
                     )}
@@ -203,7 +210,7 @@ export default function BetaDashboard({
             <section className="beta-dashboard-workspace" aria-labelledby="beta-workspace-title">
               <div className="beta-dashboard-heading">
                 <h2 id="beta-workspace-title" ref={workspaceRef} tabIndex={-1}>
-                  {selectedSlice?.label || (workspace === 'timeOff' ? 'Driver Time Off' : workspace === 'search' ? 'Search Orders' : 'Driver Workspace')}
+                  {selectedSlice?.label || (workspace === 'timeOff' ? 'Driver Time Off' : workspace === 'search' ? 'Search Orders' : '')}
                 </h2>
                 {workspace !== 'roster' && <button type="button" onClick={() => openWorkspace('roster')}>Back to Active Driver Roster</button>}
               </div>

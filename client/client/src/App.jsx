@@ -23257,6 +23257,7 @@ function openReportLoadDetails(load) {
         timeOff={userPrefs.betaDashboardEnabled && !userPrefs.hideOperationsToday && operationsData
           ? <DriverTimeOffCurrentPanel /> : null}
         onOpenRecord={(record) => loadDetails(record.id, 'basic', record.SourceListId)}
+        formatSummaryDate={formatDateOnly}
         renderRecord={(record, index, variant) => (
           <OperationOrderCard key={`${record.SourceListId || 'current'}-${record.id || index}`} record={record} index={index} variant={variant} />
         )}
