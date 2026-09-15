@@ -9827,14 +9827,121 @@ button.available-truck-distribution-summary-card:disabled {
   font-weight: 700;
 }
 
+.permit-cost-variance-kpi-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.permit-cost-variance-filters {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.permit-cost-variance-filters .permit-governance-filter-card {
+  min-height: 92px;
+  cursor: pointer;
+}
+
+.permit-cost-variance-note p {
+  margin: 6px 0 0;
+}
+
+.permit-cost-variance-table {
+  width: 100%;
+  min-width: 0 !important;
+  table-layout: fixed;
+}
+
+.permit-cost-variance-table th,
+.permit-cost-variance-table td {
+  padding-left: 7px;
+  padding-right: 7px;
+  font-size: 11px;
+}
+
+.permit-cost-variance-table th:nth-child(1),
+.permit-cost-variance-table td:nth-child(1) { width: 7%; }
+.permit-cost-variance-table th:nth-child(2),
+.permit-cost-variance-table td:nth-child(2) { width: 9%; }
+.permit-cost-variance-table th:nth-child(3),
+.permit-cost-variance-table td:nth-child(3) { width: 12%; }
+.permit-cost-variance-table th:nth-child(4),
+.permit-cost-variance-table td:nth-child(4) { width: 22%; }
+.permit-cost-variance-table th:nth-child(5),
+.permit-cost-variance-table td:nth-child(5) { width: 9%; }
+.permit-cost-variance-table th:nth-child(6),
+.permit-cost-variance-table td:nth-child(6) { width: 9%; }
+.permit-cost-variance-table th:nth-child(7),
+.permit-cost-variance-table td:nth-child(7) { width: 9%; }
+.permit-cost-variance-table th:nth-child(8),
+.permit-cost-variance-table td:nth-child(8) { width: 8%; }
+.permit-cost-variance-table th:nth-child(9),
+.permit-cost-variance-table td:nth-child(9) { width: 15%; }
+
+.permit-cost-variance-table th:nth-child(n + 5):nth-child(-n + 8),
+.permit-cost-variance-table td:nth-child(n + 5):nth-child(-n + 8) {
+  white-space: nowrap;
+}
+
+.permit-cost-variance-table .permit-variance-status {
+  justify-content: center;
+  width: 100%;
+  padding-left: 6px;
+  padding-right: 6px;
+  text-align: center;
+}
+
+.permit-variance-value.over-estimate {
+  color: var(--kole-danger);
+  font-weight: 800;
+}
+
+.permit-variance-value.under-estimate {
+  color: var(--kole-success);
+  font-weight: 800;
+}
+
+.permit-variance-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid var(--kole-border);
+  border-radius: 999px;
+  background: var(--kole-surface-2);
+  color: var(--kole-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.permit-variance-status.over-estimate {
+  border-color: color-mix(in srgb, var(--kole-danger) 45%, var(--kole-border));
+  background: color-mix(in srgb, var(--kole-danger-bg) 52%, transparent);
+  color: var(--kole-danger);
+}
+
+.permit-variance-status.under-estimate {
+  border-color: color-mix(in srgb, var(--kole-success) 45%, var(--kole-border));
+  background: color-mix(in srgb, var(--kole-success-bg) 52%, transparent);
+  color: var(--kole-success);
+}
+
+.permit-variance-status.on-estimate {
+  border-color: color-mix(in srgb, var(--kole-warning) 40%, var(--kole-border));
+  color: var(--kole-warning);
+}
+
 @media (max-width: 1100px) {
   .permit-governance-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .permit-cost-variance-kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 900px) {
   .permit-governance-card-grid,
+  .permit-cost-variance-kpi-grid,
   .permit-history-detail-grid {
     grid-template-columns: 1fr;
   }

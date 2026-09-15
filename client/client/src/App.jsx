@@ -1746,6 +1746,11 @@ export default function App() {
   const [permitGovernanceError, setPermitGovernanceError] = useState(null);
   const [permitGovernanceModalOpen, setPermitGovernanceModalOpen] = useState(false);
   const [permitGovernanceFilter, setPermitGovernanceFilter] = useState('currentlyPermitted');
+  const [permitCostVarianceReport, setPermitCostVarianceReport] = useState(null);
+  const [permitCostVarianceLoading, setPermitCostVarianceLoading] = useState(false);
+  const [permitCostVarianceError, setPermitCostVarianceError] = useState(null);
+  const [permitCostVarianceModalOpen, setPermitCostVarianceModalOpen] = useState(false);
+  const [permitCostVarianceFilter, setPermitCostVarianceFilter] = useState('all');
   const [selectedPermitHistoryLoad, setSelectedPermitHistoryLoad] = useState(null);
   const [permitHistoryOrderReturnLoad, setPermitHistoryOrderReturnLoad] = useState(null);
   const [reportActionAlerts, setReportActionAlerts] = useState(null);
@@ -2011,6 +2016,7 @@ export default function App() {
     weeklySettlementModalOpen ||
     wonNotRegisteredModalOpen ||
     permitGovernanceModalOpen ||
+    permitCostVarianceModalOpen ||
     selectedPermitHistoryLoad ||
     operationalNotesModalOpen ||
     activeDriverRosterModalOpen ||
@@ -3131,6 +3137,7 @@ export default function App() {
         setWeeklySettlementModalOpen(false);
         setWonNotRegisteredModalOpen(false);
         setPermitGovernanceModalOpen(false);
+        setPermitCostVarianceModalOpen(false);
         setSelectedPermitHistoryLoad(null);
         setPermitHistoryOrderReturnLoad(null);
         setActiveDriverRosterModalOpen(false);
@@ -3709,6 +3716,11 @@ export default function App() {
     setPermitGovernanceReport(null);
     setPermitGovernanceLoading(false);
     setPermitGovernanceError(null);
+    setPermitCostVarianceReport(null);
+    setPermitCostVarianceLoading(false);
+    setPermitCostVarianceError(null);
+    setPermitCostVarianceModalOpen(false);
+    setPermitCostVarianceFilter('all');
     setActiveDriverRosterReport(null);
     setActiveDriverRosterLoading(false);
     setActiveDriverRosterError(null);
@@ -7395,6 +7407,37 @@ function getPositionStatusLabel(position) {
     setPermitHistoryOrderReturnLoad(null);
   }
 
+  async function loadPermitCostVarianceReport() {
+    setPermitCostVarianceLoading(true);
+    setPermitCostVarianceError(null);
+    setPermitCostVarianceReport(null);
+    setPermitCostVarianceModalOpen(false);
+
+    try {
+      const res = await authedFetch(`${API}/reports/permit-cost-variance`);
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Unable to load Permit Cost Variance report.');
+      }
+
+      setPermitCostVarianceReport(data);
+      setPermitCostVarianceFilter('all');
+      setPermitCostVarianceModalOpen(true);
+    } catch (err) {
+      setPermitCostVarianceError({
+        code: 'REPORT_ERROR',
+        message: err.message || 'Unable to load Permit Cost Variance report.'
+      });
+    } finally {
+      setPermitCostVarianceLoading(false);
+    }
+  }
+
+  function closePermitCostVarianceModal() {
+    setPermitCostVarianceModalOpen(false);
+  }
+
   function closePermitHistoryDetailModal() {
     setSelectedPermitHistoryLoad(null);
   }
@@ -9641,6 +9684,7 @@ function openReportLoadDetails(load) {
     if (ordersDueSettlementModalOpen) return 'Orders Due for Settlement';
     if (wonNotRegisteredModalOpen) return 'Orders Won Not Registered';
     if (permitGovernanceModalOpen) return 'Permit Governance';
+    if (permitCostVarianceModalOpen) return 'Permit Cost Variance';
     if (onThisDayModalOpen) return 'On This Day';
     if (monthlyOpsModalOpen) return 'Monthly Operations Summary';
     if (customerTrendModalOpen) return 'Customer Booking Trends';
@@ -12945,6 +12989,135 @@ function openReportLoadDetails(load) {
                           <span className="muted-table-note">Not found</span>
                         )}
                       </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function PermitCostVariancePreview() {
+    if (!permitCostVarianceReport) return null;
+
+    const counts = permitCostVarianceReport.counts || {};
+    const totals = permitCostVarianceReport.totals || {};
+    const allRows = permitCostVarianceReport.rows || [];
+    const filterDefs = [
+      { key: 'all', label: 'All Estimated', count: counts.estimatedLoads || 0 },
+      { key: 'compared', label: 'Actual Recorded', count: counts.comparedLoads || 0 },
+      { key: 'awaitingActual', label: 'Awaiting Actual', count: counts.awaitingActual || 0 },
+      { key: 'overEstimate', label: 'Over Estimate', count: counts.overEstimate || 0 },
+      { key: 'underEstimate', label: 'Under Estimate', count: counts.underEstimate || 0 },
+      { key: 'onEstimate', label: 'On Estimate', count: counts.onEstimate || 0 }
+    ];
+    const activeFilter = filterDefs.some((filter) => filter.key === permitCostVarianceFilter)
+      ? permitCostVarianceFilter
+      : 'all';
+    const rows = allRows.filter((row) => {
+      if (activeFilter === 'all') return true;
+      if (activeFilter === 'compared') return row.HasActualPermitCost;
+      return row.PermitVarianceStatus === activeFilter;
+    });
+
+    function getVarianceLabel(row) {
+      if (!row.HasActualPermitCost) return 'Awaiting actual';
+      if (row.PermitVarianceStatus === 'overEstimate') return 'Over estimate';
+      if (row.PermitVarianceStatus === 'underEstimate') return 'Under estimate';
+      return 'On estimate';
+    }
+
+    function getVarianceClass(row) {
+      if (!row.HasActualPermitCost) return 'awaiting-actual';
+      if (row.PermitVarianceStatus === 'overEstimate') return 'over-estimate';
+      if (row.PermitVarianceStatus === 'underEstimate') return 'under-estimate';
+      return 'on-estimate';
+    }
+
+    return (
+      <div className="driver-report-preview modal-report-preview permit-cost-variance-preview">
+        <div className="driver-report-generated">
+          Generated: {permitCostVarianceReport.generatedAt}
+        </div>
+
+        <div className="report-alert permit-cost-variance-note">
+          <h4>Variance basis</h4>
+          <p>Variance equals actual permit cost minus estimated permit cost. Positive values are over estimate; missing actual costs are kept separate and never treated as zero.</p>
+        </div>
+
+        <div className="report-kpi-grid permit-cost-variance-kpi-grid">
+          <div className="report-kpi-card"><span>Estimated Loads</span><strong>{formatReportNumber(counts.estimatedLoads || 0)}</strong></div>
+          <div className="report-kpi-card"><span>Estimate Compared</span><strong>{formatReportMoney(totals.estimatedCompared || 0)}</strong></div>
+          <div className="report-kpi-card"><span>Actual Cost</span><strong>{formatReportMoney(totals.actual || 0)}</strong></div>
+          <div className="report-kpi-card"><span>Net Variance</span><strong>{formatReportMoney(totals.variance || 0)}</strong><small>{totals.variancePercent === null || totals.variancePercent === undefined ? '-' : `${formatReportNumber(totals.variancePercent, 1)}%`}</small></div>
+          <div className="report-kpi-card"><span>Average Absolute Variance</span><strong>{totals.averageAbsoluteVariance === null || totals.averageAbsoluteVariance === undefined ? '-' : formatReportMoney(totals.averageAbsoluteVariance)}</strong></div>
+        </div>
+
+        <div className="permit-governance-card-grid permit-cost-variance-filters">
+          {filterDefs.map((filter) => (
+            <button
+              key={filter.key}
+              type="button"
+              className={`permit-governance-filter-card ${activeFilter === filter.key ? 'active' : ''}`}
+              onClick={() => setPermitCostVarianceFilter(filter.key)}
+              aria-pressed={activeFilter === filter.key}
+              title={`Filter report to ${filter.label}`}
+            >
+              <span>{filter.label}</span>
+              <strong>{formatReportNumber(filter.count)}</strong>
+            </button>
+          ))}
+        </div>
+
+        <div className="driver-report-section">
+          <div className="driver-report-section-header">
+            <div>
+              <h4>{filterDefs.find((filter) => filter.key === activeFilter)?.label || 'Permit Cost Variance'}</h4>
+              <p>Won and TONU loads in the current Bid Listing with an estimated permit cost greater than zero.</p>
+            </div>
+            <div className="driver-report-section-total">{formatReportNumber(rows.length)} row(s)</div>
+          </div>
+
+          {rows.length === 0 ? (
+            <div className="msg good-news">No loads match this variance filter.</div>
+          ) : (
+            <div className="report-table-wrap permit-cost-variance-table-wrap">
+              <table className="driver-report-table permit-cost-variance-table">
+                <thead>
+                  <tr>
+                    <th>BOL</th>
+                    <th>Delivery</th>
+                    <th>Customer</th>
+                    <th>Route</th>
+                    <th>Estimate</th>
+                    <th>Actual</th>
+                    <th>Variance</th>
+                    <th>Variance %</th>
+                    <th>Result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((load, index) => (
+                    <tr
+                      key={`${load.SourceListId || ''}-${load.id || load.BOL || index}`}
+                      className={load.id ? 'report-clickable-row' : ''}
+                      onClick={() => openReportLoadDetails(load)}
+                      title={load.id ? 'Open full order screen' : ''}
+                    >
+                      <td>{load.BOL || load.BidID || '-'}</td>
+                      <td>{load.DeliveryDateDisplay || formatDateOnly(load.DeliveryDate)}</td>
+                      <td>{load.Customer || '-'}</td>
+                      <td>{load.Route || [load.OriginST, load.DestST].filter(Boolean).join(' to ') || '-'}</td>
+                      <td>{formatReportMoney(load.PermitEstimate)}</td>
+                      <td>{load.HasActualPermitCost ? formatReportMoney(load.ActualPermitCost) : <span className="muted-table-note">Awaiting actual</span>}</td>
+                      <td className={load.HasActualPermitCost ? `permit-variance-value ${getVarianceClass(load)}` : ''}>
+                        {load.HasActualPermitCost ? formatReportMoney(load.PermitVariance) : '-'}
+                      </td>
+                      <td>{load.HasActualPermitCost ? `${formatReportNumber(load.PermitVariancePercent, 1)}%` : '-'}</td>
+                      <td><span className={`permit-variance-status ${getVarianceClass(load)}`}>{getVarianceLabel(load)}</span></td>
                     </tr>
                   ))}
                 </tbody>
@@ -20658,6 +20831,7 @@ function openReportLoadDetails(load) {
     const isWeeklySettlementOpen = activeReportPanel === 'weeklySettlement';
     const isWonNotRegisteredOpen = activeReportPanel === 'wonNotRegistered';
     const isPermitGovernanceOpen = activeReportPanel === 'permitGovernance';
+    const isPermitCostVarianceOpen = activeReportPanel === 'permitCostVariance';
     const isOnThisDayOpen = activeReportPanel === 'onThisDay';
     const isOperationalNotesOpen = activeReportPanel === 'operationalNotes';
     const isActiveDriverRosterOpen = activeReportPanel === 'activeDriverRoster';
@@ -21370,6 +21544,56 @@ function openReportLoadDetails(load) {
                     <div className="report-alert error">
                       <h4>Report could not be loaded.</h4>
                       <p>{permitGovernanceError.message}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+
+          <div className={`report-accordion ${isPermitCostVarianceOpen ? 'open' : ''}`}>
+            <button
+              type="button"
+              className="report-accordion-button"
+              onClick={(e) => handleReportPanelClick(e, 'permitCostVariance')}
+            >
+              <span>Permit Cost Variance</span>
+              <span className="report-accordion-icon">{isPermitCostVarianceOpen ? '▼' : '▶'}</span>
+            </button>
+
+            {isPermitCostVarianceOpen && (
+              <div className="report-accordion-body">
+                <div className="report-card compact-report-card accordion-inner-card permit-cost-variance-card briefing-report-card">
+                  <div className="report-card-header centered-report-header">
+                    <div>
+                      <h3>Permit Cost Variance</h3>
+                      <p>Compare estimated permit costs with recorded actual costs for Won and TONU loads.</p>
+                    </div>
+                  </div>
+
+                  <div className="report-controls centered-report-controls">
+                    <button onClick={loadPermitCostVarianceReport} disabled={permitCostVarianceLoading}>
+                      {permitCostVarianceLoading ? 'Loading Report...' : 'Preview Report'}
+                    </button>
+                  </div>
+
+                  {permitCostVarianceReport && !permitCostVarianceModalOpen && (
+                    <div className="report-ready-card">
+                      <div>
+                        <strong>{permitCostVarianceReport.reportLabel} is ready.</strong>
+                        <span> The preview opens in a report window.</span>
+                      </div>
+                      <button className="view-button" onClick={() => setPermitCostVarianceModalOpen(true)}>
+                        Reopen Preview
+                      </button>
+                    </div>
+                  )}
+
+                  {permitCostVarianceError && (
+                    <div className="report-alert error">
+                      <h4>Report could not be loaded.</h4>
+                      <p>{permitCostVarianceError.message}</p>
                     </div>
                   )}
                 </div>
@@ -23977,6 +24201,33 @@ function openReportLoadDetails(load) {
 
             <div className="modal-body report-modal-body">
               <PermitGovernancePreview />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {permitCostVarianceModalOpen && permitCostVarianceReport && (
+        <div className="modal-overlay report-modal-overlay" onClick={closePermitCostVarianceModal}>
+          <div className="detail-modal report-modal wide-report-modal permit-cost-variance-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="detail-header report-modal-header">
+              <div>
+                <h2>{permitCostVarianceReport.reportLabel || 'Permit Cost Variance'}</h2>
+                <p>
+                  {formatReportNumber(permitCostVarianceReport.counts?.comparedLoads || 0)} compared
+                  {' · '}
+                  {formatReportNumber(permitCostVarianceReport.counts?.awaitingActual || 0)} awaiting actual
+                  {' · Generated '}
+                  {permitCostVarianceReport.generatedAt || ''}
+                </p>
+              </div>
+
+              <button className="close-button" onClick={closePermitCostVarianceModal}>
+                Close
+              </button>
+            </div>
+
+            <div className="modal-body report-modal-body">
+              <PermitCostVariancePreview />
             </div>
           </div>
         </div>

@@ -49,6 +49,20 @@ const {
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '256kb' }));
+app.use((req, res, next) => {
+  const startedAt = process.hrtime.bigint();
+  const originalWriteHead = res.writeHead;
+
+  res.writeHead = function writeHeadWithTiming(...args) {
+    if (!res.headersSent) {
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+      res.setHeader('Server-Timing', `app;dur=${durationMs.toFixed(1)}`);
+    }
+    return originalWriteHead.apply(this, args);
+  };
+
+  next();
+});
 
 const PORT = process.env.PORT || 5000;
 const MOBILE_PUSH_SEND_TIMEOUT_MS = 5000;
@@ -190,6 +204,7 @@ const ON_THIS_DAY_SOURCE_CACHE_MS = Number(process.env.ON_THIS_DAY_SOURCE_CACHE_
 const ON_THIS_DAY_REPORT_CACHE_MS = Number(process.env.ON_THIS_DAY_REPORT_CACHE_MS || 5 * 60 * 1000);
 const SALES_LEADS_REPORT_CACHE_MS = Number(process.env.SALES_LEADS_REPORT_CACHE_MS || BID_LIST_CACHE_MS);
 const SERVICE_LOCATIONS_CACHE_MS = Number(process.env.SERVICE_LOCATIONS_CACHE_MS || 60 * 1000);
+const DASHBOARD_SOURCE_CACHE_MS = Math.max(1000, Number(process.env.DASHBOARD_SOURCE_CACHE_MS) || 30 * 1000);
 const DASHBOARD_BID_SOURCE_CACHE_MS = Math.max(1000, Number(process.env.DASHBOARD_BID_SOURCE_CACHE_MS) || 60 * 1000);
 const DASHBOARD_BID_SOURCE_MAX_STALE_MS = Math.max(
   DASHBOARD_BID_SOURCE_CACHE_MS,
@@ -199,6 +214,7 @@ const GRAPH_REQUEST_TIMEOUT_MS = Math.max(1000, Number(process.env.GRAPH_REQUEST
 const GRAPH_READ_RETRIES = Math.max(0, Number(process.env.GRAPH_READ_RETRIES ?? 2) || 0);
 const GRAPH_RETRY_MAX_DELAY_MS = Math.max(250, Number(process.env.GRAPH_RETRY_MAX_DELAY_MS) || 5000);
 const inFlightRequests = new Map();
+const cachedDashboardListItems = new Map();
 const DASHBOARD_REFRESH_WORKLOAD = 'dashboard-refresh';
 const REPORT_WORKLOAD = 'report';
 const DASHBOARD_REFRESH_PATHS = new Set([
@@ -548,6 +564,58 @@ function setCacheRecord(cache, key, value, maxEntries = 40) {
   }
 
   return value;
+}
+
+function getDashboardListItemsCacheKey(listId, fieldSelect = '') {
+  return `${String(listId || '').trim()}|${String(fieldSelect || '').trim()}`;
+}
+
+function clearDashboardListItemsCache(listId) {
+  const prefix = `${String(listId || '').trim()}|`;
+  if (prefix === '|') return;
+
+  for (const key of cachedDashboardListItems.keys()) {
+    if (key.startsWith(prefix)) cachedDashboardListItems.delete(key);
+  }
+}
+
+async function getCachedAllListItemsWithFields(token, listId, fieldSelect = '', options = {}) {
+  const ttlMs = Math.max(1000, Number(options.ttlMs) || DASHBOARD_SOURCE_CACHE_MS);
+  const forceRefresh = options.forceRefresh === true;
+  const cacheKey = getDashboardListItemsCacheKey(listId, fieldSelect);
+
+  if (!forceRefresh) {
+    const cached = getCacheRecord(cachedDashboardListItems, cacheKey, ttlMs);
+    if (cached) return cached;
+  }
+
+  return coalesceRequest(`dashboard-list-items:${cacheKey}`, async () => {
+    if (!forceRefresh) {
+      const cached = getCacheRecord(cachedDashboardListItems, cacheKey, ttlMs);
+      if (cached) return cached;
+    }
+
+    const items = await getAllListItemsWithFields(token, listId, fieldSelect);
+    return setCacheRecord(cachedDashboardListItems, cacheKey, items, 24);
+  });
+}
+
+async function getCachedAllListItemsWithFieldsResilient(token, listId, fieldSelect = '', options = {}) {
+  try {
+    return {
+      items: await getCachedAllListItemsWithFields(token, listId, fieldSelect, options),
+      usedFallback: false,
+      warning: ''
+    };
+  } catch (error) {
+    if (!fieldSelect) throw error;
+
+    return {
+      items: await getCachedAllListItemsWithFields(token, listId, '', options),
+      usedFallback: true,
+      warning: error.message || 'Selected field fetch failed; retried with full fields.'
+    };
+  }
 }
 
 async function getAllChildrenFromFolder(token, driveId, folderId) {
@@ -1633,6 +1701,7 @@ function formatOrderEditAuditValue(value) {
 
 function clearOrderEditCaches() {
   cachedBidItemsByList.clear();
+  cachedDashboardListItems.clear();
   cachedOperationsToday = null;
   cachedOperationsTodayAt = 0;
   cachedDashboardBidSource = null;
@@ -5146,6 +5215,15 @@ async function getAllListItemsWithFieldsResilient(token, listId, fieldSelect = '
   }
 }
 
+const UPLOAD_DIGEST_FIELD_SELECT = 'BOLNumber,DriverName,UploadType,UploadDate,CompositeKey';
+
+async function getUploadDigestItems(token, options = {}) {
+  const listId = process.env.UPLOAD_DIGEST_LIST_ID || DEFAULT_UPLOAD_DIGEST_LIST_ID;
+  if (!listId) return [];
+
+  return getCachedAllListItemsWithFields(token, listId, UPLOAD_DIGEST_FIELD_SELECT, options);
+}
+
 async function getUploadEvidenceSets(token) {
   const uploadDigestListId =
     process.env.UPLOAD_DIGEST_LIST_ID || DEFAULT_UPLOAD_DIGEST_LIST_ID;
@@ -5158,11 +5236,7 @@ async function getUploadEvidenceSets(token) {
     };
   }
 
-  const uploadItems = await getAllListItemsWithFields(
-    token,
-    uploadDigestListId,
-    'BOLNumber,DriverName,UploadType,UploadDate,CompositeKey'
-  );
+  const uploadItems = await getUploadDigestItems(token);
 
   const pickupEvidenceBols = new Set();
   const deliveryEvidenceBols = new Set();
@@ -9592,6 +9666,80 @@ async function buildPermitGovernanceResponse(items, sourceList, options = {}) {
   };
 }
 
+function getPermitCostVarianceStatus(variance) {
+  if (variance === null || variance === undefined) return 'awaitingActual';
+  if (Math.abs(variance) < 0.005) return 'onEstimate';
+  return variance > 0 ? 'overEstimate' : 'underEstimate';
+}
+
+function buildPermitCostVarianceResponse(items, sourceList) {
+  const estimatedLoads = items
+    .map((item) => getPermitGovernanceReportItem(item, sourceList))
+    .filter((row) => (
+      row.PermitEstimate > 0 &&
+      ['won', 'tonu'].includes(normalizeText(row.Status))
+    ))
+    .map((row) => {
+      const variance = row.HasActualPermitCost
+        ? row.ActualPermitCost - row.PermitEstimate
+        : null;
+
+      return {
+        ...row,
+        PermitVariance: variance,
+        PermitVarianceAbsolute: variance === null ? null : Math.abs(variance),
+        PermitVariancePercent: variance === null ? null : (variance / row.PermitEstimate) * 100,
+        PermitVarianceStatus: getPermitCostVarianceStatus(variance)
+      };
+    })
+    .sort((a, b) => {
+      if (a.HasActualPermitCost !== b.HasActualPermitCost) return a.HasActualPermitCost ? -1 : 1;
+      const varianceDiff = Number(b.PermitVarianceAbsolute || 0) - Number(a.PermitVarianceAbsolute || 0);
+      if (varianceDiff !== 0) return varianceDiff;
+      const deliveryDiff = String(b.DeliveryDate || '').localeCompare(String(a.DeliveryDate || ''));
+      if (deliveryDiff !== 0) return deliveryDiff;
+      return String(a.BOL || a.BidID || '').localeCompare(String(b.BOL || b.BidID || ''), undefined, { numeric: true });
+    });
+
+  const comparedRows = estimatedLoads.filter((row) => row.HasActualPermitCost);
+  const estimatedCompared = comparedRows.reduce((sum, row) => sum + row.PermitEstimate, 0);
+  const actualTotal = comparedRows.reduce((sum, row) => sum + row.ActualPermitCost, 0);
+  const netVariance = actualTotal - estimatedCompared;
+
+  return {
+    success: true,
+    reportType: 'permitCostVariance',
+    reportLabel: 'Permit Cost Variance',
+    generatedAt: `${formatEasternTimestamp()} Eastern`,
+    dataSource: sourceList.label,
+    criteria: {
+      statuses: ['Won', 'TONU'],
+      permitEstimate: 'greaterThanZero',
+      varianceFormula: 'actualMinusEstimate'
+    },
+    count: estimatedLoads.length,
+    counts: {
+      estimatedLoads: estimatedLoads.length,
+      comparedLoads: comparedRows.length,
+      awaitingActual: estimatedLoads.length - comparedRows.length,
+      overEstimate: comparedRows.filter((row) => row.PermitVarianceStatus === 'overEstimate').length,
+      underEstimate: comparedRows.filter((row) => row.PermitVarianceStatus === 'underEstimate').length,
+      onEstimate: comparedRows.filter((row) => row.PermitVarianceStatus === 'onEstimate').length
+    },
+    totals: {
+      estimatedAll: estimatedLoads.reduce((sum, row) => sum + row.PermitEstimate, 0),
+      estimatedCompared,
+      actual: actualTotal,
+      variance: netVariance,
+      variancePercent: estimatedCompared > 0 ? (netVariance / estimatedCompared) * 100 : null,
+      averageAbsoluteVariance: comparedRows.length
+        ? comparedRows.reduce((sum, row) => sum + row.PermitVarianceAbsolute, 0) / comparedRows.length
+        : null
+    },
+    rows: estimatedLoads
+  };
+}
+
 function getReportActionAlertFieldSelect() {
   return Array.from(new Set([
     ...getOrdersDueForSettlementFieldSelect().split(','),
@@ -9830,13 +9978,17 @@ async function getDriverRosterItems(token) {
     throw new Error('DRIVER_ROSTER_LIST_ID is not configured on the server.');
   }
 
-  const items = await getAllListItemsWithFields(
+  const items = await getCachedAllListItemsWithFields(
     token,
     driverRosterListId,
     getDriverRosterFieldSelect()
   );
 
   return items.map(cleanDriverRosterItem);
+}
+
+async function getDriverPositionItems(token, listId) {
+  return getCachedAllListItemsWithFields(token, listId, getDriverPositionFieldSelect());
 }
 
 function getDriverRosterSiteId() {
@@ -10046,6 +10198,7 @@ function getDriverRosterDateOnly(value) {
 function clearDriverRosterMutationCaches() {
   cachedOperationsToday = null;
   cachedOperationsTodayAt = 0;
+  clearDashboardListItemsCache(process.env.DRIVER_ROSTER_LIST_ID);
 }
 
 function getDriverRosterTerminationDate(value) {
@@ -10496,7 +10649,7 @@ async function getDriverTimeOffRows(token) {
   if (!listId) {
     throw new Error('DRIVER_TIME_OFF_LOG_LIST_ID is not configured on the server.');
   }
-  const result = await getAllListItemsWithFieldsResilient(token, listId, getDriverTimeOffFieldSelect());
+  const result = await getCachedAllListItemsWithFieldsResilient(token, listId, getDriverTimeOffFieldSelect());
   return {
     rows: result.items
       .map(cleanDriverTimeOffItem)
@@ -12488,6 +12641,7 @@ app.post('/recruiting/candidates/:candidateId/driver-roster', requireLookupAcces
       `https://graph.microsoft.com/v1.0/sites/${rosterSiteId}/lists/${driverRosterListId}/items`,
       { fields }
     );
+    clearDriverRosterMutationCaches();
     const createdItemId = createdItem.id || createdItem?.fields?.id;
     const refreshedRosterItem = createdItemId
       ? await getDriverRosterItemById(token, createdItemId)
@@ -15135,7 +15289,7 @@ app.get('/reports/permit-governance', requireLookupAccess, async (req, res) => {
 
     // Permit Governance intentionally loads full fields because the historical pane
     // can display actual permit cost from whichever Bid Listing column is present.
-    const items = await getAllListItemsWithFields(token, currentList.listId);
+    const items = await getCachedAllListItemsWithFields(token, currentList.listId);
 
     res.json(await buildPermitGovernanceResponse(items, currentList, { token }));
   } catch (error) {
@@ -15144,6 +15298,32 @@ app.get('/reports/permit-governance', requireLookupAccess, async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Unable to load Permit Governance report.'
+    });
+  }
+});
+
+app.get('/reports/permit-cost-variance', requireLookupAccess, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const lists = await getSearchableBidLists(token);
+    const currentList = lists.find((list) => list.label === 'Bid Listing');
+
+    if (!currentList) {
+      return res.status(404).json({
+        success: false,
+        error: 'Bid Listing not found.'
+      });
+    }
+
+    // Actual permit cost has existed under several internal names, so retain the
+    // resilient full-field read and keep it briefly cached for report reopen/refresh.
+    const items = await getCachedAllListItemsWithFields(token, currentList.listId);
+    res.json(buildPermitCostVarianceResponse(items, currentList));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Unable to load Permit Cost Variance report.'
     });
   }
 });
@@ -16275,7 +16455,7 @@ function sortAvailableTrucksDistributionRows(a, b) {
 }
 
 async function getAvailableTrucksDistributionRows(token, listId) {
-  const bundle = await getAllListItemsWithFieldsResilient(
+  const bundle = await getCachedAllListItemsWithFieldsResilient(
     token,
     listId,
     getAvailableTrucksDistributionFieldSelect()
@@ -16651,6 +16831,10 @@ async function getAvailableTruckRosterOptions(token) {
 
   const rosterItems = await getDriverRosterItems(token);
   return buildAvailableTruckRosterOptions(rosterItems);
+}
+
+async function getAvailableTruckItems(token, listId) {
+  return getCachedAllListItemsWithFields(token, listId, getAvailableTruckFieldSelect());
 }
 
 async function resolveAvailableTruckDriversFromRoster(token, drivers = []) {
@@ -17781,6 +17965,10 @@ function getKoleAutoUpdaterListId() {
   return process.env.KOLE_AUTO_UPDATER_LIST_ID || DEFAULT_KOLE_AUTO_UPDATER_LIST_ID;
 }
 
+async function getIntelliTrackItems(token, listId) {
+  return getCachedAllListItemsWithFields(token, listId, getIntelliTrackFieldSelect());
+}
+
 function escapeODataString(value) {
   return String(value || '').replace(/'/g, "''");
 }
@@ -18132,6 +18320,7 @@ app.post('/available-trucks/distribution-list', requireLookupAccess, async (req,
     );
 
     const created = cleanAvailableTrucksDistributionItem(createdItem);
+    clearDashboardListItemsCache(listId);
 
     res.status(201).json({
       success: true,
@@ -18347,11 +18536,7 @@ app.get('/available-trucks', requireLookupAccess, async (req, res) => {
       : Promise.resolve([]);
 
     const [items, assignmentItems, activeDriverOptions] = await Promise.all([
-      getAllListItemsWithFields(
-        token,
-        listId,
-        getAvailableTruckFieldSelect()
-      ),
+      getAvailableTruckItems(token, listId),
       currentList
         ? getDashboardBidSource(token, currentList, { waitForRefresh: true })
         : Promise.resolve([]),
@@ -18388,11 +18573,7 @@ app.get('/tracking/intellitrack', requireLookupAccess, async (req, res) => {
     }
 
     const token = await getGraphToken();
-    const items = await getAllListItemsWithFields(
-      token,
-      listId,
-      getIntelliTrackFieldSelect()
-    );
+    const items = await getIntelliTrackItems(token, listId);
 
     const records = items
       .map(cleanIntelliTrackRecord)
@@ -18533,11 +18714,7 @@ app.get('/tracking/driver-positions', requireLookupAccess, async (req, res) => {
 
     const token = await getGraphToken();
     const [items, rosterByTruck] = await Promise.all([
-      getAllListItemsWithFields(
-        token,
-        driverPositionsListId,
-        getDriverPositionFieldSelect()
-      ),
+      getDriverPositionItems(token, driverPositionsListId),
       getDriverRosterByTruck(token)
     ]);
 
@@ -18594,10 +18771,7 @@ app.get('/upload-digest', requireLookupAccess, async (req, res) => {
       });
     }
 
-    const uploadItems = await getAllListItemsWithFields(
-      token,
-      uploadDigestListId
-    );
+    const uploadItems = await getUploadDigestItems(token);
 
     const rawRecords = uploadItems
       .map(buildUploadDigestRecord)
@@ -18879,6 +19053,10 @@ app.post('/driver-time-off', requireLookupAccess, async (req, res) => {
       { fields }
     );
 
+    clearDashboardListItemsCache(listId);
+    cachedOperationsToday = null;
+    cachedOperationsTodayAt = 0;
+
     res.status(201).json({ success: true, itemId: createdItem.id || '', message: 'Driver time off added.' });
   } catch (error) {
     console.error(error);
@@ -18904,6 +19082,10 @@ app.patch('/driver-time-off/:id', requireLookupAccess, async (req, res) => {
       `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/items/${itemId}/fields`,
       fields
     );
+
+    clearDashboardListItemsCache(listId);
+    cachedOperationsToday = null;
+    cachedOperationsTodayAt = 0;
 
     res.json({ success: true, itemId, message: 'Driver time off updated.' });
   } catch (error) {
@@ -20614,7 +20796,7 @@ async function buildBootstrapDriverPositionsPayload(token) {
   if (!listId) throw new Error('DRIVER_POSITIONS_LIST_ID is not configured on the server.');
 
   const [items, rosterByTruck] = await Promise.all([
-    getAllListItemsWithFields(token, listId, getDriverPositionFieldSelect()),
+    getDriverPositionItems(token, listId),
     getDriverRosterByTruck(token)
   ]);
   const positions = items
@@ -20646,7 +20828,7 @@ async function buildBootstrapIntelliTrackPayload(token) {
   const listId = getKoleAutoUpdaterListId();
   if (!listId) throw new Error('KOLE_AUTO_UPDATER_LIST_ID is not configured on the server.');
 
-  const items = await getAllListItemsWithFields(token, listId, getIntelliTrackFieldSelect());
+  const items = await getIntelliTrackItems(token, listId);
   const records = items
     .map(cleanIntelliTrackRecord)
     .filter((record) => !record.DisableTracking)
@@ -20665,7 +20847,7 @@ async function buildBootstrapUploadDigestPayload(token, dateValue) {
   const listId = process.env.UPLOAD_DIGEST_LIST_ID || DEFAULT_UPLOAD_DIGEST_LIST_ID;
   if (!listId) throw new Error('UPLOAD_DIGEST_LIST_ID is not configured on the server.');
 
-  const uploadItems = await getAllListItemsWithFields(token, listId);
+  const uploadItems = await getUploadDigestItems(token);
   const rawRecords = uploadItems
     .map(buildUploadDigestRecord)
     .filter((record) => normalizeEasternDateOnly(record.UploadDate) === targetDate)
@@ -20704,7 +20886,7 @@ async function buildBootstrapAvailableTrucksPayload(token, currentList, assignme
     ? ''
     : 'DRIVER_ROSTER_LIST_ID is not configured, so active roster driver options could not be loaded.';
   const [items, activeDriverOptions] = await Promise.all([
-    getAllListItemsWithFields(token, listId, getAvailableTruckFieldSelect()),
+    getAvailableTruckItems(token, listId),
     process.env.DRIVER_ROSTER_LIST_ID
       ? getAvailableTruckRosterOptions(token).catch((error) => {
           activeDriverOptionsWarning = error.message || 'Driver Roster could not be loaded for available-truck posting.';
@@ -20800,7 +20982,7 @@ app.get('/dashboard/bootstrap', requireLookupAccess, async (req, res) => {
     const needsBidSource = moduleKeys.some((key) => ['operations', 'availableTrucks', 'actionAlerts'].includes(key));
     const currentList = needsBidSource ? await getCurrentBidListingSource(token) : null;
     const bidItemsPromise = currentList
-      ? getDashboardBidSource(token, currentList, { waitForRefresh: true })
+      ? getDashboardBidSource(token, currentList)
       : Promise.resolve([]);
     const evidencePromise = moduleKeys.some((key) => ['operations', 'actionAlerts'].includes(key))
       ? getUploadEvidenceSets(token)
