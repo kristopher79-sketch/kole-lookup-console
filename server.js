@@ -208,11 +208,6 @@ const PERMIT_FOLDER_AUDIT_CONCURRENCY = Math.max(
   1,
   Math.min(8, Number(process.env.PERMIT_FOLDER_AUDIT_CONCURRENCY) || 4)
 );
-const DASHBOARD_SOURCE_CACHE_MS = Math.max(1000, Number(process.env.DASHBOARD_SOURCE_CACHE_MS) || 30 * 1000);
-const DASHBOARD_SOURCE_CACHE_MAX_ENTRIES = Math.max(
-  4,
-  Math.min(24, Number(process.env.DASHBOARD_SOURCE_CACHE_MAX_ENTRIES) || 12)
-);
 const DASHBOARD_BID_SOURCE_CACHE_MS = Math.max(1000, Number(process.env.DASHBOARD_BID_SOURCE_CACHE_MS) || 60 * 1000);
 const DASHBOARD_BID_SOURCE_MAX_STALE_MS = Math.max(
   DASHBOARD_BID_SOURCE_CACHE_MS,
@@ -222,7 +217,6 @@ const GRAPH_REQUEST_TIMEOUT_MS = Math.max(1000, Number(process.env.GRAPH_REQUEST
 const GRAPH_READ_RETRIES = Math.max(0, Number(process.env.GRAPH_READ_RETRIES ?? 2) || 0);
 const GRAPH_RETRY_MAX_DELAY_MS = Math.max(250, Number(process.env.GRAPH_RETRY_MAX_DELAY_MS) || 5000);
 const inFlightRequests = new Map();
-const cachedDashboardListItems = new Map();
 const DASHBOARD_REFRESH_WORKLOAD = 'dashboard-refresh';
 const REPORT_WORKLOAD = 'report';
 const HEAVY_WORKLOAD_MAX_QUEUE = Math.max(
@@ -232,6 +226,10 @@ const HEAVY_WORKLOAD_MAX_QUEUE = Math.max(
 const HEAVY_WORKLOAD_MAX_WAIT_MS = Math.max(
   10 * 1000,
   Math.min(5 * 60 * 1000, Number(process.env.HEAVY_WORKLOAD_MAX_WAIT_MS) || 90 * 1000)
+);
+const SERVER_MEMORY_LOG_INTERVAL_MS = Math.max(
+  15 * 1000,
+  Math.min(5 * 60 * 1000, Number(process.env.SERVER_MEMORY_LOG_INTERVAL_MS) || 60 * 1000)
 );
 const DASHBOARD_REFRESH_PATHS = new Set([
   '/dashboard/bootstrap',
@@ -299,6 +297,36 @@ function createHeavyWorkloadError(message, code) {
   error.statusCode = 503;
   error.code = code;
   return error;
+}
+
+function getServerMemoryDiagnostics() {
+  const memory = process.memoryUsage();
+  const toMb = (bytes) => Math.round((Number(bytes || 0) / (1024 * 1024)) * 10) / 10;
+
+  return {
+    rssMb: toMb(memory.rss),
+    heapUsedMb: toMb(memory.heapUsed),
+    heapTotalMb: toMb(memory.heapTotal),
+    externalMb: toMb(memory.external),
+    ...(Number.isFinite(memory.arrayBuffers) ? { arrayBuffersMb: toMb(memory.arrayBuffers) } : {}),
+    activeHeavyWorkload: activeHeavyWorkload?.kind || '',
+    queuedHeavyWorkloads: queuedHeavyWorkloads.length,
+    inFlightRequests: inFlightRequests.size,
+    cacheEntries: {
+      bidItems: cachedBidItemsByList.size,
+      onThisDaySources: cachedOnThisDayItemsBySource.size,
+      onThisDayReports: cachedOnThisDayReports.size,
+      orderNotes: cachedOrderNotesByOrder.size,
+      quoteComparables: cachedQuoteComparableItemsByList.size
+    }
+  };
+}
+
+function logServerMemory(event, context = {}) {
+  console.info(event, {
+    ...context,
+    memory: getServerMemoryDiagnostics()
+  });
 }
 
 function acquireHeavyWorkload(kind, req, res) {
@@ -389,12 +417,24 @@ function requireLookupAccess(req, res, next) {
     }
 
     let released = false;
+    const workloadStartedAt = Date.now();
     const releaseOnce = () => {
       if (released) return;
       released = true;
+      logServerMemory('Heavy workload finished', {
+        kind: workloadKind,
+        path: req.path,
+        durationMs: Date.now() - workloadStartedAt,
+        statusCode: res.statusCode
+      });
       release();
     };
 
+    logServerMemory('Heavy workload started', {
+      kind: workloadKind,
+      path: req.path,
+      waitedMs
+    });
     res.setHeader('X-Kole-Workload', workloadKind);
     if (wasQueued) res.setHeader('X-Kole-Workload-Queued', '1');
     if (waitedMs > 0) res.setHeader('X-Kole-Workload-Wait-Ms', String(waitedMs));
@@ -690,7 +730,6 @@ function sweepExpiredCache(cache, ttlMs) {
 // demand-driven, so stale entries can otherwise remain resident if their exact
 // key is never requested again. Sweep the larger caches periodically.
 const cacheSweepTimer = setInterval(() => {
-  sweepExpiredCache(cachedDashboardListItems, DASHBOARD_SOURCE_CACHE_MS);
   sweepExpiredCache(cachedBidItemsByList, BID_ITEM_CACHE_MS);
   sweepExpiredCache(cachedOnThisDayItemsBySource, ON_THIS_DAY_SOURCE_CACHE_MS);
   sweepExpiredCache(cachedOnThisDayReports, ON_THIS_DAY_REPORT_CACHE_MS);
@@ -700,71 +739,11 @@ const cacheSweepTimer = setInterval(() => {
 
 if (typeof cacheSweepTimer.unref === 'function') cacheSweepTimer.unref();
 
-function getDashboardListItemsCacheKey(listId, fieldSelect = '') {
-  return `${String(listId || '').trim()}|${String(fieldSelect || '').trim()}`;
-}
+const memoryLogTimer = setInterval(() => {
+  logServerMemory('Server memory sample');
+}, SERVER_MEMORY_LOG_INTERVAL_MS);
 
-function clearDashboardListItemsCache(listId) {
-  const prefix = `${String(listId || '').trim()}|`;
-  if (prefix === '|') return;
-
-  for (const key of cachedDashboardListItems.keys()) {
-    if (key.startsWith(prefix)) cachedDashboardListItems.delete(key);
-  }
-}
-
-async function getCachedAllListItemsWithFields(token, listId, fieldSelect = '', options = {}) {
-  const ttlMs = Math.max(1000, Number(options.ttlMs) || DASHBOARD_SOURCE_CACHE_MS);
-  const forceRefresh = options.forceRefresh === true;
-  const cacheKey = getDashboardListItemsCacheKey(listId, fieldSelect);
-
-  // Full-field SharePoint rows can contain large notes and auxiliary columns.
-  // Coalesce identical reads, but never retain those rows in the process cache.
-  if (!String(fieldSelect || '').trim()) {
-    return coalesceRequest(
-      `dashboard-list-items-uncached:${cacheKey}`,
-      () => getAllListItemsWithFields(token, listId)
-    );
-  }
-
-  if (!forceRefresh) {
-    const cached = getCacheRecord(cachedDashboardListItems, cacheKey, ttlMs);
-    if (cached) return cached;
-  }
-
-  return coalesceRequest(`dashboard-list-items:${cacheKey}`, async () => {
-    if (!forceRefresh) {
-      const cached = getCacheRecord(cachedDashboardListItems, cacheKey, ttlMs);
-      if (cached) return cached;
-    }
-
-    const items = await getAllListItemsWithFields(token, listId, fieldSelect);
-    return setCacheRecord(
-      cachedDashboardListItems,
-      cacheKey,
-      items,
-      DASHBOARD_SOURCE_CACHE_MAX_ENTRIES
-    );
-  });
-}
-
-async function getCachedAllListItemsWithFieldsResilient(token, listId, fieldSelect = '', options = {}) {
-  try {
-    return {
-      items: await getCachedAllListItemsWithFields(token, listId, fieldSelect, options),
-      usedFallback: false,
-      warning: ''
-    };
-  } catch (error) {
-    if (!fieldSelect) throw error;
-
-    return {
-      items: await getCachedAllListItemsWithFields(token, listId, '', options),
-      usedFallback: true,
-      warning: error.message || 'Selected field fetch failed; retried with full fields.'
-    };
-  }
-}
+if (typeof memoryLogTimer.unref === 'function') memoryLogTimer.unref();
 
 async function getAllChildrenFromFolder(token, driveId, folderId) {
   let url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}/children?$select=id,name,webUrl,size,file,folder,lastModifiedDateTime&$top=999`;
@@ -1849,7 +1828,6 @@ function formatOrderEditAuditValue(value) {
 
 function clearOrderEditCaches() {
   cachedBidItemsByList.clear();
-  cachedDashboardListItems.clear();
   cachedOperationsToday = null;
   cachedOperationsTodayAt = 0;
   cachedDashboardBidSource = null;
@@ -5363,13 +5341,17 @@ async function getAllListItemsWithFieldsResilient(token, listId, fieldSelect = '
   }
 }
 
+// Keep whole-list Graph arrays request-scoped. Several dashboard lists grow over
+// time, and retaining their raw item/field objects together exceeded the 512 MB
+// Render instance limit. Cache only bounded, normalized report data elsewhere.
+
 const UPLOAD_DIGEST_FIELD_SELECT = 'BOLNumber,DriverName,UploadType,UploadDate,CompositeKey';
 
-async function getUploadDigestItems(token, options = {}) {
+async function getUploadDigestItems(token) {
   const listId = process.env.UPLOAD_DIGEST_LIST_ID || DEFAULT_UPLOAD_DIGEST_LIST_ID;
   if (!listId) return [];
 
-  return getCachedAllListItemsWithFields(token, listId, UPLOAD_DIGEST_FIELD_SELECT, options);
+  return getAllListItemsWithFields(token, listId, UPLOAD_DIGEST_FIELD_SELECT);
 }
 
 async function getUploadEvidenceSets(token) {
@@ -10164,7 +10146,7 @@ async function getDriverRosterItems(token) {
     throw new Error('DRIVER_ROSTER_LIST_ID is not configured on the server.');
   }
 
-  const items = await getCachedAllListItemsWithFields(
+  const items = await getAllListItemsWithFields(
     token,
     driverRosterListId,
     getDriverRosterFieldSelect()
@@ -10174,7 +10156,7 @@ async function getDriverRosterItems(token) {
 }
 
 async function getDriverPositionItems(token, listId) {
-  return getCachedAllListItemsWithFields(token, listId, getDriverPositionFieldSelect());
+  return getAllListItemsWithFields(token, listId, getDriverPositionFieldSelect());
 }
 
 function getDriverRosterSiteId() {
@@ -10384,7 +10366,6 @@ function getDriverRosterDateOnly(value) {
 function clearDriverRosterMutationCaches() {
   cachedOperationsToday = null;
   cachedOperationsTodayAt = 0;
-  clearDashboardListItemsCache(process.env.DRIVER_ROSTER_LIST_ID);
 }
 
 function getDriverRosterTerminationDate(value) {
@@ -10835,7 +10816,7 @@ async function getDriverTimeOffRows(token) {
   if (!listId) {
     throw new Error('DRIVER_TIME_OFF_LOG_LIST_ID is not configured on the server.');
   }
-  const result = await getCachedAllListItemsWithFieldsResilient(token, listId, getDriverTimeOffFieldSelect());
+  const result = await getAllListItemsWithFieldsResilient(token, listId, getDriverTimeOffFieldSelect());
   return {
     rows: result.items
       .map(cleanDriverTimeOffItem)
@@ -16639,7 +16620,7 @@ function sortAvailableTrucksDistributionRows(a, b) {
 }
 
 async function getAvailableTrucksDistributionRows(token, listId) {
-  const bundle = await getCachedAllListItemsWithFieldsResilient(
+  const bundle = await getAllListItemsWithFieldsResilient(
     token,
     listId,
     getAvailableTrucksDistributionFieldSelect()
@@ -17018,7 +16999,7 @@ async function getAvailableTruckRosterOptions(token) {
 }
 
 async function getAvailableTruckItems(token, listId) {
-  return getCachedAllListItemsWithFields(token, listId, getAvailableTruckFieldSelect());
+  return getAllListItemsWithFields(token, listId, getAvailableTruckFieldSelect());
 }
 
 async function resolveAvailableTruckDriversFromRoster(token, drivers = []) {
@@ -18150,7 +18131,7 @@ function getKoleAutoUpdaterListId() {
 }
 
 async function getIntelliTrackItems(token, listId) {
-  return getCachedAllListItemsWithFields(token, listId, getIntelliTrackFieldSelect());
+  return getAllListItemsWithFields(token, listId, getIntelliTrackFieldSelect());
 }
 
 function escapeODataString(value) {
@@ -18504,8 +18485,6 @@ app.post('/available-trucks/distribution-list', requireLookupAccess, async (req,
     );
 
     const created = cleanAvailableTrucksDistributionItem(createdItem);
-    clearDashboardListItemsCache(listId);
-
     res.status(201).json({
       success: true,
       message: `${created.company || fields.Title} added to the Available Trucks distribution list.`,
@@ -19237,7 +19216,6 @@ app.post('/driver-time-off', requireLookupAccess, async (req, res) => {
       { fields }
     );
 
-    clearDashboardListItemsCache(listId);
     cachedOperationsToday = null;
     cachedOperationsTodayAt = 0;
 
@@ -19267,7 +19245,6 @@ app.patch('/driver-time-off/:id', requireLookupAccess, async (req, res) => {
       fields
     );
 
-    clearDashboardListItemsCache(listId);
     cachedOperationsToday = null;
     cachedOperationsTodayAt = 0;
 
@@ -21136,11 +21113,25 @@ async function buildBootstrapRecruitingPayload(token) {
   };
 }
 
-async function settleBootstrapModule(work) {
+async function settleBootstrapModule(work, moduleKey = '') {
+  if (moduleKey) {
+    logServerMemory('Dashboard bootstrap module started', { module: moduleKey });
+  }
+
   try {
-    return { ok: true, data: await work() };
+    const data = await work();
+    if (moduleKey) {
+      logServerMemory('Dashboard bootstrap module finished', { module: moduleKey });
+    }
+    return { ok: true, data };
   } catch (error) {
     console.error('Dashboard bootstrap module failed:', error);
+    if (moduleKey) {
+      logServerMemory('Dashboard bootstrap module failed', {
+        module: moduleKey,
+        statusCode: Number(error?.statusCode || error?.status || 0) || null
+      });
+    }
     return { ok: false, error: error.message || 'Unable to load dashboard module.' };
   }
 }
@@ -21193,7 +21184,7 @@ app.get('/dashboard/bootstrap', requireLookupAccess, async (req, res) => {
     for (const moduleKey of moduleKeys) {
       entries.push([
         moduleKey,
-        await settleBootstrapModule(builders[moduleKey])
+        await settleBootstrapModule(builders[moduleKey], moduleKey)
       ]);
     }
 
@@ -24703,4 +24694,5 @@ app.post('/mobile/upload', requireMobileSession, async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  logServerMemory('Server memory baseline');
 });
