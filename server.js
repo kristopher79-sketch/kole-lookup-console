@@ -204,7 +204,15 @@ const ON_THIS_DAY_SOURCE_CACHE_MS = Number(process.env.ON_THIS_DAY_SOURCE_CACHE_
 const ON_THIS_DAY_REPORT_CACHE_MS = Number(process.env.ON_THIS_DAY_REPORT_CACHE_MS || 5 * 60 * 1000);
 const SALES_LEADS_REPORT_CACHE_MS = Number(process.env.SALES_LEADS_REPORT_CACHE_MS || BID_LIST_CACHE_MS);
 const SERVICE_LOCATIONS_CACHE_MS = Number(process.env.SERVICE_LOCATIONS_CACHE_MS || 60 * 1000);
+const PERMIT_FOLDER_AUDIT_CONCURRENCY = Math.max(
+  1,
+  Math.min(8, Number(process.env.PERMIT_FOLDER_AUDIT_CONCURRENCY) || 4)
+);
 const DASHBOARD_SOURCE_CACHE_MS = Math.max(1000, Number(process.env.DASHBOARD_SOURCE_CACHE_MS) || 30 * 1000);
+const DASHBOARD_SOURCE_CACHE_MAX_ENTRIES = Math.max(
+  4,
+  Math.min(24, Number(process.env.DASHBOARD_SOURCE_CACHE_MAX_ENTRIES) || 12)
+);
 const DASHBOARD_BID_SOURCE_CACHE_MS = Math.max(1000, Number(process.env.DASHBOARD_BID_SOURCE_CACHE_MS) || 60 * 1000);
 const DASHBOARD_BID_SOURCE_MAX_STALE_MS = Math.max(
   DASHBOARD_BID_SOURCE_CACHE_MS,
@@ -217,6 +225,14 @@ const inFlightRequests = new Map();
 const cachedDashboardListItems = new Map();
 const DASHBOARD_REFRESH_WORKLOAD = 'dashboard-refresh';
 const REPORT_WORKLOAD = 'report';
+const HEAVY_WORKLOAD_MAX_QUEUE = Math.max(
+  1,
+  Math.min(100, Number(process.env.HEAVY_WORKLOAD_MAX_QUEUE) || 20)
+);
+const HEAVY_WORKLOAD_MAX_WAIT_MS = Math.max(
+  10 * 1000,
+  Math.min(5 * 60 * 1000, Number(process.env.HEAVY_WORKLOAD_MAX_WAIT_MS) || 90 * 1000)
+);
 const DASHBOARD_REFRESH_PATHS = new Set([
   '/dashboard/bootstrap',
   '/operations/today',
@@ -264,6 +280,7 @@ function grantNextHeavyWorkload() {
   if (activeHeavyWorkload || queuedHeavyWorkloads.length === 0) return;
 
   const entry = queuedHeavyWorkloads.shift();
+  entry.cleanup();
   activeHeavyWorkload = entry;
   entry.resolve({
     waitedMs: Date.now() - entry.queuedAt,
@@ -277,12 +294,66 @@ function grantNextHeavyWorkload() {
 
 // Render has one shared process budget. Keep report generation and dashboard
 // refresh batches FIFO-exclusive so a large report cannot overlap a refresh.
-function acquireHeavyWorkload(kind) {
+function createHeavyWorkloadError(message, code) {
+  const error = new Error(message);
+  error.statusCode = 503;
+  error.code = code;
+  return error;
+}
+
+function acquireHeavyWorkload(kind, req, res) {
   const queuedAt = Date.now();
   const wasQueued = Boolean(activeHeavyWorkload || queuedHeavyWorkloads.length > 0);
 
-  return new Promise((resolve) => {
-    queuedHeavyWorkloads.push({ kind, queuedAt, resolve });
+  return new Promise((resolve, reject) => {
+    if (queuedHeavyWorkloads.length >= HEAVY_WORKLOAD_MAX_QUEUE) {
+      reject(createHeavyWorkloadError(
+        'The server is handling another large request. Try again in a moment.',
+        'HEAVY_WORKLOAD_QUEUE_FULL'
+      ));
+      return;
+    }
+
+    let settled = false;
+    let waitTimer;
+    const entry = {
+      kind,
+      queuedAt,
+      resolve,
+      cleanup: () => {
+        if (waitTimer) clearTimeout(waitTimer);
+        req.removeListener('aborted', cancelQueuedRequest);
+        res.removeListener('close', cancelQueuedRequest);
+      }
+    };
+    const cancelQueuedRequest = () => {
+      if (settled || activeHeavyWorkload === entry) return;
+      settled = true;
+      const index = queuedHeavyWorkloads.indexOf(entry);
+      if (index >= 0) queuedHeavyWorkloads.splice(index, 1);
+      entry.cleanup();
+      reject(createHeavyWorkloadError(
+        'The request ended before server capacity became available.',
+        'HEAVY_WORKLOAD_REQUEST_ENDED'
+      ));
+    };
+
+    req.once('aborted', cancelQueuedRequest);
+    res.once('close', cancelQueuedRequest);
+    waitTimer = setTimeout(() => {
+      if (settled || activeHeavyWorkload === entry) return;
+      settled = true;
+      const index = queuedHeavyWorkloads.indexOf(entry);
+      if (index >= 0) queuedHeavyWorkloads.splice(index, 1);
+      entry.cleanup();
+      reject(createHeavyWorkloadError(
+        'The server is handling another large request. Try again in a moment.',
+        'HEAVY_WORKLOAD_WAIT_TIMEOUT'
+      ));
+    }, HEAVY_WORKLOAD_MAX_WAIT_MS);
+    if (typeof waitTimer.unref === 'function') waitTimer.unref();
+
+    queuedHeavyWorkloads.push(entry);
     grantNextHeavyWorkload();
   }).then((slot) => ({ ...slot, wasQueued }));
 }
@@ -311,7 +382,7 @@ function requireLookupAccess(req, res, next) {
     return;
   }
 
-  acquireHeavyWorkload(workloadKind).then(({ release, waitedMs, wasQueued }) => {
+  acquireHeavyWorkload(workloadKind, req, res).then(({ release, waitedMs, wasQueued }) => {
     if (req.aborted || res.destroyed) {
       release();
       return;
@@ -331,7 +402,13 @@ function requireLookupAccess(req, res, next) {
     res.once('close', releaseOnce);
     req.once('aborted', releaseOnce);
     next();
-  }).catch(next);
+  }).catch((error) => {
+    if (error?.code === 'HEAVY_WORKLOAD_REQUEST_ENDED' || req.aborted || res.destroyed) return;
+    res.status(error?.statusCode || 503).json({
+      success: false,
+      error: error?.message || 'The server is busy. Try again in a moment.'
+    });
+  });
 }
 
 async function getGraphToken(forceRefresh = false) {
@@ -641,6 +718,15 @@ async function getCachedAllListItemsWithFields(token, listId, fieldSelect = '', 
   const forceRefresh = options.forceRefresh === true;
   const cacheKey = getDashboardListItemsCacheKey(listId, fieldSelect);
 
+  // Full-field SharePoint rows can contain large notes and auxiliary columns.
+  // Coalesce identical reads, but never retain those rows in the process cache.
+  if (!String(fieldSelect || '').trim()) {
+    return coalesceRequest(
+      `dashboard-list-items-uncached:${cacheKey}`,
+      () => getAllListItemsWithFields(token, listId)
+    );
+  }
+
   if (!forceRefresh) {
     const cached = getCacheRecord(cachedDashboardListItems, cacheKey, ttlMs);
     if (cached) return cached;
@@ -653,7 +739,12 @@ async function getCachedAllListItemsWithFields(token, listId, fieldSelect = '', 
     }
 
     const items = await getAllListItemsWithFields(token, listId, fieldSelect);
-    return setCacheRecord(cachedDashboardListItems, cacheKey, items, 24);
+    return setCacheRecord(
+      cachedDashboardListItems,
+      cacheKey,
+      items,
+      DASHBOARD_SOURCE_CACHE_MAX_ENTRIES
+    );
   });
 }
 
@@ -9359,6 +9450,41 @@ function getPermitGovernanceFieldSelect() {
   ].join(',');
 }
 
+const ACTUAL_PERMIT_COST_FIELD_NAMES = Object.freeze([
+  'ActualPilotandPermitFees',
+  'Actual_x0020_PilotandPermitFees',
+  'Actual_x0020_Pilot_x0020_and_x0020_Permit_x0020_Fees',
+  'Actual_x0020_Permit_x0020_Cost',
+  'ActualPermitCost',
+  'Actual_x0020_Permit_x0020_Costs',
+  'Permit_x0020_Cost',
+  'PermitCost',
+  'Permit_x0020_Actual_x0020_Cost',
+  'Actual_x0020_Permits_x002f_Escort_x0020_Fees_',
+  'Permits_x002f_Escort_x0020_Actual',
+  'ActualPermitsEscortFees',
+  'PermitActualCost'
+]);
+
+async function getPermitReportItems(token, listId) {
+  const columns = await getAllQuoteEngineColumns(token, listId);
+  const availableNames = new Set(
+    columns
+      .map((column) => String(column?.name || '').trim())
+      .filter(Boolean)
+  );
+  const selectedFields = [
+    ...getPermitGovernanceFieldSelect().split(','),
+    ...ACTUAL_PERMIT_COST_FIELD_NAMES.filter((name) => availableNames.has(name))
+  ];
+
+  return getAllListItemsWithFields(
+    token,
+    listId,
+    [...new Set(selectedFields)].join(',')
+  );
+}
+
 function getFirstExistingFieldValue(fields = {}, fieldNames = []) {
   for (const fieldName of fieldNames) {
     if (!Object.prototype.hasOwnProperty.call(fields, fieldName)) continue;
@@ -9374,21 +9500,7 @@ function getFirstExistingFieldValue(fields = {}, fieldNames = []) {
 }
 
 function getActualPermitCostField(fields = {}) {
-  return getFirstExistingFieldValue(fields, [
-    'ActualPilotandPermitFees',
-    'Actual_x0020_PilotandPermitFees',
-    'Actual_x0020_Pilot_x0020_and_x0020_Permit_x0020_Fees',
-    'Actual_x0020_Permit_x0020_Cost',
-    'ActualPermitCost',
-    'Actual_x0020_Permit_x0020_Costs',
-    'Permit_x0020_Cost',
-    'PermitCost',
-    'Permit_x0020_Actual_x0020_Cost',
-    'Actual_x0020_Permits_x002f_Escort_x0020_Fees_',
-    'Permits_x002f_Escort_x0020_Actual',
-    'ActualPermitsEscortFees',
-    'PermitActualCost'
-  ]);
+  return getFirstExistingFieldValue(fields, ACTUAL_PERMIT_COST_FIELD_NAMES);
 }
 
 function formatPermitDimensionValue(value) {
@@ -9591,20 +9703,37 @@ async function addPermitFolderAuditCounts(token, rows) {
     ).values()
   );
 
-  const auditResults = await Promise.allSettled(
-    foldersToAudit.map(async (row) => {
-      const children = await getAllChildrenFromFolder(
-        token,
-        process.env.DISPATCH_ONEDRIVE_ID,
-        row.PermitFolderId
-      );
+  const auditResults = new Array(foldersToAudit.length);
+  let nextFolderIndex = 0;
+  const auditWorker = async () => {
+    while (nextFolderIndex < foldersToAudit.length) {
+      const index = nextFolderIndex;
+      nextFolderIndex += 1;
+      const row = foldersToAudit[index];
 
-      return {
-        folderId: row.PermitFolderId,
-        fileCount: children.filter((child) => child.file).length,
-        itemCount: children.length
-      };
-    })
+      try {
+        const children = await getAllChildrenFromFolder(
+          token,
+          process.env.DISPATCH_ONEDRIVE_ID,
+          row.PermitFolderId
+        );
+
+        auditResults[index] = {
+          status: 'fulfilled',
+          value: {
+            folderId: row.PermitFolderId,
+            fileCount: children.filter((child) => child.file).length,
+            itemCount: children.length
+          }
+        };
+      } catch (error) {
+        auditResults[index] = { status: 'rejected', reason: error };
+      }
+    }
+  };
+  const workerCount = Math.min(PERMIT_FOLDER_AUDIT_CONCURRENCY, foldersToAudit.length);
+  await Promise.all(
+    Array.from({ length: workerCount }, () => auditWorker())
   );
 
   const auditByFolderId = new Map();
@@ -15344,9 +15473,9 @@ app.get('/reports/permit-governance', requireLookupAccess, async (req, res) => {
       });
     }
 
-    // Permit Governance intentionally loads full fields because the historical pane
-    // can display actual permit cost from whichever Bid Listing column is present.
-    const items = await getCachedAllListItemsWithFields(token, currentList.listId);
+    // Discover the live actual-cost alias, then request only the fields used by
+    // this report. Full Bid Listing rows can exceed the host's memory budget.
+    const items = await getPermitReportItems(token, currentList.listId);
 
     res.json(await buildPermitGovernanceResponse(items, currentList, { token }));
   } catch (error) {
@@ -15372,9 +15501,7 @@ app.get('/reports/permit-cost-variance', requireLookupAccess, async (req, res) =
       });
     }
 
-    // Actual permit cost has existed under several internal names, so retain the
-    // resilient full-field read and keep it briefly cached for report reopen/refresh.
-    const items = await getCachedAllListItemsWithFields(token, currentList.listId);
+    const items = await getPermitReportItems(token, currentList.listId);
     res.json(buildPermitCostVarianceResponse(items, currentList));
   } catch (error) {
     console.error(error);
