@@ -538,6 +538,39 @@ async function graphPutBinary(token, url, body, contentType, extraHeaders = {}) 
   return data;
 }
 
+async function graphPutFileStream(token, url, filePath, fileSize, contentType, extraHeaders = {}) {
+  const body = fs.createReadStream(filePath);
+
+  try {
+    const response = await fetchWithTimeoutAndRetry(url, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': contentType,
+        ...(Number.isFinite(Number(fileSize)) && Number(fileSize) >= 0
+          ? { 'Content-Length': String(Number(fileSize)) }
+          : {}),
+        ...extraHeaders
+      },
+      body,
+      duplex: 'half'
+    }, { maxRetries: 0 });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      const error = new Error('Microsoft Graph could not store the uploaded file.');
+      error.statusCode = 502;
+      error.graphStatus = response.status;
+      throw error;
+    }
+
+    return data;
+  } finally {
+    if (!body.destroyed) body.destroy();
+  }
+}
+
 function getCacheRecord(cache, key, ttlMs) {
   const cached = cache.get(key);
   if (!cached) return null;
@@ -565,6 +598,30 @@ function setCacheRecord(cache, key, value, maxEntries = 40) {
 
   return value;
 }
+
+function sweepExpiredCache(cache, ttlMs) {
+  const now = Date.now();
+
+  for (const [key, cached] of cache.entries()) {
+    if (!cached || now - cached.cachedAt > ttlMs) {
+      cache.delete(key);
+    }
+  }
+}
+
+// Render's free instance has a tight shared memory budget. Most cache expiry is
+// demand-driven, so stale entries can otherwise remain resident if their exact
+// key is never requested again. Sweep the larger caches periodically.
+const cacheSweepTimer = setInterval(() => {
+  sweepExpiredCache(cachedDashboardListItems, DASHBOARD_SOURCE_CACHE_MS);
+  sweepExpiredCache(cachedBidItemsByList, BID_ITEM_CACHE_MS);
+  sweepExpiredCache(cachedOnThisDayItemsBySource, ON_THIS_DAY_SOURCE_CACHE_MS);
+  sweepExpiredCache(cachedOnThisDayReports, ON_THIS_DAY_REPORT_CACHE_MS);
+  sweepExpiredCache(cachedQuoteComparableItemsByList, QUOTE_ENGINE_COMPARABLE_CACHE_MS);
+  sweepExpiredCache(cachedOrderNotesByOrder, getOrderNotesCacheMs());
+}, 60 * 1000);
+
+if (typeof cacheSweepTimer.unref === 'function') cacheSweepTimer.unref();
 
 function getDashboardListItemsCacheKey(listId, fieldSelect = '') {
   return `${String(listId || '').trim()}|${String(fieldSelect || '').trim()}`;
@@ -20982,7 +21039,7 @@ app.get('/dashboard/bootstrap', requireLookupAccess, async (req, res) => {
     const needsBidSource = moduleKeys.some((key) => ['operations', 'availableTrucks', 'actionAlerts'].includes(key));
     const currentList = needsBidSource ? await getCurrentBidListingSource(token) : null;
     const bidItemsPromise = currentList
-      ? getDashboardBidSource(token, currentList)
+      ? getDashboardBidSource(token, currentList, { waitForRefresh: true })
       : Promise.resolve([]);
     const evidencePromise = moduleKeys.some((key) => ['operations', 'actionAlerts'].includes(key))
       ? getUploadEvidenceSets(token)
@@ -21005,10 +21062,13 @@ app.get('/dashboard/bootstrap', requireLookupAccess, async (req, res) => {
       }
     };
 
-    const entries = await Promise.all(moduleKeys.map(async (moduleKey) => [
-      moduleKey,
-      await settleBootstrapModule(builders[moduleKey])
-    ]));
+    const entries = [];
+    for (const moduleKey of moduleKeys) {
+      entries.push([
+        moduleKey,
+        await settleBootstrapModule(builders[moduleKey])
+      ]);
+    }
 
     res.json({
       success: true,
@@ -23142,16 +23202,16 @@ async function uploadLoadPaperworkFile(token, context, file, contentType, existi
       `/items/${encodeURIComponent(context.loadFolder.id)}:/${encodeURIComponent(candidateName)}:/content`;
 
     try {
-      return await withMobileUploadFileBufferSlot(async () => {
-        const fileBuffer = await fs.promises.readFile(file.path);
-        return graphPutBinary(
+      return await withMobileUploadFileBufferSlot(() =>
+        graphPutFileStream(
           token,
           uploadUrl,
-          fileBuffer,
+          file.path,
+          file.size,
           contentType,
           { 'If-None-Match': '*' }
-        );
-      });
+        )
+      );
     } catch (error) {
       if (![409, 412].includes(Number(error?.graphStatus)) || attempt === 3) throw error;
     }
@@ -24464,15 +24524,15 @@ app.post('/mobile/upload', requireMobileSession, async (req, res) => {
         `/items/${encodeURIComponent(targetFolder.id)}:/${encodeURIComponent(safeName)}:/content`;
 
       try {
-        const storedFile = await withMobileUploadFileBufferSlot(async () => {
-          const fileBuffer = await fs.promises.readFile(file.path);
-          return graphPutBinary(
+        const storedFile = await withMobileUploadFileBufferSlot(() =>
+          graphPutFileStream(
             graphToken,
             uploadUrl,
-            fileBuffer,
+            file.path,
+            file.size,
             contentType
-          );
-        });
+          )
+        );
 
         uploaded.push({
           name: storedFile.name || safeName,
