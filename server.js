@@ -22689,7 +22689,8 @@ const CHECK_IN_TIMES_FIELD_DEFINITIONS = Object.freeze({
     label: 'Accuracy',
     aliases: Object.freeze(['Accuracy', 'GPS Accuracy in Meters'])
   }),
-  locationStatus: Object.freeze({ label: 'Location Status', aliases: Object.freeze(['Location Status']) })
+  locationStatus: Object.freeze({ label: 'Location Status', aliases: Object.freeze(['Location Status']) }),
+  entrySource: Object.freeze({ label: 'Entry Source', aliases: Object.freeze(['EntrySource']) })
 });
 let mobileUploadActiveFileBuffers = 0;
 const mobileUploadFileBufferWaiters = [];
@@ -22904,7 +22905,8 @@ function buildCheckInTimesFields(schema, event) {
     latitude: event.latitude,
     longitude: event.longitude,
     accuracy: event.accuracy,
-    locationStatus: event.locationStatus
+    locationStatus: event.locationStatus,
+    entrySource: 'Driver'
   };
 
   Object.entries(values).forEach(([key, value]) => {
