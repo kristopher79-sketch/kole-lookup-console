@@ -66,6 +66,10 @@ Registration is treated as one transition rather than a series of field edits. D
 - Delivery: `Expected_x0020_Delivery_x0020_Da`, `Delivery1Time`, `Delivery1AMorPM`, `Delivery1Name`, `Deliver1Address1`, `Delivery1City`, `Delivery1State`, `Delivery1Zip`, `Delivery1ContactName`, `Delivery1ContactNumber`
 - Freight/operations: `Freight_x0020_Description`, `Item1QTY`, `Item1Description`, `TotalPieces`, `Item1Serial`, `Item1Dimensions`, `Length`, `Width`, `Height`, `EstimatedWeight`, `Route`, `Team_x0020_Required`, `No_x002e_ofTarpsNeeded`, `OrderNotes`
 
+`ProximityNoticeKey` is handled separately as a `LOAD_UPDATED` arrival reminder when a populated, valid `BOL|StopName` changes on an unsettled Won load with the same assigned truck. It bypasses registration suppression, uses the existing event/push/deep-link path, and adds no event-type choice or endpoint. The Bid Listing source is refreshed before delivery so authenticated Home sees the key. Empty, malformed, wrong-BOL, processed, and final-settled notices do not trigger arrival reminders.
+
+Mobile exposes the validated key through the existing Home/load mapping. A dismissible prompt is scoped to the authenticated driver's current load and today's pickup/delivery date. Driver/truck/load/key identities are remembered in session storage (last 100) with an in-memory fallback, preventing repeats during refreshes and rerenders. A new browser session can show a retained current-day notice once; the key has no event timestamp. Choosing Open check-in opens the existing primary-stop controls, preserving appointment locks and explicit check-in submission. Secondary or ambiguous stop names open the load for review because existing check-in supports primary stops only. No service-worker changes, proximity polling, GPS calculations, or automatic arrival writes are added.
+
 All other fields—including workflow flags, automation timestamps, tracking IDs, and paperwork state—are ignored by `LOAD_UPDATED` detection.
 
 ## Mobile Notification Events list

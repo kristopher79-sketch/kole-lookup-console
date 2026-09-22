@@ -341,3 +341,34 @@ test('allowlist contains only intentional driver-impacting fields', () => {
   assert.equal(DRIVER_IMPACTING_FIELDS.includes('WonNoticeSent'), false);
   assert.equal(DRIVER_IMPACTING_FIELDS.includes('Processed'), false);
 });
+
+
+test('proximity changes use LOAD_UPDATED even during registration; repeats and clearing stay silent', () => {
+  const before = { Status: 'Won', Truck_x0020_Number: '123' };
+  const after = { ...before, ProximityNoticeKey: 'BOL-42|EVA Air Cargo' };
+  const events = detect(before, after, { registrationWindowActive: true });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].eventType, 'LOAD_UPDATED');
+  assert.equal(events[0].proximityNoticeKey, after.ProximityNoticeKey);
+  assert.deepEqual(events[0].changedFields, ['ProximityNoticeKey']);
+  assert.deepEqual(detect(after, after), []);
+  assert.deepEqual(detect(after, before), []);
+  assert.equal(detect(after, { ...after, ProximityNoticeKey: 'BOL-42|AGSE' }).length, 1);
+  for (const key of ['OTHER|AGSE', 'BOL-42|', 'invalid', 'BOL-42|<script>', 'BOL-42|A|B']) {
+    assert.deepEqual(detect(before, { ...before, ProximityNoticeKey: key }), []);
+  }
+  for (const flag of ['Processed', 'FinalSettleSent']) {
+    assert.deepEqual(detect(before, { ...after, [flag]: true }), []);
+  }
+});
+
+test('proximity does not override reassignment/cancellation or repeat on ordinary edits', () => {
+  const before = { Status: 'Won', Truck_x0020_Number: '123', ProximityNoticeKey: 'BOL-42|AGSE' };
+  const edited = detect(before, { ...before, OrderNotes: 'Updated instructions' });
+  assert.equal(edited[0].proximityNoticeKey, undefined);
+  assert.deepEqual(edited[0].changedFields, ['OrderNotes']);
+  const reassigned = detect(before, { ...before, Truck_x0020_Number: '456' });
+  assert.deepEqual(reassigned.map(event => event.eventType), ['LOAD_REMOVED', 'NEW_LOAD']);
+  assert.ok(reassigned.every(event => !event.proximityNoticeKey));
+  assert.equal(detect(before, { ...before, Status: 'CAN' })[0].eventType, 'LOAD_CANCELLED');
+});

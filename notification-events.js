@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { getMobileProximityNoticeKey } = require('./mobile-home');
 
 const NOTIFICATION_EVENT_TYPES = Object.freeze({
   NEW_LOAD: 'NEW_LOAD',
@@ -238,6 +239,7 @@ function createNotificationEvent(context, eventType, truckNumber, options = {}) 
     deliveryDate: getPayloadDate(currentFields, previousFields, 'Expected_x0020_Delivery_x0020_Da'),
     deliveryTime: getPayloadTime(currentFields, previousFields, 'Delivery1Time', 'Delivery1AMorPM'),
     loadDetailsAdded: options.loadDetailsAdded === true,
+    ...(options.proximityNoticeKey ? { proximityNoticeKey: options.proximityNoticeKey } : {}),
     changedFields: Array.from(new Set(options.changedFields || [])),
     status,
     previousStatus,
@@ -351,6 +353,19 @@ function createBidListingNotificationEvents(input = {}) {
 
   if (wasWon && isWon && truckNumber && truckNumber === previousTruckNumber) {
     const changedFields = getDriverImpactingChangedFields(previousFields, currentFields);
+    const proximityNoticeKey = getMobileProximityNoticeKey(currentFields);
+    const previousProximityNoticeKey = String(previousFields.ProximityNoticeKey || '')
+      .split('|').map((part) => part.trim()).join('|');
+    // Arrival notices must not be swallowed by registration field-fill suppression.
+    if (proximityNoticeKey && proximityNoticeKey !== previousProximityNoticeKey) {
+      return [createNotificationEvent(
+        context,
+        NOTIFICATION_EVENT_TYPES.LOAD_UPDATED,
+        truckNumber,
+        { changedFields: [...changedFields, 'ProximityNoticeKey'], previousTruckNumber, proximityNoticeKey }
+      )];
+    }
+
 
     if (loadDetailsAdded) {
       return [createNotificationEvent(

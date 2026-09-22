@@ -166,6 +166,11 @@ function formatChangedFieldList(changedFields = []) {
 }
 
 function buildMobilePushBody(event = {}) {
+  if (event.eventType === 'LOAD_UPDATED' && event.proximityNoticeKey) {
+    const stopName = cleanMobilePushText(event.proximityNoticeKey.split('|')[1], 300);
+    return `Looks like you've arrived at ${stopName}. Check in now?`;
+  }
+
   if (event.eventType === 'NEW_LOAD') {
     const route = [event.origin, event.destination].map((value) => cleanMobilePushText(value, 120)).filter(Boolean);
     return route.length === 2 ? `${route[0]} → ${route[1]}` : 'A new load is ready to review.';
@@ -191,7 +196,9 @@ function buildMobilePushPayload(event = {}) {
 
   return {
     eventType,
-    title: event.loadDetailsAdded === true
+    title: event.eventType === 'LOAD_UPDATED' && event.proximityNoticeKey
+      ? 'Ready to check in?'
+      : event.loadDetailsAdded === true
       ? 'Load Details Have Been Added'
       : MOBILE_PUSH_EVENT_TITLES[eventType] || 'Kole Connect Mobile',
     body: buildMobilePushBody(event),

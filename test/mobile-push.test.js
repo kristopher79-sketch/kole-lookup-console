@@ -345,3 +345,12 @@ test('public VAPID configuration never returns the private key', () => {
   assert.deepEqual(response, { configured: true, publicKey: 'public-key' });
   assert.equal(JSON.stringify(response).includes('never-return-this'), false);
 });
+
+
+test('proximity push reuses the existing load deep link and update event', () => {
+  const payload = buildMobilePushPayload({ eventType: 'LOAD_UPDATED', loadId: '42', proximityNoticeKey: 'BOL-42|EVA Air Cargo' });
+  assert.equal(payload.eventType, 'LOAD_UPDATED');
+  assert.equal(payload.title, 'Ready to check in?');
+  assert.equal(payload.body, "Looks like you've arrived at EVA Air Cargo. Check in now?");
+  assert.equal(payload.url, '/?loadId=42');
+});

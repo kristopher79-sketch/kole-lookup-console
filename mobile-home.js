@@ -1,5 +1,18 @@
 'use strict';
 
+// Validate the backend notice without calculating location or changing arrival state.
+function getMobileProximityNoticeKey(fields = {}) {
+  const key = typeof fields.ProximityNoticeKey === 'string' ? fields.ProximityNoticeKey.trim() : '';
+  const parts = key.split('|');
+  if (parts.length !== 2 || key.length > 512 || /[\x00-\x1f\x7f<>]/.test(key)) return '';
+  const [bol, stop] = parts.map((part) => part.trim());
+  if (!bol || !stop || bol !== String(fields.BOLNumber_x0028_Won_x0029_ || '').trim()) return '';
+  if (normalizeMobileLoadStatus(getMobileChoiceValue(fields.Status)) !== 'won' ||
+      parseMobileLoadFlag(fields.Processed) || parseMobileLoadFlag(fields.FinalSettleSent)) return '';
+  return `${bol}|${stop}`;
+}
+
+
 function normalizeMobileLoadStatus(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -84,6 +97,7 @@ function shouldKeepMobileLoadVisible(load = {}) {
 }
 
 module.exports = {
+  getMobileProximityNoticeKey,
   getMobileAvailableLoadItem,
   isMobileLoadEligibleForRoster,
   isMobileLoadStatusEligible,

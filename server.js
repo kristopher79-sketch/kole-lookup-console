@@ -23,6 +23,7 @@ const {
 } = require('./mobile-push');
 const {
   getMobileAvailableLoadItem,
+  getMobileProximityNoticeKey,
   isMobileLoadEligibleForRoster,
   isMobileLoadStatusEligible,
   shouldKeepMobileLoadVisible
@@ -18154,6 +18155,7 @@ async function getCurrentBidListingSource(token) {
 
 function getDashboardBidFieldSelect() {
   return Array.from(new Set([
+    'ProximityNoticeKey',
     'BOLNumber_x0028_Won_x0029_',
     'BidID',
     'Company',
@@ -22258,6 +22260,12 @@ async function recordBidListingNotificationChange(token, input) {
     return { events: [], createdCount: 0, idempotentCount: 0 };
   }
 
+  if (events.some((event) => event.proximityNoticeKey)) {
+    // Finish any older coalesced read, then refresh before push wakes Mobile Home.
+    await inFlightRequests.get(`dashboard-bid-source:${currentList.listId}`);
+    await getDashboardBidSource(token, currentList, { forceRefresh: true, waitForRefresh: true });
+  }
+
   const targets = await resolveMobileNotificationTargets(token, events);
   const persistedEvents = [];
 
@@ -22313,6 +22321,9 @@ async function recordBidListingNotificationChange(token, input) {
 
 function getMobileNotificationBidFieldSelect() {
   return Array.from(new Set([
+    'ProximityNoticeKey',
+    'Processed',
+    'FinalSettleSent',
     'BOLNumber_x0028_Won_x0029_',
     'BidID',
     'Status',
@@ -23583,6 +23594,7 @@ function buildMobileHomeLoadSummary(item) {
   const fields = item?.fields || {};
 
   return {
+    ProximityNoticeKey: getMobileProximityNoticeKey(fields),
     id: String(item?.id || ''),
     BOL: getMobileHomeText(fields.BOLNumber_x0028_Won_x0029_),
     BidID: getMobileHomeText(fields.BidID),
@@ -23860,6 +23872,7 @@ function buildMobileLoadDetail(item) {
   const fields = item?.fields || {};
 
   const load = {
+    ProximityNoticeKey: getMobileProximityNoticeKey(fields),
     id: String(item?.id || ''),
     BOL: getMobileHomeText(fields.BOLNumber_x0028_Won_x0029_),
     BidID: getMobileHomeText(fields.BidID),
