@@ -15,6 +15,8 @@ const MOBILE_CHECKIN_LOCATION_STATUSES = Object.freeze({
   unavailable: 'Unavailable',
   timeout: 'Timeout'
 });
+const MOBILE_CHECKIN_TIME_ZONE = 'America/New_York';
+const MOBILE_CHECKIN_EARLY_MS = 60 * 60 * 1000;
 
 function createMobileCheckinError(message, statusCode = 400, code = '') {
   const error = new Error(message);
@@ -40,6 +42,45 @@ function normalizeMobileTruckKey(value) {
 
 function getCanonicalValue(value, allowedValues) {
   return allowedValues[normalizeMobileCheckinText(value)] || '';
+}
+
+function getMobileCheckinAvailableAt(load = {}, stop, stopSequence = 1) {
+  // The current Mobile load has appointment fields only for the first stop of each type.
+  if (stopSequence !== 1) return '';
+  const isPickup = getCanonicalValue(stop, MOBILE_CHECKIN_STOPS) === 'Pickup';
+  const dateText = String(isPickup ? load.PickupDate || '' : load.DeliveryDate || '').trim();
+  const timeText = String(isPickup ? load.PickupTime || '' : load.DeliveryTime || '').trim();
+  const ampmText = String(isPickup ? load.PickupAMPM || '' : load.DeliveryAMPM || '').trim();
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateText);
+  const timeMatch = /^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i.exec(timeText);
+  if (!dateMatch || !timeMatch) return '';
+
+  const [, yearText, monthText, dayText] = dateMatch;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hourText = Number(timeMatch[1]);
+  const minute = Number(timeMatch[2]);
+  const period = (timeMatch[3] || ampmText).toUpperCase();
+  if (minute > 59 || !['AM', 'PM'].includes(period) || hourText < 1 || hourText > 12) return '';
+  if (timeMatch[3] && ampmText && timeMatch[3].toUpperCase() !== ampmText.toUpperCase()) return '';
+  const validDate = new Date(Date.UTC(year, month - 1, day));
+  if (validDate.getUTCFullYear() !== year || validDate.getUTCMonth() + 1 !== month || validDate.getUTCDate() !== day) return '';
+  const hour = (hourText % 12) + (period === 'PM' ? 12 : 0);
+  const wallTime = Date.UTC(year, month - 1, day, hour, minute);
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: MOBILE_CHECKIN_TIME_ZONE,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  });
+  const candidates = [4, 5].map((offsetHours) => wallTime + offsetHours * 60 * 60 * 1000)
+    .filter((candidate) => {
+      const parts = Object.fromEntries(formatter.formatToParts(candidate).map((part) => [part.type, part.value]));
+      return Number(parts.year) === year && Number(parts.month) === month &&
+        Number(parts.day) === day && Number(parts.hour) === hour && Number(parts.minute) === minute;
+    });
+  // A repeated or nonexistent local time cannot identify one appointment instant.
+  return candidates.length === 1 ? new Date(candidates[0] - MOBILE_CHECKIN_EARLY_MS).toISOString() : '';
 }
 
 function validateMobileStopEventInput(input = {}) {
@@ -328,6 +369,25 @@ function createMobileCheckinService({ repository, now = () => new Date().toISOSt
         return { event: existingEvent, idempotentReplay: true };
       }
 
+      if (validatedInput.action === 'In') {
+        const availableAt = getMobileCheckinAvailableAt(load, validatedInput.stop, validatedInput.stopSequence);
+        if (!availableAt) {
+          throw createMobileCheckinError(
+            'A scheduled appointment date and time are required before checking in.',
+            409,
+            'CHECK_IN_APPOINTMENT_UNAVAILABLE'
+          );
+        }
+        const currentTime = Date.parse(now());
+        if (!Number.isFinite(currentTime) || currentTime < Date.parse(availableAt)) {
+          throw createMobileCheckinError(
+            'Check-in opens one hour before the scheduled appointment.',
+            409,
+            'CHECK_IN_TOO_EARLY'
+          );
+        }
+      }
+
       if (validatedInput.action === 'Out') {
         const stopState = deriveMobileStopState(
           existingEvents,
@@ -390,6 +450,7 @@ module.exports = {
   cleanMobileStopEventItem,
   createMobileCheckinError,
   createMobileCheckinService,
+  getMobileCheckinAvailableAt,
   deriveMobileStopState,
   findMobileStopEvent,
   getMobileStopEventIdentity,

@@ -6,12 +6,17 @@ const assert = require('node:assert/strict');
 const {
   createMobileCheckinService,
   deriveMobileStopState,
+  getMobileCheckinAvailableAt,
   validateMobileStopEventInput
 } = require('../mobile-checkin');
 
 const NOW = '2026-09-02T13:47:18.000Z';
 const DRIVER = Object.freeze({ truck: '412', operator: 'John Smith' });
-const LOAD = Object.freeze({ id: '18437', bol: 'D198123', truck: '0412' });
+const LOAD = Object.freeze({
+  id: '18437', bol: 'D198123', truck: '0412',
+  PickupDate: '2026-09-02', PickupTime: '10:00', PickupAMPM: 'AM',
+  DeliveryDate: '2026-09-02', DeliveryTime: '10:00', DeliveryAMPM: 'AM'
+});
 
 function createInput(overrides = {}) {
   return {
@@ -98,6 +103,17 @@ test('duplicate In is an idempotent replay and creates no second item', async ()
   assert.equal(repository.createCount, 1);
 });
 
+test('an existing In remains an idempotent replay if its appointment changes', async () => {
+  const repository = createFakeRepository();
+  const service = createService(repository);
+  await service.recordEvent({ input: createInput(), driver: DRIVER, load: LOAD });
+  const replay = await service.recordEvent({
+    input: createInput(), driver: DRIVER, load: { ...LOAD, PickupTime: '' }
+  });
+  assert.equal(replay.idempotentReplay, true);
+  assert.equal(repository.createCount, 1);
+});
+
 test('simultaneous duplicate In taps share one create operation', async () => {
   const repository = createFakeRepository({ createDelayMs: 10 });
   const service = createService(repository);
@@ -157,24 +173,61 @@ test('Pickup and Delivery ordering is independent', async () => {
   assert.deepEqual(repository.events.map((event) => event.stop), ['Pickup', 'Delivery']);
 });
 
-test('Stop Sequence participates in event identity and ordering', async () => {
+test('a later stop without its own appointment cannot create an In event', async () => {
   const repository = createFakeRepository();
   const service = createService(repository);
 
   await service.recordEvent({ input: createInput(), driver: DRIVER, load: LOAD });
-  await service.recordEvent({
-    input: createInput({ stopSequence: 2 }),
-    driver: DRIVER,
-    load: LOAD
-  });
-  await service.recordEvent({
-    input: createInput({ stopSequence: 2, action: 'out' }),
-    driver: DRIVER,
-    load: LOAD
-  });
+  await assert.rejects(
+    service.recordEvent({ input: createInput({ stopSequence: 2 }), driver: DRIVER, load: LOAD }),
+    (error) => error.code === 'CHECK_IN_APPOINTMENT_UNAVAILABLE'
+  );
 
-  assert.equal(repository.events.length, 3);
-  assert.deepEqual(repository.events.map((event) => event.stopSequence), [1, 2, 2]);
+  assert.equal(repository.events.length, 1);
+});
+
+test('check-in opens at the exact Eastern appointment date and time minus one hour', async () => {
+  const appointment = { ...LOAD, PickupDate: '2026-09-23', PickupTime: '8:00', PickupAMPM: 'AM' };
+  assert.equal(getMobileCheckinAvailableAt(appointment, 'Pickup'), '2026-09-23T11:00:00.000Z');
+  const repository = createFakeRepository();
+  const service = createMobileCheckinService({ repository, now: () => '2026-09-23T00:00:00.000Z' });
+  await assert.rejects(
+    service.recordEvent({ input: createInput(), driver: DRIVER, load: appointment }),
+    (error) => error.code === 'CHECK_IN_TOO_EARLY'
+  );
+  assert.equal(repository.createCount, 0);
+  const atOpening = createMobileCheckinService({ repository, now: () => '2026-09-23T11:00:00.000Z' });
+  await atOpening.recordEvent({ input: createInput(), driver: DRIVER, load: appointment });
+  assert.equal(repository.createCount, 1);
+});
+
+test('missing and invalid appointment information blocks In without affecting existing Out', async () => {
+  const missing = { ...LOAD, PickupTime: '' };
+  const invalid = { ...LOAD, PickupDate: '2026-02-30' };
+  for (const load of [missing, invalid]) {
+    const repository = createFakeRepository();
+    const service = createService(repository);
+    await assert.rejects(
+      service.recordEvent({ input: createInput(), driver: DRIVER, load }),
+      (error) => error.code === 'CHECK_IN_APPOINTMENT_UNAVAILABLE'
+    );
+    assert.equal(repository.createCount, 0);
+  }
+  const repository = createFakeRepository();
+  const service = createService(repository);
+  await service.recordEvent({ input: createInput(), driver: DRIVER, load: LOAD });
+  await service.recordEvent({ input: createInput({ action: 'out' }), driver: DRIVER, load: missing });
+  assert.equal(repository.createCount, 2);
+});
+
+test('Eastern winter offset is used for the appointment window', () => {
+  const winter = { ...LOAD, PickupDate: '2026-12-23', PickupTime: '8:00', PickupAMPM: 'AM' };
+  assert.equal(getMobileCheckinAvailableAt(winter, 'Pickup'), '2026-12-23T12:00:00.000Z');
+});
+
+test('a midnight appointment opens on the previous calendar date', () => {
+  const overnight = { ...LOAD, DeliveryDate: '2026-09-23', DeliveryTime: '12:30', DeliveryAMPM: 'AM' };
+  assert.equal(getMobileCheckinAvailableAt(overnight, 'Delivery'), '2026-09-23T03:30:00.000Z');
 });
 
 test('invalid coordinates are rejected when location is Captured', () => {
@@ -194,12 +247,12 @@ test('invalid coordinates are rejected when location is Captured', () => {
 });
 
 test('Denied, Unavailable, and Timeout create events without coordinates', async () => {
-  for (const [index, status] of ['Denied', 'Unavailable', 'Timeout'].entries()) {
+  for (const status of ['Denied', 'Unavailable', 'Timeout']) {
     const repository = createFakeRepository();
     const service = createService(repository);
     const result = await service.recordEvent({
       input: createInput({
-        stopSequence: index + 1,
+        stopSequence: 1,
         location: { status }
       }),
       driver: DRIVER,

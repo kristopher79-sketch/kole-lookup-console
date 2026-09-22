@@ -31,6 +31,7 @@ const {
   cleanMobileStopEventItem,
   createMobileCheckinError,
   createMobileCheckinService,
+  getMobileCheckinAvailableAt,
   toMobileStopEventResponse,
   validateMobileStopEventInput
 } = require('./mobile-checkin');
@@ -23858,7 +23859,7 @@ async function getMobilePermitFolderWebUrl(token, item, roster) {
 function buildMobileLoadDetail(item) {
   const fields = item?.fields || {};
 
-  return {
+  const load = {
     id: String(item?.id || ''),
     BOL: getMobileHomeText(fields.BOLNumber_x0028_Won_x0029_),
     BidID: getMobileHomeText(fields.BidID),
@@ -23904,6 +23905,12 @@ function buildMobileLoadDetail(item) {
     AircraftRelated: getMobileOperationalIndicator(fields.Aircraft_x0020_Related_x003f_),
     TeamRequired: getMobileOperationalIndicator(fields.Team_x0020_Required),
     IsOversized: isMobileOversizedLoad(fields)
+  };
+
+  return {
+    ...load,
+    pickupCheckInAvailableAt: getMobileCheckinAvailableAt(load, 'Pickup'),
+    deliveryCheckInAvailableAt: getMobileCheckinAvailableAt(load, 'Delivery')
   };
 }
 
@@ -24463,7 +24470,13 @@ app.post('/mobile/stop-event', requireMobileSession, async (req, res) => {
         bol: getMobileHomeText(fields.BOLNumber_x0028_Won_x0029_),
         truck: getMobileHomeText(
           fields.Truck_x0020_Number || fields['Truck_x0020_Number/Value']
-        )
+        ),
+        PickupDate: normalizeSharePointBusinessDate(fields.Pickup_x0020_Offer_x0020_Date),
+        PickupTime: getMobileHomeText(fields.Pickup1PickupTime),
+        PickupAMPM: getMobileHomeText(fields.Pickup1AMorPM),
+        DeliveryDate: normalizeSharePointBusinessDate(fields.Expected_x0020_Delivery_x0020_Da),
+        DeliveryTime: getMobileHomeText(fields.Delivery1Time),
+        DeliveryAMPM: getMobileHomeText(fields.Delivery1AMorPM)
       },
       context: { token: graphToken }
     });
