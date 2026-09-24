@@ -10,6 +10,22 @@ const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
 const multer = require('multer');
 const webpush = require('web-push');
+const { createMemoryCacheBudget, runWithWorkloadSlot, mapSequentialSettled } = require('./server-memory');
+const { buildDriverRosterEditSchema, buildDriverRosterEditPatch, driverRosterEditError } = require('./driver-roster-edit');
+
+// Reuse native date formatters across rows and refreshes; bound future variants.
+const cachedDateFormatters = new Map();
+function getCachedDateFormatter(locale, options) {
+  const key = JSON.stringify([locale, options]);
+  let formatter = cachedDateFormatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(locale, options);
+    if (cachedDateFormatters.size >= 32) cachedDateFormatters.delete(cachedDateFormatters.keys().next().value);
+    cachedDateFormatters.set(key, formatter);
+  }
+  return formatter;
+}
+
 const {
   DRIVER_IMPACTING_FIELDS,
   createBidListingNotificationEvents,
@@ -126,6 +142,7 @@ const QUOTE_ENGINE_UNKNOWN_DATE = '2100-01-01';
 const QUOTE_ENGINE_SCHEMA_CACHE_MS = 5 * 60 * 1000;
 const QUOTE_ENGINE_OPTIONS_CACHE_MS = 5 * 60 * 1000;
 const QUOTE_ENGINE_COMPARABLE_CACHE_MS = 5 * 60 * 1000;
+const LIST_READ_PAGE_SIZE = 200;
 const QUOTE_ENGINE_PUBLISH_CACHE_MS = 30 * 60 * 1000;
 const CONTRACT_LANES_CACHE_MS = 5 * 60 * 1000;
 const LOAD_PAPERWORK_ROOT_CACHE_MS = 5 * 60 * 1000;
@@ -150,19 +167,20 @@ function getLoadPicturesFolderId() {
 }
 
 
+// These are estimated retained-object budgets, not an RSS limit. Oversized
+// results are still returned in full, but are not kept between requests.
+const largeCacheBudget = createMemoryCacheBudget({ maxBytes: 32 * 1024 * 1024, maxEntryBytes: 8 * 1024 * 1024 });
+const cachedLargeReports = largeCacheBudget.createCache();
 let cachedBidLists = null;
 let cachedBidListsAt = 0;
 let cachedSalesLeadsNotesListId = null;
 let cachedSalesLeadsNotesListIdAt = 0;
-let cachedSalesLeadsBaseReport = null;
 let cachedSalesLeadsBaseReportAt = 0;
 let cachedServiceLocationsListId = null;
 let cachedServiceLocationsListIdAt = 0;
-let cachedServiceLocationsReport = null;
 let cachedServiceLocationsReportAt = 0;
 let cachedServiceLocationNotesListId = null;
 let cachedServiceLocationNotesListIdAt = 0;
-let cachedServiceLocationNotesByKey = null;
 let cachedServiceLocationNotesByKeyAt = 0;
 let cachedCheckInTimesListId = '';
 let cachedCheckInTimesListIdAt = 0;
@@ -173,14 +191,11 @@ let cachedGraphTokenExpiresAt = 0;
 let graphTokenRefreshPromise = null;
 let cachedLoadPaperworkRootFolder = null;
 let cachedLoadPaperworkRootFolderAt = 0;
-let cachedOperationsToday = null;
 let cachedOperationsTodayAt = 0;
-let cachedDashboardBidSource = null;
-const cachedBidItemsByList = new Map();
-const cachedOnThisDayItemsBySource = new Map();
-const cachedOnThisDayReports = new Map();
-const cachedOrderNotesByOrder = new Map();
-const cachedQuoteComparableItemsByList = new Map();
+const cachedBidItemsByList = largeCacheBudget.createCache();
+const cachedOrderNotesByOrder = largeCacheBudget.createCache();
+const cachedQuoteComparableItemsByList = largeCacheBudget.createCache();
+let quoteComparableCacheGeneration = 0;
 const cachedQuotePublishResults = new Map();
 const inFlightQuotePublishRequests = new Map();
 const pendingQuoteAuditContexts = new Map();
@@ -197,13 +212,10 @@ let cachedContractLaneListId = '';
 let cachedContractLaneListIdAt = 0;
 let cachedDoeDieselListId = '';
 let cachedDoeDieselListIdAt = 0;
-let cachedContractLaneSourceData = null;
 let cachedContractLaneSourceDataAt = 0;
 const BID_LIST_CACHE_MS = 5 * 60 * 1000;
 const BID_ITEM_CACHE_MS = Number(process.env.BID_ITEM_CACHE_MS || 2 * 60 * 1000);
 const OPERATIONS_TODAY_CACHE_MS = Number(process.env.OPERATIONS_TODAY_CACHE_MS || 60 * 1000);
-const ON_THIS_DAY_SOURCE_CACHE_MS = Number(process.env.ON_THIS_DAY_SOURCE_CACHE_MS || 5 * 60 * 1000);
-const ON_THIS_DAY_REPORT_CACHE_MS = Number(process.env.ON_THIS_DAY_REPORT_CACHE_MS || 5 * 60 * 1000);
 const SALES_LEADS_REPORT_CACHE_MS = Number(process.env.SALES_LEADS_REPORT_CACHE_MS || BID_LIST_CACHE_MS);
 const SERVICE_LOCATIONS_CACHE_MS = Number(process.env.SERVICE_LOCATIONS_CACHE_MS || 60 * 1000);
 const PERMIT_FOLDER_AUDIT_CONCURRENCY = Math.max(
@@ -267,7 +279,12 @@ function getLookupTokenFromRequest(req) {
 }
 
 function getHeavyWorkloadKind(req) {
+  if (String(req.method || '').toUpperCase() === 'POST' &&
+      ['/quote-engine/recommendation', '/quote-engine/publish'].includes(req.path)) return 'quote';
   if (String(req.method || '').toUpperCase() !== 'GET') return '';
+
+  if (['/search', '/bid-listing/no-bol', '/documents/loadphotos/by-bol', '/recruiting/snapshot',
+    '/driver-roster/history', '/driver-roster/history-batch'].includes(req.path)) return 'history';
 
   if (DASHBOARD_REFRESH_PATHS.has(req.path)) {
     return DASHBOARD_REFRESH_WORKLOAD;
@@ -292,8 +309,8 @@ function grantNextHeavyWorkload() {
   });
 }
 
-// Render has one shared process budget. Keep report generation and dashboard
-// refresh batches FIFO-exclusive so a large report cannot overlap a refresh.
+// Render has one shared process budget. Queue large reads and report/quote
+// calculations so they cannot overlap each other.
 function createHeavyWorkloadError(message, code) {
   const error = new Error(message);
   error.statusCode = 503;
@@ -314,10 +331,9 @@ function getServerMemoryDiagnostics() {
     activeHeavyWorkload: activeHeavyWorkload?.kind || '',
     queuedHeavyWorkloads: queuedHeavyWorkloads.length,
     inFlightRequests: inFlightRequests.size,
+    largeCacheBudget: largeCacheBudget.diagnostics(),
     cacheEntries: {
       bidItems: cachedBidItemsByList.size,
-      onThisDaySources: cachedOnThisDayItemsBySource.size,
-      onThisDayReports: cachedOnThisDayReports.size,
       orderNotes: cachedOrderNotesByOrder.size,
       quoteComparables: cachedQuoteComparableItemsByList.size
     }
@@ -406,23 +422,34 @@ function requireLookupAccess(req, res, next) {
     });
   }
 
-  const workloadKind = getHeavyWorkloadKind(req);
-  if (!workloadKind) {
-    next();
-    return;
-  }
+  next();
+}
 
-  acquireHeavyWorkload(workloadKind, req, res).then(({ release, waitedMs, wasQueued }) => {
+function withHeavyWorkload(handler) {
+  return async (req, res, next) => {
+    const workloadKind = getHeavyWorkloadKind(req);
+    if (!workloadKind) {
+      return handler(req, res, next);
+    }
+
+    let slot;
+    try {
+      slot = await acquireHeavyWorkload(workloadKind, req, res);
+    } catch (error) {
+      if (error?.code === 'HEAVY_WORKLOAD_REQUEST_ENDED' || req.aborted || res.destroyed) return;
+      return res.status(error?.statusCode || 503).json({
+        success: false,
+        error: error?.message || 'The server is busy. Try again in a moment.'
+      });
+    }
+    const { release, waitedMs, wasQueued } = slot;
     if (req.aborted || res.destroyed) {
       release();
       return;
     }
 
-    let released = false;
     const workloadStartedAt = Date.now();
-    const releaseOnce = () => {
-      if (released) return;
-      released = true;
+    const releaseSlot = () => {
       logServerMemory('Heavy workload finished', {
         kind: workloadKind,
         path: req.path,
@@ -440,17 +467,8 @@ function requireLookupAccess(req, res, next) {
     res.setHeader('X-Kole-Workload', workloadKind);
     if (wasQueued) res.setHeader('X-Kole-Workload-Queued', '1');
     if (waitedMs > 0) res.setHeader('X-Kole-Workload-Wait-Ms', String(waitedMs));
-    res.once('finish', releaseOnce);
-    res.once('close', releaseOnce);
-    req.once('aborted', releaseOnce);
-    next();
-  }).catch((error) => {
-    if (error?.code === 'HEAVY_WORKLOAD_REQUEST_ENDED' || req.aborted || res.destroyed) return;
-    res.status(error?.statusCode || 503).json({
-      success: false,
-      error: error?.message || 'The server is busy. Try again in a moment.'
-    });
-  });
+    return runWithWorkloadSlot(handler, req, res, releaseSlot);
+  };
 }
 
 async function getGraphToken(forceRefresh = false) {
@@ -608,7 +626,9 @@ async function graphPatch(token, url, body, extraHeaders = {}) {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(JSON.stringify(data));
+    const error = new Error(JSON.stringify(data));
+    error.graphStatus = response.status;
+    throw error;
   }
 
   return data;
@@ -732,9 +752,8 @@ function sweepExpiredCache(cache, ttlMs) {
 // demand-driven, so stale entries can otherwise remain resident if their exact
 // key is never requested again. Sweep the larger caches periodically.
 const cacheSweepTimer = setInterval(() => {
+  largeCacheBudget.sweep();
   sweepExpiredCache(cachedBidItemsByList, BID_ITEM_CACHE_MS);
-  sweepExpiredCache(cachedOnThisDayItemsBySource, ON_THIS_DAY_SOURCE_CACHE_MS);
-  sweepExpiredCache(cachedOnThisDayReports, ON_THIS_DAY_REPORT_CACHE_MS);
   sweepExpiredCache(cachedQuoteComparableItemsByList, QUOTE_ENGINE_COMPARABLE_CACHE_MS);
   sweepExpiredCache(cachedOrderNotesByOrder, getOrderNotesCacheMs());
 }, 60 * 1000);
@@ -1561,15 +1580,10 @@ async function getAllBidItemsFromList(token, sourceList, options = {}) {
     if (cached) return cached;
   }
 
-  let items = [];
-  try {
-    items = await getAllListItemsWithFields(token, sourceList.listId, getBidSearchFieldSelect());
-  } catch (error) {
-    // If Graph rejects a selected-field query, fall back to the previous full-field behavior.
-    items = await getAllListItemsWithFields(token, sourceList.listId);
-  }
-
-  const records = items.map((item) => cleanBidItem(item, sourceList));
+  const bundle = await getAllListItemsWithFieldsResilient(token, sourceList.listId, getBidSearchFieldSelect(), {
+    mapItem: (item) => cleanBidItem(item, sourceList)
+  });
+  const records = bundle.items;
   setCacheRecord(cachedBidItemsByList, cacheKey, records, 24);
 
   return records;
@@ -1830,15 +1844,13 @@ function formatOrderEditAuditValue(value) {
 
 function clearOrderEditCaches() {
   cachedBidItemsByList.clear();
-  cachedOperationsToday = null;
+  cachedLargeReports.delete('cachedOperationsToday');
   cachedOperationsTodayAt = 0;
-  cachedDashboardBidSource = null;
-  cachedOnThisDayItemsBySource.clear();
-  cachedOnThisDayReports.clear();
+  cachedLargeReports.delete('cachedDashboardBidSource');
 }
 
 function formatEasternDate(date = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', {
+  return getCachedDateFormatter('en-CA', {
     timeZone: 'America/New_York',
     year: 'numeric',
     month: '2-digit',
@@ -1847,7 +1859,7 @@ function formatEasternDate(date = new Date()) {
 }
 
 function formatEasternTimestamp(date = new Date()) {
-  return new Intl.DateTimeFormat('en-US', {
+  return getCachedDateFormatter('en-US', {
     timeZone: 'America/New_York',
     month: '2-digit',
     day: '2-digit',
@@ -1858,7 +1870,7 @@ function formatEasternTimestamp(date = new Date()) {
 }
 
 function formatEasternTimestampText(date = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-US', {
+  const parts = getCachedDateFormatter('en-US', {
     timeZone: 'America/New_York',
     year: 'numeric',
     month: '2-digit',
@@ -1874,7 +1886,7 @@ function formatEasternTimestampText(date = new Date()) {
 }
 
 function formatEasternListTimestampText(date = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-US', {
+  const parts = getCachedDateFormatter('en-US', {
     timeZone: 'America/New_York',
     year: 'numeric',
     month: '2-digit',
@@ -1963,7 +1975,7 @@ function normalizeEasternDateOnly(value) {
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return '';
 
-  return new Intl.DateTimeFormat('en-CA', {
+  return getCachedDateFormatter('en-CA', {
     timeZone: 'America/New_York',
     year: 'numeric',
     month: '2-digit',
@@ -2047,8 +2059,8 @@ async function getQuoteEngineCurrentList(token) {
   return currentList;
 }
 
-async function getAllQuoteEngineColumns(token, listId) {
-  let url = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/columns?$select=id,name,displayName,required,hidden,readOnly,lookup,text,number,currency,dateTime,boolean,choice&$top=999`;
+async function getAllQuoteEngineColumns(token, listId, siteId = process.env.SITE_ID) {
+  let url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/columns?$select=id,name,displayName,required,hidden,readOnly,lookup,text,number,currency,dateTime,boolean,choice&$top=999`;
   const columns = [];
 
   while (url) {
@@ -2060,7 +2072,7 @@ async function getAllQuoteEngineColumns(token, listId) {
       if (columns.length > 0) throw error;
       data = await graphGet(
         token,
-        `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/columns?$top=999`
+        `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/columns?$top=999`
       );
     }
 
@@ -2464,38 +2476,44 @@ async function getQuoteComparableItemsFromList(token, sourceList, forceRefresh =
     if (cached) return cached;
   }
 
-  const bundle = await getAllListItemsWithFieldsResilient(token, sourceList.listId, getQuoteComparableFieldSelect());
-  const records = (bundle.items || []).map((item) => cleanQuoteComparableItem(item, sourceList));
-
-  return setCacheRecord(cachedQuoteComparableItemsByList, cacheKey, {
-    records,
+  const generation = quoteComparableCacheGeneration;
+  const bundle = await getAllListItemsWithFieldsResilient(token, sourceList.listId, getQuoteComparableFieldSelect(), {
+    mapItem: (item) => cleanQuoteComparableItem(item, sourceList)
+  });
+  const result = {
+    records: bundle.items,
     warning: bundle.usedFallback ? `Selected-field retrieval fell back to the full ${sourceList.label} record shape.` : ''
-  }, 12);
+  };
+  // A read started before a write must not repopulate the invalidated cache.
+  if (generation === quoteComparableCacheGeneration) {
+    setCacheRecord(cachedQuoteComparableItemsByList, cacheKey, result, 12);
+  }
+  return result;
 }
 
 async function getAllQuoteComparableRecords(token, options = {}) {
-  const lists = await getSearchableBidLists(token, options.forceRefresh === true);
-  const settled = await Promise.allSettled(
-    lists.map((sourceList) => getQuoteComparableItemsFromList(token, sourceList, options.forceRefresh === true))
-  );
-  const records = [];
-  const warnings = [];
-  let currentListAvailable = false;
+  const forceRefresh = options.forceRefresh === true;
+  const generation = quoteComparableCacheGeneration;
+  return coalesceRequest(`quote-history:${generation}:${forceRefresh}`, async () => {
+    const lists = await getSearchableBidLists(token, forceRefresh);
+    const records = [];
+    const warnings = [];
+    let currentListAvailable = false;
 
-  settled.forEach((result, index) => {
-    const sourceList = lists[index];
-
-    if (result.status === 'fulfilled') {
-      records.push(...result.value.records);
-      if (sourceList.label === 'Bid Listing') currentListAvailable = true;
-      if (result.value.warning) warnings.push(result.value.warning);
-      return;
+    // Serial list reads bound raw response memory even on a cold cache.
+    for (const sourceList of lists) {
+      try {
+        const result = await getQuoteComparableItemsFromList(token, sourceList, forceRefresh);
+        for (const record of result.records) records.push(record);
+        if (sourceList.label === 'Bid Listing') currentListAvailable = true;
+        if (result.warning) warnings.push(result.warning);
+      } catch {
+        warnings.push(`${sourceList.label} could not be included in quote history.`);
+      }
     }
 
-    warnings.push(`${sourceList.label} could not be included in quote history.`);
+    return { records, warnings, currentListAvailable };
   });
-
-  return { records, warnings, currentListAvailable };
 }
 
 function getQuoteComparableStatusType(status) {
@@ -3101,6 +3119,7 @@ function clearQuoteEngineMutationCaches() {
   clearOrderEditCaches();
   clearSalesLeadsReportCache();
   cachedQuoteComparableItemsByList.clear();
+  quoteComparableCacheGeneration += 1;
 }
 
 async function createQuoteEngineAuditNote(token, draft, recommendation, record) {
@@ -3430,10 +3449,10 @@ async function getContractLaneSourceData(token, options = {}) {
 
   if (
     !forceRefresh &&
-    cachedContractLaneSourceData &&
+    cachedLargeReports.get('cachedContractLaneSourceData') &&
     now - cachedContractLaneSourceDataAt < CONTRACT_LANES_CACHE_MS
   ) {
-    return cachedContractLaneSourceData;
+    return cachedLargeReports.get('cachedContractLaneSourceData');
   }
 
   const [contractLaneListId, doeListId] = await Promise.all([
@@ -3480,15 +3499,16 @@ async function getContractLaneSourceData(token, options = {}) {
   if (doeBundle.usedFallback) warnings.push('DOE fuel fields were loaded with the resilient full-field fallback.');
   if (doeRecords.length === 0) warnings.push('No valid PW fuel-surcharge records are currently available.');
 
-  cachedContractLaneSourceData = {
+  const sourceData = {
     contractLaneListId,
     doeListId,
     lanes,
     doeRecords,
     warnings
   };
+  cachedLargeReports.set('cachedContractLaneSourceData', sourceData);
   cachedContractLaneSourceDataAt = now;
-  return cachedContractLaneSourceData;
+  return sourceData;
 }
 
 function resolveContractLanePricing(lane, doeRecords, requestedPickupDate, options = {}) {
@@ -3980,7 +4000,7 @@ function formatUploadDigestTimestamp(value) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return String(value || '');
 
-  return new Intl.DateTimeFormat('en-US', {
+  return getCachedDateFormatter('en-US', {
     timeZone: 'America/New_York',
     month: '2-digit',
     day: '2-digit',
@@ -4475,7 +4495,7 @@ async function createOrderNote(token, input = {}) {
   );
 
   clearOrderNotesCacheForOrder(bol, bidId);
-  cachedOperationsToday = null;
+  cachedLargeReports.delete('cachedOperationsToday');
   cachedOperationsTodayAt = 0;
   return cleanOrderNoteItem(item);
 }
@@ -5306,34 +5326,40 @@ function buildSalesActivitySnapshot(records, notesBundle, range) {
   };
 }
 
-async function getAllListItemsWithFields(token, listId, fieldSelect = '') {
+async function getAllListItemsWithFields(token, listId, fieldSelect = '', options = {}) {
   const expandFields = fieldSelect
     ? `fields($select=${fieldSelect})`
     : 'fields';
 
-  let url = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/items?$expand=${expandFields}&$top=999`;
+  const itemSelect = options.mapItem ? '&$select=id,createdDateTime,lastModifiedDateTime,eTag,fields' : '';
+  let url = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${encodeURIComponent(listId)}/items?$expand=${expandFields}${itemSelect}&$top=${LIST_READ_PAGE_SIZE}`;
   const allItems = [];
 
   while (url) {
     const data = await graphGet(token, url);
-    allItems.push(...(data.value || []));
+    // Discard each raw page after projection; callers that need raw fields may
+    // omit mapItem. Follow Graph's opaque pagination link without rebuilding it.
+    for (const item of data.value || []) {
+      if (options.consumeItem) options.consumeItem(item);
+      else allItems.push(options.mapItem ? options.mapItem(item) : item);
+    }
     url = data['@odata.nextLink'] || null;
   }
 
   return allItems;
 }
 
-async function getAllListItemsWithFieldsResilient(token, listId, fieldSelect = '') {
+async function getAllListItemsWithFieldsResilient(token, listId, fieldSelect = '', options = {}) {
   try {
     return {
-      items: await getAllListItemsWithFields(token, listId, fieldSelect),
+      items: await getAllListItemsWithFields(token, listId, fieldSelect, options),
       usedFallback: false,
       warning: ''
     };
   } catch (error) {
     if (!fieldSelect) throw error;
 
-    const fallbackItems = await getAllListItemsWithFields(token, listId);
+    const fallbackItems = await getAllListItemsWithFields(token, listId, '', options);
 
     return {
       items: fallbackItems,
@@ -5368,32 +5394,21 @@ async function getUploadEvidenceSets(token) {
     };
   }
 
-  const uploadItems = await getUploadDigestItems(token);
-
   const pickupEvidenceBols = new Set();
   const deliveryEvidenceBols = new Set();
-
-  uploadItems.forEach((item) => {
-    const fields = item.fields || {};
-    const bol = normalizeBolKey(fields.BOLNumber);
-    const uploadType = normalizeText(fields.UploadType);
-
-    if (!bol) return;
-
-    if (uploadType === 'pickup') {
-      pickupEvidenceBols.add(bol);
-    }
-
-    if (uploadType === 'delivery') {
-      deliveryEvidenceBols.add(bol);
+  let uploadDigestCount = 0;
+  await getAllListItemsWithFields(token, uploadDigestListId, 'BOLNumber,UploadType', {
+    consumeItem: (item) => {
+      uploadDigestCount++;
+      const fields = item.fields || {};
+      const bol = normalizeBolKey(fields.BOLNumber);
+      const uploadType = normalizeText(fields.UploadType);
+      if (!bol) return;
+      if (uploadType === 'pickup') pickupEvidenceBols.add(bol);
+      if (uploadType === 'delivery') deliveryEvidenceBols.add(bol);
     }
   });
-
-  return {
-    pickupEvidenceBols,
-    deliveryEvidenceBols,
-    uploadDigestCount: uploadItems.length
-  };
+  return { pickupEvidenceBols, deliveryEvidenceBols, uploadDigestCount };
 }
 
 function addUploadEvidence(record, evidenceSets) {
@@ -5407,7 +5422,7 @@ function addUploadEvidence(record, evidenceSets) {
 }
 
 function getEasternParts(date = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-US', {
+  const parts = getCachedDateFormatter('en-US', {
     timeZone: 'America/New_York',
     year: 'numeric',
     month: '2-digit',
@@ -5472,14 +5487,14 @@ function getDriverSummaryUnlockParts(year, month) {
 }
 
 function getMonthName(month) {
-  return new Intl.DateTimeFormat('en-US', {
+  return getCachedDateFormatter('en-US', {
     month: 'long',
     timeZone: 'UTC'
   }).format(new Date(Date.UTC(2026, Number(month) - 1, 1)));
 }
 
 function getShortMonthName(month) {
-  return new Intl.DateTimeFormat('en-US', {
+  return getCachedDateFormatter('en-US', {
     month: 'short',
     timeZone: 'UTC'
   }).format(new Date(Date.UTC(2026, Number(month) - 1, 1)));
@@ -5558,7 +5573,7 @@ function formatShortDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value || '');
 
-  return new Intl.DateTimeFormat('en-US', {
+  return getCachedDateFormatter('en-US', {
     timeZone: 'UTC',
     month: '2-digit',
     day: '2-digit',
@@ -6126,7 +6141,7 @@ function buildRecruitingSnapshotReport(itemsWithSource = [], sourceLists = [], r
   const rosterByTruck = buildRecruitingSnapshotRosterMap(rosterItems);
   const loads = itemsWithSource
     .map((entry) => {
-      const load = getDriverSummaryItem(entry.item, entry.sourceList);
+      const load = entry.record;
       const status = normalizeText(load.Status);
       if (status !== 'won') return null;
       if (!isDateInRecruitingSnapshotWindow(load.PickupDate, windowDef)) return null;
@@ -6226,17 +6241,16 @@ async function getRecruitingSnapshotReportPayload(options = {}) {
     throw error;
   }
 
-  const settled = await Promise.allSettled(
-    sourceLists.map(async (sourceList) => {
-      const items = await getAllListItemsWithFields(
-        token,
-        sourceList.listId,
-        getDriverSummaryFieldSelect()
-      );
+  const settled = await mapSequentialSettled(sourceLists, async (sourceList) => {
+    const items = await getAllListItemsWithFields(
+      token,
+      sourceList.listId,
+      getDriverSummaryFieldSelect(),
+      { mapItem: (item) => ({ record: getDriverSummaryItem(item, sourceList), sourceList }) }
+    );
 
-      return items.map((item) => ({ item, sourceList }));
-    })
-  );
+    return items;
+  });
 
   const successfulItems = settled
     .filter((result) => result.status === 'fulfilled')
@@ -7203,16 +7217,15 @@ async function getMonthlyOperationsSummaryPayload(monthValue, yearValue) {
   const sourceWarnings = [];
   const failedLists = [];
 
-  const [bidBundle, availableResult, noAvailabilityResult] = await Promise.allSettled([
-    getAllListItemsWithFieldsResilient(token, sourceList.listId, getMonthlyOperationsBidFieldSelect()),
-    getAllListItemsWithFieldsResilient(token, getAvailableTrucksSingleLineListId(), getMonthlyOperationsAvailableFieldSelect()),
-    Promise.allSettled(
-      getNoAvailabilitySources().map(async (source) => {
-        const items = await getAllListItemsWithFields(token, source.listId, getNoAvailabilityFieldSelect());
-        return items.map((item) => cleanNoAvailabilityItem(item, source));
+  const [bidBundle, availableResult, noAvailabilityResult] = await mapSequentialSettled([
+    () => getAllListItemsWithFieldsResilient(token, sourceList.listId, getMonthlyOperationsBidFieldSelect()),
+    () => getAllListItemsWithFieldsResilient(token, getAvailableTrucksSingleLineListId(), getMonthlyOperationsAvailableFieldSelect()),
+    () => mapSequentialSettled(getNoAvailabilitySources(), (source) => (
+      getAllListItemsWithFields(token, source.listId, getNoAvailabilityFieldSelect(), {
+        mapItem: (item) => cleanNoAvailabilityItem(item, source)
       })
-    )
-  ]);
+    ))
+  ], (read) => read());
 
   if (bidBundle.status === 'rejected') {
     const error = new Error(bidBundle.reason?.message || 'Unable to load Bid Listing source for Monthly Operations Summary.');
@@ -9334,7 +9347,7 @@ function getDateOnlyComparable(value) {
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) return '';
 
-  return new Intl.DateTimeFormat('en-CA', {
+  return getCachedDateFormatter('en-CA', {
     timeZone: 'America/New_York',
     year: 'numeric',
     month: '2-digit',
@@ -9921,10 +9934,20 @@ function getReportActionAlertFieldSelect() {
 async function buildReportActionAlertsResponse(items, sourceList, options = {}) {
   const ordersDueSettlement = buildOrdersDueForSettlementResponse(items, sourceList, options.uploadEvidenceSets);
   const wonNotRegistered = buildWonNotRegisteredResponse(items, sourceList);
-  const permitGovernance = await buildPermitGovernanceResponse(items, sourceList, {
-    ...options,
-    includeFolderAudit: false
-  });
+  // Dashboard needs only this count; retain the full report for its drilldown.
+  const today = formatEasternDate();
+  let permitAlertCount = 0;
+  for (const item of items) {
+    const fields = item.fields || {};
+    const record = {
+      BOL: fields.BOLNumber_x0028_Won_x0029_ || '',
+      Status: fields.Status || '',
+      DeliveryDate: fields.Expected_x0020_Delivery_x0020_Da || '',
+      PermitEstimate: getNumberValue(fields.Permits_x002f_Escort_x0020_Fees_),
+      PermitsRequested: parseBoolean(fields.PermitsRequested)
+    };
+    if (isPermitGovernanceOperationalRow(record, today) && record.PermitEstimate > 0 && !record.PermitsRequested) permitAlertCount++;
+  }
 
   const alerts = {
     ordersDueSettlement: {
@@ -9943,9 +9966,9 @@ async function buildReportActionAlertsResponse(items, sourceList, options = {}) 
     },
     permitGovernance: {
       reportKey: 'permitGovernance',
-      reportLabel: permitGovernance.reportLabel,
-      count: permitGovernance.alertCount,
-      hasAlert: permitGovernance.alertCount > 0
+      reportLabel: 'Permit Governance',
+      count: permitAlertCount,
+      hasAlert: permitAlertCount > 0
     }
   };
 
@@ -10352,11 +10375,12 @@ async function findActiveDriverRosterMatchByTruck(token, truck) {
   }) || null;
 }
 
-async function getDriverRosterItemById(token, itemId) {
+async function getDriverRosterItemById(token, itemId, fullFields = false) {
   const { siteId, listId } = assertDriverRosterConfig();
+  const expand = fullFields ? 'fields' : `fields($select=${getDriverRosterFieldSelect()})`;
   return graphGet(
     token,
-    `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${encodeURIComponent(itemId)}?$select=id,webUrl,eTag&$expand=fields($select=${getDriverRosterFieldSelect()})`
+    `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${encodeURIComponent(itemId)}?$select=id,webUrl,eTag&$expand=${expand}`
   );
 }
 
@@ -10366,8 +10390,39 @@ function getDriverRosterDateOnly(value) {
 }
 
 function clearDriverRosterMutationCaches() {
-  cachedOperationsToday = null;
+  cachedLargeReports.delete('cachedOperationsToday');
   cachedOperationsTodayAt = 0;
+}
+
+const inFlightDriverRosterEdits = new Set();
+const inFlightDriverRosterTruckEdits = new Set();
+
+function getDriverRosterEditItemId(value) {
+  const itemId = String(value || '').trim();
+  if (!/^\d+$/.test(itemId)) throw driverRosterEditError('A valid Driver Roster item ID is required.');
+  return itemId;
+}
+
+function getDriverRosterEditETag(item) {
+  const etag = item?.eTag || item?.['@odata.etag'] || '';
+  if (!etag) throw driverRosterEditError('This record could not be version-checked. Reload it before editing.', 503);
+  return etag;
+}
+
+async function assertDriverRosterTruckAvailable(token, itemId, truck) {
+  const { siteId, listId } = assertDriverRosterConfig();
+  const truckKey = normalizeTruckKey(truck);
+  let url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?$select=id,fields&$expand=fields($select=Trucks,Status,TermDate)&$top=${LIST_READ_PAGE_SIZE}`;
+  while (url) {
+    const page = await graphGet(token, url);
+    for (const item of page.value || []) {
+      if (String(item.id) !== itemId && normalizeTruckKey(item.fields?.Trucks) === truckKey &&
+          normalizeText(item.fields?.Status) === 'active' && !item.fields?.TermDate) {
+        throw driverRosterEditError('That truck is already assigned to another active driver.', 409, 'DRIVER_ROSTER_TRUCK_ASSIGNED');
+      }
+    }
+    url = page['@odata.nextLink'] || null;
+  }
 }
 
 function getDriverRosterTerminationDate(value) {
@@ -10521,27 +10576,29 @@ async function getDriverHistorySourceContext(token) {
   const currentEasternYear = getEasternParts().year;
   const sourceLists = await getSearchableBidLists(token);
 
-  const sourceResults = await Promise.all(sourceLists.map(async (sourceList) => {
+  const sourceResults = [];
+  for (const sourceList of sourceLists) {
     try {
       const result = await getAllListItemsWithFieldsResilient(
         token,
         sourceList.listId,
-        getDriverSummaryFieldSelect()
+        getDriverSummaryFieldSelect(),
+        { mapItem: (item) => getDriverSummaryItem(item, sourceList) }
       );
 
-      return {
+      sourceResults.push({
         sourceList,
-        items: result.items || [],
+        records: result.items || [],
         warning: result.warning || ''
-      };
+      });
     } catch (error) {
-      return {
+      sourceResults.push({
         sourceList,
-        items: [],
+        records: [],
         warning: error.message || `Unable to load ${sourceList.label || 'Bid Listing source'}.`
-      };
+      });
     }
-  }));
+  }
 
   let timeOffResult = { rows: [], warning: '' };
   try {
@@ -10579,7 +10636,7 @@ function buildDriverHistorySnapshotFromContext(rawTruck, context) {
     getDriverHistoryYear(yearMap, year);
   }
 
-  sourceResults.forEach(({ sourceList, items, warning }) => {
+  sourceResults.forEach(({ sourceList, records, warning }) => {
     if (warning) {
       warnings.push({
         source: sourceList?.label || 'Bid Listing',
@@ -10587,8 +10644,7 @@ function buildDriverHistorySnapshotFromContext(rawTruck, context) {
       });
     }
 
-    (items || []).forEach((item) => {
-      const record = getDriverSummaryItem(item, sourceList);
+    (records || []).forEach((record) => {
       const recordTruckKey = normalizeDriverSnapshotTruckKey(record.Truck);
 
       if (!recordTruckKey || recordTruckKey !== truckKey) return;
@@ -11226,7 +11282,7 @@ function formatIsoDateParts(parts) {
 }
 
 function formatDisplayDateParts(parts) {
-  return new Intl.DateTimeFormat('en-US', {
+  return getCachedDateFormatter('en-US', {
     timeZone: 'UTC',
     month: '2-digit',
     day: '2-digit',
@@ -12560,7 +12616,7 @@ function buildRequirementPatchFromBody(body = {}, currentRequirement = null) {
   return patch;
 }
 
-app.get('/recruiting/dashboard', requireLookupAccess, async (req, res) => {
+app.get('/recruiting/dashboard', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const { lists } = assertRecruitingConfig();
     const token = await getGraphToken();
@@ -12596,10 +12652,10 @@ app.get('/recruiting/dashboard', requireLookupAccess, async (req, res) => {
       error: error.message || 'Unable to load recruiting dashboard.'
     });
   }
-});
+}));
 
 
-app.get('/recruiting/snapshot', requireLookupAccess, async (req, res) => {
+app.get('/recruiting/snapshot', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const report = await getRecruitingSnapshotReportPayload({
       months: req.query.months
@@ -12612,7 +12668,7 @@ app.get('/recruiting/snapshot', requireLookupAccess, async (req, res) => {
       error: error.message || 'Unable to load Recruiting Snapshot.'
     });
   }
-});
+}));
 
 app.get('/recruiting/candidates', requireLookupAccess, async (req, res) => {
   try {
@@ -12960,7 +13016,7 @@ app.get('/quote-engine/options', requireLookupAccess, async (req, res) => {
   }
 });
 
-app.post('/quote-engine/recommendation', requireLookupAccess, async (req, res) => {
+app.post('/quote-engine/recommendation', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const draft = normalizeQuoteEngineDraft(req.body || {});
     const token = await getGraphToken();
@@ -12975,9 +13031,9 @@ app.post('/quote-engine/recommendation', requireLookupAccess, async (req, res) =
       error: error.statusCode ? error.message : 'Unable to calculate a quote recommendation.'
     });
   }
-});
+}));
 
-app.post('/quote-engine/publish', requireLookupAccess, async (req, res) => {
+app.post('/quote-engine/publish', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const draft = normalizeQuoteEngineDraft(req.body || {});
     if (!/^[A-Za-z0-9-]{8,100}$/.test(draft.requestId)) {
@@ -13037,7 +13093,7 @@ app.post('/quote-engine/publish', requireLookupAccess, async (req, res) => {
       duplicates: Array.isArray(error.duplicates) ? error.duplicates : undefined
     });
   }
-});
+}));
 
 app.get('/quote-engine/bid-id/:itemId', requireLookupAccess, async (req, res) => {
   try {
@@ -13292,7 +13348,7 @@ app.get('/contract-lanes/bid-id/:itemId', requireLookupAccess, async (req, res) 
   }
 });
 
-app.get('/bid-listing/no-bol', requireLookupAccess, async (req, res) => {
+app.get('/bid-listing/no-bol', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const token = await getGraphToken();
     const lists = await getSearchableBidLists(token);
@@ -13316,9 +13372,9 @@ app.get('/bid-listing/no-bol', requireLookupAccess, async (req, res) => {
       error: 'Unable to load current Bid Listing entries without a BOL.'
     });
   }
-});
+}));
 
-app.get('/search', requireLookupAccess, async (req, res) => {
+app.get('/search', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const token = await getGraphToken();
     const q = (req.query.q || '').toString().trim();
@@ -13340,9 +13396,7 @@ app.get('/search', requireLookupAccess, async (req, res) => {
 
     const forceRefresh = String(req.query.refresh || '').toLowerCase() === 'true';
 
-    const settled = await Promise.allSettled(
-      lists.map((list) => getAllBidItemsFromList(token, list, { forceRefresh }))
-    );
+    const settled = await mapSequentialSettled(lists, (list) => getAllBidItemsFromList(token, list, { forceRefresh }));
 
     const successfulGroups = settled
       .filter((result) => result.status === 'fulfilled')
@@ -13377,7 +13431,7 @@ app.get('/search', requireLookupAccess, async (req, res) => {
       error: error.message
     });
   }
-});
+}));
 
 app.get('/documents/bol', requireLookupAccess, async (req, res) => {
   try {
@@ -13668,7 +13722,7 @@ app.post('/documents/load-paperwork', requireLookupAccess, async (req, res) => {
 });
 
 
-app.get('/documents/loadphotos/by-bol', requireLookupAccess, async (req, res) => {
+app.get('/documents/loadphotos/by-bol', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const bol = (req.query.bol || '').toString().trim();
     const driverHint = (req.query.driver || '').toString().trim();
@@ -13776,7 +13830,7 @@ app.get('/documents/loadphotos/by-bol', requireLookupAccess, async (req, res) =>
     console.error(error);
     res.status(500).json({ success: false, error: error.message });
   }
-});
+}));
 
 app.get('/documents/loadphotos', requireLookupAccess, async (req, res) => {
   try {
@@ -13966,7 +14020,7 @@ app.get('/documents/permits', requireLookupAccess, async (req, res) => {
 
 
 
-app.get('/reports/order-notes/recent', requireLookupAccess, async (req, res) => {
+app.get('/reports/order-notes/recent', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const token = await getGraphToken();
     const data = await getRecentOrderNotesReport(token, {
@@ -13980,7 +14034,7 @@ app.get('/reports/order-notes/recent', requireLookupAccess, async (req, res) => 
       error: error.message || 'Unable to load recent order notes.'
     });
   }
-});
+}));
 
 app.get('/order-notes', requireLookupAccess, async (req, res) => {
   try {
@@ -14319,7 +14373,7 @@ async function getSalesActivityReportPayload(query = {}) {
   };
 }
 
-app.get('/reports/sales-activity', requireLookupAccess, async (req, res) => {
+app.get('/reports/sales-activity', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const report = await getSalesActivityReportPayload(req.query || {});
     res.json(report);
@@ -14331,7 +14385,7 @@ app.get('/reports/sales-activity', requireLookupAccess, async (req, res) => {
       error: error.message || 'Unable to load Sales Activity Snapshot.'
     });
   }
-});
+}));
 
 
 function normalizeSalesLeadAction(value) {
@@ -15162,7 +15216,7 @@ app.patch('/sales-leads/:id/suppression', requireLookupAccess, async (req, res) 
   }
 });
 
-app.get('/reports/sales-leads', requireLookupAccess, async (req, res) => {
+app.get('/reports/sales-leads', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const view = String(req.query.view || 'all').trim() || 'all';
     const sort = String(req.query.sort || '').trim();
@@ -15179,10 +15233,10 @@ app.get('/reports/sales-leads', requireLookupAccess, async (req, res) => {
       error: error.message || 'Unable to load Sales Leads.'
     });
   }
-});
+}));
 
 
-app.get('/reports/sales-leads/orders', requireLookupAccess, async (req, res) => {
+app.get('/reports/sales-leads/orders', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const customerCode = String(req.query.customerCode || '').trim();
     const year = Number(req.query.year || 0);
@@ -15220,7 +15274,7 @@ app.get('/reports/sales-leads/orders', requireLookupAccess, async (req, res) => 
       error: error.message || 'Unable to load customer orders for that year.'
     });
   }
-});
+}));
 
 
 app.post('/sales-leads/notes', requireLookupAccess, async (req, res) => {
@@ -15313,7 +15367,7 @@ app.get('/sales-leads/by-customer', requireLookupAccess, async (req, res) => {
   }
 });
 
-app.get('/reports/action-alerts', requireLookupAccess, async (req, res) => {
+app.get('/reports/action-alerts', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const forceRefresh = String(req.query.refresh || '').toLowerCase() === 'true';
     const token = await getGraphToken();
@@ -15341,10 +15395,10 @@ app.get('/reports/action-alerts', requireLookupAccess, async (req, res) => {
       error: error.message || 'Unable to load report action alerts.'
     });
   }
-});
+}));
 
 
-app.get('/reports/won-not-registered', requireLookupAccess, async (req, res) => {
+app.get('/reports/won-not-registered', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const token = await getGraphToken();
     const lists = await getSearchableBidLists(token);
@@ -15373,10 +15427,10 @@ app.get('/reports/won-not-registered', requireLookupAccess, async (req, res) => 
       error: error.message
     });
   }
-});
+}));
 
 
-app.get('/reports/yearly-revenue-projection', requireLookupAccess, async (req, res) => {
+app.get('/reports/yearly-revenue-projection', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const year = parseReportInteger(req.query.year || getEasternParts().year, 'year', 2024, 2030);
     const token = await getGraphToken();
@@ -15406,10 +15460,10 @@ app.get('/reports/yearly-revenue-projection', requireLookupAccess, async (req, r
       error: error.message || 'Unable to load Yearly Revenue Projection.'
     });
   }
-});
+}));
 
 
-app.get('/reports/gross-revenue-totals', requireLookupAccess, async (req, res) => {
+app.get('/reports/gross-revenue-totals', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const year = parseReportInteger(req.query.year || getEasternParts().year, 'year', 2024, 2030);
     const token = await getGraphToken();
@@ -15439,11 +15493,11 @@ app.get('/reports/gross-revenue-totals', requireLookupAccess, async (req, res) =
       error: error.message || 'Unable to load Gross Revenue Totals.'
     });
   }
-});
+}));
 
 
 
-app.get('/reports/permit-governance', requireLookupAccess, async (req, res) => {
+app.get('/reports/permit-governance', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const token = await getGraphToken();
     const lists = await getSearchableBidLists(token);
@@ -15469,9 +15523,9 @@ app.get('/reports/permit-governance', requireLookupAccess, async (req, res) => {
       error: error.message || 'Unable to load Permit Governance report.'
     });
   }
-});
+}));
 
-app.get('/reports/permit-cost-variance', requireLookupAccess, async (req, res) => {
+app.get('/reports/permit-cost-variance', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const token = await getGraphToken();
     const lists = await getSearchableBidLists(token);
@@ -15493,9 +15547,9 @@ app.get('/reports/permit-cost-variance', requireLookupAccess, async (req, res) =
       error: error.message || 'Unable to load Permit Cost Variance report.'
     });
   }
-});
+}));
 
-app.get('/reports/orders-due-for-settlement', requireLookupAccess, async (req, res) => {
+app.get('/reports/orders-due-for-settlement', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const token = await getGraphToken();
     const lists = await getSearchableBidLists(token);
@@ -15526,7 +15580,7 @@ app.get('/reports/orders-due-for-settlement', requireLookupAccess, async (req, r
       error: error.message || 'Unable to load Orders Due for Settlement.'
     });
   }
-});
+}));
 
 
 
@@ -16336,21 +16390,19 @@ async function getWeeklySettlementReportPayload(cutoffDateValue) {
     throw notFoundError;
   }
 
-  const settled = await Promise.allSettled(
-    sourceLists.map(async (sourceList) => {
-      const listItems = await getAllListItemsWithFields(
-        token,
-        sourceList.listId,
-        getSettlementFieldSelect()
-      );
+  const settled = await mapSequentialSettled(sourceLists, async (sourceList) => {
+    const listItems = await getAllListItemsWithFields(
+      token,
+      sourceList.listId,
+      getSettlementFieldSelect()
+    );
 
-      return listItems.map((item) => ({
-        item,
-        sourceList,
-        sourceListId: sourceList.listId
-      }));
-    })
-  );
+    return listItems.map((item) => ({
+      item,
+      sourceList,
+      sourceListId: sourceList.listId
+    }));
+  });
 
   const successfulItems = settled
     .filter((result) => result.status === 'fulfilled')
@@ -16385,7 +16437,7 @@ async function getWeeklySettlementReportPayload(cutoffDateValue) {
   };
 }
 
-app.get('/reports/weekly-settlement', requireLookupAccess, async (req, res) => {
+app.get('/reports/weekly-settlement', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const report = await getWeeklySettlementReportPayload(req.query.cutoffDate);
     res.json(report);
@@ -16397,9 +16449,9 @@ app.get('/reports/weekly-settlement', requireLookupAccess, async (req, res) => {
       error: error.message
     });
   }
-});
+}));
 
-app.get('/reports/weekly-settlement/pdf', requireLookupAccess, async (req, res) => {
+app.get('/reports/weekly-settlement/pdf', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const report = await getWeeklySettlementReportPayload(req.query.cutoffDate);
     const pdfBuffer = createWeeklySettlementPdfBuffer(report);
@@ -16418,9 +16470,9 @@ app.get('/reports/weekly-settlement/pdf', requireLookupAccess, async (req, res) 
       error: error.message || 'Unable to export Weekly Settlement Report PDF.'
     });
   }
-});
+}));
 
-app.get('/reports/driver-summary/pdf', requireLookupAccess, async (req, res) => {
+app.get('/reports/driver-summary/pdf', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const report = await getDriverSummaryReportPayload(req.query.month, req.query.year);
     const pdfBuffer = createDriverSummaryPdfBuffer(report);
@@ -16439,9 +16491,9 @@ app.get('/reports/driver-summary/pdf', requireLookupAccess, async (req, res) => 
       error: error.message || 'Unable to export Monthly Driver Summary Report PDF.'
     });
   }
-});
+}));
 
-app.get('/reports/sales-activity/pdf', requireLookupAccess, async (req, res) => {
+app.get('/reports/sales-activity/pdf', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const report = await getSalesActivityReportPayload(req.query || {});
     const pdfBuffer = createSalesActivityPdfBuffer(report);
@@ -16460,7 +16512,7 @@ app.get('/reports/sales-activity/pdf', requireLookupAccess, async (req, res) => 
       error: error.message || 'Unable to export Sales Activity Snapshot PDF.'
     });
   }
-});
+}));
 
 async function getDriverSummaryReportPayload(monthValue, yearValue) {
   const month = parseReportInteger(monthValue, 'month', 1, 12);
@@ -16499,7 +16551,7 @@ async function getDriverSummaryReportPayload(monthValue, yearValue) {
   return buildDriverSummaryResponse(items, sourceList, year, month);
 }
 
-app.get('/reports/driver-summary', requireLookupAccess, async (req, res) => {
+app.get('/reports/driver-summary', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const report = await getDriverSummaryReportPayload(req.query.month, req.query.year);
     res.json(report);
@@ -16511,9 +16563,9 @@ app.get('/reports/driver-summary', requireLookupAccess, async (req, res) => {
       error: error.message
     });
   }
-});
+}));
 
-app.get('/reports/monthly-operations-summary', requireLookupAccess, async (req, res) => {
+app.get('/reports/monthly-operations-summary', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const report = await getMonthlyOperationsSummaryPayload(req.query.month, req.query.year);
     res.json(report);
@@ -16525,9 +16577,9 @@ app.get('/reports/monthly-operations-summary', requireLookupAccess, async (req, 
       error: error.message || 'Unable to load Monthly Operations Summary.'
     });
   }
-});
+}));
 
-app.get('/reports/monthly-operations-summary/pdf', requireLookupAccess, async (req, res) => {
+app.get('/reports/monthly-operations-summary/pdf', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const report = await getMonthlyOperationsSummaryPayload(req.query.month, req.query.year);
     const pdfBuffer = createMonthlyOperationsSummaryPdfBuffer(report);
@@ -16546,7 +16598,7 @@ app.get('/reports/monthly-operations-summary/pdf', requireLookupAccess, async (r
       error: error.message || 'Unable to export Monthly Operations Summary PDF.'
     });
   }
-});
+}));
 
 
 
@@ -17177,7 +17229,7 @@ function getTimeOfDaySortValue(value) {
 }
 
 function getEasternClockParts(date = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-US', {
+  const parts = getCachedDateFormatter('en-US', {
     timeZone: 'America/New_York',
     hour: '2-digit',
     minute: '2-digit',
@@ -18215,31 +18267,35 @@ async function refreshDashboardBidSource(token, currentList) {
     currentList.listId,
     getDashboardBidFieldSelect()
   );
-  cachedDashboardBidSource = {
+  cachedLargeReports.set('cachedDashboardBidSource', {
     listId: currentList.listId,
     items,
     cachedAt: Date.now()
-  };
+  });
   return items;
 }
 
 async function getDashboardBidSource(token, currentList, options = {}) {
   const forceRefresh = options.forceRefresh === true;
-  const waitForRefresh = options.waitForRefresh === true;
-  const matchesList = cachedDashboardBidSource?.listId === currentList?.listId;
-  const ageMs = matchesList ? Date.now() - cachedDashboardBidSource.cachedAt : Infinity;
+  const cached = cachedLargeReports.get('cachedDashboardBidSource');
+  const matchesList = cached?.listId === currentList?.listId;
+  const ageMs = matchesList ? Date.now() - cached.cachedAt : Infinity;
 
   if (!forceRefresh && matchesList && ageMs < DASHBOARD_BID_SOURCE_CACHE_MS) {
-    return cachedDashboardBidSource.items;
+    return cached.items;
   }
 
   const requestKey = `dashboard-bid-source:${currentList?.listId || 'missing'}`;
   if (!forceRefresh && matchesList && ageMs < DASHBOARD_BID_SOURCE_MAX_STALE_MS) {
-    const refreshRequest = coalesceRequest(requestKey, () => refreshDashboardBidSource(token, currentList));
-    if (waitForRefresh) return refreshRequest;
-
-    void refreshRequest.catch((error) => console.warn('Dashboard Bid Listing background refresh failed:', error.message));
-    return cachedDashboardBidSource.items;
+    // Keep refresh work inside the caller's workload slot. A detached refresh
+    // can otherwise overlap the next report after this response finishes.
+    try {
+      return await coalesceRequest(requestKey, () => refreshDashboardBidSource(token, currentList));
+    } catch (error) {
+      if (options.waitForRefresh === true) throw error;
+      console.warn('Dashboard Bid Listing refresh failed; using the recent cached snapshot.');
+      return cached.items;
+    }
   }
 
   return coalesceRequest(requestKey, () => refreshDashboardBidSource(token, currentList));
@@ -18417,7 +18473,7 @@ async function findCurrentBidOrderByBol(token, currentList, bol) {
 
 
 
-app.get('/available-trucks/distribution-list', requireLookupAccess, async (req, res) => {
+app.get('/available-trucks/distribution-list', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const listId = getAvailableTrucksEmailListId();
 
@@ -18451,7 +18507,7 @@ app.get('/available-trucks/distribution-list', requireLookupAccess, async (req, 
       error: error.message || 'Unable to load Available Trucks distribution list.'
     });
   }
-});
+}));
 
 app.post('/available-trucks/distribution-list', requireLookupAccess, async (req, res) => {
   try {
@@ -18672,7 +18728,7 @@ app.post('/available-trucks', requireLookupAccess, async (req, res) => {
   }
 });
 
-app.get('/available-trucks', requireLookupAccess, async (req, res) => {
+app.get('/available-trucks', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const listId = getAvailableTrucksSingleLineListId();
 
@@ -18725,9 +18781,9 @@ app.get('/available-trucks', requireLookupAccess, async (req, res) => {
       error: error.message || 'Unable to load Available Trucks.'
     });
   }
-});
+}));
 
-app.get('/tracking/intellitrack', requireLookupAccess, async (req, res) => {
+app.get('/tracking/intellitrack', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const listId = getKoleAutoUpdaterListId();
 
@@ -18761,7 +18817,7 @@ app.get('/tracking/intellitrack', requireLookupAccess, async (req, res) => {
       error: error.message || 'Unable to load IntelliTrack.'
     });
   }
-});
+}));
 
 app.get('/tracking/intellitrack/order', requireLookupAccess, async (req, res) => {
   try {
@@ -18867,7 +18923,7 @@ app.post('/tracking/intellitrack/order/:id', requireLookupAccess, async (req, re
   }
 });
 
-app.get('/tracking/driver-positions', requireLookupAccess, async (req, res) => {
+app.get('/tracking/driver-positions', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const driverPositionsListId = process.env.DRIVER_POSITIONS_LIST_ID;
 
@@ -18920,10 +18976,10 @@ app.get('/tracking/driver-positions', requireLookupAccess, async (req, res) => {
       error: error.message || 'Unable to load driver position tracking.'
     });
   }
-});
+}));
 
 
-app.get('/upload-digest', requireLookupAccess, async (req, res) => {
+app.get('/upload-digest', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const token = await getGraphToken();
     const targetDate = normalizeEasternDateOnly(req.query.date) || formatEasternDate();
@@ -18984,21 +19040,21 @@ app.get('/upload-digest', requireLookupAccess, async (req, res) => {
       error: error.message || 'Unable to load Upload Digest.'
     });
   }
-});
+}));
 
-app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, async (req, res) => {
+app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const targetDate = formatEasternDate();
     const forceRefresh = String(req.query.refresh || '').toLowerCase() === 'true';
 
     if (
       !forceRefresh &&
-      cachedOperationsToday &&
-      cachedOperationsToday.targetDate === targetDate &&
+      cachedLargeReports.get('cachedOperationsToday') &&
+      cachedLargeReports.get('cachedOperationsToday').targetDate === targetDate &&
       Date.now() - cachedOperationsTodayAt < OPERATIONS_TODAY_CACHE_MS
     ) {
       return res.json({
-        ...cachedOperationsToday.payload,
+        ...cachedLargeReports.get('cachedOperationsToday').payload,
         cache: {
           hit: true,
           ageSeconds: Math.round((Date.now() - cachedOperationsTodayAt) / 1000)
@@ -19105,10 +19161,10 @@ app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, asyn
       loadingNext7
     };
 
-    cachedOperationsToday = {
+    cachedLargeReports.set('cachedOperationsToday', {
       targetDate,
       payload
-    };
+    });
     cachedOperationsTodayAt = Date.now();
 
     res.json(payload);
@@ -19120,7 +19176,7 @@ app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, asyn
       error: error.message
     });
   }
-});
+}));
 
 
 
@@ -19143,7 +19199,7 @@ app.get('/driver-time-off/current', requireLookupAccess, async (req, res) => {
   }
 });
 
-app.get('/reports/driver-time-off', requireLookupAccess, async (req, res) => {
+app.get('/reports/driver-time-off', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const currentYear = Number(formatEasternDate().slice(0, 4));
     const minYear = currentYear - DRIVER_TIME_OFF_DEFAULT_REPORT_YEARS_BACK;
@@ -19164,10 +19220,10 @@ app.get('/reports/driver-time-off', requireLookupAccess, async (req, res) => {
     console.error(error);
     res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Unable to load Driver Time Off report.' });
   }
-});
+}));
 
 
-app.get('/reports/driver-time-off/pdf', requireLookupAccess, async (req, res) => {
+app.get('/reports/driver-time-off/pdf', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const currentYear = Number(formatEasternDate().slice(0, 4));
     const minYear = currentYear - DRIVER_TIME_OFF_DEFAULT_REPORT_YEARS_BACK;
@@ -19202,7 +19258,7 @@ app.get('/reports/driver-time-off/pdf', requireLookupAccess, async (req, res) =>
       error: error.message || 'Unable to export Driver Time Off report PDF.'
     });
   }
-});
+}));
 
 app.post('/driver-time-off', requireLookupAccess, async (req, res) => {
   try {
@@ -19219,7 +19275,7 @@ app.post('/driver-time-off', requireLookupAccess, async (req, res) => {
       { fields }
     );
 
-    cachedOperationsToday = null;
+    cachedLargeReports.delete('cachedOperationsToday');
     cachedOperationsTodayAt = 0;
 
     res.status(201).json({ success: true, itemId: createdItem.id || '', message: 'Driver time off added.' });
@@ -19248,7 +19304,7 @@ app.patch('/driver-time-off/:id', requireLookupAccess, async (req, res) => {
       fields
     );
 
-    cachedOperationsToday = null;
+    cachedLargeReports.delete('cachedOperationsToday');
     cachedOperationsTodayAt = 0;
 
     res.json({ success: true, itemId, message: 'Driver time off updated.' });
@@ -19260,7 +19316,7 @@ app.patch('/driver-time-off/:id', requireLookupAccess, async (req, res) => {
 
 
 
-app.get('/reports/no-availability/pdf', requireLookupAccess, async (req, res) => {
+app.get('/reports/no-availability/pdf', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const yearParam = String(req.query.year || 'all').trim().toLowerCase();
     const selectedYear = yearParam === 'all'
@@ -19276,17 +19332,16 @@ app.get('/reports/no-availability/pdf', requireLookupAccess, async (req, res) =>
     }
 
     const token = await getGraphToken();
-    const settled = await Promise.allSettled(
-      sources.map(async (source) => {
-        const items = await getAllListItemsWithFields(
-          token,
-          source.listId,
-          getNoAvailabilityFieldSelect()
-        );
+    const settled = await mapSequentialSettled(sources, async (source) => {
+      const items = await getAllListItemsWithFields(
+        token,
+        source.listId,
+        getNoAvailabilityFieldSelect(),
+        { mapItem: (item) => cleanNoAvailabilityItem(item, source) }
+      );
 
-        return items.map((item) => cleanNoAvailabilityItem(item, source));
-      })
-    );
+      return items;
+    });
 
     const rows = settled
       .filter((result) => result.status === 'fulfilled')
@@ -19309,9 +19364,9 @@ app.get('/reports/no-availability/pdf', requireLookupAccess, async (req, res) =>
       error: error.message || 'Unable to export No Availability PDF.'
     });
   }
-});
+}));
 
-app.get('/reports/no-availability', requireLookupAccess, async (req, res) => {
+app.get('/reports/no-availability', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const yearParam = String(req.query.year || 'all').trim().toLowerCase();
     const selectedYear = yearParam === 'all'
@@ -19327,17 +19382,16 @@ app.get('/reports/no-availability', requireLookupAccess, async (req, res) => {
     }
 
     const token = await getGraphToken();
-    const settled = await Promise.allSettled(
-      sources.map(async (source) => {
-        const items = await getAllListItemsWithFields(
-          token,
-          source.listId,
-          getNoAvailabilityFieldSelect()
-        );
+    const settled = await mapSequentialSettled(sources, async (source) => {
+      const items = await getAllListItemsWithFields(
+        token,
+        source.listId,
+        getNoAvailabilityFieldSelect(),
+        { mapItem: (item) => cleanNoAvailabilityItem(item, source) }
+      );
 
-        return items.map((item) => cleanNoAvailabilityItem(item, source));
-      })
-    );
+      return items;
+    });
 
     const rows = settled
       .filter((result) => result.status === 'fulfilled')
@@ -19374,9 +19428,9 @@ app.get('/reports/no-availability', requireLookupAccess, async (req, res) => {
       error: error.message || 'Unable to load No Availability report.'
     });
   }
-});
+}));
 
-app.get('/reports/customer-booking-trends', requireLookupAccess, async (req, res) => {
+app.get('/reports/customer-booking-trends', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const throughMonth = parseReportInteger(req.query.month, 'month', 1, 12);
     const throughYear = parseReportInteger(req.query.year, 'year', ARCHIVE_YEAR_MIN, ARCHIVE_YEAR_MAX);
@@ -19418,22 +19472,21 @@ app.get('/reports/customer-booking-trends', requireLookupAccess, async (req, res
       });
     }
 
-    const settled = await Promise.allSettled(
-      sourceLists.map(async (sourceList) => {
-        const bundle = await getAllListItemsWithFieldsResilient(
-          token,
-          sourceList.listId,
-          getCustomerBookingTrendsSourceFieldSelect()
-        );
+    const settled = await mapSequentialSettled(sourceLists, async (sourceList) => {
+      const bundle = await getAllListItemsWithFieldsResilient(
+        token,
+        sourceList.listId,
+        getCustomerBookingTrendsSourceFieldSelect(),
+        { mapItem: (item) => getCustomerBookingTrendRecordFromBidItem(item, sourceList) }
+      );
 
-        return {
-          sourceList,
-          items: bundle.items.map((item) => ({ item, sourceList })),
-          usedFallback: bundle.usedFallback,
-          warning: bundle.warning
-        };
-      })
-    );
+      return {
+        sourceList,
+        items: bundle.items,
+        usedFallback: bundle.usedFallback,
+        warning: bundle.warning
+      };
+    });
 
     const fulfilledBundles = settled
       .filter((result) => result.status === 'fulfilled')
@@ -19457,9 +19510,7 @@ app.get('/reports/customer-booking-trends', requireLookupAccess, async (req, res
         error: entry.result.reason?.message || 'Unknown customer trend list failure'
       }));
 
-    const trendRecords = successfulItems
-      .map(({ item, sourceList }) => getCustomerBookingTrendRecordFromBidItem(item, sourceList))
-      .filter(Boolean);
+    const trendRecords = successfulItems.filter(Boolean);
 
     const report = buildCustomerBookingTrendsResponse(trendRecords, throughYear, throughMonth);
 
@@ -19479,775 +19530,8 @@ app.get('/reports/customer-booking-trends', requireLookupAccess, async (req, res
       error: error.message || 'Unable to load Customer Booking Trends.'
     });
   }
-});
+}));
 
-
-
-function normalizeOnThisDayMode(value) {
-  // Comparison-years mode was intentionally retired after it caused oversized
-  // multi-source report loads on Render. Keep accepting the query parameter,
-  // but always run the lightweight exact-date version.
-  return 'exact';
-}
-
-function getOnThisDayTargetDate(value) {
-  const candidate = normalizeEasternDateOnly(value) || String(value || '').trim();
-  return isValidDateInput(candidate) ? candidate : formatEasternDate();
-}
-
-function getDateMonthDayKey(value) {
-  const dateKey = normalizeEasternDateOnly(value);
-  return dateKey ? dateKey.slice(5) : '';
-}
-
-function getDateYearKey(value) {
-  const dateKey = normalizeEasternDateOnly(value);
-  return dateKey ? dateKey.slice(0, 4) : '';
-}
-
-function isDateMatchForOnThisDay(value, targetDate, mode = 'across') {
-  const dateKey = normalizeEasternDateOnly(value);
-  if (!dateKey) return false;
-
-  if (normalizeOnThisDayMode(mode) === 'exact') {
-    return dateKey === targetDate;
-  }
-
-  return dateKey.slice(5) === targetDate.slice(5);
-}
-
-function getOnThisDayGroupYear(value, targetDate, mode = 'across') {
-  const dateKey = normalizeEasternDateOnly(value);
-  if (!dateKey || !isDateMatchForOnThisDay(dateKey, targetDate, mode)) return '';
-  return normalizeOnThisDayMode(mode) === 'exact' ? targetDate.slice(0, 4) : dateKey.slice(0, 4);
-}
-
-function buildOnThisDayDateForYear(year, targetDate) {
-  const candidate = `${year}-${String(targetDate || '').slice(5)}`;
-  return isValidDateInput(candidate) ? candidate : '';
-}
-
-function formatOnThisDayFullDate(value) {
-  const dateKey = normalizeEasternDateOnly(value);
-  if (!dateKey) return String(value || '-');
-
-  const [year, month, day] = dateKey.split('-').map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day));
-
-  return date.toLocaleDateString('en-US', {
-    timeZone: 'UTC',
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric'
-  });
-}
-
-function formatOnThisDayMonthDay(value) {
-  const dateKey = normalizeEasternDateOnly(value);
-  if (!dateKey) return String(value || '-');
-
-  const [year, month, day] = dateKey.split('-').map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day));
-
-  return date.toLocaleDateString('en-US', {
-    timeZone: 'UTC',
-    month: 'long',
-    day: 'numeric'
-  });
-}
-
-function formatOnThisDayTime(timeValue, ampmValue, snapshotValue) {
-  const snapshot = cleanRosterText(snapshotValue);
-  if (snapshot) return snapshot;
-
-  return uniqueNonEmpty([timeValue, ampmValue]).join(' ') || '-';
-}
-
-function parseOnThisDayBidIdDate(value) {
-  const match = String(value || '').match(/Q-(\d{4})(\d{2})(\d{2})/i);
-  if (!match) return '';
-  return `${match[1]}-${match[2]}-${match[3]}`;
-}
-
-function getOnThisDayBidCreatedDate(fields = {}, item = {}) {
-  return (
-    parseOnThisDayBidIdDate(fields.BidID) ||
-    normalizeEasternDateOnly(fields.Created) ||
-    normalizeEasternDateOnly(item.createdDateTime) ||
-    ''
-  );
-}
-
-function normalizeOnThisDayStatus(value) {
-  return String(value || '').trim().toLowerCase();
-}
-
-function isOnThisDayPlaceholderText(value) {
-  const normalized = normalizeText(value);
-  return !normalized || normalized === '-' || normalized === 'n/a' || normalized === 'na';
-}
-
-function cleanOnThisDayAssignmentValue(value) {
-  return isOnThisDayPlaceholderText(value) ? '' : cleanRosterText(value);
-}
-
-function cleanOnThisDayStatusValue(value) {
-  return isOnThisDayPlaceholderText(value) ? 'Quote' : cleanRosterText(value);
-}
-
-function isOnThisDayPlaceholderDate(value) {
-  const raw = String(value || '').trim();
-  if (!raw || raw === '-') return true;
-
-  const compact = raw.replace(/\s+/g, '').toLowerCase();
-  if (compact === '12/31/99' || compact === '12/31/1999') return true;
-
-  return normalizeEasternDateOnly(raw) === '1999-12-31';
-}
-
-function cleanOnThisDayDateValue(value) {
-  return isOnThisDayPlaceholderDate(value) ? '' : String(value || '').trim();
-}
-
-function isOnThisDayMovementStatus(value) {
-  const status = normalizeOnThisDayStatus(value);
-  return status === 'won' || status === 'tonu';
-}
-
-function getOnThisDayBidFieldSelect() {
-  return [
-    'BOLNumber_x0028_Won_x0029_',
-    'BidID',
-    'Company',
-    'CustomerCode',
-    'Shipment_x0020_Origin',
-    'Shipment_x0020_Destination',
-    'Operator_x002f_Team',
-    'TMSName',
-    'Truck_x0020_Number',
-    'Pickup_x0020_Offer_x0020_Date',
-    'Expected_x0020_Delivery_x0020_Da',
-    'Pickup1PickupTime',
-    'Pickup1AMorPM',
-    'Pickup1TimeSnapshot',
-    'Delivery1Time',
-    'Delivery1AMorPM',
-    'Delivery1TimeSnapshot',
-    'Status',
-    'Quoted_x0020_Total',
-    'Created'
-  ].join(',');
-}
-
-function cleanOnThisDayBidItem(item, sourceList) {
-  const f = item.fields || {};
-  const rawPickupDate = f.Pickup_x0020_Offer_x0020_Date || '';
-  const rawDeliveryDate = f.Expected_x0020_Delivery_x0020_Da || '';
-  const pickupDate = cleanOnThisDayDateValue(rawPickupDate);
-  const deliveryDate = cleanOnThisDayDateValue(rawDeliveryDate);
-  const createdDate = getOnThisDayBidCreatedDate(f, item);
-  const driverName = cleanOnThisDayAssignmentValue(f.TMSName) || cleanOnThisDayAssignmentValue(f.Operator_x002f_Team);
-  const truckNumber = cleanOnThisDayAssignmentValue(f.Truck_x0020_Number);
-  const rawStatus = f.Status || '';
-
-  return {
-    id: item.id || '',
-    SourceListId: sourceList?.listId || '',
-    SourceList: sourceList?.label || '',
-    SourceYear: sourceList?.year || '',
-    BOL: cleanOnThisDayAssignmentValue(f.BOLNumber_x0028_Won_x0029_),
-    BidID: f.BidID || '',
-    Customer: f.Company || '',
-    CustomerCode: f.CustomerCode || '',
-    Origin: f.Shipment_x0020_Origin || '',
-    Destination: f.Shipment_x0020_Destination || '',
-    Driver: driverName,
-    OperatorTeam: cleanOnThisDayAssignmentValue(f.Operator_x002f_Team),
-    TMSName: cleanOnThisDayAssignmentValue(f.TMSName),
-    Truck: truckNumber,
-    PickupDate: pickupDate,
-    PickupDateKey: normalizeEasternDateOnly(pickupDate),
-    PickupTime: formatOnThisDayTime(f.Pickup1PickupTime, f.Pickup1AMorPM, f.Pickup1TimeSnapshot),
-    DeliveryDate: deliveryDate,
-    DeliveryDateKey: normalizeEasternDateOnly(deliveryDate),
-    DeliveryTime: formatOnThisDayTime(f.Delivery1Time, f.Delivery1AMorPM, f.Delivery1TimeSnapshot),
-    CreatedDate: createdDate,
-    WonDate: createdDate,
-    StatusRaw: rawStatus,
-    Status: cleanOnThisDayStatusValue(rawStatus),
-    QuotedTotal: f.Quoted_x0020_Total || ''
-  };
-}
-
-function sortOnThisDayLoads(a, b, dateField = '') {
-  const dateDiff = String(a?.[dateField] || '').localeCompare(String(b?.[dateField] || ''));
-  if (dateDiff !== 0) return dateDiff;
-
-  const truckDiff = String(a.Truck || '').localeCompare(String(b.Truck || ''), undefined, { numeric: true, sensitivity: 'base' });
-  if (truckDiff !== 0) return truckDiff;
-
-  return String(a.Customer || '').localeCompare(String(b.Customer || ''), undefined, { sensitivity: 'base' });
-}
-
-function sortOnThisDayTextRows(a, b) {
-  return String(a.Driver || a.driverName || a.operatorName || a.Customer || a.company || '').localeCompare(
-    String(b.Driver || b.driverName || b.operatorName || b.Customer || b.company || ''),
-    undefined,
-    { numeric: true, sensitivity: 'base' }
-  );
-}
-
-function getOnThisDayGroup(map, year, targetDate, mode) {
-  const cleanYear = String(year || '').trim() || 'Unknown';
-
-  if (!map.has(cleanYear)) {
-    const groupDate = cleanYear === 'Unknown' ? '' : buildOnThisDayDateForYear(cleanYear, targetDate);
-    map.set(cleanYear, {
-      year: cleanYear,
-      date: groupDate,
-      label: normalizeOnThisDayMode(mode) === 'exact'
-        ? formatOnThisDayFullDate(targetDate)
-        : (groupDate ? formatOnThisDayFullDate(groupDate) : `${formatOnThisDayMonthDay(targetDate)} · ${cleanYear}`),
-      summary: {
-        pickups: 0,
-        deliveries: 0,
-        ordersWon: 0,
-        uploads: 0,
-        driversOff: 0,
-        noAvailability: 0,
-        availableTrucks: 0
-      },
-      pickups: [],
-      deliveries: [],
-      ordersWon: [],
-      uploads: [],
-      driversOff: [],
-      noAvailability: [],
-      availableTrucks: []
-    });
-  }
-
-  return map.get(cleanYear);
-}
-
-function addOnThisDayRow(groups, sectionKey, year, row, targetDate, mode) {
-  const group = getOnThisDayGroup(groups, year, targetDate, mode);
-  group[sectionKey].push(row);
-  group.summary[sectionKey] = group[sectionKey].length;
-}
-
-function getOnThisDayTimeOffMatches(row = {}, targetDate, mode = 'across') {
-  const startDate = normalizeEasternDateOnly(row.startDate);
-  const endDate = normalizeEasternDateOnly(row.endDate || row.startDate);
-  if (!startDate || !endDate) return [];
-
-  if (normalizeOnThisDayMode(mode) === 'exact') {
-    return startDate <= targetDate && endDate >= targetDate ? [targetDate.slice(0, 4)] : [];
-  }
-
-  const startYear = Number(startDate.slice(0, 4));
-  const endYear = Number(endDate.slice(0, 4));
-  if (Number.isNaN(startYear) || Number.isNaN(endYear)) return [];
-
-  const years = [];
-  for (let year = startYear; year <= endYear; year += 1) {
-    const candidate = buildOnThisDayDateForYear(year, targetDate);
-    if (candidate && candidate >= startDate && candidate <= endDate) {
-      years.push(String(year));
-    }
-  }
-
-  return years;
-}
-
-function getOnThisDayNoAvailabilityRow(row = {}) {
-  return {
-    id: row.id || '',
-    sourceLabel: row.sourceLabel || '',
-    date: row.solicitDateKey || row.solicitDate || '',
-    company: row.company || '',
-    requestor: row.requestor || '',
-    pickupLocation: row.pickupCityState || normalizeNoAvailabilityCityState(row.pickupLocation),
-    deliveryLocation: row.deliveryCityState || normalizeNoAvailabilityCityState(row.deliveryLocation),
-    shipmentType: row.shipmentType || '',
-    totalMiles: row.totalMiles || 0
-  };
-}
-
-function getOnThisDayAvailableTruckRow(record = {}) {
-  return {
-    id: record.id || '',
-    dateSent: record.dateSent || '',
-    timeOfDay: record.timeOfDay || '',
-    driverName: record.driverName || '',
-    unitNo: record.unitNo || '',
-    equipmentType: record.equipmentType || '',
-    currentLocation: record.currentLocation || '',
-    proximitySummary: (record.proximityStops || [])
-      .slice(0, 4)
-      .map((stop) => uniqueNonEmpty([stop.location, stop.timeLabel]).join(' · '))
-      .filter(Boolean)
-      .join(' | ')
-  };
-}
-
-function buildOnThisDayResponse(data = {}, options = {}) {
-  const targetDate = getOnThisDayTargetDate(options.date);
-  const mode = normalizeOnThisDayMode(options.mode);
-  const groups = new Map();
-  const bidRows = data.bidRows || [];
-
-  bidRows.forEach((row) => {
-    if (isOnThisDayMovementStatus(row.StatusRaw || row.Status)) {
-      const pickupYear = getOnThisDayGroupYear(row.PickupDateKey || row.PickupDate, targetDate, mode);
-      if (pickupYear) addOnThisDayRow(groups, 'pickups', pickupYear, row, targetDate, mode);
-
-      const deliveryYear = getOnThisDayGroupYear(row.DeliveryDateKey || row.DeliveryDate, targetDate, mode);
-      if (deliveryYear) addOnThisDayRow(groups, 'deliveries', deliveryYear, row, targetDate, mode);
-    }
-
-    const createdYear = getOnThisDayGroupYear(row.CreatedDate || row.WonDate, targetDate, mode);
-    if (createdYear) addOnThisDayRow(groups, 'ordersWon', createdYear, row, targetDate, mode);
-  });
-
-  (data.uploadRows || []).forEach((row) => {
-    const year = getOnThisDayGroupYear(row.UploadDate, targetDate, mode);
-    if (year) addOnThisDayRow(groups, 'uploads', year, row, targetDate, mode);
-  });
-
-  (data.driverTimeOffRows || []).forEach((row) => {
-    getOnThisDayTimeOffMatches(row, targetDate, mode).forEach((year) => {
-      addOnThisDayRow(groups, 'driversOff', year, row, targetDate, mode);
-    });
-  });
-
-  (data.noAvailabilityRows || []).forEach((row) => {
-    const year = getOnThisDayGroupYear(row.solicitDateKey || row.solicitDate, targetDate, mode);
-    if (year) addOnThisDayRow(groups, 'noAvailability', year, getOnThisDayNoAvailabilityRow(row), targetDate, mode);
-  });
-
-  (data.availableTruckRows || []).forEach((row) => {
-    const year = getOnThisDayGroupYear(row.dateSent, targetDate, mode);
-    if (year) addOnThisDayRow(groups, 'availableTrucks', year, getOnThisDayAvailableTruckRow(row), targetDate, mode);
-  });
-
-  if (groups.size === 0 && mode === 'exact') {
-    getOnThisDayGroup(groups, targetDate.slice(0, 4), targetDate, mode);
-  }
-
-  const yearGroups = [...groups.values()]
-    .map((group) => ({
-      ...group,
-      pickups: group.pickups.sort((a, b) => sortOnThisDayLoads(a, b, 'PickupDateKey')),
-      deliveries: group.deliveries.sort((a, b) => sortOnThisDayLoads(a, b, 'DeliveryDateKey')),
-      ordersWon: group.ordersWon.sort((a, b) => sortOnThisDayLoads(a, b, 'CreatedDate')),
-      uploads: group.uploads.sort((a, b) => new Date(b.UploadDate).getTime() - new Date(a.UploadDate).getTime()),
-      driversOff: group.driversOff.sort(sortDriverTimeOffRows),
-      noAvailability: group.noAvailability.sort(sortOnThisDayTextRows),
-      availableTrucks: group.availableTrucks.sort(sortOnThisDayTextRows)
-    }))
-    .sort((a, b) => Number(b.year || 0) - Number(a.year || 0));
-
-  const summary = yearGroups.reduce((totals, group) => {
-    Object.keys(totals).forEach((key) => {
-      totals[key] += Number(group.summary?.[key] || 0);
-    });
-    return totals;
-  }, {
-    pickups: 0,
-    deliveries: 0,
-    ordersWon: 0,
-    uploads: 0,
-    driversOff: 0,
-    noAvailability: 0,
-    availableTrucks: 0
-  });
-
-  return {
-    success: true,
-    generatedAt: `${formatEasternTimestamp()} Eastern`,
-    reportLabel: mode === 'exact'
-      ? `On This Day: ${formatOnThisDayFullDate(targetDate)}`
-      : `On This Day: ${formatOnThisDayMonthDay(targetDate)} Across Years`,
-    targetDate,
-    targetMonthDay: targetDate.slice(5),
-    targetLabel: mode === 'exact' ? formatOnThisDayFullDate(targetDate) : formatOnThisDayMonthDay(targetDate),
-    mode,
-    modeLabel: mode === 'exact' ? 'Exact Date' : 'Across Years',
-    summary,
-    count: Object.values(summary).reduce((sum, value) => sum + Number(value || 0), 0),
-    yearsReturned: yearGroups.length,
-    yearGroups,
-    recordsScanned: data.recordsScanned || {},
-    warnings: data.warnings || []
-  };
-}
-
-function getOnThisDayCurrentYear() {
-  return Number(formatEasternDate().slice(0, 4));
-}
-
-function getOnThisDaySourceListYear(sourceList = {}) {
-  if (sourceList.year === 'Current') return getOnThisDayCurrentYear();
-
-  const year = Number(sourceList.year);
-  return Number.isNaN(year) ? null : year;
-}
-
-function getOnThisDaySourceListsForMode(sourceLists = [], targetDate, mode) {
-  if (mode !== 'exact') return sourceLists;
-
-  const targetYear = Number(String(targetDate || '').slice(0, 4));
-  const exactSources = sourceLists.filter((sourceList) => (
-    getOnThisDaySourceListYear(sourceList) === targetYear
-  ));
-
-  return exactSources.length ? exactSources : sourceLists;
-}
-
-function getNoAvailabilitySourcesForOnThisDay(sources = [], targetDate, mode) {
-  if (mode !== 'exact') return sources;
-
-  const targetYear = Number(String(targetDate || '').slice(0, 4));
-  const currentYear = getOnThisDayCurrentYear();
-
-  const exactSources = sources.filter((source) => (
-    Number(source.sourceYear) === targetYear ||
-    (source.sourceYear === 'Main' && targetYear === currentYear)
-  ));
-
-  return exactSources.length ? exactSources : sources;
-}
-
-async function getCachedOnThisDayItems(token, sourceName, listId, fieldSelect = '') {
-  const cacheKey = `${sourceName}|${listId}|${fieldSelect || 'all'}`;
-  const cached = getCacheRecord(cachedOnThisDayItemsBySource, cacheKey, ON_THIS_DAY_SOURCE_CACHE_MS);
-
-  if (cached) return cached;
-
-  const items = await getAllListItemsWithFields(token, listId, fieldSelect);
-  setCacheRecord(cachedOnThisDayItemsBySource, cacheKey, items, 60);
-
-  return items;
-}
-
-async function getCachedOnThisDayItemsResilient(token, sourceName, listId, fieldSelect = '') {
-  try {
-    return {
-      items: await getCachedOnThisDayItems(token, sourceName, listId, fieldSelect),
-      usedFallback: false,
-      warning: ''
-    };
-  } catch (error) {
-    if (!fieldSelect) throw error;
-
-    return {
-      items: await getCachedOnThisDayItems(token, `${sourceName}:fallback`, listId, ''),
-      usedFallback: true,
-      warning: error.message || 'Selected field fetch failed; retried with full fields.'
-    };
-  }
-}
-
-async function getOnThisDayReportData(token, options = {}) {
-  const targetDate = getOnThisDayTargetDate(options.date);
-  const mode = normalizeOnThisDayMode(options.mode);
-  const reportCacheKey = `${targetDate}|${mode}`;
-  const cachedReport = getCacheRecord(cachedOnThisDayReports, reportCacheKey, ON_THIS_DAY_REPORT_CACHE_MS);
-
-  if (cachedReport) {
-    return {
-      ...cachedReport,
-      cache: {
-        hit: true
-      }
-    };
-  }
-
-  const warnings = [];
-  const recordsScanned = {};
-
-  const allSourceLists = await getSearchableBidLists(token);
-  const sourceLists = getOnThisDaySourceListsForMode(allSourceLists, targetDate, mode);
-  const bidSettled = await Promise.allSettled(
-    sourceLists.map(async (sourceList) => {
-      const bundle = await getCachedOnThisDayItemsResilient(
-        token,
-        `bid:${sourceList.label}`,
-        sourceList.listId,
-        getOnThisDayBidFieldSelect()
-      );
-
-      if (bundle.usedFallback) {
-        warnings.push({
-          source: sourceList.label,
-          message: bundle.warning || 'Bid Listing selected-field fetch failed; retried with full fields.'
-        });
-      }
-
-      return bundle.items.map((item) => cleanOnThisDayBidItem(item, sourceList));
-    })
-  );
-
-  const bidRows = bidSettled
-    .filter((result) => result.status === 'fulfilled')
-    .flatMap((result) => result.value);
-
-  bidSettled.forEach((result, index) => {
-    if (result.status === 'rejected') {
-      warnings.push({
-        source: sourceLists[index]?.label || 'Bid Listing',
-        message: result.reason?.message || 'Unable to load this Bid Listing source.'
-      });
-    }
-  });
-  recordsScanned.bidListings = bidRows.length;
-
-  let uploadRows = [];
-  const uploadDigestListId = process.env.UPLOAD_DIGEST_LIST_ID || DEFAULT_UPLOAD_DIGEST_LIST_ID;
-  if (uploadDigestListId) {
-    try {
-      const uploadItems = await getCachedOnThisDayItems(token, 'upload-digest', uploadDigestListId);
-      uploadRows = uploadItems.map(buildUploadDigestRecord);
-      recordsScanned.uploadDigest = uploadRows.length;
-    } catch (error) {
-      warnings.push({ source: 'Upload Digest', message: error.message || 'Unable to load Upload Digest.' });
-    }
-  }
-
-  let driverTimeOffRows = [];
-  try {
-    const driverTimeOffResult = await getDriverTimeOffRows(token);
-    driverTimeOffRows = Array.isArray(driverTimeOffResult?.rows) ? driverTimeOffResult.rows : [];
-    recordsScanned.driverTimeOff = driverTimeOffRows.length;
-
-    if (driverTimeOffResult?.warning) {
-      warnings.push({ source: 'Driver Time Off', message: driverTimeOffResult.warning });
-    }
-  } catch (error) {
-    warnings.push({ source: 'Driver Time Off', message: error.message || 'Unable to load Driver Time Off.' });
-  }
-
-  let noAvailabilityRows = [];
-  const noAvailabilitySources = getNoAvailabilitySourcesForOnThisDay(getNoAvailabilitySources(), targetDate, mode);
-  if (noAvailabilitySources.length) {
-    const noAvailabilitySettled = await Promise.allSettled(
-      noAvailabilitySources.map(async (source) => {
-        const items = await getCachedOnThisDayItems(token, `no-availability:${source.label}`, source.listId, getNoAvailabilityFieldSelect());
-        return items.map((item) => cleanNoAvailabilityItem(item, source));
-      })
-    );
-
-    noAvailabilityRows = noAvailabilitySettled
-      .filter((result) => result.status === 'fulfilled')
-      .flatMap((result) => result.value);
-
-    noAvailabilitySettled.forEach((result, index) => {
-      if (result.status === 'rejected') {
-        warnings.push({
-          source: noAvailabilitySources[index]?.label || 'No Availability',
-          message: result.reason?.message || 'Unable to load this No Availability source.'
-        });
-      }
-    });
-    recordsScanned.noAvailability = noAvailabilityRows.length;
-  }
-
-  let availableTruckRows = [];
-  const availableTrucksListId = getAvailableTrucksSingleLineListId();
-  if (availableTrucksListId) {
-    try {
-      const availableTruckItems = await getCachedOnThisDayItems(token, 'available-trucks', availableTrucksListId, getAvailableTruckFieldSelect());
-      availableTruckRows = availableTruckItems
-        .map(cleanAvailableTruckRecord)
-        .filter((record) => record.driverName || record.unitNo || record.currentLocation);
-      recordsScanned.availableTrucks = availableTruckRows.length;
-    } catch (error) {
-      warnings.push({ source: 'Available Trucks', message: error.message || 'Unable to load Available Trucks.' });
-    }
-  }
-
-  const report = buildOnThisDayResponse({
-    bidRows,
-    uploadRows,
-    driverTimeOffRows,
-    noAvailabilityRows,
-    availableTruckRows,
-    recordsScanned,
-    warnings
-  }, { date: targetDate, mode });
-
-  setCacheRecord(cachedOnThisDayReports, reportCacheKey, report, 20);
-
-  return report;
-}
-
-function createOnThisDayPdfBuffer(report) {
-  const writer = createPdfReportWriter({
-    title: report.reportLabel || 'On This Day',
-    subtitle: `Generated: ${report.generatedAt || '-'}    View: ${report.modeLabel || '-'}`
-  });
-
-  const summary = report.summary || {};
-  writer.addSectionTitle(report.mode === 'across' ? 'Comparison Year Summary' : 'Daily Activity Summary');
-  writer.addParagraph('Report date', report.targetLabel || report.targetDate || '-');
-  writer.addParagraph('View', report.modeLabel || '-');
-  writer.addParagraph('Years returned', formatPdfNumber(report.yearsReturned));
-
-  if (report.mode === 'across') {
-    writer.addTable([
-      { label: 'Year', width: 52, value: 'year', mono: true },
-      { label: 'Pickups', width: 64, value: (group) => formatPdfNumber(group.summary?.pickups) },
-      { label: 'Deliveries', width: 70, value: (group) => formatPdfNumber(group.summary?.deliveries) },
-      { label: 'Bid Records', width: 76, value: (group) => formatPdfNumber(group.summary?.ordersWon) },
-      { label: 'Uploads', width: 62, value: (group) => formatPdfNumber(group.summary?.uploads) },
-      { label: 'Drivers Off', width: 78, value: (group) => formatPdfNumber(group.summary?.driversOff) },
-      { label: 'No Avail.', width: 70, value: (group) => formatPdfNumber(group.summary?.noAvailability) },
-      { label: 'Avail. Posted', width: 88, value: (group) => formatPdfNumber(group.summary?.availableTrucks) }
-    ], report.yearGroups || [], 'No comparison-year activity was found.');
-  } else {
-    writer.addParagraph('Pickups / Deliveries', `${formatPdfNumber(summary.pickups)} / ${formatPdfNumber(summary.deliveries)}`);
-    writer.addParagraph('Bid listing records created', formatPdfNumber(summary.ordersWon));
-    writer.addParagraph('Job uploads', formatPdfNumber(summary.uploads));
-    writer.addParagraph('Drivers off', formatPdfNumber(summary.driversOff));
-    writer.addParagraph('No availability', formatPdfNumber(summary.noAvailability));
-    writer.addParagraph('Available trucks posted', formatPdfNumber(summary.availableTrucks));
-  }
-
-  if ((report.warnings || []).length > 0) {
-    writer.addSectionTitle('Source Warnings', `${formatPdfNumber(report.warnings.length)} warning(s)`);
-    (report.warnings || []).slice(0, 8).forEach((warning) => {
-      writer.addParagraph(warning.source || 'Source', warning.message || 'Unable to load source.');
-    });
-  }
-
-  const movementColumns = [
-    { label: 'BOL', width: 70, value: (row) => `${row.BOL || '-'}${normalizeOnThisDayStatus(row.StatusRaw || row.Status) === 'tonu' ? ' *' : ''}`, mono: true },
-    { label: 'Customer', width: 148, value: 'Customer' },
-    { label: 'Driver / TMS', width: 112, value: 'Driver' },
-    { label: 'Truck', width: 48, value: 'Truck', mono: true },
-    { label: 'Origin', width: 136, value: 'Origin' },
-    { label: 'Destination', width: 136, value: 'Destination' },
-    { label: 'Time', width: 70, value: (row) => row.PickupTime || row.DeliveryTime || '-' }
-  ];
-
-  const getTonuFootnote = (rows = []) => (
-    rows.some((row) => normalizeOnThisDayStatus(row.StatusRaw || row.Status) === 'tonu') ? ' · * TONU shipment' : ''
-  );
-
-  (report.yearGroups || []).forEach((group) => {
-    writer.addSectionTitle(group.label || group.year, [
-      `${formatPdfNumber(group.summary?.pickups)} pickup(s)`,
-      `${formatPdfNumber(group.summary?.deliveries)} delivery/deliveries`,
-      `${formatPdfNumber(group.summary?.ordersWon)} bid record(s)`,
-      `${formatPdfNumber(group.summary?.uploads)} upload(s)`,
-      `${formatPdfNumber(group.summary?.driversOff)} driver(s) off`
-    ].join(' · '));
-
-    writer.addSectionTitle('Pickups', `${formatPdfNumber(group.pickups?.length)} row(s)${getTonuFootnote(group.pickups || [])}`);
-    writer.addTable(movementColumns.map((column) => (
-      column.label === 'Time' ? { ...column, value: 'PickupTime' } : column
-    )), group.pickups || [], 'No pickups found.');
-
-    writer.addSectionTitle('Deliveries', `${formatPdfNumber(group.deliveries?.length)} row(s)${getTonuFootnote(group.deliveries || [])}`);
-    writer.addTable(movementColumns.map((column) => (
-      column.label === 'Time' ? { ...column, value: 'DeliveryTime' } : column
-    )), group.deliveries || [], 'No deliveries found.');
-
-    writer.addSectionTitle('Bid Listing Records Created', `${formatPdfNumber(group.ordersWon?.length)} row(s)`);
-    writer.addTable([
-      { label: 'Bid/BOL', width: 92, value: (row) => row.BOL || row.BidID || '-' },
-      { label: 'Status', width: 52, value: 'Status' },
-      { label: 'Customer', width: 136, value: 'Customer' },
-      { label: 'Driver / TMS', width: 104, value: (row) => row.Driver || 'Not assigned' },
-      { label: 'Truck', width: 44, value: (row) => row.Truck || 'Not assigned', mono: true },
-      { label: 'Pickup', width: 76, value: (row) => row.PickupDateKey || row.PickupDate ? formatPdfRosterDate(row.PickupDateKey || row.PickupDate) : 'Not set' },
-      { label: 'Delivery', width: 76, value: (row) => row.DeliveryDateKey || row.DeliveryDate ? formatPdfRosterDate(row.DeliveryDateKey || row.DeliveryDate) : 'Not set' },
-      { label: 'Quote', width: 60, value: (row) => formatPdfMoney(row.QuotedTotal) }
-    ], group.ordersWon || [], 'No bid listing records were created.');
-
-    writer.addSectionTitle('Job Upload Activity', `${formatPdfNumber(group.uploads?.length)} row(s)`);
-    writer.addTable([
-      { label: 'BOL', width: 70, value: 'BOLNumber', mono: true },
-      { label: 'Driver', width: 150, value: 'DriverName' },
-      { label: 'Upload Type', width: 130, value: 'UploadType' },
-      { label: 'Uploaded', width: 180, value: 'UploadDateDisplay' },
-      { label: 'Composite Key', width: 190, value: 'CompositeKey' }
-    ], group.uploads || [], 'No job upload activity found.');
-
-    writer.addSectionTitle('Driver Availability Context');
-    writer.addTable([
-      { label: 'Driver', width: 160, value: 'operatorName' },
-      { label: 'Truck', width: 60, value: 'truckNumber', mono: true },
-      { label: 'Start', width: 78, value: (row) => formatPdfRosterDate(row.startDate) },
-      { label: 'End', width: 78, value: (row) => formatPdfRosterDate(row.endDate) },
-      { label: 'Reason', width: 230, value: 'reason' },
-      { label: 'Status', width: 70, value: 'status' }
-    ], group.driversOff || [], 'No driver time-off records found.');
-
-    writer.addSectionTitle('No Availability', `${formatPdfNumber(group.noAvailability?.length)} row(s)`);
-    writer.addTable([
-      { label: 'Customer', width: 142, value: 'company' },
-      { label: 'Requestor', width: 110, value: 'requestor' },
-      { label: 'Pickup', width: 156, value: 'pickupLocation' },
-      { label: 'Delivery', width: 156, value: 'deliveryLocation' },
-      { label: 'Type', width: 86, value: 'shipmentType' },
-      { label: 'Miles', width: 60, value: (row) => formatPdfNumber(row.totalMiles) }
-    ], group.noAvailability || [], 'No no-availability records found.');
-
-    writer.addSectionTitle('Available Trucks Posted', `${formatPdfNumber(group.availableTrucks?.length)} row(s)`);
-    writer.addTable([
-      { label: 'Driver', width: 140, value: 'driverName' },
-      { label: 'Truck', width: 54, value: 'unitNo', mono: true },
-      { label: 'Equipment', width: 120, value: 'equipmentType' },
-      { label: 'Current Location', width: 150, value: 'currentLocation' },
-      { label: 'Time of Day', width: 82, value: 'timeOfDay' },
-      { label: 'Proximity', width: 174, value: 'proximitySummary' }
-    ], group.availableTrucks || [], 'No available-truck postings found.');
-  });
-
-  return writer.finish();
-}
-
-app.get('/reports/on-this-day', requireLookupAccess, async (req, res) => {
-  try {
-    const token = await getGraphToken();
-    const report = await getOnThisDayReportData(token, {
-      date: req.query.date,
-      mode: req.query.mode
-    });
-
-    res.json(report);
-  } catch (error) {
-    console.error(error);
-    res.status(error.statusCode || 500).json({
-      success: false,
-      error: error.message || 'Unable to load On This Day report.'
-    });
-  }
-});
-
-app.get('/reports/on-this-day/pdf', requireLookupAccess, async (req, res) => {
-  try {
-    const token = await getGraphToken();
-    const report = await getOnThisDayReportData(token, {
-      date: req.query.date,
-      mode: req.query.mode
-    });
-    const pdfBuffer = createOnThisDayPdfBuffer(report);
-    const safeDate = getOnThisDayTargetDate(req.query.date).replace(/[^0-9A-Za-z_-]+/g, '-');
-    const safeMode = normalizeOnThisDayMode(req.query.mode) === 'exact' ? 'Exact' : 'Across_Years';
-
-    sendPdfResponse(res, pdfBuffer, `Kole_On_This_Day_${safeDate}_${safeMode}.pdf`);
-  } catch (error) {
-    console.error(error);
-    res.status(error.statusCode || 500).json({
-      success: false,
-      error: error.message || 'Unable to export On This Day PDF.'
-    });
-  }
-});
 
 
 function getRosterReportDisplayName(roster = {}) {
@@ -20494,7 +19778,7 @@ function createSalesLeadSuppressionPdfBuffer(report) {
 }
 
 function clearSalesLeadsReportCache() {
-  cachedSalesLeadsBaseReport = null;
+  cachedLargeReports.delete('cachedSalesLeadsBaseReport');
   cachedSalesLeadsBaseReportAt = 0;
 }
 
@@ -20510,10 +19794,10 @@ async function getSalesLeadsBaseReportData(token, forceRefresh = false) {
   const now = Date.now();
   if (
     !forceRefresh &&
-    cachedSalesLeadsBaseReport &&
+    cachedLargeReports.get('cachedSalesLeadsBaseReport') &&
     now - cachedSalesLeadsBaseReportAt < SALES_LEADS_REPORT_CACHE_MS
   ) {
-    return cachedSalesLeadsBaseReport;
+    return cachedLargeReports.get('cachedSalesLeadsBaseReport');
   }
 
   const [items, customerRevenueIndex, notesBundle] = await Promise.all([
@@ -20527,7 +19811,7 @@ async function getSalesLeadsBaseReportData(token, forceRefresh = false) {
     .map((record) => enrichSalesLeadWithRevenue(record, customerRevenueIndex))
     .map((record) => enrichSalesLeadWithNotes(record, notesBundle.notesIndex));
 
-  cachedSalesLeadsBaseReport = {
+  const baseReport = {
     generatedAt: `${formatEasternTimestamp()} Eastern`,
     sourceListId: salesLeadsListId,
     notesSourceListId: notesBundle.sourceListId,
@@ -20537,9 +19821,10 @@ async function getSalesLeadsBaseReportData(token, forceRefresh = false) {
     recordsScanned: records.length,
     records
   };
+  cachedLargeReports.set('cachedSalesLeadsBaseReport', baseReport);
   cachedSalesLeadsBaseReportAt = now;
 
-  return cachedSalesLeadsBaseReport;
+  return baseReport;
 }
 
 async function getSalesLeadsReportData(token, view = 'all', sort = '', forceRefresh = false) {
@@ -20570,6 +19855,91 @@ async function getSalesLeadsReportData(token, view = 'all', sort = '', forceRefr
   };
 }
 
+
+app.get('/driver-roster/:itemId/edit', requireLookupAccess, async (req, res) => {
+  try {
+    const itemId = getDriverRosterEditItemId(req.params.itemId);
+    const token = await getGraphToken();
+    const { siteId, listId } = assertDriverRosterConfig();
+    const item = await getDriverRosterItemById(token, itemId, true);
+    const columns = await getAllQuoteEngineColumns(token, listId, siteId);
+    const fields = buildDriverRosterEditSchema(columns);
+    res.json({
+      success: true, etag: getDriverRosterEditETag(item), fields,
+      values: Object.fromEntries(fields.map((field) => [field.key, item.fields?.[field.field] ?? '']))
+    });
+  } catch (error) {
+    res.status(error.safeForClient ? error.statusCode : 503).json({
+      success: false,
+      error: error.safeForClient ? error.message : 'Unable to load this driver for editing. Try again in a moment.'
+    });
+  }
+});
+
+app.patch('/driver-roster/:itemId', requireLookupAccess, async (req, res) => {
+  let lockedId = '';
+  let lockedTruck = '';
+  let patchAttempted = false;
+  try {
+    const itemId = getDriverRosterEditItemId(req.params.itemId);
+    const etag = req.body?.etag;
+    if (typeof etag !== 'string' || !etag.trim() || etag.trim() === '*' || etag.length > 512 || /[\r\n]/.test(etag)) {
+      throw driverRosterEditError('Reload the driver before saving changes.');
+    }
+    if (inFlightDriverRosterEdits.has(itemId)) throw driverRosterEditError('This driver is already being saved. Wait for that save to finish.', 409);
+    inFlightDriverRosterEdits.add(itemId);
+    lockedId = itemId;
+    const token = await getGraphToken();
+    const { siteId, listId } = assertDriverRosterConfig();
+    const currentItem = await getDriverRosterItemById(token, itemId, true);
+    if (getDriverRosterEditETag(currentItem) !== etag) {
+      throw driverRosterEditError('This driver changed since you opened the editor. Reload the latest record before saving.', 409, 'DRIVER_ROSTER_CHANGED');
+    }
+    const columns = await getAllQuoteEngineColumns(token, listId, siteId);
+    const patch = buildDriverRosterEditPatch(req.body?.changes, columns, currentItem.fields);
+    if (Object.hasOwn(patch, 'Trucks') && normalizeText(currentItem.fields?.Status) === 'active' && !currentItem.fields?.TermDate &&
+        normalizeTruckKey(patch.Trucks) !== normalizeTruckKey(currentItem.fields?.Trucks)) {
+      const truckKey = normalizeTruckKey(patch.Trucks);
+      if (inFlightDriverRosterTruckEdits.has(truckKey)) throw driverRosterEditError('That truck assignment is being updated. Try again after it finishes.', 409);
+      inFlightDriverRosterTruckEdits.add(truckKey);
+      lockedTruck = truckKey;
+      await assertDriverRosterTruckAvailable(token, itemId, patch.Trucks);
+    }
+    let updatedItem = currentItem;
+    let refreshWarning = '';
+    if (Object.keys(patch).length) {
+      patchAttempted = true;
+      await graphPatch(token, `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${encodeURIComponent(itemId)}/fields`, patch, { 'If-Match': etag });
+      clearDriverRosterMutationCaches();
+      updatedItem = { ...currentItem, fields: { ...currentItem.fields, ...patch } };
+      try { updatedItem = await getDriverRosterItemById(token, itemId, true); }
+      catch { refreshWarning = 'Saved values are shown. The latest server view could not be reloaded yet.'; }
+    }
+    const roster = cleanDriverRosterItem(updatedItem);
+    res.json({
+      success: true, roster,
+      reportRow: buildFleetEquipmentReportResponse([roster], 'all').rows[0],
+      rosterOption: buildAvailableTruckRosterOptions([roster])[0] || null,
+      message: Object.keys(patch).length ? 'Driver record saved.' : 'No changes to save.',
+      warning: refreshWarning
+    });
+  } catch (error) {
+    const conflict = error.graphStatus === 412 || error.code === 'DRIVER_ROSTER_CHANGED';
+    const uncertain = patchAttempted && (!error.graphStatus || error.graphStatus >= 500);
+    if (patchAttempted) clearDriverRosterMutationCaches();
+    res.status(conflict ? 409 : error.safeForClient ? error.statusCode : 502).json({
+      success: false,
+      requiresReload: conflict || uncertain,
+      error: conflict ? 'This driver changed during the save. Reload the latest record before saving again.'
+        : error.safeForClient ? error.message
+          : uncertain ? 'The save outcome could not be confirmed. Reload the driver to check the saved values before trying again.'
+            : 'SharePoint could not save this driver. Check the field values and try again.'
+    });
+  } finally {
+    if (lockedId) inFlightDriverRosterEdits.delete(lockedId);
+    if (lockedTruck) inFlightDriverRosterTruckEdits.delete(lockedTruck);
+  }
+});
 
 app.get('/driver-roster/lookup', requireLookupAccess, async (req, res) => {
   try {
@@ -20687,7 +20057,7 @@ app.patch('/driver-roster/:itemId/terminate', requireLookupAccess, async (req, r
   }
 });
 
-app.get('/driver-roster/history-batch', requireLookupAccess, async (req, res) => {
+app.get('/driver-roster/history-batch', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const trucks = String(req.query.trucks || '')
       .split(',')
@@ -20708,9 +20078,9 @@ app.get('/driver-roster/history-batch', requireLookupAccess, async (req, res) =>
       error: error.message || 'Unable to preload driver history snapshots.'
     });
   }
-});
+}));
 
-app.get('/driver-roster/history', requireLookupAccess, async (req, res) => {
+app.get('/driver-roster/history', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const truck = cleanRosterText(req.query.truck || '');
 
@@ -20728,9 +20098,9 @@ app.get('/driver-roster/history', requireLookupAccess, async (req, res) => {
       error: error.message || 'Unable to load driver history snapshot.'
     });
   }
-});
+}));
 
-app.get('/reports/active-driver-roster', requireLookupAccess, async (req, res) => {
+app.get('/reports/active-driver-roster', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     if (!process.env.DRIVER_ROSTER_LIST_ID) {
       return res.status(500).json({
@@ -20749,9 +20119,9 @@ app.get('/reports/active-driver-roster', requireLookupAccess, async (req, res) =
       error: error.message || 'Unable to load active driver roster.'
     });
   }
-});
+}));
 
-app.get('/reports/active-driver-roster/pdf', requireLookupAccess, async (req, res) => {
+app.get('/reports/active-driver-roster/pdf', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const token = await getGraphToken();
     const rosterItems = await getDriverRosterItems(token);
@@ -20765,9 +20135,9 @@ app.get('/reports/active-driver-roster/pdf', requireLookupAccess, async (req, re
       error: error.message || 'Unable to export Active Driver Roster PDF.'
     });
   }
-});
+}));
 
-app.get('/reports/inactive-driver-roster', requireLookupAccess, async (req, res) => {
+app.get('/reports/inactive-driver-roster', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     if (!process.env.DRIVER_ROSTER_LIST_ID) {
       return res.status(500).json({
@@ -20786,9 +20156,9 @@ app.get('/reports/inactive-driver-roster', requireLookupAccess, async (req, res)
       error: error.message || 'Unable to load inactive driver roster.'
     });
   }
-});
+}));
 
-app.get('/reports/inactive-driver-roster/pdf', requireLookupAccess, async (req, res) => {
+app.get('/reports/inactive-driver-roster/pdf', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const token = await getGraphToken();
     const rosterItems = await getDriverRosterItems(token);
@@ -20802,9 +20172,9 @@ app.get('/reports/inactive-driver-roster/pdf', requireLookupAccess, async (req, 
       error: error.message || 'Unable to export Inactive Driver Roster PDF.'
     });
   }
-});
+}));
 
-app.get('/reports/fleet-equipment', requireLookupAccess, async (req, res) => {
+app.get('/reports/fleet-equipment', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     if (!process.env.DRIVER_ROSTER_LIST_ID) {
       return res.status(500).json({
@@ -20823,9 +20193,9 @@ app.get('/reports/fleet-equipment', requireLookupAccess, async (req, res) => {
       error: error.message || 'Unable to load Fleet Equipment report.'
     });
   }
-});
+}));
 
-app.get('/reports/fleet-equipment/pdf', requireLookupAccess, async (req, res) => {
+app.get('/reports/fleet-equipment/pdf', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const status = normalizeDriverRosterReportStatus(req.query.status || 'active');
     const token = await getGraphToken();
@@ -20841,9 +20211,9 @@ app.get('/reports/fleet-equipment/pdf', requireLookupAccess, async (req, res) =>
       error: error.message || 'Unable to export Fleet Equipment PDF.'
     });
   }
-});
+}));
 
-app.get('/reports/sales-leads/suppression/pdf', requireLookupAccess, async (req, res) => {
+app.get('/reports/sales-leads/suppression/pdf', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const token = await getGraphToken();
     const report = await getSalesLeadsReportData(token, 'suppressed', 'name');
@@ -20856,18 +20226,18 @@ app.get('/reports/sales-leads/suppression/pdf', requireLookupAccess, async (req,
       error: error.message || 'Unable to export Lead Suppression Report PDF.'
     });
   }
-});
+}));
 
 async function buildBootstrapOperationsPayload(token, currentList, items, evidenceSets) {
   const targetDate = formatEasternDate();
 
   if (
-    cachedOperationsToday &&
-    cachedOperationsToday.targetDate === targetDate &&
+    cachedLargeReports.get('cachedOperationsToday') &&
+    cachedLargeReports.get('cachedOperationsToday').targetDate === targetDate &&
     Date.now() - cachedOperationsTodayAt < OPERATIONS_TODAY_CACHE_MS
   ) {
     return {
-      ...cachedOperationsToday.payload,
+      ...cachedLargeReports.get('cachedOperationsToday').payload,
       cache: {
         hit: true,
         ageSeconds: Math.round((Date.now() - cachedOperationsTodayAt) / 1000)
@@ -20950,7 +20320,7 @@ async function buildBootstrapOperationsPayload(token, currentList, items, eviden
     loadingNext7
   };
 
-  cachedOperationsToday = { targetDate, payload };
+  cachedLargeReports.set('cachedOperationsToday', { targetDate, payload });
   cachedOperationsTodayAt = Date.now();
   return payload;
 }
@@ -21139,7 +20509,7 @@ async function settleBootstrapModule(work, moduleKey = '') {
   }
 }
 
-app.get('/dashboard/bootstrap', requireLookupAccess, async (req, res) => {
+app.get('/dashboard/bootstrap', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const allowedModules = new Set([
       'operations',
@@ -21203,7 +20573,7 @@ app.get('/dashboard/bootstrap', requireLookupAccess, async (req, res) => {
       error: error.message || 'Unable to load dashboard bootstrap.'
     });
   }
-});
+}));
 
 
 function getServiceLocationField(fields, aliases) {
@@ -21294,8 +20664,8 @@ function buildServiceLocationsResponse(items, listId) {
 
 async function getServiceLocationsReport(token, forceRefresh = false) {
   const now = Date.now();
-  if (!forceRefresh && cachedServiceLocationsReport && now - cachedServiceLocationsReportAt < SERVICE_LOCATIONS_CACHE_MS) {
-    return cachedServiceLocationsReport;
+  if (!forceRefresh && cachedLargeReports.get('cachedServiceLocationsReport') && now - cachedServiceLocationsReportAt < SERVICE_LOCATIONS_CACHE_MS) {
+    return cachedLargeReports.get('cachedServiceLocationsReport');
   }
 
   const listId = await getServiceLocationsListId(token, forceRefresh);
@@ -21311,7 +20681,7 @@ async function getServiceLocationsReport(token, forceRefresh = false) {
     warning: result.warning || ''
   };
 
-  cachedServiceLocationsReport = report;
+  cachedLargeReports.set('cachedServiceLocationsReport', report);
   cachedServiceLocationsReportAt = now;
   return report;
 }
@@ -21389,10 +20759,10 @@ async function getServiceLocationNotesByKey(token, forceRefresh = false) {
   const now = Date.now();
   if (
     !forceRefresh &&
-    cachedServiceLocationNotesByKey &&
+    cachedLargeReports.get('cachedServiceLocationNotesByKey') &&
     now - cachedServiceLocationNotesByKeyAt < SERVICE_LOCATIONS_CACHE_MS
   ) {
-    return cachedServiceLocationNotesByKey;
+    return cachedLargeReports.get('cachedServiceLocationNotesByKey');
   }
 
   const listId = await getServiceLocationNotesListId(token, forceRefresh);
@@ -21427,7 +20797,7 @@ async function getServiceLocationNotesByKey(token, forceRefresh = false) {
     console.warn('Service Location Notes selected-field lookup failed; the full-field fallback succeeded.');
   }
 
-  cachedServiceLocationNotesByKey = notesByKey;
+  cachedLargeReports.set('cachedServiceLocationNotesByKey', notesByKey);
   cachedServiceLocationNotesByKeyAt = now;
   return notesByKey;
 }
@@ -21486,7 +20856,7 @@ function buildServiceLocationPatch(body, columnLookup) {
   return fields;
 }
 
-app.get('/reports/service-locations', requireLookupAccess, async (req, res) => {
+app.get('/reports/service-locations', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const token = await getGraphToken();
     const forceRefresh = parseBoolean(req.query.refresh);
@@ -21499,7 +20869,7 @@ app.get('/reports/service-locations', requireLookupAccess, async (req, res) => {
       error: error.message || 'Unable to load Service Locations.'
     });
   }
-});
+}));
 
 app.post('/service-locations', requireLookupAccess, async (req, res) => {
   try {
@@ -21533,7 +20903,7 @@ app.post('/service-locations', requireLookupAccess, async (req, res) => {
     );
     const record = cleanServiceLocationItem(verifiedItem);
 
-    cachedServiceLocationsReport = null;
+    cachedLargeReports.delete('cachedServiceLocationsReport');
     cachedServiceLocationsReportAt = 0;
 
     res.status(201).json({
@@ -21581,7 +20951,7 @@ app.patch('/service-locations/:id', requireLookupAccess, async (req, res) => {
     );
     const record = cleanServiceLocationItem(updatedItem);
 
-    cachedServiceLocationsReport = null;
+    cachedLargeReports.delete('cachedServiceLocationsReport');
     cachedServiceLocationsReportAt = 0;
 
     res.json({

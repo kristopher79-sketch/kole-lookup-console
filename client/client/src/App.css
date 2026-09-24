@@ -9344,278 +9344,6 @@ button.available-truck-distribution-summary-card:disabled {
 }
 
 
-/* ON THIS DAY REPORT */
-.on-this-day-card .report-controls input[type="date"] {
-  min-width: 170px;
-}
-
-.on-this-day-preview .report-kpi-grid {
-  margin-top: 14px;
-}
-
-.on-this-day-year-block {
-  margin-top: 22px;
-  border: 1px solid var(--kole-border-subtle);
-  border-radius: 14px;
-  overflow: hidden;
-  background: var(--kole-table-body);
-}
-
-.on-this-day-year-header {
-  border-bottom: 1px solid var(--kole-border-subtle);
-}
-
-.on-this-day-section {
-  padding: 14px 16px 4px;
-  border-top: 1px solid rgba(255,255,255,0.06);
-}
-
-.on-this-day-section:first-of-type {
-  border-top: none;
-}
-
-.on-this-day-section h5 {
-  margin: 0 0 10px;
-  font-size: 15px;
-}
-
-.on-this-day-table-wrap {
-  margin-bottom: 12px;
-}
-
-.on-this-day-table th {
-  white-space: nowrap;
-}
-
-.on-this-day-table td {
-  vertical-align: top;
-}
-
-.on-this-day-warning-card {
-  margin: 12px 0 18px;
-}
-
-.on-this-day-modal .detail-modal,
-.on-this-day-modal.report-modal {
-  width: min(1500px, 96vw);
-}
-
-/* ON THIS DAY CLEANUP PASS */
-.on-this-day-preview .on-this-day-kpi-grid .report-kpi-card {
-  background: #f8fafc;
-  border-color: #cbd5e1;
-  color: #0f172a;
-  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.18);
-}
-
-.on-this-day-preview .on-this-day-kpi-grid .report-kpi-card span {
-  color: #475569;
-  opacity: 1;
-}
-
-.on-this-day-preview .on-this-day-kpi-grid .report-kpi-card strong {
-  color: #0f172a;
-}
-
-.on-this-day-filter-bar {
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 12px;
-  margin: 4px 0 18px;
-  flex-wrap: wrap;
-}
-
-.on-this-day-filter-bar label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 230px;
-}
-
-.on-this-day-filter-bar label span {
-  color: #cbd5e1;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-weight: 800;
-}
-
-.on-this-day-filter-bar select {
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--kole-control-border);
-  background: var(--kole-control-bg);
-  color: #e5e7eb;
-  font-size: 14px;
-  outline: none;
-}
-
-.on-this-day-filter-bar small {
-  color: var(--kole-muted-subtle);
-  padding-bottom: 10px;
-}
-
-.on-this-day-summary-pills {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 10px;
-}
-
-.on-this-day-summary-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 12px;
-  font-weight: 800;
-  border: 1px solid rgba(255,255,255,0.18);
-  background: #334155;
-  color: #f8fafc;
-}
-
-.on-this-day-summary-pill strong {
-  font-size: 13px;
-}
-
-.on-this-day-summary-pill.pickup {
-  background: rgba(22, 101, 52, 0.9);
-}
-
-.on-this-day-summary-pill.delivery {
-  background: rgba(30, 64, 175, 0.9);
-}
-
-.on-this-day-summary-pill.bid {
-  background: rgba(120, 53, 15, 0.9);
-}
-
-.on-this-day-summary-pill.upload {
-  background: rgba(88, 28, 135, 0.9);
-}
-
-.on-this-day-summary-pill.off {
-  background: rgba(127, 29, 29, 0.9);
-}
-
-.on-this-day-section h5 {
-  color: #e5e7eb;
-  background: rgba(255,255,255,0.055);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 10px;
-  padding: 10px 12px;
-}
-
-/* ON THIS DAY SECOND CLEANUP PASS */
-.on-this-day-run-hint {
-  margin: 10px 0 0;
-  text-align: center;
-  color: var(--kole-muted-subtle);
-  font-size: 13px;
-}
-
-.on-this-day-compare-button {
-  background: #475569;
-  color: #f8fafc;
-}
-
-.on-this-day-compare-button:hover {
-  background: #64748b;
-}
-
-.on-this-day-tonu-marker {
-  display: inline-block;
-  margin-left: 3px;
-  color: #facc15;
-  font-weight: 900;
-  font-size: 15px;
-  line-height: 1;
-}
-
-.on-this-day-tonu-row td {
-  background: rgba(120, 53, 15, 0.12);
-}
-
-.on-this-day-tonu-note {
-  margin: 6px 0 2px;
-  color: #fde68a;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-/* ON THIS DAY COMPARISON CARD ROWS */
-.on-this-day-comparison-kpi-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 14px 0 18px;
-  overflow-x: auto;
-  padding-bottom: 2px;
-}
-
-.on-this-day-comparison-kpi-row {
-  display: grid;
-  grid-template-columns: 118px repeat(7, minmax(116px, 1fr));
-  gap: 10px;
-  align-items: stretch;
-  min-width: 1000px;
-}
-
-.on-this-day-comparison-year-card,
-.on-this-day-comparison-metric-card {
-  background: #f8fafc;
-  border: 1px solid #cbd5e1;
-  color: #0f172a;
-  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.16);
-}
-
-.on-this-day-comparison-year-card {
-  border-radius: 12px;
-  padding: 12px 14px;
-  border-left: 5px solid #facc15;
-}
-
-.on-this-day-comparison-year-card span,
-.on-this-day-comparison-metric-card span {
-  display: block;
-  color: #475569;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-weight: 800;
-  margin-bottom: 6px;
-}
-
-.on-this-day-comparison-year-card strong,
-.on-this-day-comparison-metric-card strong {
-  display: block;
-  color: #0f172a;
-  font-size: 19px;
-  line-height: 1.15;
-}
-
-.on-this-day-comparison-year-card small {
-  display: block;
-  margin-top: 5px;
-  color: #64748b;
-  font-size: 11px;
-  line-height: 1.25;
-}
-
-.on-this-day-comparison-metric-card {
-  border-radius: 12px;
-  padding: 12px 14px;
-}
-
-@media (max-width: 900px) {
-  .on-this-day-comparison-kpi-row {
-    min-width: 920px;
-    grid-template-columns: 108px repeat(7, minmax(104px, 1fr));
-  }
-}
-
 /* LEAD SUPPRESSION CONTROL */
 .sales-suppression-control-section {
   margin-top: 22px;
@@ -10511,6 +10239,51 @@ button.available-truck-distribution-summary-card:disabled {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+
+.driver-roster-edit-form,
+.driver-roster-edit-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.driver-roster-edit-form { gap: 18px; }
+.driver-roster-edit-intro p,
+.driver-roster-edit-field small { color: var(--kole-muted); }
+.driver-roster-edit-intro h3 { margin: 0 0 6px; }
+.driver-roster-edit-intro p { margin: 0; }
+
+.driver-roster-edit-section {
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--kole-border);
+  border-radius: 10px;
+}
+
+.driver-roster-edit-section legend { padding: 0 6px; font-weight: 800; color: var(--kole-text); }
+.driver-roster-edit-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.driver-roster-edit-field > span { color: var(--kole-text-soft); font-size: 13px; font-weight: 700; }
+.driver-roster-edit-field input,
+.driver-roster-edit-field select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 9px 10px;
+  border: 1px solid var(--kole-control-border);
+  border-radius: 8px;
+  background: var(--kole-control-bg);
+  color: var(--kole-text);
+  font: inherit;
+}
+.driver-roster-edit-field input:focus-visible,
+.driver-roster-edit-field select:focus-visible { outline: 2px solid var(--kole-action); outline-offset: 2px; }
+.driver-roster-edit-field small { overflow-wrap: anywhere; }
+.driver-roster-edit-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
+.driver-roster-edit-actions > span { margin-right: auto; color: var(--kole-muted); }
+@media (max-width: 900px) { .driver-roster-edit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .driver-roster-edit-grid { grid-template-columns: minmax(0, 1fr); } }
 
 .driver-termination-button {
   border: 1px solid color-mix(in srgb, var(--kole-danger) 34%, transparent);
@@ -12272,8 +12045,7 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .report-controls select,
 :root[data-theme='light'] .available-truck-send-grid select,
 :root[data-theme='light'] .available-truck-main-grid select,
-:root[data-theme='light'] .driver-time-off-form-grid select,
-:root[data-theme='light'] .on-this-day-filter-bar select {
+:root[data-theme='light'] .driver-time-off-form-grid select {
   appearance: none !important;
   -webkit-appearance: none !important;
   background-color: #ffffff !important;
@@ -12387,8 +12159,7 @@ button.available-truck-distribution-summary-card:disabled {
 :root[data-theme='light'] .report-group-alert-pill,
 :root[data-theme='light'] .feature-section-status-pill,
 :root[data-theme='light'] .driver-time-off-count-pill,
-:root[data-theme='light'] .driver-position-count-pill,
-:root[data-theme='light'] .on-this-day-summary-pill {
+:root[data-theme='light'] .driver-position-count-pill {
   opacity: 1 !important;
   font-weight: 900 !important;
   text-shadow: none !important;
@@ -12451,42 +12222,6 @@ button.available-truck-distribution-summary-card:disabled {
   background: #dbeafe !important;
   border-color: #60a5fa !important;
   color: #1e3a8a !important;
-}
-
-/* On This Day summary chips need light-specific colors, not dark transparent badges. */
-:root[data-theme='light'] .on-this-day-summary-pill {
-  border-color: #cbd5e1 !important;
-  color: var(--kole-light-ink) !important;
-}
-
-:root[data-theme='light'] .on-this-day-summary-pill.pickup {
-  background: #dcfce7 !important;
-  border-color: #86efac !important;
-  color: #14532d !important;
-}
-
-:root[data-theme='light'] .on-this-day-summary-pill.delivery {
-  background: #dbeafe !important;
-  border-color: #93c5fd !important;
-  color: #1e3a8a !important;
-}
-
-:root[data-theme='light'] .on-this-day-summary-pill.bid {
-  background: #ffedd5 !important;
-  border-color: #fdba74 !important;
-  color: #9a3412 !important;
-}
-
-:root[data-theme='light'] .on-this-day-summary-pill.upload {
-  background: #ede9fe !important;
-  border-color: #c4b5fd !important;
-  color: #5b21b6 !important;
-}
-
-:root[data-theme='light'] .on-this-day-summary-pill.off {
-  background: #fee2e2 !important;
-  border-color: #fca5a5 !important;
-  color: #991b1b !important;
 }
 
 /* Permit Governance top cards: modern light dashboard cards instead of dark old-school blocks. */
@@ -12835,113 +12570,6 @@ button.available-truck-distribution-summary-card:disabled {
   background: #f8fafc !important;
   border-color: #cbd5e1 !important;
   color: #334155 !important;
-}
-
-/*  On This Day light-mode section cleanup
-   The On This Day modal was still carrying dark report-shell bars inside a light modal.
-   Keep the useful grouping, but make the year container and movement section headers read
-   like clean light report cards instead of black divider bars. */
-:root[data-theme='light'] .on-this-day-year-block {
-  background: #ffffff !important;
-  border-color: #cbd5e1 !important;
-  box-shadow:
-    0 14px 34px rgba(15, 23, 42, 0.08),
-    inset 0 1px 0 #ffffff !important;
-}
-
-:root[data-theme='light'] .on-this-day-year-header {
-  background:
-    linear-gradient(135deg, rgba(37, 99, 235, 0.045), transparent 48%),
-    #f8fafc !important;
-  border-bottom: 1px solid #cbd5e1 !important;
-  color: #0f172a !important;
-}
-
-:root[data-theme='light'] .on-this-day-year-header h4 {
-  color: #0f172a !important;
-}
-
-:root[data-theme='light'] .on-this-day-section {
-  background: #ffffff !important;
-  border-top: 1px solid #e2e8f0 !important;
-  padding: 14px 16px 10px !important;
-}
-
-:root[data-theme='light'] .on-this-day-section:first-of-type {
-  border-top: none !important;
-}
-
-:root[data-theme='light'] .on-this-day-section h5 {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  min-height: 40px !important;
-  margin: 0 0 10px !important;
-  padding: 9px 14px !important;
-  border: 1px solid #cbd5e1 !important;
-  border-left: 5px solid #2563eb !important;
-  border-radius: 10px !important;
-  background:
-    linear-gradient(135deg, rgba(37, 99, 235, 0.06), transparent 58%),
-    #f8fafc !important;
-  color: #0f172a !important;
-  box-shadow: inset 0 1px 0 #ffffff !important;
-  text-shadow: none !important;
-}
-
-:root[data-theme='light'] .on-this-day-section:nth-of-type(2) h5 {
-  border-left-color: #16a34a !important;
-}
-
-:root[data-theme='light'] .on-this-day-section:nth-of-type(3) h5 {
-  border-left-color: #2563eb !important;
-}
-
-:root[data-theme='light'] .on-this-day-section:nth-of-type(4) h5 {
-  border-left-color: #ea580c !important;
-}
-
-:root[data-theme='light'] .on-this-day-section:nth-of-type(5) h5 {
-  border-left-color: #7c3aed !important;
-}
-
-:root[data-theme='light'] .on-this-day-section:nth-of-type(6) h5 {
-  border-left-color: #dc2626 !important;
-}
-
-:root[data-theme='light'] .on-this-day-section:nth-of-type(7) h5 {
-  border-left-color: #0f766e !important;
-}
-
-:root[data-theme='light'] .on-this-day-section:nth-of-type(8) h5 {
-  border-left-color: #0891b2 !important;
-}
-
-:root[data-theme='light'] .on-this-day-table-wrap {
-  border: 1px solid #cbd5e1 !important;
-  border-radius: 11px !important;
-  overflow: hidden !important;
-  background: #ffffff !important;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.045) !important;
-}
-
-:root[data-theme='light'] .on-this-day-table th {
-  background: #e2e8f0 !important;
-  color: #1e293b !important;
-  border-bottom-color: #cbd5e1 !important;
-}
-
-:root[data-theme='light'] .on-this-day-table td {
-  color: #0f172a !important;
-  border-bottom-color: #e2e8f0 !important;
-}
-
-:root[data-theme='light'] .on-this-day-table tbody tr:nth-child(even) {
-  background: #f8fafc !important;
-}
-
-:root[data-theme='light'] .on-this-day-table tbody tr:hover {
-  background: #eff6ff !important;
 }
 
 /*  first morning polish + accordion close behavior support
@@ -16789,7 +16417,7 @@ button.available-truck-distribution-summary-card:disabled {
   color: #92400e !important;
 }
 
-/* Polish round: comparison-year On This Day was retired; yearly projection tables should not pretend every row is clickable. */
+/* Yearly projection summary rows are not interactive. */
 .yearly-projection-scenario-table tbody tr,
 .yearly-projection-sensitivity-table tbody tr,
 .yearly-projection-month-card {

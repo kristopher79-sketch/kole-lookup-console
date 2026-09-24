@@ -3,6 +3,11 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import './App.css?seasonal-modals=v9';
 import koleLogo from './assets/kole-logo.png';
 import BetaDashboard from './BetaDashboard';
+import DriverRosterEditor from './DriverRosterEditor';
+
+function RosterReportStaleNotice({ report }) {
+  return report?.rosterStale ? <div className="report-alert warning" role="status">Driver details changed after this report was generated. Run it again for current roster information.</div> : null;
+}
 
 const isTauriRuntime = Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
 const isViteDev = import.meta.env?.DEV === true;
@@ -35,8 +40,6 @@ const SALES_NOTE_MAX_LENGTH = 63000;
 const SALES_SNOOZE_NOTE_MAX_LENGTH = 4000;
 const AVAILABLE_TRUCK_MAX_ROWS = 8;
 const SEARCH_RESULT_CACHE_MS = 2 * 60 * 1000;
-const ON_THIS_DAY_CLIENT_CACHE_MS = 5 * 60 * 1000;
-const ON_THIS_DAY_CLIENT_CACHE_LIMIT = 10;
 const ORDER_NOTES_CLIENT_CACHE_MS = 60 * 1000;
 const ORDER_NOTE_MAX_LENGTH = 20000;
 const ORDER_NOTE_TYPE_OPTIONS = ['Dispatch', 'Paperwork', 'Permits', 'Billing', 'Operations'];
@@ -847,7 +850,6 @@ const DEFAULT_KOLE_USER_PREFERENCES = {
   betaDashboardEnabled: false,
   orderCardView: false,
   hideYearlyProjection: false,
-  hideOnThisDay: false,
   hideWeeklySettlementReport: false,
   hideRecruiting: false,
   recruitingDefaultOpen: true,
@@ -1670,6 +1672,10 @@ export default function App() {
   const [driverTimeOffAccordionOpen, setDriverTimeOffAccordionOpen] = useState(() => userPrefs.driverTimeOffDefaultOpen);
   const [driverTimeOffPaneFilter, setDriverTimeOffPaneFilter] = useState(() => userPrefs.driverTimeOffDefaultPane);
   const [selectedDriverRoster, setSelectedDriverRoster] = useState(null);
+  const [driverRosterEditing, setDriverRosterEditing] = useState(false);
+  const [driverRosterEditMessage, setDriverRosterEditMessage] = useState('');
+  const driverRosterEditStateRef = useRef({ open: false, dirty: false, saving: false });
+  const driverRosterEditButtonRef = useRef(null);
   const [driverTerminationModalOpen, setDriverTerminationModalOpen] = useState(false);
   const [driverTerminationDate, setDriverTerminationDate] = useState(getEasternDateInputValue);
   const [driverTerminationConfirmed, setDriverTerminationConfirmed] = useState(false);
@@ -1775,14 +1781,6 @@ export default function App() {
   const [fleetEquipmentModalOpen, setFleetEquipmentModalOpen] = useState(false);
   const [fleetEquipmentPdfLoading, setFleetEquipmentPdfLoading] = useState(false);
   const [fleetEquipmentPdfError, setFleetEquipmentPdfError] = useState('');
-  const [onThisDayDate, setOnThisDayDate] = useState(getEasternDateInputValue);
-  const [onThisDayMode, setOnThisDayMode] = useState('exact');
-  const [onThisDayReport, setOnThisDayReport] = useState(null);
-  const [onThisDayLoading, setOnThisDayLoading] = useState(false);
-  const [onThisDayError, setOnThisDayError] = useState(null);
-  const [onThisDayModalOpen, setOnThisDayModalOpen] = useState(false);
-  const [onThisDayPdfLoading, setOnThisDayPdfLoading] = useState(false);
-  const [onThisDayPdfError, setOnThisDayPdfError] = useState('');
   const [operationalNotesReport, setOperationalNotesReport] = useState(null);
   const [operationalNotesLoading, setOperationalNotesLoading] = useState(false);
   const [operationalNotesError, setOperationalNotesError] = useState(null);
@@ -1893,7 +1891,6 @@ export default function App() {
   const trackingPreferencesRequestRef = useRef(0);
   const searchCacheRef = useRef(new Map());
   const pendingSearchControllerRef = useRef(null);
-  const onThisDayReportCacheRef = useRef(new Map());
   const driverHistoryRequestRef = useRef(0);
   const driverHistoryCacheRef = useRef(new Map());
   const orderNotesCacheRef = useRef(new Map());
@@ -2022,7 +2019,6 @@ export default function App() {
     activeDriverRosterModalOpen ||
     inactiveDriverRosterModalOpen ||
     fleetEquipmentModalOpen ||
-    onThisDayModalOpen ||
     noAvailabilityModalOpen ||
     driverTimeOffModalOpen ||
     driverTimeOffFormOpen ||
@@ -2556,9 +2552,6 @@ export default function App() {
       setActiveReportPanel('');
     }
 
-    if (key === 'hideOnThisDay' && value && activeReportPanel === 'onThisDay') {
-      setActiveReportPanel('');
-    }
 
     if (key === 'hideWeeklySettlementReport' && value && activeReportPanel === 'weeklySettlement') {
       setActiveReportPanel('');
@@ -2599,7 +2592,7 @@ export default function App() {
     setUserPrefs(nextPrefs);
     applyDashboardPreferenceDefaults(nextPrefs);
 
-    if (activeReportPanel === 'yearlyProjection' || activeReportPanel === 'onThisDay' || SALES_AND_LEADS_PANEL_KEYS.includes(activeReportPanel)) {
+    if (activeReportPanel === 'yearlyProjection' || SALES_AND_LEADS_PANEL_KEYS.includes(activeReportPanel)) {
       setActiveReportPanel('');
     }
   }
@@ -2872,12 +2865,6 @@ export default function App() {
                   onChange={(checked) => updateUserPreference('hideYearlyProjection', checked)}
                 />
                 <PreferenceSwitch
-                  label="Hide On This Day"
-                  description="Removes the historical daily snapshot from Operational Reports."
-                  checked={userPrefs.hideOnThisDay}
-                  onChange={(checked) => updateUserPreference('hideOnThisDay', checked)}
-                />
-                <PreferenceSwitch
                   label="Hide Weekly Settlement Report"
                   description="Removes the Weekly Settlement Report from Financial Reports."
                   checked={userPrefs.hideWeeklySettlementReport}
@@ -3009,14 +2996,13 @@ export default function App() {
     const hiddenPanels = [];
 
     if (userPrefs.hideYearlyProjection) hiddenPanels.push('yearlyProjection');
-    if (userPrefs.hideOnThisDay) hiddenPanels.push('onThisDay');
     if (userPrefs.hideWeeklySettlementReport) hiddenPanels.push('weeklySettlement');
     if (userPrefs.hideSalesAndLeads) hiddenPanels.push(...SALES_AND_LEADS_PANEL_KEYS);
 
     if (hiddenPanels.includes(activeReportPanel)) {
       setActiveReportPanel('');
     }
-  }, [userPrefs.hideYearlyProjection, userPrefs.hideOnThisDay, userPrefs.hideWeeklySettlementReport, userPrefs.hideSalesAndLeads, activeReportPanel]);
+  }, [userPrefs.hideYearlyProjection, userPrefs.hideWeeklySettlementReport, userPrefs.hideSalesAndLeads, activeReportPanel]);
 
   useEffect(() => {
     const body = document.body;
@@ -3102,6 +3088,11 @@ export default function App() {
   useEffect(() => {
     function handleEsc(e) {
       if (e.key === 'Escape') {
+        if (driverRosterEditStateRef.current.open) {
+          e.preventDefault();
+          cancelDriverRosterEdit();
+          return;
+        }
         setSelected(null);
         setOrderReturnTrailLabel('');
         setOrderDrilldownReturn(null);
@@ -3649,6 +3640,9 @@ export default function App() {
     setDriverTimeOffActionMessage('');
     setDriverTimeOffActionError('');
     setSelectedDriverRoster(null);
+    setDriverRosterEditing(false);
+    setDriverRosterEditMessage('');
+    driverRosterEditStateRef.current = { open: false, dirty: false, saving: false };
     setDriverHistoryModalOpen(false);
     setDriverHistorySnapshot(null);
     setDriverHistoryLoading(false);
@@ -3730,9 +3724,6 @@ export default function App() {
     setFleetEquipmentReport(null);
     setFleetEquipmentLoading(false);
     setFleetEquipmentError(null);
-    setOnThisDayReport(null);
-    setOnThisDayLoading(false);
-    setOnThisDayError(null);
     setOperationalNotesReport(null);
     setOperationalNotesLoading(false);
     setOperationalNotesError(null);
@@ -3778,7 +3769,6 @@ export default function App() {
     setCustomerTrendLoading(false);
     setCustomerTrendError(null);
     searchCacheRef.current.clear();
-    onThisDayReportCacheRef.current.clear();
 
     if (pendingSearchControllerRef.current) {
       pendingSearchControllerRef.current.abort();
@@ -4070,9 +4060,7 @@ export default function App() {
 
   function clearQuoteEngineClientCaches() {
     searchCacheRef.current.clear();
-    onThisDayReportCacheRef.current.clear();
     setNoBolBidsData(null);
-    setOnThisDayReport(null);
     setSalesLeadsReport(null);
     setCustomerTrendReport(null);
   }
@@ -5590,18 +5578,85 @@ async function refreshOperationsAndTracking() {
 }
 
 function closeDriverRosterModal() {
-  if (driverTerminationSavingRef.current) return;
+  if (driverTerminationSavingRef.current || driverRosterEditStateRef.current.open) return;
 
   setDriverTerminationModalOpen(false);
   setDriverTerminationConfirmed(false);
   setDriverTerminationError('');
   setDriverTerminationMessage('');
+  setDriverRosterEditMessage('');
   setDriverHistoryModalOpen(false);
   setSelectedDriverRoster(null);
   setDriverHistorySnapshot(null);
   setDriverHistoryLoading(false);
   setDriverHistoryError('');
   setOrderDrilldownReturn(null);
+}
+
+function openDriverRosterEdit() {
+  if (!selectedDriverRoster?.roster?.id || driverTerminationSavingRef.current) return;
+  driverRosterEditStateRef.current = { open: true, dirty: false, saving: false };
+  setDriverRosterEditMessage('');
+  setDriverRosterEditing(true);
+}
+
+function cancelDriverRosterEdit() {
+  const state = driverRosterEditStateRef.current;
+  if (state.saving) return;
+  if (state.dirty && !window.confirm('Discard your unsaved driver changes?')) return;
+  driverRosterEditStateRef.current = { open: false, dirty: false, saving: false };
+  setDriverRosterEditing(false);
+  window.requestAnimationFrame(() => driverRosterEditButtonRef.current?.focus());
+}
+
+function applyDriverRosterEditToClient(result) {
+  const roster = result.roster;
+  const oldTruck = selectedDriverRoster?.roster?.truck || '';
+  const truckChanged = normalizeDriverHistoryTruckKey(oldTruck) !== normalizeDriverHistoryTruckKey(roster.truck);
+  const sameRoster = (row) => String(row?.id || '') === String(roster.id);
+  const displayName = roster.tmsName || roster.operatorTeamName || 'Driver';
+  driverRosterEditStateRef.current = { open: false, dirty: false, saving: false };
+  setDriverRosterEditing(false);
+  setDriverRosterEditMessage([result.message, result.warning].filter(Boolean).join(' '));
+  setSelectedDriverRoster((current) => current && sameRoster(current.roster) ? {
+    ...current, roster, driverName: displayName, equipmentId: roster.truck,
+    ...(current.rosterModalTitle || truckChanged ? {
+      rosterModalTitle: getDriverRosterModalTitle(roster.status),
+      rosterModalSubtitle: `${displayName} · Truck ${roster.truck || '-'}`
+    } : {})
+  } : current);
+  setDriverPositionsData((current) => current ? { ...current, positions: (current.positions || []).map((position) => {
+    if (!sameRoster(position.roster)) return position;
+    return truckChanged ? { ...position, roster: null, hasRosterDetails: false }
+      : { ...position, roster, driverName: displayName };
+  }) } : current);
+  const updateReport = (current) => current ? {
+    ...current, rows: sortClientRosterRows((current.rows || []).map((row) => sameRoster(row) ? { ...row, ...result.reportRow } : row))
+  } : current;
+  setActiveDriverRosterReport(updateReport);
+  setInactiveDriverRosterReport(updateReport);
+  setFleetEquipmentReport(updateReport);
+  const updateOptions = (options = []) => options.flatMap((option) => sameRoster(option) ? result.rosterOption ? [result.rosterOption] : [] : [option]);
+  setAvailableTrucksData((current) => current ? { ...current, activeDriverOptions: updateOptions(current.activeDriverOptions) } : current);
+  setDriverTimeOffReport((current) => current ? { ...current, activeDriverOptions: updateOptions(current.activeDriverOptions) } : current);
+  setOperationsData((current) => current?.driverTimeOff ? {
+    ...current, driverTimeOff: { ...current.driverTimeOff, activeDriverOptions: updateOptions(current.driverTimeOff.activeDriverOptions) }
+  } : current);
+  driverHistoryCacheRef.current.clear();
+  driverHistoryRequestRef.current += 1;
+  setDriverHistorySnapshot(null);
+  setDriverHistoryLoading(false);
+  setDriverHistoryError('');
+  setContractLanesData(null);
+  // Retain open report/return context, but label calculations that used the old roster.
+  const staleReport = (current) => current ? { ...current, rosterStale: true } : current;
+  setGrossRevenueReport(staleReport);
+  setYearlyProjectionReport(staleReport);
+  setDriverSummaryReport(staleReport);
+  setWeeklySettlementReport(staleReport);
+  setRecruitingSnapshotReport(staleReport);
+  void loadDashboardBootstrap({ moduleKeys: ['operations', 'driverPositions', 'availableTrucks', 'availableTruckDistribution'] });
+  window.requestAnimationFrame(() => driverRosterEditButtonRef.current?.focus());
 }
 
 function getDriverRosterDateInputValue(value) {
@@ -7234,26 +7289,6 @@ function getPositionStatusLabel(position) {
     });
   }
 
-  async function downloadOnThisDayPdf() {
-    if (!onThisDayDate) {
-      setOnThisDayPdfError('Choose a date before exporting On This Day.');
-      return;
-    }
-
-    const params = new URLSearchParams({
-      date: onThisDayDate,
-      mode: onThisDayMode || 'exact'
-    });
-
-    await downloadReportPdf({
-      reportKey: 'onThisDay',
-      reportName: 'On This Day',
-      endpoint: `${API}/reports/on-this-day/pdf?${params.toString()}`,
-      fallbackName: `Kole_On_This_Day_${getSafeFileNamePart(onThisDayDate, 'date')}_${onThisDayMode === 'exact' ? 'Exact' : 'Across_Years'}.pdf`,
-      setLoading: setOnThisDayPdfLoading,
-      setError: setOnThisDayPdfError
-    });
-  }
 
   async function loadActiveDriverRosterReport() {
     setActiveDriverRosterLoading(true);
@@ -7740,152 +7775,12 @@ function getPositionStatusLabel(position) {
     });
   }
 
-  function getEmptyOnThisDaySummary() {
-    return {
-      pickups: 0,
-      deliveries: 0,
-      ordersWon: 0,
-      uploads: 0,
-      driversOff: 0,
-      noAvailability: 0,
-      availableTrucks: 0
-    };
-  }
 
-  function getEmptyOnThisDayGroup(dateValue = onThisDayDate) {
-    const targetDate = dateValue || getEasternDateInputValue();
-    return {
-      year: String(targetDate).slice(0, 4),
-      date: targetDate,
-      label: formatDateInputLabel(targetDate),
-      summary: getEmptyOnThisDaySummary(),
-      pickups: [],
-      deliveries: [],
-      ordersWon: [],
-      uploads: [],
-      driversOff: [],
-      noAvailability: [],
-      availableTrucks: []
-    };
-  }
 
-  function getOnThisDaySummaryCount(sourceSummary = {}) {
-    return Object.keys(getEmptyOnThisDaySummary()).reduce((sum, key) => (
-      sum + Number(sourceSummary?.[key] || 0)
-    ), 0);
-  }
 
-  function buildOnThisDayDisplayReport(sourceReport, requestedMode = 'exact') {
-    if (!sourceReport) return null;
 
-    const mode = requestedMode === 'across' ? 'across' : 'exact';
 
-    if (mode === 'across') {
-      return {
-        ...sourceReport,
-        mode: 'across',
-        modeLabel: 'Comparison Years',
-        count: getOnThisDaySummaryCount(sourceReport.summary || {})
-      };
-    }
 
-    const targetDate = sourceReport.targetDate || onThisDayDate || getEasternDateInputValue();
-    const targetYear = String(targetDate).slice(0, 4);
-    const targetGroup = (sourceReport.yearGroups || []).find((group) => String(group.year || '') === targetYear) || getEmptyOnThisDayGroup(targetDate);
-    const summary = targetGroup.summary || getEmptyOnThisDaySummary();
-
-    return {
-      ...sourceReport,
-      reportLabel: `On This Day: ${formatDateInputLabel(targetDate)}`,
-      targetLabel: formatDateInputLabel(targetDate),
-      mode: 'exact',
-      modeLabel: 'Selected Date',
-      summary,
-      count: getOnThisDaySummaryCount(summary),
-      yearsReturned: targetGroup ? 1 : 0,
-      yearGroups: [targetGroup]
-    };
-  }
-
-  async function loadOnThisDayReport(modeOverride = '') {
-    if (!onThisDayDate) {
-      setOnThisDayError({
-        code: 'REPORT_ERROR',
-        message: 'Choose a date before previewing On This Day.'
-      });
-      return;
-    }
-
-    const requestedMode = 'exact';
-    const normalizedMode = 'exact';
-    const exactCacheKey = `${onThisDayDate}|exact`;
-    const acrossCacheKey = `${onThisDayDate}|across`;
-    const cachedSource = normalizedMode === 'exact'
-      ? (
-          getClientCacheRecord(onThisDayReportCacheRef.current, exactCacheKey, ON_THIS_DAY_CLIENT_CACHE_MS) ||
-          getClientCacheRecord(onThisDayReportCacheRef.current, acrossCacheKey, ON_THIS_DAY_CLIENT_CACHE_MS)
-        )
-      : getClientCacheRecord(onThisDayReportCacheRef.current, acrossCacheKey, ON_THIS_DAY_CLIENT_CACHE_MS);
-
-    setOnThisDayMode(normalizedMode);
-    setOnThisDayError(null);
-    setOnThisDayPdfError('');
-    clearPdfExportNotice('onThisDay');
-
-    if (cachedSource) {
-      setOnThisDayReport(buildOnThisDayDisplayReport(cachedSource, normalizedMode));
-      setOnThisDayModalOpen(true);
-      return;
-    }
-
-    setOnThisDayLoading(true);
-    setOnThisDayReport(null);
-    setOnThisDayModalOpen(false);
-
-    try {
-      const params = new URLSearchParams({
-        date: onThisDayDate,
-        mode: normalizedMode
-      });
-      const res = await authedFetch(`${API}/reports/on-this-day?${params.toString()}`);
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || data.message || 'Unable to load On This Day.');
-      }
-
-      const reportSource = {
-        ...data,
-        mode: normalizedMode,
-        modeLabel: normalizedMode === 'across' ? 'Comparison Years' : 'Selected Date'
-      };
-
-      setLimitedClientCacheRecord(
-        onThisDayReportCacheRef.current,
-        `${onThisDayDate}|${normalizedMode}`,
-        reportSource,
-        ON_THIS_DAY_CLIENT_CACHE_LIMIT
-      );
-
-      setOnThisDayReport(buildOnThisDayDisplayReport(reportSource, normalizedMode));
-      setOnThisDayModalOpen(true);
-    } catch (err) {
-      setOnThisDayError({
-        code: 'REPORT_ERROR',
-        message: err.message || 'Unable to load On This Day.'
-      });
-    } finally {
-      setOnThisDayLoading(false);
-    }
-  }
-
-  function loadOnThisDayExactReport() {
-    loadOnThisDayReport('exact');
-  }
-
-  function closeOnThisDayModal() {
-    setOnThisDayModalOpen(false);
-  }
 
   async function loadOperationalNotesReport() {
     setOperationalNotesLoading(true);
@@ -8395,7 +8290,7 @@ function getPositionStatusLabel(position) {
 
   const reportPanelsByGroup = {
     financial: ['grossRevenue', 'yearlyProjection', 'driverSummary', 'weeklySettlement'],
-    operational: ['monthlyOperations', 'serviceLocations', 'ordersDueSettlement', 'wonNotRegistered', 'permitGovernance', 'onThisDay', 'operationalNotes', 'noAvailability'],
+    operational: ['monthlyOperations', 'serviceLocations', 'ordersDueSettlement', 'wonNotRegistered', 'permitGovernance', 'operationalNotes', 'noAvailability'],
     driverFleet: ['activeDriverRoster', 'inactiveDriverRoster', 'fleetEquipment', 'driverTimeOff'],
     sales: ['customerBookingTrends', 'salesActivity', 'leadSuppression', 'salesLeads']
   };
@@ -9685,7 +9580,6 @@ function openReportLoadDetails(load) {
     if (wonNotRegisteredModalOpen) return 'Orders Won Not Registered';
     if (permitGovernanceModalOpen) return 'Permit Governance';
     if (permitCostVarianceModalOpen) return 'Permit Cost Variance';
-    if (onThisDayModalOpen) return 'On This Day';
     if (monthlyOpsModalOpen) return 'Monthly Operations Summary';
     if (customerTrendModalOpen) return 'Customer Booking Trends';
     if (salesSearchReturnLead) return 'Customer Card';
@@ -11438,6 +11332,7 @@ function openReportLoadDetails(load) {
 
     return (
       <div className="driver-report-preview modal-report-preview gross-revenue-preview">
+        <RosterReportStaleNotice report={grossRevenueReport} />
         <div className="driver-report-generated">
           Generated: {grossRevenueReport.generatedAt}
         </div>
@@ -12030,6 +11925,7 @@ function openReportLoadDetails(load) {
 
     return (
       <div className="driver-report-preview modal-report-preview yearly-projection-preview">
+        <RosterReportStaleNotice report={yearlyProjectionReport} />
         <div className="yearly-projection-hero">
           <div>
             <span>Projected Annual Revenue</span>
@@ -12321,6 +12217,7 @@ function openReportLoadDetails(load) {
 
     return (
       <div className="driver-report-preview modal-report-preview">
+        <RosterReportStaleNotice report={driverSummaryReport} />
         <div className="driver-report-generated">
           Generated: {driverSummaryReport.generatedAt}
         </div>
@@ -12682,6 +12579,7 @@ function openReportLoadDetails(load) {
 
     return (
       <div className="settlement-report-preview modal-report-preview">
+        <RosterReportStaleNotice report={weeklySettlementReport} />
         <div className="driver-report-title">
           <div>
        
@@ -13435,378 +13333,6 @@ function openReportLoadDetails(load) {
   }
 
 
-  function OnThisDayPreview() {
-    const groups = onThisDayReport?.yearGroups || [];
-    const summary = onThisDayReport?.summary || {};
-    const warnings = onThisDayReport?.warnings || [];
-
-    if (!onThisDayReport) return null;
-
-    const isComparisonMode = onThisDayReport?.mode === 'across';
-    const isTonuMovement = (row = {}) => String(row.StatusRaw || row.Status || '').trim().toLowerCase() === 'tonu';
-    const formatBidAssignment = (value) => String(value || '').trim() || 'Not assigned';
-    const formatBidDateValue = (value) => String(value || '').trim() ? formatDateOnly(value) : 'Not set';
-
-    const getSummaryMetricCards = (sourceSummary = {}) => ([
-      { key: 'pickups', label: 'Pickups', value: sourceSummary.pickups || 0 },
-      { key: 'deliveries', label: 'Deliveries', value: sourceSummary.deliveries || 0 },
-      { key: 'bidRecords', label: 'Bid Records', value: sourceSummary.ordersWon || 0 },
-      { key: 'uploads', label: 'Job Uploads', value: sourceSummary.uploads || 0 },
-      { key: 'driversOff', label: 'Drivers Off', value: sourceSummary.driversOff || 0 },
-      { key: 'noAvailability', label: 'No Availability', value: sourceSummary.noAvailability || 0 },
-      { key: 'availableTrucks', label: 'Available Posted', value: sourceSummary.availableTrucks || 0 }
-    ]);
-
-    const getComparisonYearSubLabel = (group = {}) => {
-      const rawLabel = String(group.label || '').trim();
-      const year = String(group.year || '').trim();
-      if (!rawLabel) return onThisDayReport?.targetLabel || '';
-      if (!year) return rawLabel;
-      return rawLabel.replace(new RegExp(`,?\s*${year}$`), '').trim() || rawLabel;
-    };
-
-    const getGroupSummaryPills = (group = {}) => ([
-      { label: 'Pickups', value: group.summary?.pickups || 0, className: 'pickup' },
-      { label: 'Deliveries', value: group.summary?.deliveries || 0, className: 'delivery' },
-      { label: 'Bid Records', value: group.summary?.ordersWon || 0, className: 'bid' },
-      { label: 'Uploads', value: group.summary?.uploads || 0, className: 'upload' },
-      { label: 'Drivers Off', value: group.summary?.driversOff || 0, className: 'off' }
-    ]);
-
-    function renderMovementRows(rows = [], dateType = 'pickup') {
-      if (!rows.length) return <div className="msg">No {dateType === 'pickup' ? 'pickups' : 'deliveries'} found.</div>;
-
-      const hasTonuRows = rows.some(isTonuMovement);
-
-      return (
-        <div className="report-table-wrap on-this-day-table-wrap">
-          <table className="driver-report-table on-this-day-table">
-            <thead>
-              <tr>
-                <th>BOL</th>
-                <th>Customer</th>
-                <th>Driver / TMS Name</th>
-                <th>Truck</th>
-                <th>Origin</th>
-                <th>Destination</th>
-                <th>Time</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, index) => {
-                const isTonu = isTonuMovement(row);
-
-                return (
-                  <tr
-                    key={`${dateType}-${row.id || row.BOL || row.BidID || index}-${index}`}
-                    className={`${row.id ? 'report-clickable-row' : ''}${isTonu ? ' on-this-day-tonu-row' : ''}`.trim()}
-                    onClick={() => row.id && loadDetails(row.id, 'basic', row.SourceListId)}
-                    title={row.id ? 'Open full order screen' : ''}
-                  >
-                    <td>
-                      {row.BOL || '-'}
-                      {isTonu && <span className="on-this-day-tonu-marker" title="TONU shipment">*</span>}
-                    </td>
-                    <td>{row.Customer || '-'}</td>
-                    <td>{row.Driver || '-'}</td>
-                    <td>{row.Truck || '-'}</td>
-                    <td>{row.Origin || '-'}</td>
-                    <td>{row.Destination || '-'}</td>
-                    <td>{dateType === 'pickup' ? row.PickupTime || '-' : row.DeliveryTime || '-'}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {hasTonuRows && <div className="on-this-day-tonu-note">* TONU shipment</div>}
-        </div>
-      );
-    }
-
-    function renderBidRecordRows(rows = []) {
-      if (!rows.length) return <div className="msg">No bid listing records were created.</div>;
-
-      return (
-        <div className="report-table-wrap on-this-day-table-wrap">
-          <table className="driver-report-table on-this-day-table">
-            <thead>
-              <tr>
-                <th>BOL / BidID</th>
-                <th>Status</th>
-                <th>Customer</th>
-                <th>Driver / TMS Name</th>
-                <th>Truck</th>
-                <th>Pickup</th>
-                <th>Delivery</th>
-                <th>Quote</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, index) => (
-                <tr
-                  key={`bid-created-${row.id || row.BOL || row.BidID || index}-${index}`}
-                  className={row.id ? 'report-clickable-row' : ''}
-                  onClick={() => row.id && loadDetails(row.id, 'basic', row.SourceListId)}
-                  title={row.id ? 'Open full order screen' : ''}
-                >
-                  <td>{row.BOL || row.BidID || '-'}</td>
-                  <td><span className={getStatusClass(row.Status)}>{row.Status || '-'}</span></td>
-                  <td>{row.Customer || '-'}</td>
-                  <td>{formatBidAssignment(row.Driver)}</td>
-                  <td>{formatBidAssignment(row.Truck)}</td>
-                  <td>{formatBidDateValue(row.PickupDateKey || row.PickupDate)}</td>
-                  <td>{formatBidDateValue(row.DeliveryDateKey || row.DeliveryDate)}</td>
-                  <td>{formatMoney(row.QuotedTotal)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      );
-    }
-
-    function renderUploadRows(rows = []) {
-      if (!rows.length) return <div className="msg">No job upload activity found.</div>;
-
-      return (
-        <div className="report-table-wrap on-this-day-table-wrap">
-          <table className="driver-report-table on-this-day-table">
-            <thead>
-              <tr>
-                <th>BOL</th>
-                <th>Driver</th>
-                <th>Upload Type</th>
-                <th>Uploaded</th>
-                <th>Folder</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, index) => (
-                <tr key={`upload-${row.id || row.BOLNumber || index}-${index}`}>
-                  <td>{row.BOLNumber || '-'}</td>
-                  <td>{row.DriverName || '-'}</td>
-                  <td>{row.UploadType || '-'}</td>
-                  <td>{row.UploadDateDisplay || formatDateOnly(row.UploadDate)}</td>
-                  <td>
-                    <button
-                      type="button"
-                      className="table-link-button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openUploadDigestLoadPhotos(row);
-                      }}
-                      disabled={!row.BOLNumber || documentLoading === `upload-digest-loadphotos-${row.id || row.BOLNumber}`}
-                    >
-                      {documentLoading === `upload-digest-loadphotos-${row.id || row.BOLNumber}`
-                        ? 'Opening...'
-                        : `${row.UploadType || 'Open'} Folder`}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      );
-    }
-
-    function renderDriversOffRows(rows = []) {
-      if (!rows.length) return <div className="msg">No driver time-off records found.</div>;
-
-      return (
-        <div className="report-table-wrap on-this-day-table-wrap">
-          <table className="driver-report-table on-this-day-table">
-            <thead>
-              <tr>
-                <th>Driver</th>
-                <th>Truck</th>
-                <th>Start</th>
-                <th>End</th>
-                <th>Reason</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, index) => (
-                <tr key={`off-${row.id || row.recordNumber || index}-${index}`}>
-                  <td>{row.operatorName || '-'}</td>
-                  <td>{row.truckNumber || '-'}</td>
-                  <td>{formatDateOnly(row.startDate)}</td>
-                  <td>{formatDateOnly(row.endDate)}</td>
-                  <td>{row.reason || '-'}</td>
-                  <td>{row.status || '-'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      );
-    }
-
-    function renderNoAvailabilityRows(rows = []) {
-      if (!rows.length) return <div className="msg">No no-availability records found.</div>;
-
-      return (
-        <div className="report-table-wrap on-this-day-table-wrap">
-          <table className="driver-report-table on-this-day-table">
-            <thead>
-              <tr>
-                <th>Customer</th>
-                <th>Requestor</th>
-                <th>Pickup</th>
-                <th>Delivery</th>
-                <th>Type</th>
-                <th>Miles</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, index) => (
-                <tr key={`na-${row.id || row.company || index}-${index}`}>
-                  <td>{row.company || '-'}</td>
-                  <td>{row.requestor || '-'}</td>
-                  <td>{row.pickupLocation || '-'}</td>
-                  <td>{row.deliveryLocation || '-'}</td>
-                  <td>{row.shipmentType || '-'}</td>
-                  <td>{formatReportNumber(row.totalMiles)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      );
-    }
-
-    function renderAvailableTruckRows(rows = []) {
-      if (!rows.length) return <div className="msg">No available-truck postings found.</div>;
-
-      return (
-        <div className="report-table-wrap on-this-day-table-wrap">
-          <table className="driver-report-table on-this-day-table">
-            <thead>
-              <tr>
-                <th>Driver</th>
-                <th>Truck</th>
-                <th>Equipment</th>
-                <th>Current Location</th>
-                <th>Time of Day</th>
-                <th>Proximity</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, index) => (
-                <tr key={`avail-${row.id || row.unitNo || index}-${index}`}>
-                  <td>{row.driverName || '-'}</td>
-                  <td>{row.unitNo || '-'}</td>
-                  <td>{row.equipmentType || '-'}</td>
-                  <td>{row.currentLocation || '-'}</td>
-                  <td>{row.timeOfDay || '-'}</td>
-                  <td>{row.proximitySummary || '-'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      );
-    }
-
-    return (
-      <div className="driver-report-preview modal-report-preview on-this-day-preview">
-        {isComparisonMode ? (
-          <div className="on-this-day-comparison-kpi-stack">
-            {groups.map((group) => (
-              <div key={`comparison-kpi-${group.year}`} className="on-this-day-comparison-kpi-row">
-                <div className="on-this-day-comparison-year-card">
-                  <span>Year</span>
-                  <strong>{group.year || '-'}</strong>
-                  <small>{getComparisonYearSubLabel(group)}</small>
-                </div>
-                {getSummaryMetricCards(group.summary).map((card) => (
-                  <div key={`${group.year}-${card.key}`} className="report-kpi-card on-this-day-comparison-metric-card">
-                    <span>{card.label}</span>
-                    <strong>{formatReportNumber(card.value)}</strong>
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="report-kpi-grid on-this-day-kpi-grid">
-            {getSummaryMetricCards(summary).map((card) => (
-              <div key={card.key} className="report-kpi-card">
-                <span>{card.label}</span>
-                <strong>{formatReportNumber(card.value)}</strong>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {warnings.length > 0 && (
-          <div className="report-alert locked on-this-day-warning-card">
-            <h4>Some sources reported warnings.</h4>
-            {warnings.slice(0, 4).map((warning, index) => (
-              <p key={`${warning.source || 'source'}-${index}`}><strong>{warning.source || 'Source'}:</strong> {warning.message || 'Unable to load source.'}</p>
-            ))}
-          </div>
-        )}
-
-        {groups.length === 0 ? (
-          <div className="msg">No activity was found for this date.</div>
-        ) : (
-          groups.map((group) => (
-            <div key={group.year} className="on-this-day-year-block">
-              <div className="driver-report-section-header on-this-day-year-header">
-                <div>
-                  <h4>{group.label || group.year}</h4>
-                  <div className="on-this-day-summary-pills">
-                    {getGroupSummaryPills(group).map((pill) => (
-                      <span key={`${group.year}-${pill.label}`} className={`on-this-day-summary-pill ${pill.className}`}>
-                        <strong>{formatReportNumber(pill.value)}</strong> {pill.label}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="on-this-day-section">
-                <h5>Pickups</h5>
-                {renderMovementRows(group.pickups, 'pickup')}
-              </div>
-
-              <div className="on-this-day-section">
-                <h5>Deliveries</h5>
-                {renderMovementRows(group.deliveries, 'delivery')}
-              </div>
-
-              <div className="on-this-day-section">
-                <h5>Bid Listing Records Created</h5>
-                {renderBidRecordRows(group.ordersWon)}
-              </div>
-
-              <div className="on-this-day-section">
-                <h5>Job Upload Activity</h5>
-                {renderUploadRows(group.uploads)}
-              </div>
-
-              <div className="on-this-day-section">
-                <h5>Drivers Off</h5>
-                {renderDriversOffRows(group.driversOff)}
-              </div>
-
-              <div className="on-this-day-section">
-                <h5>No Availability</h5>
-                {renderNoAvailabilityRows(group.noAvailability)}
-              </div>
-
-              <div className="on-this-day-section">
-                <h5>Available Trucks Posted</h5>
-                {renderAvailableTruckRows(group.availableTrucks)}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    );
-  }
 
   function NoAvailabilityPreview() {
     const rows = noAvailabilityReport?.rows || [];
@@ -14995,7 +14521,7 @@ function openReportLoadDetails(load) {
   }
 
 
-  function DriverRosterModal() {
+  function renderDriverRosterModal() {
     if (!selectedDriverRoster) return null;
 
     const roster = selectedDriverRoster.roster || {};
@@ -15011,19 +14537,22 @@ function openReportLoadDetails(load) {
         <div className="detail-modal driver-roster-modal" onClick={(e) => e.stopPropagation()}>
           <div className="detail-header">
             <div>
-              <ModalReturnTrail label={getDriverRosterReturnTrailLabel()} onClick={handleDriverRosterReturnTrailClick} />
+              {!driverRosterEditing && <ModalReturnTrail label={getDriverRosterReturnTrailLabel()} onClick={handleDriverRosterReturnTrailClick} />}
               <h2>{modalTitle}</h2>
               <p>{modalSubtitle}</p>
             </div>
 
             <div className="driver-roster-header-actions">
+              {hasRoster && roster.id && !driverRosterEditing && (
+                <button type="button" className="view-button" ref={driverRosterEditButtonRef} onClick={openDriverRosterEdit} disabled={driverTerminationSaving}>Edit Driver</button>
+              )}
               {hasRoster && canTerminateDriverRoster(roster) && (
                 <button
                   ref={driverTerminationButtonRef}
                   type="button"
                   className="danger-button driver-termination-button"
                   onClick={openDriverTerminationModal}
-                  disabled={driverTerminationSaving}
+                  disabled={driverTerminationSaving || driverRosterEditing}
                 >
                   Terminate Driver
                 </button>
@@ -15033,24 +14562,29 @@ function openReportLoadDetails(load) {
                   type="button"
                   className={`view-button driver-performance-button ${driverHistoryLoading ? 'loading' : ''}`}
                   onClick={openDriverPerformanceModal}
-                  disabled={driverHistoryLoading}
+                  disabled={driverHistoryLoading || driverRosterEditing}
                 >
                   {driverHistoryLoading ? 'Analyzing...' : 'Performance Snapshot'}
                 </button>
               )}
-              <button className="close-button" onClick={closeDriverRosterModal}>
+              <button className="close-button" onClick={closeDriverRosterModal} disabled={driverRosterEditing}>
                 Close
               </button>
             </div>
           </div>
 
           <div className="modal-body">
+            {driverRosterEditMessage && <div className="msg success" role="status" aria-live="polite">{driverRosterEditMessage}</div>}
             {driverTerminationMessage && (
               <div className="msg success driver-termination-success" role="status" aria-live="polite">
                 {driverTerminationMessage}
               </div>
             )}
-            {!hasRoster ? (
+            {driverRosterEditing && roster.id ? (
+              <DriverRosterEditor key={roster.id} itemId={roster.id} api={API} authedFetch={authedFetch}
+                onSaved={applyDriverRosterEditToClient} onCancel={cancelDriverRosterEdit}
+                onStateChange={(state) => { if (driverRosterEditStateRef.current.open) driverRosterEditStateRef.current = { open: true, ...state }; }} />
+            ) : !hasRoster ? (
               <div className="report-alert locked">
                 <h4>No roster details matched this active position.</h4>
                 <p>
@@ -19473,6 +19007,7 @@ function openReportLoadDetails(load) {
           </div>
 
           <div className="modal-body recruiting-snapshot-body">
+        <RosterReportStaleNotice report={recruitingSnapshotReport} />
             {recruitingSnapshotLoading && !report && <div className="msg">Building recruiting snapshot...</div>}
 
             {recruitingSnapshotError && (
@@ -20832,7 +20367,6 @@ function openReportLoadDetails(load) {
     const isWonNotRegisteredOpen = activeReportPanel === 'wonNotRegistered';
     const isPermitGovernanceOpen = activeReportPanel === 'permitGovernance';
     const isPermitCostVarianceOpen = activeReportPanel === 'permitCostVariance';
-    const isOnThisDayOpen = activeReportPanel === 'onThisDay';
     const isOperationalNotesOpen = activeReportPanel === 'operationalNotes';
     const isActiveDriverRosterOpen = activeReportPanel === 'activeDriverRoster';
     const isInactiveDriverRosterOpen = activeReportPanel === 'inactiveDriverRoster';
@@ -21603,106 +21137,6 @@ function openReportLoadDetails(load) {
 
 
 
-          {!userPrefs.hideOnThisDay && (
-          <div className={`report-accordion ${isOnThisDayOpen ? 'open' : ''}`}>
-            <button
-              type="button"
-              className="report-accordion-button"
-              onClick={(e) => handleReportPanelClick(e, 'onThisDay')}
-            >
-              <span>On This Day</span>
-              <span className="report-accordion-icon">{isOnThisDayOpen ? '▼' : '▶'}</span>
-            </button>
-
-            {isOnThisDayOpen && (
-              <div className="report-accordion-body">
-                <div className="report-card compact-report-card accordion-inner-card on-this-day-card briefing-report-card">
-                  <div className="report-card-header centered-report-header">
-                    <div>
-                      <h3>On This Day</h3>
-                      <p>Daily operational history: Won/TONU pickups and deliveries, bid records created, uploads, drivers off, no availability, and available trucks posted.</p>
-                    </div>
-                  </div>
-
-                  <div className="report-controls centered-report-controls">
-                    <label>
-                      <span>Report Date</span>
-                      <input
-                        type="date"
-                        value={onThisDayDate}
-                        onChange={(e) => {
-                          setOnThisDayDate(e.target.value);
-                          setOnThisDayMode('exact');
-                          setOnThisDayReport(null);
-                          setOnThisDayError(null);
-                          setOnThisDayPdfError('');
-                          setOnThisDayModalOpen(false);
-                          clearPdfExportNotice('onThisDay');
-                        }}
-                        disabled={onThisDayLoading}
-                      />
-                    </label>
-
-                    <button onClick={() => loadOnThisDayReport('exact')} disabled={onThisDayLoading}>
-                      {onThisDayLoading ? 'Loading Report...' : 'Preview Report'}
-                    </button>
-                    {!onThisDayReport && (
-                      <button
-                        type="button"
-                        className="pdf-export-button compact"
-                        onClick={downloadOnThisDayPdf}
-                        disabled={onThisDayPdfLoading || onThisDayLoading}
-                      >
-                        {onThisDayPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
-                      </button>
-                    )}
-                  </div>
-
-            
-
-                  {getPdfExportNotice('onThisDay') && !onThisDayModalOpen && (
-                    <div className="pdf-export-success">{getPdfExportNotice('onThisDay')}</div>
-                  )}
-
-                  {onThisDayPdfError && !onThisDayModalOpen && (
-                    <div className="msg error pdf-export-error">{onThisDayPdfError}</div>
-                  )}
-
-                  {onThisDayReport && !onThisDayModalOpen && (
-                    <div className="report-ready-card">
-                      <div>
-                        <strong>{onThisDayReport.reportLabel} is ready.</strong>
-                        <span> The preview opens in a report window.</span>
-                      </div>
-                      <div className="report-ready-actions">
-                        <button className="view-button" onClick={() => setOnThisDayModalOpen(true)}>
-                          Reopen Preview
-                        </button>
-                        <button
-                          type="button"
-                          className="pdf-export-button compact"
-                          onClick={downloadOnThisDayPdf}
-                          disabled={onThisDayPdfLoading || onThisDayLoading}
-                        >
-                          {onThisDayPdfLoading ? 'Exporting...' : 'Export PDF'}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {onThisDayError && (
-                    <div className="report-alert error">
-                      <h4>Report could not be loaded.</h4>
-                      <p>{onThisDayError.message}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-
-          )}
 
           <div className={`report-accordion ${isOperationalNotesOpen ? 'open' : ''}`}>
             <button
@@ -24348,42 +23782,6 @@ function openReportLoadDetails(load) {
       )}
 
 
-      {onThisDayModalOpen && onThisDayReport && (
-        <div className="modal-overlay report-modal-overlay" onClick={closeOnThisDayModal}>
-          <div className="detail-modal report-modal wide-report-modal on-this-day-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="detail-header report-modal-header">
-              <div>
-                <h2>{onThisDayReport.reportLabel || 'On This Day'}</h2>
-                <p>{onThisDayReport.modeLabel || '-'} · {formatReportNumber(onThisDayReport.count)} activity item(s) · Generated {onThisDayReport.generatedAt || ''}</p>
-              </div>
-
-              <div className="report-modal-actions">
-                <button
-                  type="button"
-                  className="pdf-export-button"
-                  onClick={downloadOnThisDayPdf}
-                  disabled={onThisDayPdfLoading || onThisDayLoading}
-                >
-                  {onThisDayPdfLoading ? 'Exporting PDF...' : 'Export PDF'}
-                </button>
-                <button className="close-button" onClick={closeOnThisDayModal}>
-                  Close
-                </button>
-              </div>
-            </div>
-
-            <div className="modal-body report-modal-body">
-              {getPdfExportNotice('onThisDay') && (
-                <div className="pdf-export-success">{getPdfExportNotice('onThisDay')}</div>
-              )}
-              {onThisDayPdfError && (
-                <div className="msg error pdf-export-error">{onThisDayPdfError}</div>
-              )}
-              <OnThisDayPreview />
-            </div>
-          </div>
-        </div>
-      )}
 
       {driverTimeOffModalOpen && driverTimeOffReport && (
         <div className="modal-overlay report-modal-overlay" onClick={closeDriverTimeOffModal}>
@@ -24522,7 +23920,7 @@ function openReportLoadDetails(load) {
       )}
 
       {DriverTimeOffFormModal()}
-      <DriverRosterModal />
+      {renderDriverRosterModal()}
       {renderDriverTerminationModal()}
       <DriverPerformanceModal />
       {SalesLeadProfileModal()}
