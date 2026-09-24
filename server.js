@@ -46,6 +46,7 @@ const {
 } = require('./mobile-home');
 const {
   cleanMobileStopEventItem,
+  deriveMobileStopState,
   createMobileCheckinError,
   createMobileCheckinService,
   getMobileCheckinAvailableAt,
@@ -14094,7 +14095,9 @@ app.get('/record/:listId/:id', requireLookupAccess, async (req, res) => {
       `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${listId}/items/${id}?$expand=fields`
     );
 
-    res.json(buildRecordResponse(data, sourceList));
+    const record = buildRecordResponse(data, sourceList);
+    await hydrateOfficeCheckInSummaries(token, [record], sourceList);
+    res.json(record);
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, error: error.message });
@@ -14121,7 +14124,9 @@ app.get('/record/:id', requireLookupAccess, async (req, res) => {
       `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}/items/${id}?$expand=fields`
     );
 
-    res.json(buildRecordResponse(data, currentList));
+    const record = buildRecordResponse(data, currentList);
+    await hydrateOfficeCheckInSummaries(token, [record], currentList);
+    res.json(record);
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, error: error.message });
@@ -19122,6 +19127,8 @@ app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, with
       })
       .map((r) => addUploadEvidence(r, evidenceSets));
 
+    await hydrateOfficeCheckInSummaries(token, [...loadingToday, ...deliveringToday], currentList);
+
     const orderNoteIndicatorResult = await getOperationOrderNoteIndicators(token, activeToday);
     activeToday = activeToday.map((record) => addOperationOrderNoteIndicators(record, orderNoteIndicatorResult.byOrder));
 
@@ -20281,6 +20288,7 @@ async function buildBootstrapOperationsPayload(token, currentList, items, eviden
       return pickup > targetDate && pickup <= plus7;
     })
     .map((record) => addUploadEvidence(record, evidenceSets));
+  await hydrateOfficeCheckInSummaries(token, [...loadingToday, ...deliveringToday], currentList);
   const orderNoteIndicatorResult = await getOperationOrderNoteIndicators(token, activeToday);
   activeToday = activeToday.map((record) => addOperationOrderNoteIndicators(record, orderNoteIndicatorResult.byOrder));
 
@@ -22260,6 +22268,64 @@ async function getCheckInTimesEventsForLoad(token, loadId) {
       if (timeDifference !== 0) return timeDifference;
       return String(left.id).localeCompare(String(right.id), undefined, { numeric: true });
     });
+}
+
+function buildOfficeCheckInSummary(events = [], available = true) {
+  const validEvents = events.filter((event) => Number.isFinite(Date.parse(event.time || '')));
+  const summarizeStop = (stop) => {
+    // Scheduled office cards represent stop 1. Preserve Mobile's canonical
+    // earliest In/Out resolution and idempotent one-event-per-action semantics.
+    const state = deriveMobileStopState(validEvents, stop, 1);
+    return {
+      arrivedAt: state.arrivedEvent ? new Date(state.arrivedEvent.time).toISOString() : null,
+      departedAt: state.departedEvent ? new Date(state.departedEvent.time).toISOString() : null
+    };
+  };
+  return { available, pickup: summarizeStop('Pickup'), delivery: summarizeStop('Delivery') };
+}
+
+async function hydrateOfficeCheckInSummaries(token, records, sourceList) {
+  for (const record of records) record.checkInSummary = buildOfficeCheckInSummary([], false);
+  // SharePoint item IDs are only unique within a list; archives must never join.
+  if (sourceList?.label !== 'Bid Listing') return;
+  const eligible = records.filter((record) => (
+    record.SourceListId === sourceList.listId && /^\d{1,12}$/.test(String(record.id))
+  ));
+  if (!eligible.length) return;
+  const byRecordId = new Map(eligible.map((record) => [String(record.id), []]));
+  const byBol = new Map(eligible
+    .filter((record) => normalizeBolKey(record.BOL))
+    .map((record) => [normalizeBolKey(record.BOL), String(record.id)]));
+  const resolveRecordId = (event) => {
+    const bol = normalizeBolKey(event.bol);
+    // A present BOL is authoritative, even when unmatched. Only blank BOLs
+    // may fall back to the internal item ID (including for manual punches).
+    return bol ? byBol.get(bol) : byRecordId.has(event.loadId) ? event.loadId : undefined;
+  };
+  try {
+    const schema = await getCheckInTimesSchema(token);
+    // Office details also need this BOL-visible read: Mobile's Load ID query
+    // cannot find manual punches with missing or mistyped Load IDs.
+    // One paginated list read, never one Graph request per dashboard row.
+    const result = await getAllListItemsWithFieldsResilient(
+      token, schema.listId, getCheckInTimesFieldSelect(schema), {
+        mapItem: (item) => {
+          const event = cleanMobileStopEventItem(item, schema.fieldNames);
+          return resolveRecordId(event) ? event : null;
+        }
+      }
+    );
+    for (const event of result.items) {
+      if (!event) continue;
+      const recordId = resolveRecordId(event);
+      if (recordId) byRecordId.get(recordId).push(event);
+    }
+    for (const record of eligible) {
+      record.checkInSummary = buildOfficeCheckInSummary(byRecordId.get(String(record.id)));
+    }
+  } catch {
+    console.warn('Office check-in status unavailable; orders will continue without check-in times.');
+  }
 }
 
 function getCheckInTimesWriteValue(column, value) {

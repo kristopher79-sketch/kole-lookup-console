@@ -10217,20 +10217,48 @@ function openReportLoadDetails(load) {
   }
 
 
-  function EvidenceDot({ hasEvidence, label }) {
+  function EvidenceDot({ hasEvidence, label, statusText, unavailable = false }) {
     return (
       <span
-        title={hasEvidence ? `${label} evidence received` : `No ${label.toLowerCase()} evidence received yet`}
-        aria-label={hasEvidence ? `${label} evidence received` : `No ${label.toLowerCase()} evidence received yet`}
+        title={statusText || (hasEvidence ? `${label} evidence received` : `No ${label.toLowerCase()} evidence received yet`)}
+        aria-label={statusText || (hasEvidence ? `${label} evidence received` : `No ${label.toLowerCase()} evidence received yet`)}
         style={{
           display: 'inline-block',
           width: '14px',
           height: '14px',
           borderRadius: '50%',
-          backgroundColor: hasEvidence ? '#2e9d50' : '#c93f3f',
+          backgroundColor: unavailable ? 'var(--kole-muted-subtle)' : hasEvidence ? '#2e9d50' : '#c93f3f',
           boxShadow: '0 0 0 2px rgba(255,255,255,0.9), 0 1px 4px rgba(0,0,0,0.25)'
         }}
       />
+    );
+  }
+
+  function ArrivalDot({ record, stop }) {
+    const unavailable = record.checkInSummary?.available !== true;
+    const arrived = Boolean(record.checkInSummary?.[stop]?.arrivedAt);
+    const statusText = unavailable ? 'Check-in status unavailable.'
+      : arrived ? `Driver arrived at ${stop}` : `Driver has not arrived at ${stop}`;
+    return <EvidenceDot hasEvidence={arrived} unavailable={unavailable} statusText={statusText} />;
+  }
+
+  function CheckInTimes({ stop, scheduledDate }) {
+    const summary = selected.checkInSummary;
+    const formatActual = (value) => {
+      if (!value || !Number.isFinite(Date.parse(value))) return '—';
+      const date = new Date(value);
+      const sameDay = getEasternDateInputValue(date) === getOrderEditDateInputValue(scheduledDate);
+      return date.toLocaleString('en-US', {
+        timeZone: 'America/New_York',
+        ...(sameDay ? {} : { month: 'short', day: 'numeric', year: 'numeric' }),
+        hour: 'numeric', minute: '2-digit'
+      });
+    };
+    return (
+      <small className="check-in-times">
+        {summary?.available !== true ? 'Check-in status unavailable.' :
+          `IN ${formatActual(summary[stop]?.arrivedAt)}  ·  OUT ${formatActual(summary[stop]?.departedAt)}`}
+      </small>
     );
   }
 
@@ -10408,6 +10436,12 @@ function openReportLoadDetails(load) {
           </div>
 
           <div className="operations-order-card-signals">
+            {(showPickupEvidence || showDeliveryEvidence) && (
+              <span className="order-card-signal">
+                <ArrivalDot record={record} stop={showPickupEvidence ? 'pickup' : 'delivery'} />
+                <small>Arrived</small>
+              </span>
+            )}
             {showPickupEvidence && (
               <span className="order-card-signal">
                 <EvidenceDot hasEvidence={record.hasPickupEvidence} label="Pickup" />
@@ -10835,13 +10869,17 @@ function openReportLoadDetails(load) {
           label="Pickup"
           value={formatDateTime(selected.PickupDate, selected.PickupTime, selected.PickupAMPM)}
           wide
-        />
+        >
+          <CheckInTimes stop="pickup" scheduledDate={selected.PickupDate} />
+        </DetailItem>
 
         <DetailItem
           label="Delivery"
           value={formatDateTime(selected.DeliveryDate, selected.DeliveryTime, selected.DeliveryAMPM)}
           wide
-        />
+        >
+          <CheckInTimes stop="delivery" scheduledDate={selected.DeliveryDate} />
+        </DetailItem>
 
         <SectionTitle>Truck, Driver & Freight</SectionTitle>
 
@@ -23141,6 +23179,7 @@ function openReportLoadDetails(load) {
               <table>
                 <thead>
                   <tr>
+                    <th>Arrived</th>
                     <th>Picked Up</th>
                     <th>BOL</th>
                     <th>Driver</th>
@@ -23157,6 +23196,7 @@ function openReportLoadDetails(load) {
                       onClick={() => loadDetails(r.id, 'basic', r.SourceListId)}
                       style={{ cursor: 'pointer' }}
                     >
+                      <td><ArrivalDot record={r} stop="pickup" /></td>
                       <td>
                         <EvidenceDot hasEvidence={r.hasPickupEvidence} label="Pickup" />
                       </td>
@@ -23189,6 +23229,7 @@ function openReportLoadDetails(load) {
               <table>
                 <thead>
                   <tr>
+                    <th>Arrived</th>
                     <th>Delivered</th>
                     <th>Status</th>
                     <th>BOL</th>
@@ -23206,6 +23247,7 @@ function openReportLoadDetails(load) {
                       onClick={() => loadDetails(r.id, 'basic', r.SourceListId)}
                       style={{ cursor: 'pointer' }}
                     >
+                      <td><ArrivalDot record={r} stop="delivery" /></td>
                       <td>
                         <EvidenceDot hasEvidence={r.hasDeliveryEvidence} label="Delivery" />
                       </td>

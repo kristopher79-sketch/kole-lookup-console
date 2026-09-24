@@ -2513,6 +2513,11 @@ tbody tr:hover {
   line-height: 1.35;
 }
 
+.detail-item .check-in-times {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
 .detail-item.wide {
   grid-column: span 2;
 }
