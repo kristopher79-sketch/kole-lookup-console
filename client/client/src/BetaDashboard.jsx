@@ -20,7 +20,7 @@ function SalesWorkspace({ searchActive, searching, search, sales }) {
 export default function BetaDashboard({
   enabled, children, searching, operationsHidden,
   operationsData, operationsLoading, operationsError, refreshing, onRefresh,
-  currentTimeOffCount, onOpenTimeOff, roster, timeOff, onOpenRecord, renderRecord, quickActions, formatSummaryDate,
+  currentTimeOffCount, onOpenTimeOff, roster, timeOff, onOpenRecord, renderRecord, renderArrival, quickActions, formatSummaryDate,
   photosHidden, photoCount, photoDateLabel, photos,
   trackingHidden, trackingCount, tracking,
   equipmentHidden, equipmentCount, equipment,
@@ -211,7 +211,13 @@ export default function BetaDashboard({
                               <strong>{record.BOL || record.BidID || 'Order'}{detail ? ` - ${detail}` : ''}</strong>
                               <span>{record.Driver || 'Driver unavailable'}</span>
                               <small>{record.Origin || 'Origin unavailable'} → {record.Destination || 'Destination unavailable'}</small>
-                              {slice.key !== 'loadingNext7' && <span className="beta-dashboard-photo-cues" aria-label="Job photo status">
+                              {slice.key !== 'loadingNext7' && <span className="beta-dashboard-photo-cues" aria-label="Arrival and job photo status">
+                                {(slice.key === 'loadingToday' || slice.key === 'deliveringToday') && (
+                                  <span className="beta-dashboard-photo-cue">
+                                    {renderArrival(record, slice.key === 'loadingToday' ? 'pickup' : 'delivery')}
+                                    Arrived
+                                  </span>
+                                )}
                                 {[
                                   ['Pickup', record.hasPickupEvidence],
                                   ['Delivery', record.hasDeliveryEvidence]

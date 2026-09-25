@@ -22954,6 +22954,7 @@ function openReportLoadDetails(load) {
           ? <DriverTimeOffCurrentPanel /> : null}
         onOpenRecord={(record) => loadDetails(record.id, 'basic', record.SourceListId)}
         formatSummaryDate={formatDateOnly}
+        renderArrival={(record, stop) => <ArrivalDot record={record} stop={stop} />}
         renderRecord={(record, index, variant) => (
           <OperationOrderCard key={`${record.SourceListId || 'current'}-${record.id || index}`} record={record} index={index} variant={variant} />
         )}
