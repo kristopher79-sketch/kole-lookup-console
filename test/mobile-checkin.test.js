@@ -11,6 +11,52 @@ const {
 } = require('../mobile-checkin');
 
 const NOW = '2026-09-02T13:47:18.000Z';
+
+test('early-arrival override is strictly boolean and only valid for In', () => {
+  for (const earlyArrival of ['true', 'false', 1, null, {}]) {
+    assert.throws(() => validateMobileStopEventInput(createInput({ earlyArrival })), { code: 'INVALID_EARLY_ARRIVAL' });
+  }
+  assert.throws(() => validateMobileStopEventInput(createInput({ action: 'out', earlyArrival: true })), { code: 'INVALID_EARLY_ARRIVAL' });
+});
+
+test('early pickup and delivery require explicit override, preserve its flag on replay, and allow checkout', async () => {
+  for (const stop of ['pickup', 'delivery']) {
+    const repository = createFakeRepository({ createDelayMs: 5 });
+    const service = createMobileCheckinService({ repository, now: () => '2026-09-02T12:59:59.999Z' });
+    await assert.rejects(service.recordEvent({ input: createInput({ stop }), driver: DRIVER, load: LOAD }), { code: 'CHECK_IN_TOO_EARLY' });
+    const request = { input: createInput({ stop, earlyArrival: true }), driver: DRIVER, load: LOAD };
+    const results = await Promise.all([service.recordEvent(request), service.recordEvent(request)]);
+    assert.equal(repository.createCount, 1);
+    assert.ok(results.every(result => result.event.earlyArrival === true));
+    const replay = await service.recordEvent({ ...request, input: createInput({ stop }) });
+    assert.equal(replay.event.earlyArrival, true);
+    assert.equal(replay.idempotentReplay, true);
+    const checkout = await service.recordEvent({ ...request, input: createInput({ stop, action: 'out' }) });
+    assert.equal(checkout.event.earlyArrival, false);
+  }
+});
+
+test('override never bypasses missing appointments, ownership, or an invalid server clock', async () => {
+  for (const [load, driver, now, code] of [
+    [{ ...LOAD, PickupTime: '' }, DRIVER, NOW, 'CHECK_IN_APPOINTMENT_UNAVAILABLE'],
+    [LOAD, { truck: '999' }, NOW, 'LOAD_NOT_AVAILABLE'],
+    [LOAD, DRIVER, 'invalid', 'EVENT_TIME_UNAVAILABLE'],
+  ]) {
+    const repository = createFakeRepository();
+    const service = createMobileCheckinService({ repository, now: () => now });
+    await assert.rejects(service.recordEvent({ input: createInput({ earlyArrival: true }), driver, load }), { code });
+    assert.equal(repository.createCount, 0);
+  }
+});
+
+test('normal check-ins and overrides reaching the server at opening are recorded as not early', async () => {
+  for (const earlyArrival of [false, true]) {
+    const repository = createFakeRepository();
+    const service = createMobileCheckinService({ repository, now: () => '2026-09-02T13:00:00.000Z' });
+    const result = await service.recordEvent({ input: createInput({ earlyArrival }), driver: DRIVER, load: LOAD });
+    assert.equal(result.event.earlyArrival, false);
+  }
+});
 const DRIVER = Object.freeze({ truck: '412', operator: 'John Smith' });
 const LOAD = Object.freeze({
   id: '18437', bol: 'D198123', truck: '0412',

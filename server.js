@@ -22080,7 +22080,8 @@ const CHECK_IN_TIMES_FIELD_DEFINITIONS = Object.freeze({
     aliases: Object.freeze(['Accuracy', 'GPS Accuracy in Meters'])
   }),
   locationStatus: Object.freeze({ label: 'Location Status', aliases: Object.freeze(['Location Status']) }),
-  entrySource: Object.freeze({ label: 'Entry Source', aliases: Object.freeze(['EntrySource']) })
+  entrySource: Object.freeze({ label: 'Entry Source', aliases: Object.freeze(['EntrySource']) }),
+  earlyArrival: Object.freeze({ label: 'Early Arrival', aliases: Object.freeze(['EarlyArrival', 'Early Arrival']), optional: true })
 });
 let mobileUploadActiveFileBuffers = 0;
 const mobileUploadFileBufferWaiters = [];
@@ -22152,7 +22153,7 @@ async function getCheckInTimesSchema(token, forceRefresh = false) {
   const data = await graphGet(
     token,
     `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${encodeURIComponent(listId)}/columns` +
-      '?$select=name,displayName,hidden,readOnly,text,number,choice,dateTime&$top=999'
+      '?$select=name,displayName,hidden,readOnly,text,number,choice,dateTime,boolean&$top=999'
   );
   const columnsByAlias = new Map();
 
@@ -22173,6 +22174,9 @@ async function getCheckInTimesSchema(token, forceRefresh = false) {
 
   Object.entries(CHECK_IN_TIMES_FIELD_DEFINITIONS).forEach(([key, definition]) => {
     const column = getCheckInTimesColumnByAliases(columnsByAlias, definition.aliases);
+
+    // A missing or incompatible override column must not disable ordinary check-ins.
+    if (definition.optional && (!column || column.readOnly === true || !column.boolean)) return;
 
     if (!column) {
       missing.push(definition.label);
@@ -22331,6 +22335,8 @@ async function hydrateOfficeCheckInSummaries(token, records, sourceList) {
 function getCheckInTimesWriteValue(column, value) {
   if (value === null || value === undefined || value === '') return null;
 
+  if (column?.boolean) return value === true;
+
   if (column?.number !== undefined && column?.number !== null) {
     const numericValue = Number(value);
     return Number.isFinite(numericValue) ? numericValue : null;
@@ -22340,6 +22346,14 @@ function getCheckInTimesWriteValue(column, value) {
 }
 
 function buildCheckInTimesFields(schema, event) {
+  const earlyArrivalColumn = schema.columns.earlyArrival;
+  if (event.earlyArrival === true && (!earlyArrivalColumn?.boolean || earlyArrivalColumn.readOnly === true)) {
+    throw createMobileCheckinError(
+      'Early check-in is temporarily unavailable. Please contact dispatch.',
+      503,
+      'EARLY_ARRIVAL_UNAVAILABLE'
+    );
+  }
   const fields = {};
   const values = {
     bol: event.bol,
@@ -22354,10 +22368,12 @@ function buildCheckInTimesFields(schema, event) {
     longitude: event.longitude,
     accuracy: event.accuracy,
     locationStatus: event.locationStatus,
-    entrySource: 'Driver'
+    entrySource: 'Driver',
+    earlyArrival: event.earlyArrival === true
   };
 
   Object.entries(values).forEach(([key, value]) => {
+    if (!schema.fieldNames[key]) return;
     const storedValue = getCheckInTimesWriteValue(schema.columns[key], value);
     if (storedValue !== null) fields[schema.fieldNames[key]] = storedValue;
   });

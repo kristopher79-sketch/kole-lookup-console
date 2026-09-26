@@ -124,6 +124,13 @@ function validateMobileStopEventInput(input = {}) {
     );
   }
 
+  if (input.earlyArrival !== undefined && typeof input.earlyArrival !== 'boolean') {
+    throw createMobileCheckinError('Early arrival must be true or false.', 400, 'INVALID_EARLY_ARRIVAL');
+  }
+  if (input.earlyArrival === true && action !== 'In') {
+    throw createMobileCheckinError('Early arrival is only available for check-in.', 400, 'INVALID_EARLY_ARRIVAL');
+  }
+
   const rawLocation = input.location && typeof input.location === 'object'
     ? input.location
     : {};
@@ -179,6 +186,7 @@ function validateMobileStopEventInput(input = {}) {
     stop,
     stopSequence,
     action,
+    earlyArrival: input.earlyArrival === true,
     location
   };
 }
@@ -249,7 +257,7 @@ function assertMobileStopEventOwnership(driver = {}, load = {}) {
   }
 }
 
-function buildMobileStopEventRecord({ input, driver, load, now }) {
+function buildMobileStopEventRecord({ input, driver, load, now, earlyArrival = false }) {
   assertMobileStopEventOwnership(driver, load);
 
   const bol = String(load.bol || '').trim();
@@ -279,6 +287,7 @@ function buildMobileStopEventRecord({ input, driver, load, now }) {
     stop: input.stop,
     stopSequence: input.stopSequence,
     action: input.action,
+    earlyArrival,
     time: new Date(timestamp).toISOString(),
     latitude: input.location.latitude,
     longitude: input.location.longitude,
@@ -306,6 +315,7 @@ function cleanMobileStopEventItem(item = {}, fieldNames = {}) {
     stop: getCanonicalValue(getField(fieldNames.stop), MOBILE_CHECKIN_STOPS) || String(getField(fieldNames.stop) || '').trim(),
     stopSequence: getNullableNumber(fieldNames.stopSequence),
     action: getCanonicalValue(getField(fieldNames.action), MOBILE_CHECKIN_ACTIONS) || String(getField(fieldNames.action) || '').trim(),
+    earlyArrival: getField(fieldNames.earlyArrival) === true,
     time: String(getField(fieldNames.time) || '').trim(),
     latitude: getNullableNumber(fieldNames.latitude),
     longitude: getNullableNumber(fieldNames.longitude),
@@ -323,6 +333,7 @@ function toMobileStopEventResponse(event = {}) {
     stop: event.stop || '',
     stopSequence: Number(event.stopSequence) || 0,
     action: event.action || '',
+    earlyArrival: event.earlyArrival === true,
     time: event.time || '',
     latitude: Number.isFinite(event.latitude) ? event.latitude : null,
     longitude: Number.isFinite(event.longitude) ? event.longitude : null,
@@ -369,6 +380,8 @@ function createMobileCheckinService({ repository, now = () => new Date().toISOSt
         return { event: existingEvent, idempotentReplay: true };
       }
 
+      const eventTime = now();
+      let earlyArrival = false;
       if (validatedInput.action === 'In') {
         const availableAt = getMobileCheckinAvailableAt(load, validatedInput.stop, validatedInput.stopSequence);
         if (!availableAt) {
@@ -378,8 +391,12 @@ function createMobileCheckinService({ repository, now = () => new Date().toISOSt
             'CHECK_IN_APPOINTMENT_UNAVAILABLE'
           );
         }
-        const currentTime = Date.parse(now());
-        if (!Number.isFinite(currentTime) || currentTime < Date.parse(availableAt)) {
+        const currentTime = Date.parse(eventTime);
+        if (!Number.isFinite(currentTime)) {
+          throw createMobileCheckinError('The server could not determine the event time.', 500, 'EVENT_TIME_UNAVAILABLE');
+        }
+        earlyArrival = currentTime < Date.parse(availableAt);
+        if (earlyArrival && !validatedInput.earlyArrival) {
           throw createMobileCheckinError(
             'Check-in opens one hour before the scheduled appointment.',
             409,
@@ -408,7 +425,8 @@ function createMobileCheckinService({ repository, now = () => new Date().toISOSt
         input: validatedInput,
         driver,
         load,
-        now: now()
+        now: eventTime,
+        earlyArrival
       });
 
       try {
