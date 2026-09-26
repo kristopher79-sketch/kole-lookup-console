@@ -12,6 +12,18 @@ const {
 
 const NOW = '2026-09-02T13:47:18.000Z';
 
+test('complete appointment time takes precedence over the redundant AM/PM field, matching Mobile display', async () => {
+  const load = { ...LOAD, DeliveryDate: '2026-09-28', DeliveryTime: '8:00 AM', DeliveryAMPM: 'PM' };
+  assert.equal(getMobileCheckinAvailableAt(load, 'Delivery'), '2026-09-28T11:00:00.000Z');
+  const repository = createFakeRepository();
+  const service = createMobileCheckinService({ repository, now: () => '2026-09-26T18:00:00.000Z' });
+  await assert.rejects(service.recordEvent({ input: createInput({ stop: 'delivery' }), driver: DRIVER, load }), { code: 'CHECK_IN_TOO_EARLY' });
+  const result = await service.recordEvent({ input: createInput({ stop: 'delivery', earlyArrival: true }), driver: DRIVER, load });
+  assert.equal(result.event.earlyArrival, true);
+  assert.equal(getMobileCheckinAvailableAt({ ...load, DeliveryTime: '8:00', DeliveryAMPM: 'PM' }, 'Delivery'), '2026-09-28T23:00:00.000Z');
+  assert.equal(getMobileCheckinAvailableAt({ ...load, DeliveryTime: '8:00', DeliveryAMPM: '' }, 'Delivery'), '');
+});
+
 test('early-arrival override is strictly boolean and only valid for In', () => {
   for (const earlyArrival of ['true', 'false', 1, null, {}]) {
     assert.throws(() => validateMobileStopEventInput(createInput({ earlyArrival })), { code: 'INVALID_EARLY_ARRIVAL' });

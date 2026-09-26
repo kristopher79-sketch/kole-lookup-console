@@ -63,7 +63,8 @@ function getMobileCheckinAvailableAt(load = {}, stop, stopSequence = 1) {
   const minute = Number(timeMatch[2]);
   const period = (timeMatch[3] || ampmText).toUpperCase();
   if (minute > 59 || !['AM', 'PM'].includes(period) || hourText < 1 || hourText > 12) return '';
-  if (timeMatch[3] && ampmText && timeMatch[3].toUpperCase() !== ampmText.toUpperCase()) return '';
+  // Match the Mobile display: a complete time carries its own AM/PM.
+  // The separate legacy AM/PM field is used only when the time omits it.
   const validDate = new Date(Date.UTC(year, month - 1, day));
   if (validDate.getUTCFullYear() !== year || validDate.getUTCMonth() + 1 !== month || validDate.getUTCDate() !== day) return '';
   const hour = (hourText % 12) + (period === 'PM' ? 12 : 0);
