@@ -39,7 +39,7 @@ There is no automated test suite or `test` script. Do not claim tests passed. Br
 
 ## Authentication and configuration
 
-- The client stores the lookup token only in `sessionStorage` as `koleLookupToken`.
+- Desktop lookup tokens remain in memory and require login on each fresh launch or page reload. Phones and tablets persist `koleLookupToken` in `localStorage`; logout and `401`/`403` clear both browser storage locations. Keep this device policy independent of responsive layout width.
 - Protected client requests must use `authedFetch`, which sends `X-Lookup-Token` and clears the session on `401`/`403`.
 - Express protects operational routes with `requireLookupAccess`.
 - Microsoft Graph uses server-side client credentials through `getGraphToken`; Graph tokens never reach the browser.

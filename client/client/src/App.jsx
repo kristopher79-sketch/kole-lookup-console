@@ -4,12 +4,14 @@ import './App.css?seasonal-modals=v9';
 import koleLogo from './assets/kole-logo.png';
 import BetaDashboard from './BetaDashboard';
 import DriverRosterEditor from './DriverRosterEditor';
+import { createLookupTokenStorage } from './lookup-token-storage';
 
 function RosterReportStaleNotice({ report }) {
   return report?.rosterStale ? <div className="report-alert warning" role="status">Driver details changed after this report was generated. Run it again for current roster information.</div> : null;
 }
 
 const isTauriRuntime = Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
+const lookupTokenStorage = createLookupTokenStorage(window);
 const isViteDev = import.meta.env?.DEV === true;
 const configuredApiBase = String(import.meta.env?.VITE_KOLE_API_BASE || '').trim();
 const isLocalDevHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
@@ -1562,7 +1564,7 @@ function getDriverHistoryTruckFromCard(card) {
 
 
 export default function App() {
-  const [accessToken, setAccessToken] = useState(() => sessionStorage.getItem('koleLookupToken') || '');
+  const [accessToken, setAccessToken] = useState(() => lookupTokenStorage.restore());
   const [password, setPassword] = useState('');
   const [colorTheme, setColorTheme] = useState(getSavedKoleTheme);
   const [userPrefs, setUserPrefs] = useState(getSavedKoleUserPreferences);
@@ -1909,7 +1911,7 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginStatusMessage, setLoginStatusMessage] = useState('');
-  const [startupSplashVisible, setStartupSplashVisible] = useState(() => Boolean(sessionStorage.getItem('koleLookupToken')) && !userPrefs.skipStartupSplash);
+  const [startupSplashVisible, setStartupSplashVisible] = useState(() => Boolean(accessToken) && !userPrefs.skipStartupSplash);
   const [startupSplashExiting, setStartupSplashExiting] = useState(false);
   const [startupSplashDismissed, setStartupSplashDismissed] = useState(false);
   const [startupSplashElapsedMs, setStartupSplashElapsedMs] = useState(0);
@@ -3817,7 +3819,7 @@ export default function App() {
         throw new Error(data.error || 'Access token was not accepted.');
       }
 
-      sessionStorage.setItem('koleLookupToken', token);
+      lookupTokenStorage.save(token);
       driverHistoryCacheRef.current.clear();
       startupSplashStartedAtRef.current = Date.now();
       setStartupSplashElapsedMs(0);
@@ -3842,7 +3844,7 @@ export default function App() {
   }
 
   function handleLogout() {
-    sessionStorage.removeItem('koleLookupToken');
+    lookupTokenStorage.clear();
     setAccessToken('');
     setPassword('');
     setAuthError('');
@@ -3871,7 +3873,7 @@ export default function App() {
     });
 
     if (res.status === 401 || res.status === 403) {
-      sessionStorage.removeItem('koleLookupToken');
+      lookupTokenStorage.clear();
       setAccessToken('');
       resetAppState();
       throw new Error('Access was denied. Please log in again.');
