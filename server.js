@@ -22368,7 +22368,7 @@ function buildCheckInTimesFields(schema, event) {
     longitude: event.longitude,
     accuracy: event.accuracy,
     locationStatus: event.locationStatus,
-    entrySource: 'Driver',
+    entrySource: event.entrySource || 'Driver',
     earlyArrival: event.earlyArrival === true
   };
 
@@ -22395,6 +22395,86 @@ async function createCheckInTimesEvent(token, event) {
 
   return cleanMobileStopEventItem(created, schema.fieldNames);
 }
+
+// Retain attempted writes, including uncertain Graph outcomes, for this process.
+// Never evict an uncertain result to make room for another write.
+const manualCheckInWrites = new Set();
+const MANUAL_CHECK_IN_WRITE_LIMIT = 10000;
+
+function parseManualCheckInTime(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return null;
+  const [year, month, day, hour, minute] = value.split(/[-T:]/).map(Number);
+  if (year < 2000 || year > 2100 || month < 1 || month > 12 || day < 1 ||
+      day > getDaysInMonth(year, month) || hour > 23 || minute > 59) return null;
+  const wallTime = Date.UTC(year, month - 1, day, hour, minute);
+  // Check both Eastern offsets against the existing zoned formatter. Reject
+  // nonexistent spring times and ambiguous fall times instead of guessing.
+  const matches = [4, 5].map((offset) => new Date(wallTime + offset * 3600000)).filter((date) => {
+    const parts = getEasternParts(date);
+    return parts.year === year && parts.month === month && parts.day === day &&
+      parts.hour % 24 === hour && parts.minute === minute;
+  });
+  return matches.length === 1 ? matches[0].toISOString() : null;
+}
+
+app.post('/check-in-times/manual', requireLookupAccess, async (req, res) => {
+  let writeKey = '';
+  let writeAttempted = false;
+  try {
+    const { loadId, sourceListId, stop, action, time } = req.body || {};
+    const timestamp = parseManualCheckInTime(time);
+    if (typeof loadId !== 'string' || !/^[1-9]\d{0,11}$/.test(loadId) ||
+        typeof sourceListId !== 'string' || !sourceListId ||
+        !['Pickup', 'Delivery'].includes(stop) || !['In', 'Out'].includes(action)) {
+      return res.status(400).json({ success: false, error: 'Choose a current order and a valid Pickup or Delivery IN/OUT stamp.' });
+    }
+    if (!timestamp) {
+      return res.status(400).json({ success: false, error: 'Enter a valid Eastern date and time. Times skipped or repeated during daylight saving changes cannot be used.' });
+    }
+    const token = await getGraphToken();
+    const lists = await getSearchableBidLists(token);
+    const currentList = lists.find((list) => list.label === 'Bid Listing');
+    if (!currentList || sourceListId !== currentList.listId) {
+      return res.status(400).json({ success: false, error: 'Manual stamps are only available for the current Bid Listing.' });
+    }
+    const key = `${currentList.listId}:${loadId}:${stop}:${action}`;
+    if (manualCheckInWrites.has(key)) {
+      return res.status(409).json({ success: false, error: 'This stamp has already been submitted. Refresh the order and verify Check In Times before trying again.' });
+    }
+    if (manualCheckInWrites.size >= MANUAL_CHECK_IN_WRITE_LIMIT) {
+      return res.status(503).json({ success: false, error: 'Manual stamps are temporarily unavailable. Contact support.' });
+    }
+    manualCheckInWrites.add(key);
+    writeKey = key;
+    const item = await graphGet(token,
+      `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${encodeURIComponent(currentList.listId)}/items/${encodeURIComponent(loadId)}?$expand=fields`);
+    if (isOrderEditSettled(item.fields || {})) {
+      return res.status(423).json({ success: false, error: 'Final-settled orders are read-only.' });
+    }
+    const record = buildRecordResponse(item, currentList);
+    await hydrateOfficeCheckInSummaries(token, [record], currentList);
+    if (!record.checkInSummary?.available) {
+      return res.status(503).json({ success: false, error: 'Check In Times is unavailable. No stamp was created.' });
+    }
+    const existing = record.checkInSummary[stop.toLowerCase()];
+    if (existing[action === 'In' ? 'arrivedAt' : 'departedAt']) {
+      return res.status(409).json({ success: false, error: 'That stamp already exists. Refresh the order to see it.' });
+    }
+    writeAttempted = true;
+    await createCheckInTimesEvent(token, {
+      loadId, bol: record.BOL, truck: record.Truck, operator: record.Driver,
+      stop, stopSequence: 1, action, time: timestamp, entrySource: 'Dispatch'
+    });
+    return res.json({ success: true });
+  } catch {
+    return res.status(503).json({ success: false, error: writeAttempted
+      ? 'The stamp could not be confirmed. Refresh the order and verify Check In Times; do not submit it again.'
+      : 'Unable to verify this order and its stamps. No stamp was created.' });
+  } finally {
+    if (writeAttempted) clearOrderEditCaches();
+    else if (writeKey) manualCheckInWrites.delete(writeKey);
+  }
+});
 
 const mobileCheckinService = createMobileCheckinService({
   repository: {

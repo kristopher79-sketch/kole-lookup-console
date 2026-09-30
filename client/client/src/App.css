@@ -2518,6 +2518,34 @@ tbody tr:hover {
   overflow-wrap: anywhere;
 }
 
+.manual-stamp-add {
+  margin-left: 8px;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--kole-text-soft);
+  background: var(--kole-surface-2);
+  border: 1px solid var(--kole-border);
+  border-radius: 5px;
+}
+
+.manual-stamp-overlay { z-index: var(--kole-z-modal-deep); }
+.detail-modal.manual-stamp-modal { width: min(480px, 100%); }
+.manual-stamp-form { display: grid; gap: 14px; }
+.manual-stamp-form p { margin: 0; overflow-wrap: anywhere; }
+.manual-stamp-context, .manual-stamp-note { color: var(--kole-muted); font-size: 12px; line-height: 1.5; }
+.manual-stamp-fields { display: flex; flex-wrap: wrap; gap: 12px; }
+.manual-stamp-fields label { display: grid; gap: 6px; flex: 1 1 160px; min-width: 0; }
+.manual-stamp-fields input {
+  width: 100%; min-width: 0; box-sizing: border-box; padding: 9px;
+  background: var(--kole-control-bg); color: var(--kole-text);
+  border: 1px solid var(--kole-control-border); border-radius: 6px;
+}
+.manual-stamp-selector { margin: 0; padding: 8px; border: 1px solid var(--kole-border); }
+.manual-stamp-selector label { display: inline-flex; align-items: center; gap: 5px; margin-right: 20px; }
+.manual-stamp-error { color: var(--kole-danger); font-size: 13px; }
+.manual-stamp-error:empty { display: none; }
+.manual-stamp-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
 .detail-item.wide {
   grid-column: span 2;
 }

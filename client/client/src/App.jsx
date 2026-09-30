@@ -1619,6 +1619,12 @@ export default function App() {
   const [orderNoteSaveError, setOrderNoteSaveError] = useState('');
   const [orderEditDraft, setOrderEditDraft] = useState(null);
   const [orderEditSaving, setOrderEditSaving] = useState(false);
+  const [manualStamp, setManualStamp] = useState(null);
+  const [manualStampSaving, setManualStampSaving] = useState(false);
+  const [manualStampError, setManualStampError] = useState('');
+  const manualStampSavingRef = useRef(false);
+  const manualStampTriggerRef = useRef(null);
+  const manualStampDialogRef = useRef(null);
   const [orderEditError, setOrderEditError] = useState('');
   const [orderEditMessage, setOrderEditMessage] = useState('');
   const [orderEditNoteWarning, setOrderEditNoteWarning] = useState('');
@@ -3090,6 +3096,11 @@ export default function App() {
   useEffect(() => {
     function handleEsc(e) {
       if (e.key === 'Escape') {
+        if (manualStampDialogRef.current) {
+          e.preventDefault();
+          closeManualStamp();
+          return;
+        }
         if (driverRosterEditStateRef.current.open) {
           e.preventDefault();
           cancelDriverRosterEdit();
@@ -6293,6 +6304,56 @@ function getPositionStatusLabel(position) {
     }
   }
 
+  function closeManualStamp() {
+    if (manualStampSavingRef.current) return;
+    setManualStamp(null);
+    setManualStampError('');
+    requestAnimationFrame(() => {
+      const trigger = manualStampTriggerRef.current;
+      if (trigger?.isConnected) trigger.focus();
+      else document.querySelector('.order-detail-modal .close-button')?.focus();
+    });
+  }
+
+  async function saveManualStamp(event) {
+    event.preventDefault();
+    if (manualStampSavingRef.current || !manualStamp) return;
+    const form = new FormData(event.currentTarget);
+    const record = manualStamp.record;
+    manualStampSavingRef.current = true;
+    setManualStampSaving(true);
+    setManualStampError('');
+    try {
+      const response = await authedFetch(`${API}/check-in-times/manual`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          loadId: String(record.id), sourceListId: record.SourceListId,
+          stop: manualStamp.stop, action: form.get('action'),
+          time: `${form.get('date')}T${form.get('time')}`
+        })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || 'Unable to create stamp. Refresh the order before trying again.');
+      searchCacheRef.current.clear();
+      driverHistoryCacheRef.current.clear();
+      const refreshed = await loadDetails(record.id, selectedView, record.SourceListId, { returnLabel: orderReturnTrailLabel });
+      if (refreshed) {
+        setResults((rows) => rows.map((row) => row.id === record.id && row.SourceListId === record.SourceListId
+          ? { ...row, checkInSummary: refreshed.checkInSummary } : row));
+      } else {
+        setError('The stamp was created, but the order could not be refreshed. Reopen the order to view it.');
+      }
+      if (operationsData) void loadOperationsDashboard({ silent: true, forceRefresh: true });
+      setManualStamp(null);
+      requestAnimationFrame(() => document.querySelector('.order-detail-modal .close-button')?.focus());
+    } catch (error) {
+      setManualStampError(error.message || 'Unable to confirm the stamp. Refresh the order before trying again.');
+    } finally {
+      manualStampSavingRef.current = false;
+      setManualStampSaving(false);
+    }
+  }
+
   async function loadDetails(id, view = 'basic', sourceListId = '', options = {}) {
     if (!id) {
       setError('This row does not have a record ID.');
@@ -6304,6 +6365,7 @@ function getPositionStatusLabel(position) {
       : getLiveOrderReturnTrailLabel();
 
     setOrderReturnTrailLabel(returnLabel || '');
+    if (!manualStampSavingRef.current) setManualStamp(null);
     setSelectedView(view);
     setOrderNotesData(null);
     setOrderNotesLoading(false);
@@ -6338,6 +6400,7 @@ function getPositionStatusLabel(position) {
       } else if (view === 'documents') {
         void loadLoadPaperwork(data);
       }
+      return data;
     } catch (err) {
       setError(err.message);
       setSelected(null);
@@ -6524,6 +6587,8 @@ function getPositionStatusLabel(position) {
   }
 
   function closeModal() {
+    if (manualStampSavingRef.current) return;
+    setManualStamp(null);
     setSelected(null);
     setOrderReturnTrailLabel('');
     setOrderDrilldownReturn(null);
@@ -10260,6 +10325,15 @@ function openReportLoadDetails(load) {
       <small className="check-in-times">
         {summary?.available !== true ? 'Check-in status unavailable.' :
           `IN ${formatActual(summary[stop]?.arrivedAt)}  ·  OUT ${formatActual(summary[stop]?.departedAt)}`}
+        {summary?.available === true && getOrderEditAvailability(selected).canEdit &&
+          (!summary[stop]?.arrivedAt || !summary[stop]?.departedAt) && (
+            <button type="button" className="manual-stamp-add" onClick={(event) => {
+              manualStampTriggerRef.current = event.currentTarget;
+              setManualStampError('');
+              setManualStamp({ record: selected, stop: stop === 'pickup' ? 'Pickup' : 'Delivery',
+                actions: [!summary[stop]?.arrivedAt && 'In', !summary[stop]?.departedAt && 'Out'].filter(Boolean) });
+            }}>+ Add Stamp</button>
+          )}
       </small>
     );
   }
@@ -24082,8 +24156,51 @@ function openReportLoadDetails(load) {
         </div>
       )}
 
+      {manualStamp && selected && (
+        <div ref={manualStampDialogRef} className="modal-overlay manual-stamp-overlay" onClick={closeManualStamp}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              event.stopPropagation();
+              closeManualStamp();
+            }
+            if (event.key === 'Tab') {
+              const controls = [...event.currentTarget.querySelectorAll('button:not(:disabled), input:not(:disabled):not([type="hidden"])')];
+              if (!controls.length) event.preventDefault();
+              const first = controls[0];
+              const last = controls[controls.length - 1];
+              if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+              else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+            }
+          }}>
+          <div className="detail-modal manual-stamp-modal" role="dialog" aria-modal="true" aria-labelledby="manual-stamp-title" onClick={(event) => event.stopPropagation()}>
+            <div className="detail-header"><h2 id="manual-stamp-title">Add {manualStamp.stop} Stamp</h2></div>
+            <form className="modal-body manual-stamp-form" onSubmit={saveManualStamp} aria-busy={manualStampSaving}>
+              <p className="manual-stamp-context">BOL: {manualStamp.record.BOL || '—'}<br />
+                Driver / Operator: {manualStamp.record.Driver || '—'}<br />Truck: {manualStamp.record.Truck || '—'}</p>
+              {manualStamp.actions.length === 1 ? <p>Stamp: <strong>{manualStamp.actions[0].toUpperCase()}</strong>
+                <input type="hidden" name="action" value={manualStamp.actions[0]} /></p> :
+                <fieldset disabled={manualStampSaving} className="manual-stamp-selector"><legend>Stamp</legend>
+                  {manualStamp.actions.map((action, index) => <label key={action}>
+                    <input type="radio" name="action" value={action} defaultChecked={index === 0} /> {action.toUpperCase()}
+                  </label>)}
+                </fieldset>}
+              <div className="manual-stamp-fields">
+                <label>Date (Eastern)<input autoFocus type="date" name="date" required min="2000-01-01" max="2100-12-31" defaultValue={getEasternDateInputValue()} disabled={manualStampSaving} /></label>
+                <label>Time (Eastern)<input type="time" name="time" required step="60" disabled={manualStampSaving} /></label>
+              </div>
+              <p className="manual-stamp-note">Manual stamps are written to Check In Times and become part of the permanent arrival/departure record.</p>
+              <p className="manual-stamp-error" role="status" aria-live="polite">{manualStampError}</p>
+              <div className="manual-stamp-actions">
+                <button type="button" className="close-button" onClick={closeManualStamp} disabled={manualStampSaving}>Cancel</button>
+                <button type="submit" disabled={manualStampSaving}>{manualStampSaving ? 'Creating...' : 'Create Stamp'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
       {selected && (
-        <div className="modal-overlay" onClick={closeModal}>
+        <div className="modal-overlay" onClick={closeModal} inert={manualStamp ? true : undefined}>
           <div className="detail-modal order-detail-modal" onClick={(e) => e.stopPropagation()}>
             <div className="detail-header">
               <div>
