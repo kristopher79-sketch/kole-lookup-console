@@ -3637,6 +3637,71 @@ tbody tr:hover {
   margin-bottom: 14px;
 }
 
+.driver-position-view-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  margin: 10px 14px 0;
+  border: 1px solid var(--kole-border);
+  border-radius: 8px;
+  background: var(--kole-surface);
+}
+
+.driver-position-view-toggle button {
+  padding: 5px 9px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--kole-text);
+  font-size: 12px;
+}
+
+.driver-position-view-toggle button[aria-pressed='true'] {
+  border-color: var(--kole-gold);
+  background: var(--kole-surface-2);
+  font-weight: 800;
+}
+
+.driver-position-view-toggle button:focus-visible,
+.driver-position-load-link:focus-visible {
+  outline: 2px solid var(--kole-gold);
+  outline-offset: 2px;
+}
+
+.driver-position-panel .driver-position-table.driver-position-duty-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.driver-position-panel .driver-position-table.driver-position-duty-table :is(th, td) {
+  padding: 8px 6px;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.driver-position-panel .driver-position-table.driver-position-duty-table :is(th, td):nth-child(1) { width: 10%; }
+.driver-position-panel .driver-position-table.driver-position-duty-table :is(th, td):nth-child(2) { width: 20%; }
+.driver-position-panel .driver-position-table.driver-position-duty-table :is(th, td):nth-child(3) { width: 20%; }
+.driver-position-panel .driver-position-table.driver-position-duty-table :is(th, td):nth-child(4) { width: 16%; }
+.driver-position-panel .driver-position-table.driver-position-duty-table :is(th, td):nth-child(5) { width: 16%; }
+.driver-position-panel .driver-position-table.driver-position-duty-table :is(th, td):nth-child(6) { width: 18%; }
+
+.driver-position-load-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tracking-pill.no-position {
+  white-space: normal;
+}
+
 .driver-position-header p {
   margin: 0;
   color: var(--kole-muted-subtle);
@@ -3683,6 +3748,11 @@ tbody tr:hover {
   text-overflow: ellipsis;
 }
 
+.driver-position-panel .driver-position-table :is(th, td),
+.driver-position-panel .driver-position-load-link {
+  text-align: left;
+}
+
 .driver-position-table th:nth-child(1),
 .driver-position-table td:nth-child(1) {
   width: 90px;
@@ -3706,13 +3776,11 @@ tbody tr:hover {
 .driver-position-table th:nth-child(5),
 .driver-position-table td:nth-child(5) {
   width: 82px;
-  text-align: right;
 }
 
 .driver-position-table th:nth-child(6),
 .driver-position-table td:nth-child(6) {
   width: 78px;
-  text-align: center;
 }
 
 .driver-position-table th:nth-child(7),

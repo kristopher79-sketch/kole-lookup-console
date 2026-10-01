@@ -18930,49 +18930,10 @@ app.post('/tracking/intellitrack/order/:id', requireLookupAccess, async (req, re
 
 app.get('/tracking/driver-positions', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
-    const driverPositionsListId = process.env.DRIVER_POSITIONS_LIST_ID;
-
-    if (!driverPositionsListId) {
-      return res.status(500).json({
-        success: false,
-        error: 'DRIVER_POSITIONS_LIST_ID is not configured on the server.'
-      });
-    }
-
     const token = await getGraphToken();
-    const [items, rosterByTruck] = await Promise.all([
-      getDriverPositionItems(token, driverPositionsListId),
-      getDriverRosterByTruck(token)
-    ]);
-
-    const positions = items
-      .map(cleanDriverPositionItem)
-      .map((position) => {
-        const roster = rosterByTruck.get(normalizeTruckKey(position.equipmentId)) || null;
-
-        return {
-          ...position,
-          roster,
-          hasRosterDetails: Boolean(roster)
-        };
-      })
-      .sort(sortDriverPositions);
-
-    res.json({
-      success: true,
-      generatedAt: `${formatEasternTimestamp()} Eastern`,
-      sourceListId: driverPositionsListId,
-      rosterSourceListId: process.env.DRIVER_ROSTER_LIST_ID || '',
-      counts: {
-        total: positions.length,
-        moving: positions.filter((p) => p.isMoving).length,
-        stopped: positions.filter((p) => !p.isMoving).length,
-        stale: positions.filter((p) => p.isStale).length,
-        unmatchedRoster: positions.filter((p) => p.rosterMatched !== true).length,
-        missingRosterDetails: positions.filter((p) => !p.hasRosterDetails).length
-      },
-      positions
-    });
+    res.json(await buildBootstrapDriverPositionsPayload(token, {
+      forceRefresh: parseBoolean(req.query.refresh)
+    }));
   } catch (error) {
     console.error(error);
 
@@ -20333,38 +20294,160 @@ async function buildBootstrapOperationsPayload(token, currentList, items, eviden
   return payload;
 }
 
-async function buildBootstrapDriverPositionsPayload(token) {
+function formatRosterDutyDate(value) {
+  const date = normalizeSharePointBusinessDate(value);
+  return date ? `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}` : '';
+}
+
+function compareRosterDutyLoads(a, b) {
+  const dateDiff = String(a.PickupDate || '9999-12-31').localeCompare(String(b.PickupDate || '9999-12-31'));
+  if (dateDiff) return dateDiff;
+  const aClock = parseAssignmentPickupClock(a.PickupTime, a.PickupAMPM);
+  const bClock = parseAssignmentPickupClock(b.PickupTime, b.PickupAMPM);
+  return (aClock.hour * 60 + aClock.minute) - (bClock.hour * 60 + bClock.minute) ||
+    String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
+}
+
+function buildRosterDutyState(loads, currentTimeOff, targetDate, timeOffWarning = '') {
+  // Evidence, not a scheduled date span, establishes that pickup occurred.
+  const pickedUp = loads.filter((load) => load.hasPickupEvidence);
+  const delivering = pickedUp.find((load) => load.DeliveryDate === targetDate);
+  const pickupToday = loads.find((load) => load.PickupDate === targetDate && !load.hasPickupEvidence);
+  const currentLoad = delivering || pickedUp[0] || pickupToday || null;
+  const nextLoad = loads.find((load) => load !== currentLoad && !load.hasPickupEvidence && load.PickupDate > targetDate) || null;
+  const unresolvedLoad = loads.find((load) => !load.PickupDate || load.PickupDate < targetDate);
+  let dutyState;
+  let dutyLabel;
+  let dutyLoadLabel = '—';
+  let dutyTimingLabel = '—';
+  let dutyLoad = null;
+
+  if (currentLoad) {
+    dutyState = delivering ? 'delivering_today' : pickedUp.length ? 'in_transit' : 'pickup_today';
+    dutyLabel = delivering ? 'Delivering Today' : pickedUp.length ? 'In Transit' : 'Picking Up Today';
+    dutyLoad = currentLoad;
+    const date = formatRosterDutyDate(dutyState === 'pickup_today' ? currentLoad.PickupDate : currentLoad.DeliveryDate);
+    dutyTimingLabel = date ? `${dutyState === 'pickup_today' ? 'Pickup' : 'Delivers'} ${date}` : 'Timing unavailable';
+  } else if (currentTimeOff) {
+    dutyState = 'off_time';
+    dutyLabel = 'Off Time';
+    dutyLoadLabel = currentTimeOff.reason || 'Off Time';
+    dutyTimingLabel = `Returns ${formatRosterDutyDate(currentTimeOff.endDate || currentTimeOff.startDate)}`;
+  } else if (timeOffWarning || unresolvedLoad) {
+    dutyState = 'attention';
+    dutyLabel = 'Attention';
+    dutyLoad = unresolvedLoad || null;
+    dutyTimingLabel = timeOffWarning ? 'Time off unavailable' : 'Confirm assignment';
+  } else if (nextLoad) {
+    dutyState = 'next_pickup';
+    dutyLabel = 'Next Pickup';
+    dutyLoad = nextLoad;
+    const time = [nextLoad.PickupTime, nextLoad.PickupAMPM].filter(Boolean).join(' ');
+    dutyTimingLabel = [formatRosterDutyDate(nextLoad.PickupDate), time].filter(Boolean).join(' · ');
+  } else {
+    dutyState = 'available';
+    dutyLabel = 'Available';
+  }
+
+  if (dutyLoad) dutyLoadLabel = dutyLoad.BOL || '—';
+  return { dutyState, dutyLabel, currentLoad, nextLoad, currentTimeOff, dutyLoad, dutyLoadLabel, dutyTimingLabel };
+}
+
+function buildActiveDriverRosterPositions(rosterItems, positionItems, bidItems, currentList, evidenceSets, timeOffResult, targetDate) {
+  // New Vision is an occasional subcontractor, not part of the internal roster panel.
+  const activeRoster = filterDriverRosterByStatus(rosterItems, 'active')
+    .filter((roster) => normalizeTruckKey(roster.truck) !== '5550');
+  const positionByTruck = new Map();
+  // Latest telemetry wins; never use the telemetry's cached ActiveInRoster flag for membership.
+  positionItems.map(cleanDriverPositionItem).sort(sortDriverPositions).forEach((position) => {
+    const key = normalizeTruckKey(position.equipmentId);
+    if (key && !positionByTruck.has(key)) positionByTruck.set(key, position);
+  });
+
+  const loadsByTruck = new Map();
+  bidItems.forEach((item) => {
+    const record = buildOperationsRecord(item, currentList);
+    if (normalizeText(record.Status) !== 'won' || parseBoolean(record.Processed) || parseBoolean(item.fields?.FinalSettleSent)) return;
+    const load = addUploadEvidence({
+      ...record,
+      PickupDate: normalizeSharePointBusinessDate(record.PickupDate),
+      DeliveryDate: normalizeSharePointBusinessDate(record.DeliveryDate)
+    }, evidenceSets);
+    if (load.hasDeliveryEvidence) return;
+    pushAssignmentToMapArray(loadsByTruck, normalizeTruckKey(load.Truck), load);
+  });
+  loadsByTruck.forEach((loads) => loads.sort(compareRosterDutyLoads));
+
+  const offByTruck = new Map();
+  const offByName = new Map();
+  const currentOff = buildDriverTimeOffCurrentResponse(timeOffResult.rows || [], { targetDate }).records;
+  currentOff.forEach((row) => {
+    const key = normalizeTruckKey(row.truckNumber);
+    pushAssignmentToMapArray(offByTruck, key, row);
+    // Name fallback only for records without a truck; never cross a known truck assignment.
+    if (!key) pushAssignmentToMapArray(offByName, normalizeSearchValue(row.operatorName), row);
+  });
+
+  return activeRoster.map((roster) => {
+    const key = normalizeTruckKey(roster.truck);
+    const position = positionByTruck.get(key);
+    const currentTimeOff = (offByTruck.get(key) ||
+      offByName.get(normalizeSearchValue(roster.tmsName)) ||
+      offByName.get(normalizeSearchValue(roster.operatorTeamName)) || [])[0] || null;
+    return {
+      ...(position || {
+        currentCityState: '', latitude: null, longitude: null, speed: null,
+        ignitionStatus: '', ignitionStatusLabel: '', positionTimeUtc: '',
+        positionAgeMinutes: null, isMoving: false, isStale: false
+      }),
+      // Identity belongs to the roster, including duplicate/blank truck records.
+      id: roster.id,
+      positionId: position?.id || null,
+      equipmentId: roster.truck,
+      driverName: getRosterReportDisplayName(roster),
+      roster,
+      hasRosterDetails: true,
+      hasPosition: Boolean(position),
+      ...buildRosterDutyState(loadsByTruck.get(key) || [], currentTimeOff, targetDate, timeOffResult.warning)
+    };
+  }).sort(sortDriverPositions);
+}
+
+async function buildBootstrapDriverPositionsPayload(token, options = {}) {
   const listId = process.env.DRIVER_POSITIONS_LIST_ID;
   if (!listId) throw new Error('DRIVER_POSITIONS_LIST_ID is not configured on the server.');
-
-  const [items, rosterByTruck] = await Promise.all([
+  const currentList = options.currentList || await getCurrentBidListingSource(token);
+  if (!currentList) throw new Error('Bid Listing not found.');
+  const [rosterItems, positionItems, bidItems, evidenceSets, timeOffResult] = await Promise.all([
+    getDriverRosterItems(token),
     getDriverPositionItems(token, listId),
-    getDriverRosterByTruck(token)
+    options.bidItems || getDashboardBidSource(token, currentList, { forceRefresh: options.forceRefresh === true, waitForRefresh: true }),
+    options.evidenceSets || getUploadEvidenceSets(token),
+    getDriverTimeOffListId()
+      ? getDriverTimeOffRows(token)
+      : Promise.resolve({ rows: [], warning: 'Driver Time Off is not configured; duty availability cannot be confirmed.' })
   ]);
-  const positions = items
-    .map(cleanDriverPositionItem)
-    .map((position) => {
-      const roster = rosterByTruck.get(normalizeTruckKey(position.equipmentId)) || null;
-      return { ...position, roster, hasRosterDetails: Boolean(roster) };
-    })
-    .sort(sortDriverPositions);
-
+  const targetDate = formatEasternDate();
+  const positions = buildActiveDriverRosterPositions(rosterItems, positionItems, bidItems, currentList, evidenceSets, timeOffResult, targetDate);
   return {
     success: true,
     generatedAt: `${formatEasternTimestamp()} Eastern`,
+    targetDate,
     sourceListId: listId,
     rosterSourceListId: process.env.DRIVER_ROSTER_LIST_ID || '',
+    warning: timeOffResult.warning || '',
     counts: {
       total: positions.length,
-      moving: positions.filter((position) => position.isMoving).length,
-      stopped: positions.filter((position) => !position.isMoving).length,
-      stale: positions.filter((position) => position.isStale).length,
-      unmatchedRoster: positions.filter((position) => position.rosterMatched !== true).length,
-      missingRosterDetails: positions.filter((position) => !position.hasRosterDetails).length
+      moving: positions.filter((position) => position.hasPosition && position.isMoving).length,
+      stopped: positions.filter((position) => position.hasPosition && !position.isMoving).length,
+      stale: positions.filter((position) => position.hasPosition && position.isStale).length,
+      noPosition: positions.filter((position) => !position.hasPosition).length,
+      missingRosterDetails: 0
     },
     positions
   };
 }
+
 
 async function buildBootstrapIntelliTrackPayload(token) {
   const listId = getKoleAutoUpdaterListId();
@@ -20535,18 +20618,20 @@ app.get('/dashboard/bootstrap', requireLookupAccess, withHeavyWorkload(async (re
       .filter((value) => allowedModules.has(value));
     const moduleKeys = requestedModules.length ? [...new Set(requestedModules)] : [...allowedModules];
     const token = await getGraphToken();
-    const needsBidSource = moduleKeys.some((key) => ['operations', 'availableTrucks', 'actionAlerts'].includes(key));
+    const needsBidSource = moduleKeys.some((key) => ['operations', 'driverPositions', 'availableTrucks', 'actionAlerts'].includes(key));
     const currentList = needsBidSource ? await getCurrentBidListingSource(token) : null;
     const bidItemsPromise = currentList
       ? getDashboardBidSource(token, currentList, { waitForRefresh: true })
       : Promise.resolve([]);
-    const evidencePromise = moduleKeys.some((key) => ['operations', 'actionAlerts'].includes(key))
+    const evidencePromise = moduleKeys.some((key) => ['operations', 'driverPositions', 'actionAlerts'].includes(key))
       ? getUploadEvidenceSets(token)
       : Promise.resolve({ pickupEvidenceBols: new Set(), deliveryEvidenceBols: new Set(), uploadDigestCount: 0 });
 
     const builders = {
       operations: async () => buildBootstrapOperationsPayload(token, currentList, await bidItemsPromise, await evidencePromise),
-      driverPositions: () => buildBootstrapDriverPositionsPayload(token),
+      driverPositions: () => buildBootstrapDriverPositionsPayload(token, {
+        currentList, bidItems: bidItemsPromise, evidenceSets: evidencePromise
+      }),
       uploadDigest: () => buildBootstrapUploadDigestPayload(token, req.query.uploadDate),
       intelliTrack: () => buildBootstrapIntelliTrackPayload(token),
       availableTrucks: async () => buildBootstrapAvailableTrucksPayload(token, currentList, await bidItemsPromise),

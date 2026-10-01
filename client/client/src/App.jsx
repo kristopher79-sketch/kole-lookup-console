@@ -1676,6 +1676,7 @@ export default function App() {
   const [driverPositionsData, setDriverPositionsData] = useState(null);
   const [driverPositionsLoading, setDriverPositionsLoading] = useState(false);
   const [driverPositionsError, setDriverPositionsError] = useState('');
+  const [driverRosterView, setDriverRosterView] = useState('position');
   const [driverRosterAccordionOpen, setDriverRosterAccordionOpen] = useState(() => userPrefs.driverRosterDefaultOpen);
   const [driverTimeOffAccordionOpen, setDriverTimeOffAccordionOpen] = useState(() => userPrefs.driverTimeOffDefaultOpen);
   const [driverTimeOffPaneFilter, setDriverTimeOffPaneFilter] = useState(() => userPrefs.driverTimeOffDefaultPane);
@@ -4713,7 +4714,7 @@ async function loadOperationsDashboard(options = {}) {
 }
 
 async function loadDriverPositions(options = {}) {
-  const { silent = false } = options;
+  const { silent = false, forceRefresh = false } = options;
 
   if (!silent) {
     setDriverPositionsLoading(true);
@@ -4723,7 +4724,7 @@ async function loadDriverPositions(options = {}) {
 
   try {
     const res = await authedFetch(
-      `${API}/tracking/driver-positions`
+      `${API}/tracking/driver-positions${forceRefresh ? '?refresh=true' : ''}`
     );
 
     const data = await res.json();
@@ -5577,7 +5578,7 @@ function openUploadDigestOrder(record, event) {
 async function refreshOperationsAndTracking() {
   const operationsRefresh = loadOperationsDashboard({ forceRefresh: true });
 
-  loadDriverPositions();
+  loadDriverPositions({ forceRefresh: true });
   loadUploadDigest(uploadDigestDate);
   loadIntelliTrack();
   loadAvailableTrucks();
@@ -6080,6 +6081,7 @@ function formatPhone(value) {
 }
 
 function formatSpeed(value) {
+  if (value === null || value === undefined || value === '') return '—';
   const number = Number(value);
 
   if (Number.isNaN(number)) return '-';
@@ -6088,12 +6090,14 @@ function formatSpeed(value) {
 }
 
 function getPositionStatusClass(position) {
+  if (position?.hasPosition === false) return 'tracking-pill no-position';
   if (position?.isStale) return 'tracking-pill stale';
   if (Number(position?.speed || 0) > 0) return 'tracking-pill moving';
   return 'tracking-pill stopped';
 }
 
 function getPositionStatusLabel(position) {
+  if (position?.hasPosition === false) return 'No Position';
   if (position?.isStale) return 'Stale';
   if (Number(position?.speed || 0) > 0) return 'Moving';
   return 'Stopped';
@@ -14275,6 +14279,7 @@ function openReportLoadDetails(load) {
     const positions = driverPositionsData?.positions || [];
     const expanded = workspace || driverRosterAccordionOpen;
     const RosterHeading = workspace ? 'div' : 'button';
+    const dutyView = driverRosterView === 'duty';
 
     return (
       <div className={`driver-position-panel ${expanded ? 'is-open' : 'is-closed'}`}>
@@ -14295,8 +14300,8 @@ function openReportLoadDetails(load) {
               <span className="driver-position-count-pill total">{driverPositionsData.counts.total} active units</span>
               <span className="driver-position-count-pill moving">{driverPositionsData.counts.moving} moving</span>
               <span className="driver-position-count-pill stale">{driverPositionsData.counts.stale} stale</span>
-              {driverPositionsData.counts.missingRosterDetails > 0 && (
-                <span className="driver-position-count-pill missing">{driverPositionsData.counts.missingRosterDetails} missing roster</span>
+              {driverPositionsData.counts.noPosition > 0 && (
+                <span className="driver-position-count-pill no-position">{driverPositionsData.counts.noPosition} no position</span>
               )}
             </div>
           )}
@@ -14306,6 +14311,19 @@ function openReportLoadDetails(load) {
 
         {expanded && (
           <div className="driver-position-accordion-body">
+            <div className="driver-position-view-toggle" role="group" aria-label="Active driver roster view">
+              {['position', 'duty'].map((view) => (
+                <button
+                  key={view}
+                  type="button"
+                  aria-pressed={driverRosterView === view}
+                  onClick={() => setDriverRosterView(view)}
+                >
+                  {view === 'position' ? 'Position' : 'Duty'}
+                </button>
+              ))}
+            </div>
+            {driverPositionsData?.warning && <div className="msg" role="status">{driverPositionsData.warning}</div>}
             {driverPositionsError && <div className="msg error">{driverPositionsError}</div>}
             {driverPositionsLoading && !driverPositionsData && <div className="msg">Loading active driver roster...</div>}
 
@@ -14315,29 +14333,29 @@ function openReportLoadDetails(load) {
 
             {positions.length > 0 && (
               <div className="operations-table-wrap driver-position-table-wrap">
-                <table className="driver-position-table">
+                <table className={`driver-position-table${dutyView ? ' driver-position-duty-table' : ''}`}>
                   <thead>
                     <tr>
-                      <th>Status</th>
+                      {!dutyView && <th>Status</th>}
                       <th>Truck</th>
                       <th>Driver</th>
                       <th>Location</th>
-                      <th>Speed</th>
-                      <th>Ignition</th>
-                      <th>Position Time</th>
+                      <th>{dutyView ? 'Duty' : 'Speed'}</th>
+                      <th>{dutyView ? 'Detail' : 'Ignition'}</th>
+                      <th>{dutyView ? 'Timing' : 'Position Time'}</th>
                     </tr>
                   </thead>
 
                   <tbody>
                     {positions.map((position) => (
                       <tr
-                        key={position.id || position.equipmentId}
+                        key={position.roster?.id || position.id || position.equipmentId}
                         className={`driver-position-row ${position.hasRosterDetails ? 'has-roster-details' : 'missing-roster-details'}`}
                         onClick={() => setSelectedDriverRoster(position)}
                         {...(workspace ? {
                           tabIndex: 0,
                           onKeyDown: (event) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
+                            if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
                               event.preventDefault();
                               setSelectedDriverRoster(position);
                             }
@@ -14345,11 +14363,13 @@ function openReportLoadDetails(load) {
                         } : {})}
                         title={position.hasRosterDetails ? 'Open driver roster details' : 'Open active position details'}
                       >
-                        <td>
-                          <span className={getPositionStatusClass(position)}>
-                            {getPositionStatusLabel(position)}
-                          </span>
-                        </td>
+                        {!dutyView && (
+                          <td>
+                            <span className={getPositionStatusClass(position)}>
+                              {getPositionStatusLabel(position)}
+                            </span>
+                          </td>
+                        )}
                         <td>{position.equipmentId || '-'}</td>
                         <td>
                           <strong>{position.roster?.tmsName || position.driverName || 'Unmatched'}</strong>
@@ -14360,10 +14380,33 @@ function openReportLoadDetails(load) {
                             <small className="roster-warning-text">No roster details matched</small>
                           )}
                         </td>
-                        <td>{position.currentCityState || '-'}</td>
-                        <td>{formatSpeed(position.speed)}</td>
-                        <td>{position.ignitionStatusLabel || '-'}</td>
-                        <td>{formatTrackingTimestamp(position.positionTimeUtc)}</td>
+                        <td>{position.currentCityState || '—'}</td>
+                        {dutyView ? (
+                          <>
+                            <td>{position.dutyLabel || '—'}</td>
+                            <td>
+                              {position.dutyLoad?.id && position.dutyLoad?.BOL ? (
+                                <button
+                                  type="button"
+                                  className="driver-position-load-link"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    openReportLoadDetails(position.dutyLoad);
+                                  }}
+                                >
+                                  {position.dutyLoadLabel}
+                                </button>
+                              ) : position.dutyLoadLabel || '—'}
+                            </td>
+                            <td>{position.dutyTimingLabel || '—'}</td>
+                          </>
+                        ) : (
+                          <>
+                            <td>{position.hasPosition === false ? '—' : formatSpeed(position.speed)}</td>
+                            <td>{position.hasPosition === false ? '—' : position.ignitionStatusLabel || '—'}</td>
+                            <td>{position.hasPosition === false ? '—' : formatTrackingTimestamp(position.positionTimeUtc)}</td>
+                          </>
+                        )}
                       </tr>
                     ))}
                   </tbody>
