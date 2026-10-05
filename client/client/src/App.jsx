@@ -23299,7 +23299,6 @@ function openReportLoadDetails(load) {
               <table>
                 <thead>
                   <tr>
-                    <th>Arrived</th>
                     <th>Picked Up</th>
                     <th>BOL</th>
                     <th>Driver</th>
@@ -23316,7 +23315,6 @@ function openReportLoadDetails(load) {
                       onClick={() => loadDetails(r.id, 'basic', r.SourceListId)}
                       style={{ cursor: 'pointer' }}
                     >
-                      <td><ArrivalDot record={r} stop="pickup" /></td>
                       <td>
                         <EvidenceDot hasEvidence={r.hasPickupEvidence} label="Pickup" />
                       </td>
@@ -23349,7 +23347,6 @@ function openReportLoadDetails(load) {
               <table>
                 <thead>
                   <tr>
-                    <th>Arrived</th>
                     <th>Delivered</th>
                     <th>Status</th>
                     <th>BOL</th>
@@ -23367,7 +23364,6 @@ function openReportLoadDetails(load) {
                       onClick={() => loadDetails(r.id, 'basic', r.SourceListId)}
                       style={{ cursor: 'pointer' }}
                     >
-                      <td><ArrivalDot record={r} stop="delivery" /></td>
                       <td>
                         <EvidenceDot hasEvidence={r.hasDeliveryEvidence} label="Delivery" />
                       </td>
