@@ -6131,16 +6131,16 @@ function getPositionStatusLabel(position) {
   }
 
   async function loadRateConfirmations(record = selected, options = {}) {
-    const bol = String(record?.BOL || '').trim();
-    if (!options.force && rateConfirmationsData?.bol === bol) return;
+    const bidId = String(record?.BidID || '').trim();
+    if (!options.force && rateConfirmationsData?.bidId === bidId) return;
 
     const requestId = rateConfirmationsRequestRef.current + 1;
     rateConfirmationsRequestRef.current = requestId;
     setRateConfirmationsData(null);
     setRateConfirmationsError('');
 
-    if (!bol) {
-      setRateConfirmationsData({ bol: '', records: [] });
+    if (!bidId) {
+      setRateConfirmationsData({ bidId: '', records: [] });
       setRateConfirmationsLoading(false);
       return;
     }
@@ -6149,23 +6149,23 @@ function getPositionStatusLabel(position) {
 
     try {
       const response = await authedFetch(
-        `${API}/operator-rate-confirmations?bol=${encodeURIComponent(bol)}`
+        `${API}/operator-rate-confirmations?bidId=${encodeURIComponent(bidId)}`
       );
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Rate confirmation history is temporarily unavailable.');
+        throw new Error(data.error || 'Rate confirmation is temporarily unavailable.');
       }
       if (rateConfirmationsRequestRef.current !== requestId) return;
 
       setRateConfirmationsData({
-        bol,
+        bidId,
         records: Array.isArray(data.records) ? data.records : []
       });
     } catch (error) {
       if (rateConfirmationsRequestRef.current !== requestId) return;
       setRateConfirmationsError(
-        error.message || 'Rate confirmation history is temporarily unavailable.'
+        error.message || 'Rate confirmation is temporarily unavailable.'
       );
     } finally {
       if (rateConfirmationsRequestRef.current === requestId) {
@@ -11232,7 +11232,7 @@ function openReportLoadDetails(load) {
 
         <section className="rate-confirmation-section" aria-live="polite" aria-busy={rateConfirmationsLoading}>
           {rateConfirmationsLoading && (
-            <p className="rate-confirmation-state">Loading rate confirmation history...</p>
+            <p className="rate-confirmation-state">Loading rate confirmation...</p>
           )}
 
           {!rateConfirmationsLoading && rateConfirmationsError && (

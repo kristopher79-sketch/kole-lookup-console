@@ -21,7 +21,7 @@ function createContext(graphGet = async () => ({ value: [] })) {
     DEFAULT_OPERATOR_RATE_TEXTS_LIST_ID: 'operator-rate-list',
     LIST_READ_PAGE_SIZE: 200,
     graphGet,
-    normalizeBolKey: (value) => String(value || '').trim().toUpperCase()
+    normalizeText: (value) => String(value || '').trim().toLowerCase()
   });
   const functions = [
     'escapeODataString',
@@ -29,7 +29,7 @@ function createContext(graphGet = async () => ({ value: [] })) {
     'cleanOperatorRateTextValue',
     'cleanOperatorRateTextRecord',
     'compareOperatorRateTextsNewestFirst',
-    'getOperatorRateConfirmationsForBol'
+    'getOperatorRateConfirmationsForBidId'
   ].map(extractFunction).join('\n');
   vm.runInContext(functions, context);
   return context;
@@ -41,7 +41,7 @@ test('record cleaning preserves multiline SMS, amounts, statuses, and optional p
   const record = context.cleanOperatorRateTextRecord({
     id: '42',
     fields: {
-      BOLNumber: 'KOL0007',
+      BidID: 'BID0007',
       DriverName: 'Synthetic Operator',
       RateText: rateText,
       Phone1: 5550101234,
@@ -51,14 +51,14 @@ test('record cleaning preserves multiline SMS, amounts, statuses, and optional p
     }
   });
 
-  assert.equal(record.bolNumber, 'KOL0007');
+  assert.equal(record.bidId, 'BID0007');
   assert.equal(record.rateText, rateText);
   assert.equal(record.phone1, '5550101234');
   assert.equal(record.phone2, '');
   assert.equal(record.sendStatus, 'Partially successful');
 });
 
-test('multiple confirmations sort newest first with descending item ID as the stable tie-breaker', () => {
+test('unexpected duplicate confirmations sort newest first with a stable item ID tie-breaker', () => {
   const context = createContext();
   const records = [
     { id: '8', dateSent: '2026-10-07T12:00:00Z' },
@@ -71,19 +71,19 @@ test('multiple confirmations sort newest first with descending item ID as the st
   assert.deepEqual(records.map((record) => record.id), ['10', '9', '8', '11']);
 });
 
-test('lookup uses a filtered paged read and preserves prefixed BOLs with leading zeros', async () => {
+test('lookup filters by BidID and preserves prefixes and leading zeros', async () => {
   const calls = [];
   const pages = [
     {
       value: [
-        { id: '2', fields: { BOLNumber: 'KOL0007', DateSent: '2026-10-08T07:00:00Z', Phone1: 5550102000, Phone2: 5550102001 } },
-        { id: '999', fields: { BOLNumber: 'KOL7', DateSent: '2026-10-09T07:00:00Z' } }
+        { id: '2', fields: { BidID: 'BID0007', DateSent: '2026-10-08T07:00:00Z', Phone1: 5550102000, Phone2: 5550102001 } },
+        { id: '999', fields: { BidID: 'BID7', DateSent: '2026-10-09T07:00:00Z' } }
       ],
       '@odata.nextLink': 'opaque-next-page'
     },
     {
       value: [
-        { id: '1', fields: { BOLNumber: 'kol0007', DateSent: '2026-10-07T07:00:00Z', Phone1: 5550102000 } }
+        { id: '1', fields: { BidID: 'bid0007', DateSent: '2026-10-07T07:00:00Z', Phone1: 5550102000 } }
       ]
     }
   ];
@@ -92,11 +92,11 @@ test('lookup uses a filtered paged read and preserves prefixed BOLs with leading
     return pages[calls.length - 1];
   });
 
-  const records = await context.getOperatorRateConfirmationsForBol('synthetic-token', 'KOL0007');
+  const records = await context.getOperatorRateConfirmationsForBidId('synthetic-token', 'BID0007');
   const query = new URL(calls[0].url).searchParams;
 
   assert.equal(calls.length, 2);
-  assert.equal(query.get('$filter'), "fields/BOLNumber eq 'KOL0007'");
+  assert.equal(query.get('$filter'), "fields/BidID eq 'BID0007'");
   assert.equal(query.get('$top'), '200');
   assert.match(query.get('$expand'), /RateText/);
   assert.equal(calls[0].headers.Prefer, 'HonorNonIndexedQueriesWarningMayFailRandomly');
@@ -104,9 +104,9 @@ test('lookup uses a filtered paged read and preserves prefixed BOLs with leading
   assert.deepEqual(Array.from(records, (record) => record.id), ['2', '1']);
 });
 
-test('lookup returns an empty history without treating it as an error', async () => {
+test('lookup returns an empty result without treating it as an error', async () => {
   const context = createContext();
-  const records = await context.getOperatorRateConfirmationsForBol('synthetic-token', 'ABC0000');
+  const records = await context.getOperatorRateConfirmationsForBidId('synthetic-token', 'BID0000');
   assert.equal(records.length, 0);
 });
 
@@ -115,7 +115,7 @@ test('upstream failure returns a modest isolated error without exposing Graph de
     app: { get(_path, _auth, handler) { context.handler = handler; } },
     requireLookupAccess: () => {},
     getGraphToken: async () => 'synthetic-token',
-    getOperatorRateConfirmationsForBol: async () => {
+    getOperatorRateConfirmationsForBidId: async () => {
       throw new Error('synthetic private Graph response');
     },
     console: { error() {} }
@@ -129,23 +129,26 @@ test('upstream failure returns a modest isolated error without exposing Graph de
     json(data) { this.data = data; return this; }
   };
 
-  await context.handler({ query: { bol: 'KOL0007' } }, response);
+  await context.handler({ query: { bidId: 'BID0007' } }, response);
 
   assert.equal(response.statusCode, 502);
   assert.equal(response.data.success, false);
-  assert.equal(response.data.error, 'Rate confirmation history is temporarily unavailable.');
+  assert.equal(response.data.error, 'Rate confirmation is temporarily unavailable.');
   assert.doesNotMatch(JSON.stringify(response.data), /private Graph/);
 });
 
 test('endpoint remains office-authenticated and is absent from mobile routes and payload builders', () => {
   assert.match(serverSource, /app\.get\('\/operator-rate-confirmations', requireLookupAccess/);
+  assert.match(serverSource, /req\.query\.bidId/);
+  assert.doesNotMatch(serverSource, /operator-rate-confirmations\?bol=/);
   assert.doesNotMatch(serverSource, /app\.get\('\/mobile\/operator-rate-confirmations'/);
   const mobileSection = serverSource.slice(serverSource.indexOf("app.post('/mobile/login'"));
   assert.doesNotMatch(mobileSection, /rateText|rateConfirmations|operator-rate-confirmations/i);
 });
 
-test('billing UI includes loading, empty, error, historical disclosure, wrapping, and theme-token styling', () => {
+test('billing UI reads by BidID and includes loading, empty, error, disclosure, wrapping, and theme styling', () => {
   assert.match(appSource, /Rate Confirmation/);
+  assert.match(appSource, /operator-rate-confirmations\?bidId=/);
   assert.match(appSource, /No rate confirmation text recorded for this order\./);
   assert.match(appSource, /historical provider-submission information/);
   assert.match(appSource, /<pre>\{record\.rateText/);

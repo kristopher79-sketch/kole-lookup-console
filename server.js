@@ -14058,13 +14058,13 @@ app.get('/order-notes', requireLookupAccess, async (req, res) => {
 
 app.get('/operator-rate-confirmations', requireLookupAccess, async (req, res) => {
   try {
-    const bol = String(req.query.bol || '').trim();
+    const bidId = String(req.query.bidId || '').trim();
     const token = await getGraphToken();
-    const records = await getOperatorRateConfirmationsForBol(token, bol);
+    const records = await getOperatorRateConfirmationsForBidId(token, bidId);
 
     res.json({
       success: true,
-      bol,
+      bidId,
       records
     });
   } catch (error) {
@@ -14074,7 +14074,7 @@ app.get('/operator-rate-confirmations', requireLookupAccess, async (req, res) =>
       success: false,
       error: statusCode === 400
         ? error.message
-        : 'Rate confirmation history is temporarily unavailable.'
+        : 'Rate confirmation is temporarily unavailable.'
     });
   }
 });
@@ -18234,7 +18234,7 @@ function cleanOperatorRateTextRecord(item) {
 
   return {
     id: cleanOperatorRateTextValue(item?.id),
-    bolNumber: cleanOperatorRateTextValue(fields.BOLNumber),
+    bidId: cleanOperatorRateTextValue(fields.BidID),
     driverName: cleanOperatorRateTextValue(fields.DriverName),
     rateText: cleanOperatorRateTextValue(fields.RateText),
     phone1: cleanOperatorRateTextValue(fields.Phone1),
@@ -18258,22 +18258,22 @@ function compareOperatorRateTextsNewestFirst(left, right) {
   });
 }
 
-async function getOperatorRateConfirmationsForBol(token, bol) {
-  const requestedBol = String(bol || '').trim();
-  if (!requestedBol) {
-    const error = new Error('A BOL number is required.');
+async function getOperatorRateConfirmationsForBidId(token, bidId) {
+  const requestedBidId = String(bidId || '').trim();
+  if (!requestedBidId) {
+    const error = new Error('A Bid ID is required.');
     error.statusCode = 400;
     throw error;
   }
-  if (requestedBol.length > 128 || /[\u0000-\u001f\u007f]/.test(requestedBol)) {
-    const error = new Error('The BOL number is invalid.');
+  if (requestedBidId.length > 128 || /[\u0000-\u001f\u007f]/.test(requestedBidId)) {
+    const error = new Error('The Bid ID is invalid.');
     error.statusCode = 400;
     throw error;
   }
 
   const listId = getOperatorRateTextsListId();
-  const fieldSelect = 'BOLNumber,DriverName,RateText,Phone1,Phone2,DateSent,SendStatus';
-  const filter = `fields/BOLNumber eq '${escapeODataString(requestedBol)}'`;
+  const fieldSelect = 'BidID,DriverName,RateText,Phone1,Phone2,DateSent,SendStatus';
+  const filter = `fields/BidID eq '${escapeODataString(requestedBidId)}'`;
   const query = new URLSearchParams({
     '$select': 'id',
     '$expand': `fields($select=${fieldSelect})`,
@@ -18291,10 +18291,10 @@ async function getOperatorRateConfirmationsForBol(token, bol) {
     url = data['@odata.nextLink'] || null;
   }
 
-  const requestedBolKey = normalizeBolKey(requestedBol);
+  const requestedBidIdKey = normalizeText(requestedBidId);
   return items
     .map(cleanOperatorRateTextRecord)
-    .filter((record) => normalizeBolKey(record.bolNumber) === requestedBolKey)
+    .filter((record) => normalizeText(record.bidId) === requestedBidIdKey)
     .sort(compareOperatorRateTextsNewestFirst);
 }
 
