@@ -2552,6 +2552,149 @@ tbody tr:hover {
 .detail-item.full {
   grid-column: 1 / -1;
 }
+
+.rate-confirmation-section {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 10px;
+  min-width: 0;
+}
+
+.rate-confirmation-state {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--kole-border);
+  border-radius: 12px;
+  background: var(--kole-surface-2);
+  color: var(--kole-muted);
+}
+
+.rate-confirmation-state.is-error {
+  border-color: var(--kole-danger);
+  background: var(--kole-danger-bg);
+  color: var(--kole-danger);
+}
+
+.rate-confirmation-record {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--kole-border);
+  border-radius: 14px;
+  background: var(--kole-surface-2);
+}
+
+.rate-confirmation-record summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 16px;
+  color: var(--kole-text);
+  cursor: pointer;
+}
+
+.rate-confirmation-record summary::-webkit-details-marker {
+  display: none;
+}
+
+.rate-confirmation-record summary::before {
+  content: '▸';
+  flex: 0 0 auto;
+  color: var(--kole-action);
+}
+
+.rate-confirmation-record[open] summary::before {
+  content: '▾';
+}
+
+.rate-confirmation-record summary > span:first-child {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 3px;
+  min-width: 0;
+}
+
+.rate-confirmation-record summary strong,
+.rate-confirmation-record summary small {
+  overflow-wrap: anywhere;
+}
+
+.rate-confirmation-record summary small,
+.rate-confirmation-status-note {
+  color: var(--kole-muted);
+}
+
+.rate-confirmation-summary-status {
+  flex: 0 1 auto;
+  max-width: 45%;
+  padding: 5px 9px;
+  border: 1px solid var(--kole-border-strong);
+  border-radius: 999px;
+  background: var(--kole-shell);
+  color: var(--kole-text-soft);
+  font-size: 12px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.rate-confirmation-record-body {
+  display: grid;
+  gap: 12px;
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--kole-border-subtle);
+}
+
+.rate-confirmation-meta {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0 0;
+}
+
+.rate-confirmation-meta div {
+  min-width: 0;
+}
+
+.rate-confirmation-meta dt,
+.rate-confirmation-message > span {
+  color: var(--kole-muted-subtle);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.rate-confirmation-meta dd {
+  margin: 4px 0 0;
+  color: var(--kole-text);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.rate-confirmation-message {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--kole-border-subtle);
+  border-radius: 10px;
+  background: var(--kole-shell);
+}
+
+.rate-confirmation-message pre {
+  max-width: 100%;
+  margin: 8px 0 0;
+  color: var(--kole-message-text);
+  font: inherit;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.rate-confirmation-status-note {
+  line-height: 1.4;
+}
+
 @media (max-width: 1000px) {
   .detail-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -2559,6 +2702,10 @@ tbody tr:hover {
 
   .detail-item.wide {
     grid-column: span 2;
+  }
+
+  .rate-confirmation-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -2745,6 +2892,20 @@ tbody tr:hover {
 
   .detail-item.wide {
     grid-column: span 1;
+  }
+
+  .rate-confirmation-record summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .rate-confirmation-summary-status {
+    max-width: 100%;
+    text-align: left;
+  }
+
+  .rate-confirmation-meta {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -117,6 +117,7 @@ const DEFAULT_SALES_LEADS_NOTES_LIST_NAME = 'Sales Leads Notes Log';
 const DEFAULT_SERVICE_LOCATIONS_LIST_NAME = 'Service Locations';
 const DEFAULT_SERVICE_LOCATION_NOTES_LIST_NAME = 'Service Location Notes';
 const DEFAULT_CHECK_IN_TIMES_LIST_NAME = 'Check In Times';
+const DEFAULT_OPERATOR_RATE_TEXTS_LIST_ID = 'b57c9a12-0896-4e0c-a00c-c26ea542e5f1';
 const ORDER_NOTES_DEFAULT_CACHE_MS = 60 * 1000;
 const ORDER_NOTE_MAX_LENGTH = 20000;
 const DEFAULT_CUSTOMER_BOOKING_TRENDS_LIST_ID = 'f899ef92-6489-43b1-9a9f-19c5f0ee83b9';
@@ -14055,6 +14056,29 @@ app.get('/order-notes', requireLookupAccess, async (req, res) => {
   }
 });
 
+app.get('/operator-rate-confirmations', requireLookupAccess, async (req, res) => {
+  try {
+    const bol = String(req.query.bol || '').trim();
+    const token = await getGraphToken();
+    const records = await getOperatorRateConfirmationsForBol(token, bol);
+
+    res.json({
+      success: true,
+      bol,
+      records
+    });
+  } catch (error) {
+    const statusCode = error?.statusCode === 400 ? 400 : 502;
+    if (statusCode !== 400) console.error('Operator rate confirmation retrieval failed.');
+    res.status(statusCode).json({
+      success: false,
+      error: statusCode === 400
+        ? error.message
+        : 'Rate confirmation history is temporarily unavailable.'
+    });
+  }
+});
+
 
 app.post('/order-notes', requireLookupAccess, async (req, res) => {
   try {
@@ -18195,6 +18219,83 @@ async function getIntelliTrackItems(token, listId) {
 
 function escapeODataString(value) {
   return String(value || '').replace(/'/g, "''");
+}
+
+function getOperatorRateTextsListId() {
+  return process.env.OPERATOR_RATE_TEXTS_LIST_ID || DEFAULT_OPERATOR_RATE_TEXTS_LIST_ID;
+}
+
+function cleanOperatorRateTextValue(value) {
+  return value === null || value === undefined ? '' : String(value);
+}
+
+function cleanOperatorRateTextRecord(item) {
+  const fields = item?.fields || {};
+
+  return {
+    id: cleanOperatorRateTextValue(item?.id),
+    bolNumber: cleanOperatorRateTextValue(fields.BOLNumber),
+    driverName: cleanOperatorRateTextValue(fields.DriverName),
+    rateText: cleanOperatorRateTextValue(fields.RateText),
+    phone1: cleanOperatorRateTextValue(fields.Phone1),
+    phone2: cleanOperatorRateTextValue(fields.Phone2),
+    dateSent: cleanOperatorRateTextValue(fields.DateSent),
+    sendStatus: cleanOperatorRateTextValue(fields.SendStatus)
+  };
+}
+
+function compareOperatorRateTextsNewestFirst(left, right) {
+  const leftDate = Date.parse(left.dateSent);
+  const rightDate = Date.parse(right.dateSent);
+  const safeLeftDate = Number.isFinite(leftDate) ? leftDate : 0;
+  const safeRightDate = Number.isFinite(rightDate) ? rightDate : 0;
+
+  if (safeLeftDate !== safeRightDate) return safeRightDate - safeLeftDate;
+
+  return String(right.id || '').localeCompare(String(left.id || ''), 'en-US', {
+    numeric: true,
+    sensitivity: 'base'
+  });
+}
+
+async function getOperatorRateConfirmationsForBol(token, bol) {
+  const requestedBol = String(bol || '').trim();
+  if (!requestedBol) {
+    const error = new Error('A BOL number is required.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (requestedBol.length > 128 || /[\u0000-\u001f\u007f]/.test(requestedBol)) {
+    const error = new Error('The BOL number is invalid.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const listId = getOperatorRateTextsListId();
+  const fieldSelect = 'BOLNumber,DriverName,RateText,Phone1,Phone2,DateSent,SendStatus';
+  const filter = `fields/BOLNumber eq '${escapeODataString(requestedBol)}'`;
+  const query = new URLSearchParams({
+    '$select': 'id',
+    '$expand': `fields($select=${fieldSelect})`,
+    '$filter': filter,
+    '$top': String(LIST_READ_PAGE_SIZE)
+  });
+  let url = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${encodeURIComponent(listId)}/items?${query.toString()}`;
+  const items = [];
+
+  while (url) {
+    const data = await graphGet(token, url, {
+      Prefer: 'HonorNonIndexedQueriesWarningMayFailRandomly'
+    });
+    items.push(...(data.value || []));
+    url = data['@odata.nextLink'] || null;
+  }
+
+  const requestedBolKey = normalizeBolKey(requestedBol);
+  return items
+    .map(cleanOperatorRateTextRecord)
+    .filter((record) => normalizeBolKey(record.bolNumber) === requestedBolKey)
+    .sort(compareOperatorRateTextsNewestFirst);
 }
 
 function getChoiceValue(value) {

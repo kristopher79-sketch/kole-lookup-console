@@ -145,6 +145,22 @@ function formatLoadPaperworkModified(value) {
   });
 }
 
+function formatRateConfirmationDate(value) {
+  if (!value) return '-';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+
+  return date.toLocaleString('en-US', {
+    timeZone: 'America/New_York',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+}
+
 function createSalesLeadTrackingPreferencesDraft(preferences = {}) {
   return {
     Email1: String(preferences.Email1 || ''),
@@ -1591,6 +1607,10 @@ export default function App() {
   const [hasSearched, setHasSearched] = useState(false);
   const [selected, setSelected] = useState(null);
   const [selectedView, setSelectedView] = useState('basic');
+  const [rateConfirmationsData, setRateConfirmationsData] = useState(null);
+  const [rateConfirmationsLoading, setRateConfirmationsLoading] = useState(false);
+  const [rateConfirmationsError, setRateConfirmationsError] = useState('');
+  const rateConfirmationsRequestRef = useRef(0);
   const [orderReturnTrailLabel, setOrderReturnTrailLabel] = useState('');
   const [orderDrilldownReturn, setOrderDrilldownReturn] = useState(null);
   const [statusFilter, setStatusFilter] = useState('All');
@@ -3541,6 +3561,7 @@ export default function App() {
     setSelected(null);
     setOrderReturnTrailLabel('');
     setOrderDrilldownReturn(null);
+    resetRateConfirmationState();
     setOrderNotesData(null);
     setOrderNotesLoading(false);
     setOrderNotesError('');
@@ -6102,6 +6123,62 @@ function getPositionStatusLabel(position) {
   if (Number(position?.speed || 0) > 0) return 'Moving';
   return 'Stopped';
 }
+  function resetRateConfirmationState() {
+    rateConfirmationsRequestRef.current += 1;
+    setRateConfirmationsData(null);
+    setRateConfirmationsLoading(false);
+    setRateConfirmationsError('');
+  }
+
+  async function loadRateConfirmations(record = selected, options = {}) {
+    const bol = String(record?.BOL || '').trim();
+    if (!options.force && rateConfirmationsData?.bol === bol) return;
+
+    const requestId = rateConfirmationsRequestRef.current + 1;
+    rateConfirmationsRequestRef.current = requestId;
+    setRateConfirmationsData(null);
+    setRateConfirmationsError('');
+
+    if (!bol) {
+      setRateConfirmationsData({ bol: '', records: [] });
+      setRateConfirmationsLoading(false);
+      return;
+    }
+
+    setRateConfirmationsLoading(true);
+
+    try {
+      const response = await authedFetch(
+        `${API}/operator-rate-confirmations?bol=${encodeURIComponent(bol)}`
+      );
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Rate confirmation history is temporarily unavailable.');
+      }
+      if (rateConfirmationsRequestRef.current !== requestId) return;
+
+      setRateConfirmationsData({
+        bol,
+        records: Array.isArray(data.records) ? data.records : []
+      });
+    } catch (error) {
+      if (rateConfirmationsRequestRef.current !== requestId) return;
+      setRateConfirmationsError(
+        error.message || 'Rate confirmation history is temporarily unavailable.'
+      );
+    } finally {
+      if (rateConfirmationsRequestRef.current === requestId) {
+        setRateConfirmationsLoading(false);
+      }
+    }
+  }
+
+  function openBillingTab() {
+    setSelectedView('billing');
+    void loadRateConfirmations(selected);
+  }
+
   function resetLoadPaperworkState() {
     loadPaperworkRequestRef.current += 1;
     loadPaperworkDragDepthRef.current = 0;
@@ -6371,6 +6448,7 @@ function getPositionStatusLabel(position) {
     setOrderReturnTrailLabel(returnLabel || '');
     if (!manualStampSavingRef.current) setManualStamp(null);
     setSelectedView(view);
+    resetRateConfirmationState();
     setOrderNotesData(null);
     setOrderNotesLoading(false);
     setOrderNotesError('');
@@ -6399,7 +6477,9 @@ function getPositionStatusLabel(position) {
 
       setSelected(data);
 
-      if (view === 'notes') {
+      if (view === 'billing') {
+        void loadRateConfirmations(data, { force: true });
+      } else if (view === 'notes') {
         loadOrderNotes(data);
       } else if (view === 'documents') {
         void loadLoadPaperwork(data);
@@ -6597,6 +6677,7 @@ function getPositionStatusLabel(position) {
     setOrderReturnTrailLabel('');
     setOrderDrilldownReturn(null);
     setDocumentError('');
+    resetRateConfirmationState();
     resetLoadPaperworkState();
     setOrderNotesData(null);
     setOrderNotesLoading(false);
@@ -11074,6 +11155,7 @@ function openReportLoadDetails(load) {
 
   function BillingView() {
     const driverPayDisplay = getDriverPayDisplay(selected);
+    const rateConfirmationRecords = rateConfirmationsData?.records || [];
 
     return (
       <div className="detail-grid">
@@ -11145,6 +11227,64 @@ function openReportLoadDetails(load) {
             {driverLookupLoading ? 'Looking up...' : 'View Driver Card'}
           </button>
         </DetailItem>
+
+        <SectionTitle>Rate Confirmation</SectionTitle>
+
+        <section className="rate-confirmation-section" aria-live="polite" aria-busy={rateConfirmationsLoading}>
+          {rateConfirmationsLoading && (
+            <p className="rate-confirmation-state">Loading rate confirmation history...</p>
+          )}
+
+          {!rateConfirmationsLoading && rateConfirmationsError && (
+            <p className="rate-confirmation-state is-error" role="status">
+              {rateConfirmationsError}
+            </p>
+          )}
+
+          {!rateConfirmationsLoading && !rateConfirmationsError && rateConfirmationRecords.length === 0 && (
+            <p className="rate-confirmation-state">
+              No rate confirmation text recorded for this order.
+            </p>
+          )}
+
+          {!rateConfirmationsLoading && !rateConfirmationsError && rateConfirmationRecords.map((record, index) => (
+            <details
+              className="rate-confirmation-record"
+              key={record.id || `${record.dateSent || 'undated'}-${index}`}
+              defaultOpen={index === 0}
+            >
+              <summary>
+                <span>
+                  <strong>{record.driverName || 'Operator not recorded'}</strong>
+                  <small>{formatRateConfirmationDate(record.dateSent)}</small>
+                </span>
+                <span className="rate-confirmation-summary-status">
+                  {record.sendStatus || 'Status not recorded'}
+                </span>
+              </summary>
+
+              <div className="rate-confirmation-record-body">
+                <dl className="rate-confirmation-meta">
+                  <div><dt>Driver / Operator</dt><dd>{record.driverName || '-'}</dd></div>
+                  <div><dt>Date Sent</dt><dd>{formatRateConfirmationDate(record.dateSent)}</dd></div>
+                  <div><dt>Phone 1</dt><dd>{record.phone1 || '-'}</dd></div>
+                  {String(record.phone2 || '').trim() && (
+                    <div><dt>Phone 2</dt><dd>{record.phone2}</dd></div>
+                  )}
+                  <div><dt>Recorded Send Status</dt><dd>{record.sendStatus || '-'}</dd></div>
+                </dl>
+
+                <div className="rate-confirmation-message">
+                  <span>Original SMS Message</span>
+                  <pre>{record.rateText || 'No SMS message recorded.'}</pre>
+                </div>
+                <small className="rate-confirmation-status-note">
+                  Send status is historical provider-submission information and does not confirm handset delivery.
+                </small>
+              </div>
+            </details>
+          ))}
+        </section>
       </div>
     );
   }
@@ -24272,7 +24412,7 @@ function openReportLoadDetails(load) {
 
                   <button
                     className={selectedView === 'billing' ? 'active-tab' : ''}
-                    onClick={() => setSelectedView('billing')}
+                    onClick={openBillingTab}
                   >
                     Billing Info
                   </button>
