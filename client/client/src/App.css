@@ -2607,6 +2607,10 @@ tbody tr:hover {
   content: '▾';
 }
 
+.rate-confirmation-record[open] summary {
+  justify-content: flex-start;
+}
+
 .rate-confirmation-record summary > span:first-child {
   display: grid;
   flex: 1 1 auto;
@@ -2619,8 +2623,7 @@ tbody tr:hover {
   overflow-wrap: anywhere;
 }
 
-.rate-confirmation-record summary small,
-.rate-confirmation-status-note {
+.rate-confirmation-record summary small {
   color: var(--kole-muted);
 }
 
@@ -2687,12 +2690,9 @@ tbody tr:hover {
   font: inherit;
   line-height: 1.5;
   overflow-wrap: anywhere;
+  text-align: left;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-.rate-confirmation-status-note {
-  line-height: 1.4;
 }
 
 @media (max-width: 1000px) {

@@ -161,6 +161,10 @@ function formatRateConfirmationDate(value) {
   });
 }
 
+function getRateConfirmationRecordKey(record, index) {
+  return String(record?.id || `${record?.dateSent || 'undated'}-${index}`);
+}
+
 function createSalesLeadTrackingPreferencesDraft(preferences = {}) {
   return {
     Email1: String(preferences.Email1 || ''),
@@ -1610,6 +1614,7 @@ export default function App() {
   const [rateConfirmationsData, setRateConfirmationsData] = useState(null);
   const [rateConfirmationsLoading, setRateConfirmationsLoading] = useState(false);
   const [rateConfirmationsError, setRateConfirmationsError] = useState('');
+  const [openRateConfirmationKeys, setOpenRateConfirmationKeys] = useState([]);
   const rateConfirmationsRequestRef = useRef(0);
   const [orderReturnTrailLabel, setOrderReturnTrailLabel] = useState('');
   const [orderDrilldownReturn, setOrderDrilldownReturn] = useState(null);
@@ -6128,6 +6133,7 @@ function getPositionStatusLabel(position) {
     setRateConfirmationsData(null);
     setRateConfirmationsLoading(false);
     setRateConfirmationsError('');
+    setOpenRateConfirmationKeys([]);
   }
 
   async function loadRateConfirmations(record = selected, options = {}) {
@@ -6142,6 +6148,7 @@ function getPositionStatusLabel(position) {
     if (!bidId) {
       setRateConfirmationsData({ bidId: '', records: [] });
       setRateConfirmationsLoading(false);
+      setOpenRateConfirmationKeys([]);
       return;
     }
 
@@ -6158,10 +6165,15 @@ function getPositionStatusLabel(position) {
       }
       if (rateConfirmationsRequestRef.current !== requestId) return;
 
+      const records = Array.isArray(data.records) ? data.records : [];
+
       setRateConfirmationsData({
         bidId,
-        records: Array.isArray(data.records) ? data.records : []
+        records
       });
+      setOpenRateConfirmationKeys(
+        records.length > 0 ? [getRateConfirmationRecordKey(records[0], 0)] : []
+      );
     } catch (error) {
       if (rateConfirmationsRequestRef.current !== requestId) return;
       setRateConfirmationsError(
@@ -6177,6 +6189,17 @@ function getPositionStatusLabel(position) {
   function openBillingTab() {
     setSelectedView('billing');
     void loadRateConfirmations(selected);
+  }
+
+  function handleRateConfirmationToggle(recordKey, isOpen) {
+    setOpenRateConfirmationKeys((currentKeys) => {
+      const isCurrentlyOpen = currentKeys.includes(recordKey);
+      if (isCurrentlyOpen === isOpen) return currentKeys;
+
+      return isOpen
+        ? [...currentKeys, recordKey]
+        : currentKeys.filter((key) => key !== recordKey);
+    });
   }
 
   function resetLoadPaperworkState() {
@@ -11247,43 +11270,50 @@ function openReportLoadDetails(load) {
             </p>
           )}
 
-          {!rateConfirmationsLoading && !rateConfirmationsError && rateConfirmationRecords.map((record, index) => (
-            <details
-              className="rate-confirmation-record"
-              key={record.id || `${record.dateSent || 'undated'}-${index}`}
-              defaultOpen={index === 0}
-            >
-              <summary>
-                <span>
-                  <strong>{record.driverName || 'Operator not recorded'}</strong>
-                  <small>{formatRateConfirmationDate(record.dateSent)}</small>
-                </span>
-                <span className="rate-confirmation-summary-status">
-                  {record.sendStatus || 'Status not recorded'}
-                </span>
-              </summary>
+          {!rateConfirmationsLoading && !rateConfirmationsError && rateConfirmationRecords.map((record, index) => {
+            const recordKey = getRateConfirmationRecordKey(record, index);
+            const isOpen = openRateConfirmationKeys.includes(recordKey);
 
-              <div className="rate-confirmation-record-body">
-                <dl className="rate-confirmation-meta">
-                  <div><dt>Driver / Operator</dt><dd>{record.driverName || '-'}</dd></div>
-                  <div><dt>Date Sent</dt><dd>{formatRateConfirmationDate(record.dateSent)}</dd></div>
-                  <div><dt>Phone 1</dt><dd>{record.phone1 || '-'}</dd></div>
-                  {String(record.phone2 || '').trim() && (
-                    <div><dt>Phone 2</dt><dd>{record.phone2}</dd></div>
+            return (
+              <details
+                className="rate-confirmation-record"
+                key={recordKey}
+                open={isOpen}
+                onToggle={(event) => handleRateConfirmationToggle(recordKey, event.currentTarget.open)}
+              >
+                <summary aria-label={`${isOpen ? 'Collapse' : 'Expand'} rate confirmation for ${record.driverName || 'operator not recorded'}`}>
+                  {!isOpen && (
+                    <>
+                      <span>
+                        <strong>{record.driverName || 'Operator not recorded'}</strong>
+                        <small>{formatRateConfirmationDate(record.dateSent)}</small>
+                      </span>
+                      <span className="rate-confirmation-summary-status">
+                        {record.sendStatus || 'Status not recorded'}
+                      </span>
+                    </>
                   )}
-                  <div><dt>Recorded Send Status</dt><dd>{record.sendStatus || '-'}</dd></div>
-                </dl>
+                </summary>
 
-                <div className="rate-confirmation-message">
-                  <span>Original SMS Message</span>
-                  <pre>{record.rateText || 'No SMS message recorded.'}</pre>
+                <div className="rate-confirmation-record-body">
+                  <dl className="rate-confirmation-meta">
+                    <div><dt>Driver / Operator</dt><dd>{record.driverName || '-'}</dd></div>
+                    <div><dt>Date Sent</dt><dd>{formatRateConfirmationDate(record.dateSent)}</dd></div>
+                    <div><dt>Phone 1</dt><dd>{record.phone1 || '-'}</dd></div>
+                    {String(record.phone2 || '').trim() && (
+                      <div><dt>Phone 2</dt><dd>{record.phone2}</dd></div>
+                    )}
+                    <div><dt>Recorded Send Status</dt><dd>{record.sendStatus || '-'}</dd></div>
+                  </dl>
+
+                  <div className="rate-confirmation-message">
+                    <span>Original SMS Message</span>
+                    <pre>{record.rateText || 'No SMS message recorded.'}</pre>
+                  </div>
                 </div>
-                <small className="rate-confirmation-status-note">
-                  Send status is historical provider-submission information and does not confirm handset delivery.
-                </small>
-              </div>
-            </details>
-          ))}
+              </details>
+            );
+          })}
         </section>
       </div>
     );
