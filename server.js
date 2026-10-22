@@ -64,6 +64,18 @@ const {
   createMobilePaperworkService,
   getMobilePaperworkErrorResponse
 } = require('./mobile-paperwork');
+const {
+  CUSTOMER_TRACKING_SESSION_MAX_AGE_SECONDS,
+  buildCustomerTrackingPayload,
+  createCustomerTrackingSessionToken,
+  getCustomerTrackingSessionCookie,
+  getTrackingPasskeyFingerprint,
+  normalizeTrackingPasskey,
+  serializeCustomerTrackingSessionClearCookie,
+  serializeCustomerTrackingSessionCookie,
+  trackingPasskeysMatch,
+  verifyCustomerTrackingSessionToken
+} = require('./customer-tracking');
 
 const app = express();
 app.use(cors());
@@ -18438,6 +18450,219 @@ function getIntelliTrackFieldSelect() {
   ].join(',');
 }
 
+function createCustomerTrackingError(message, statusCode = 500, code = 'tracking_unavailable') {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
+}
+
+function getCustomerTrackingPasskeyFieldName() {
+  const fieldName = String(process.env.KOLE_TRACK_PASSKEY_FIELD || 'Passkey').trim();
+
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(fieldName)) {
+    throw createCustomerTrackingError(
+      'KOLE Track passkey field configuration is invalid.',
+      503,
+      'tracking_configuration_error'
+    );
+  }
+
+  return fieldName;
+}
+
+function getCustomerTrackingSessionSecret() {
+  const secret = String(
+    process.env.KOLE_TRACK_SESSION_SECRET || process.env.MOBILE_SESSION_SECRET || ''
+  ).trim();
+
+  if (!secret) {
+    throw createCustomerTrackingError(
+      'KOLE Track session signing is not configured.',
+      503,
+      'tracking_configuration_error'
+    );
+  }
+
+  return secret;
+}
+
+function getCustomerTrackingFieldSelect() {
+  return [
+    'BOLNumber',
+    'TruckNumber',
+    'Origin',
+    'Destination',
+    'DisableTracking',
+    'CurrentLocation',
+    'BidListingID',
+    getCustomerTrackingPasskeyFieldName()
+  ].join(',');
+}
+
+function cleanCustomerTrackingRecord(item) {
+  const fields = item?.fields || {};
+
+  return {
+    id: String(item?.id || ''),
+    passkey: String(fields[getCustomerTrackingPasskeyFieldName()] || '').trim(),
+    bolNumber: String(fields.BOLNumber || '').trim(),
+    truckNumber: String(fields.TruckNumber || '').trim(),
+    origin: String(fields.Origin || '').trim(),
+    destination: String(fields.Destination || '').trim(),
+    currentLocation: String(fields.CurrentLocation || '').trim(),
+    bidListingId: String(fields.BidListingID || '').trim(),
+    disableTracking: parseBoolean(fields.DisableTracking)
+  };
+}
+
+async function getCustomerTrackingRecords(token) {
+  const listId = getKoleAutoUpdaterListId();
+  if (!listId) {
+    throw createCustomerTrackingError(
+      'KOLE Track records are not configured.',
+      503,
+      'tracking_configuration_error'
+    );
+  }
+
+  const result = await getAllListItemsWithFieldsResilient(
+    token,
+    listId,
+    getCustomerTrackingFieldSelect()
+  );
+
+  return result.items.map(cleanCustomerTrackingRecord);
+}
+
+async function findCustomerTrackingRecordByPasskey(token, passkey) {
+  const normalizedPasskey = normalizeTrackingPasskey(passkey);
+  if (!normalizedPasskey) return null;
+
+  const records = await getCustomerTrackingRecords(token);
+  return records.find((record) => trackingPasskeysMatch(record.passkey, normalizedPasskey)) || null;
+}
+
+async function getCustomerTrackingRecordById(token, recordId) {
+  const listId = getKoleAutoUpdaterListId();
+  const cleanRecordId = String(recordId || '').trim();
+  if (!listId || !cleanRecordId) return null;
+
+  const url =
+    `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}` +
+    `/lists/${encodeURIComponent(listId)}/items/${encodeURIComponent(cleanRecordId)}` +
+    `?$select=id,lastModifiedDateTime&$expand=fields($select=${getCustomerTrackingFieldSelect()})`;
+
+  try {
+    return cleanCustomerTrackingRecord(await graphGet(token, url));
+  } catch (error) {
+    if (/itemNotFound|not found|does not exist/i.test(String(error?.message || ''))) return null;
+    throw error;
+  }
+}
+
+async function getCustomerTrackingPosition(token, truckNumber) {
+  const listId = String(process.env.DRIVER_POSITIONS_LIST_ID || '').trim();
+  const truckKey = normalizeTruckKey(truckNumber);
+  if (!listId || !truckKey) return null;
+
+  const positionItems = await getDriverPositionItems(token, listId);
+  return positionItems
+    .map(cleanDriverPositionItem)
+    .filter((position) => normalizeTruckKey(position.equipmentId) === truckKey)
+    .sort(sortDriverPositions)[0] || null;
+}
+
+async function buildCustomerTrackingSnapshot(token, record) {
+  const bolKey = normalizeBolKey(record?.bolNumber);
+  const [position, evidenceSets] = await Promise.all([
+    getCustomerTrackingPosition(token, record?.truckNumber),
+    getUploadEvidenceSets(token)
+  ]);
+
+  return buildCustomerTrackingPayload({
+    record,
+    position,
+    hasPickupEvidence: Boolean(bolKey && evidenceSets.pickupEvidenceBols.has(bolKey)),
+    hasDeliveryEvidence: Boolean(bolKey && evidenceSets.deliveryEvidenceBols.has(bolKey)),
+    refreshAfterSeconds: Number(process.env.KOLE_TRACK_REFRESH_SECONDS || 60)
+  });
+}
+
+function isCustomerTrackingCookieSecure(req) {
+  return process.env.NODE_ENV === 'production' ||
+    String(req.headers['x-forwarded-proto'] || '').toLowerCase() === 'https';
+}
+
+function setCustomerTrackingSessionCookie(req, res, token) {
+  res.setHeader('Set-Cookie', serializeCustomerTrackingSessionCookie(token, {
+    secure: isCustomerTrackingCookieSecure(req),
+    maxAgeSeconds: CUSTOMER_TRACKING_SESSION_MAX_AGE_SECONDS
+  }));
+}
+
+function clearCustomerTrackingSessionCookie(req, res) {
+  res.setHeader('Set-Cookie', serializeCustomerTrackingSessionClearCookie({
+    secure: isCustomerTrackingCookieSecure(req)
+  }));
+}
+
+async function requireCustomerTrackingSession(req, res, next) {
+  try {
+    const sessionToken = getCustomerTrackingSessionCookie(req.headers.cookie);
+    if (!sessionToken) {
+      return res.status(401).json({
+        success: false,
+        code: 'tracking_session_required',
+        error: 'A valid shipment tracking link is required.'
+      });
+    }
+
+    let session;
+    try {
+      session = verifyCustomerTrackingSessionToken(
+        sessionToken,
+        getCustomerTrackingSessionSecret()
+      );
+    } catch {
+      clearCustomerTrackingSessionCookie(req, res);
+      return res.status(401).json({
+        success: false,
+        code: 'tracking_session_invalid',
+        error: 'This shipment tracking session is no longer valid.'
+      });
+    }
+
+    const graphToken = await getGraphToken();
+    const record = await getCustomerTrackingRecordById(graphToken, session.recordId);
+    const currentFingerprint = getTrackingPasskeyFingerprint(record?.passkey);
+
+    if (
+      !record ||
+      record.disableTracking ||
+      !currentFingerprint ||
+      currentFingerprint !== String(session.passkeyFingerprint || '')
+    ) {
+      clearCustomerTrackingSessionCookie(req, res);
+      return res.status(410).json({
+        success: false,
+        code: 'tracking_ended',
+        error: 'Tracking for this shipment has ended.'
+      });
+    }
+
+    req.customerTracking = { graphToken, record };
+    next();
+  } catch (error) {
+    console.error('Customer tracking session validation failed.');
+    res.status(error.statusCode || 503).json({
+      success: false,
+      code: error.code || 'tracking_unavailable',
+      error: 'KOLE Track is temporarily unavailable.'
+    });
+  }
+}
+
 function getIntelliTrackBidFieldSelect() {
   return [
     'BOLNumber_x0028_Won_x0029_',
@@ -18888,6 +19113,74 @@ app.get('/available-trucks', requireLookupAccess, withHeavyWorkload(async (req, 
     });
   }
 }));
+
+app.post('/api/v1/track/session', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+
+  try {
+    const passkey = normalizeTrackingPasskey(req.body?.token);
+    if (!passkey) {
+      return res.status(400).json({
+        success: false,
+        code: 'tracking_token_invalid',
+        error: 'This shipment tracking link is not valid.'
+      });
+    }
+
+    const graphToken = await getGraphToken();
+    const record = await findCustomerTrackingRecordByPasskey(graphToken, passkey);
+
+    if (!record) {
+      return res.status(401).json({
+        success: false,
+        code: 'tracking_token_invalid',
+        error: 'This shipment tracking link is not available.'
+      });
+    }
+
+    if (record.disableTracking) {
+      return res.status(410).json({
+        success: false,
+        code: 'tracking_ended',
+        error: 'Tracking for this shipment has ended.'
+      });
+    }
+
+    const sessionToken = createCustomerTrackingSessionToken(
+      record,
+      getCustomerTrackingSessionSecret()
+    );
+    setCustomerTrackingSessionCookie(req, res, sessionToken);
+    res.json(await buildCustomerTrackingSnapshot(graphToken, record));
+  } catch (error) {
+    console.error('Customer tracking token exchange failed.');
+    res.status(error.statusCode || 503).json({
+      success: false,
+      code: error.code || 'tracking_unavailable',
+      error: 'KOLE Track is temporarily unavailable.'
+    });
+  }
+});
+
+app.get('/api/v1/track/shipment', requireCustomerTrackingSession, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+
+  try {
+    res.json(await buildCustomerTrackingSnapshot(
+      req.customerTracking.graphToken,
+      req.customerTracking.record
+    ));
+  } catch {
+    console.error('Customer tracking snapshot failed.');
+    res.status(503).json({
+      success: false,
+      code: 'tracking_unavailable',
+      error: 'KOLE Track is temporarily unavailable.'
+    });
+  }
+});
 
 app.get('/tracking/intellitrack', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
