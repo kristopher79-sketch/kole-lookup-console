@@ -23971,8 +23971,9 @@ function getMobileHomeSelection(roster, items = [], uploadEvidenceSets = {}) {
       deliveryEvidenceBols: uploadEvidenceSets.deliveryEvidenceBols || new Set()
     }))
     .sort(compareMobileHomeLoads);
-  // Upload evidence advances Won loads in order: Pickup, then Delivery. A TONU
-  // leaves the driver's view as soon as either folder has the required BOL.
+  // Upload evidence advances the action shown for Won loads, but does not close
+  // them out. Won loads remain available until Processed or FinalSettleSent is
+  // set. A TONU leaves the driver's view once either folder has the required BOL.
   const activeLoads = loads.filter((load) => shouldKeepMobileLoadVisible(load));
 
   // TONU orders remain actionable until the cancelled BOL is logged. This must

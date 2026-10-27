@@ -91,9 +91,12 @@ function shouldKeepMobileLoadVisible(load = {}) {
 
   if (!isMobileLoadStatusEligible(normalized)) return false;
 
+  // Won loads remain available to the assigned driver after delivery photos
+  // arrive. Final settlement is the authoritative close-out boundary and is
+  // enforced by isMobileLoadEligibleForRoster before this visibility check.
   return normalized === 'tonu'
     ? !hasPickupEvidence && !hasDeliveryEvidence
-    : !hasDeliveryEvidence;
+    : true;
 }
 
 module.exports = {

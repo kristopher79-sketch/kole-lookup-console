@@ -22,10 +22,10 @@ test('TONU remains visible only until either upload type has evidence', () => {
   assert.equal(shouldKeepMobileLoadVisible({ status: 'TONU', hasDeliveryEvidence: true }), false);
 });
 
-test('Won loads continue to require Delivery evidence before leaving the mobile view', () => {
+test('Won loads remain visible after Delivery evidence until final settlement', () => {
   assert.equal(shouldKeepMobileLoadVisible({ status: 'Won' }), true);
   assert.equal(shouldKeepMobileLoadVisible({ status: 'Won', hasPickupEvidence: true }), true);
-  assert.equal(shouldKeepMobileLoadVisible({ status: 'Won', hasDeliveryEvidence: true }), false);
+  assert.equal(shouldKeepMobileLoadVisible({ status: 'Won', hasDeliveryEvidence: true }), true);
 });
 
 test('production load summaries use Status when applying upload visibility', () => {
@@ -44,6 +44,14 @@ test('production load summaries use Status when applying upload visibility', () 
       hasDeliveryEvidence: false
     }),
     false
+  );
+  assert.equal(
+    shouldKeepMobileLoadVisible({
+      Status: 'Won',
+      hasPickupEvidence: true,
+      hasDeliveryEvidence: true
+    }),
+    true
   );
 });
 
