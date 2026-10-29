@@ -12,6 +12,7 @@ const multer = require('multer');
 const webpush = require('web-push');
 const { createMemoryCacheBudget, runWithWorkloadSlot, mapSequentialSettled } = require('./server-memory');
 const { buildDriverRosterEditSchema, buildDriverRosterEditPatch, driverRosterEditError } = require('./driver-roster-edit');
+const { createPhotoLibraryService } = require('./photo-library-service');
 
 // Reuse native date formatters across rows and refreshes; bound future variants.
 const cachedDateFormatters = new Map();
@@ -297,6 +298,11 @@ function getHeavyWorkloadKind(req) {
       ['/quote-engine/recommendation', '/quote-engine/publish'].includes(req.path)) return 'quote';
   if (String(req.method || '').toUpperCase() !== 'GET') return '';
 
+  if (req.path === '/api/photo-library/models' || req.path === '/api/photo-library/hidden' ||
+      (req.path.endsWith('/photos') && req.path.startsWith('/api/photo-library/'))) {
+    return 'photo-library';
+  }
+
   if (['/search', '/bid-listing/no-bol', '/documents/loadphotos/by-bol', '/recruiting/snapshot',
     '/driver-roster/history', '/driver-roster/history-batch'].includes(req.path)) return 'history';
 
@@ -436,6 +442,41 @@ function requireLookupAccess(req, res, next) {
     });
   }
 
+  next();
+}
+
+function getPhotoCuratorTokenFromRequest(req) {
+  return String(req.headers['x-photo-curator-token'] || '').trim();
+}
+
+function photoCuratorTokensMatch(expected, supplied) {
+  const expectedBuffer = Buffer.from(String(expected || ''), 'utf8');
+  const suppliedBuffer = Buffer.from(String(supplied || ''), 'utf8');
+  return expectedBuffer.length > 0 && expectedBuffer.length === suppliedBuffer.length &&
+    crypto.timingSafeEqual(expectedBuffer, suppliedBuffer);
+}
+
+function hasPhotoCuratorAccess(req) {
+  const expectedToken = String(process.env.PHOTO_LIBRARY_CURATOR_TOKEN || '').trim();
+  return photoCuratorTokensMatch(expectedToken, getPhotoCuratorTokenFromRequest(req));
+}
+
+function requirePhotoCurator(req, res, next) {
+  const expectedToken = String(process.env.PHOTO_LIBRARY_CURATOR_TOKEN || '').trim();
+  if (!expectedToken) {
+    return res.status(503).json({
+      success: false,
+      code: 'PHOTO_CURATOR_NOT_CONFIGURED',
+      error: 'Photo Library curator access is not configured on the server.'
+    });
+  }
+  if (!hasPhotoCuratorAccess(req)) {
+    return res.status(403).json({
+      success: false,
+      code: 'PHOTO_CURATOR_FORBIDDEN',
+      error: 'Curator authorization is required for photo visibility changes.'
+    });
+  }
   next();
 }
 
@@ -12993,6 +13034,289 @@ app.patch('/recruiting/requirements/:id', requireLookupAccess, async (req, res) 
   } catch (error) {
     console.error(error);
     res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Unable to update qualification requirement.' });
+  }
+});
+
+const photoLibraryService = createPhotoLibraryService({
+  graphGet,
+  graphPatch,
+  graphPost,
+  getGraphToken,
+  getSiteId: () => process.env.KOLE_SHAREPOINT_SITE_ID || process.env.SITE_ID || '',
+  getListId: () => process.env.PHOTO_LIBRARY_LIST_ID || '4f05fa77-918f-4529-93ed-b633ddd7341d',
+  getOverridesListId: () => process.env.PHOTO_LIBRARY_OVERRIDES_LIST_ID || 'efbff622-9bd6-4221-b66b-75711f562f27',
+  getDriveId: () => process.env.DISPATCH_ONEDRIVE_ID || '',
+  getRootFolderId: getLoadPicturesFolderId
+});
+
+function sendPhotoLibraryError(res, error, fallbackMessage) {
+  const safeForClient = error?.safeForClient === true;
+  const statusCode = safeForClient ? Number(error?.statusCode) : 502;
+  return res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 502).json({
+    success: false,
+    code: safeForClient && error?.code ? error.code : 'PHOTO_LIBRARY_UPSTREAM_ERROR',
+    error: safeForClient ? error.message : fallbackMessage
+  });
+}
+
+function isPhotoLibraryClientDisconnect(req, res, error) {
+  return req.aborted || res.destroyed ||
+    error?.code === 'ERR_STREAM_PREMATURE_CLOSE' ||
+    error?.code === 'ERR_STREAM_UNABLE_TO_PIPE';
+}
+
+async function getPhotoLibraryContentResponse(token, reference) {
+  return fetchWithTimeoutAndRetry(
+    `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(reference.driveId)}` +
+      `/items/${encodeURIComponent(reference.itemId)}/content`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'image/*'
+      },
+      redirect: 'follow'
+    },
+    { maxRetries: GRAPH_READ_RETRIES }
+  );
+}
+
+async function getPhotoLibraryThumbnailResponse(token, reference) {
+  const thumbnailData = await graphGet(
+    token,
+    `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(reference.driveId)}` +
+      `/items/${encodeURIComponent(reference.itemId)}/thumbnails?$select=id,medium,large`
+  );
+  const thumbnailSet = thumbnailData.value?.[0];
+  const thumbnailUrl = thumbnailSet?.medium?.url || thumbnailSet?.large?.url;
+  if (!thumbnailUrl) {
+    const error = new Error('A thumbnail is not available for this photograph.');
+    error.statusCode = 404;
+    error.code = 'PHOTO_THUMBNAIL_NOT_AVAILABLE';
+    error.safeForClient = true;
+    throw error;
+  }
+  return fetchWithTimeoutAndRetry(
+    thumbnailUrl,
+    { headers: { Accept: 'image/*' }, redirect: 'follow' },
+    { maxRetries: GRAPH_READ_RETRIES }
+  );
+}
+
+async function streamPhotoLibraryImage(res, response, reference, cacheSeconds) {
+  if (!response.ok || !response.body) {
+    await response.arrayBuffer().catch(() => null);
+    const error = new Error('The photograph could not be retrieved.');
+    error.statusCode = response.status === 404 ? 404 : 502;
+    error.code = 'PHOTO_CONTENT_UNAVAILABLE';
+    error.safeForClient = true;
+    throw error;
+  }
+  const contentType = response.headers.get('content-type') || reference.mimeType;
+  if (!String(contentType).toLowerCase().startsWith('image/')) {
+    await response.arrayBuffer().catch(() => null);
+    const error = new Error('The requested file is not a supported image.');
+    error.statusCode = 415;
+    error.code = 'PHOTO_CONTENT_TYPE_UNSUPPORTED';
+    error.safeForClient = true;
+    throw error;
+  }
+  res.status(200);
+  res.set({
+    'Cache-Control': `private, max-age=${cacheSeconds}`,
+    'Content-Type': contentType,
+    'Content-Disposition': `inline; filename="${String(reference.name || 'photo').replace(/["\\\r\n]/g, '_')}"`,
+    'X-Content-Type-Options': 'nosniff',
+    Vary: 'X-Lookup-Token'
+  });
+  const contentLength = response.headers.get('content-length');
+  if (contentLength) res.set('Content-Length', contentLength);
+  await pipeline(Readable.fromWeb(response.body), res);
+}
+
+app.get('/api/photo-library/schema', requireLookupAccess, async (req, res) => {
+  try {
+    const schema = await photoLibraryService.getSchema({
+      forceRefresh: String(req.query.refresh || '').toLowerCase() === 'true'
+    });
+    return res.json({ success: true, schema });
+  } catch (error) {
+    console.error('Photo Library schema verification failed.', {
+      code: error?.code || 'PHOTO_LIBRARY_SCHEMA_FAILED'
+    });
+    return sendPhotoLibraryError(res, error, 'Unable to verify the Photo Library schema.');
+  }
+});
+
+app.get('/api/photo-library/models', requireLookupAccess, withHeavyWorkload(async (req, res) => {
+  try {
+    const result = await photoLibraryService.listModels();
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Photo Library model catalog failed.', {
+      code: error?.code || 'PHOTO_LIBRARY_MODELS_FAILED'
+    });
+    return sendPhotoLibraryError(res, error, 'Unable to load the Photo Library model catalog.');
+  }
+}));
+
+app.get('/api/photo-library/models/:model/photos', requireLookupAccess, withHeavyWorkload(async (req, res) => {
+  try {
+    const result = await photoLibraryService.listPhotoPage({
+      model: req.params.model,
+      cursor: req.query.cursor,
+      stage: req.query.stage,
+      search: req.query.search,
+      sort: req.query.sort,
+      shipmentLimit: req.query.shipmentLimit
+    });
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Photo Library model photographs failed.', {
+      code: error?.code || 'PHOTO_LIBRARY_MODEL_PHOTOS_FAILED'
+    });
+    return sendPhotoLibraryError(res, error, 'Unable to load model photographs.');
+  }
+}));
+
+app.get('/api/photo-library/categories/:category/photos', requireLookupAccess, withHeavyWorkload(async (req, res) => {
+  try {
+    const category = String(req.params.category || '').trim();
+    if (!['aircraft-engines', 'aircraft-parts', 'engine-stands', 'general-freight'].includes(category)) {
+      return res.status(400).json({
+        success: false,
+        code: 'PHOTO_LIBRARY_CATEGORY_INVALID',
+        error: 'That Photo Library category is invalid.'
+      });
+    }
+    const result = await photoLibraryService.listPhotoPage({
+      category,
+      cursor: req.query.cursor,
+      stage: req.query.stage,
+      search: req.query.search,
+      sort: req.query.sort,
+      shipmentLimit: req.query.shipmentLimit
+    });
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Photo Library category photographs failed.', {
+      code: error?.code || 'PHOTO_LIBRARY_CATEGORY_PHOTOS_FAILED'
+    });
+    return sendPhotoLibraryError(res, error, 'Unable to load category photographs.');
+  }
+}));
+
+app.get('/api/photo-library/diagnostics', requireLookupAccess, async (req, res) => {
+  try {
+    const schema = await photoLibraryService.getSchema();
+    const diagnostics = photoLibraryService.getDiagnostics();
+    return res.json({ success: true, schema, diagnostics });
+  } catch (error) {
+    return sendPhotoLibraryError(res, error, 'Unable to load Photo Library diagnostics.');
+  }
+});
+
+app.get('/api/photo-library/curator/auth-check', requireLookupAccess, requirePhotoCurator, (req, res) => {
+  res.json({ success: true, curator: true });
+});
+
+app.get('/api/photo-library/hidden', requireLookupAccess, requirePhotoCurator, withHeavyWorkload(async (req, res) => {
+  try {
+    const model = String(req.query.model || '').trim();
+    const category = String(req.query.category || '').trim();
+    if (Boolean(model) === Boolean(category)) {
+      return res.status(400).json({
+        success: false,
+        code: 'PHOTO_LIBRARY_HIDDEN_SCOPE_REQUIRED',
+        error: 'Select exactly one engine model or freight category for hidden-photo review.'
+      });
+    }
+    if (category && !['aircraft-engines', 'aircraft-parts', 'engine-stands', 'general-freight'].includes(category)) {
+      return res.status(400).json({
+        success: false,
+        code: 'PHOTO_LIBRARY_CATEGORY_INVALID',
+        error: 'That Photo Library category is invalid.'
+      });
+    }
+    const result = await photoLibraryService.listPhotoPage({
+      model,
+      category,
+      visibility: 'hidden',
+      cursor: req.query.cursor,
+      stage: req.query.stage,
+      search: req.query.search,
+      sort: req.query.sort,
+      shipmentLimit: req.query.shipmentLimit
+    });
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Hidden Photo Library review failed.', {
+      code: error?.code || 'PHOTO_LIBRARY_HIDDEN_FAILED'
+    });
+    return sendPhotoLibraryError(res, error, 'Unable to load hidden photographs.');
+  }
+}));
+
+app.post('/api/photo-library/photos/:photoId/hide', requireLookupAccess, requirePhotoCurator, async (req, res) => {
+  try {
+    const result = await photoLibraryService.setPhotoHidden(req.params.photoId, true);
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Photo Library hide failed.', { code: error?.code || 'PHOTO_LIBRARY_HIDE_FAILED' });
+    return sendPhotoLibraryError(res, error, 'Unable to hide that photograph.');
+  }
+});
+
+app.post('/api/photo-library/photos/:photoId/restore', requireLookupAccess, requirePhotoCurator, async (req, res) => {
+  try {
+    const result = await photoLibraryService.setPhotoHidden(req.params.photoId, false);
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Photo Library restore failed.', { code: error?.code || 'PHOTO_LIBRARY_RESTORE_FAILED' });
+    return sendPhotoLibraryError(res, error, 'Unable to restore that photograph.');
+  }
+});
+
+app.get('/api/photo-library/photos/:photoId/thumbnail', requireLookupAccess, async (req, res) => {
+  try {
+    const reference = photoLibraryService.getPhotoReference(req.params.photoId);
+    if (reference.hidden && !hasPhotoCuratorAccess(req)) {
+      return res.status(403).json({
+        success: false,
+        code: 'PHOTO_CURATOR_FORBIDDEN',
+        error: 'Curator authorization is required to load a hidden photograph.'
+      });
+    }
+    const token = await getGraphToken();
+    const response = await getPhotoLibraryThumbnailResponse(token, reference);
+    await streamPhotoLibraryImage(res, response, reference, 15 * 60);
+  } catch (error) {
+    if (res.headersSent || isPhotoLibraryClientDisconnect(req, res, error)) return;
+    console.error('Photo Library thumbnail retrieval failed.', {
+      code: error?.code || 'PHOTO_LIBRARY_THUMBNAIL_FAILED'
+    });
+    return sendPhotoLibraryError(res, error, 'Unable to retrieve the photograph thumbnail.');
+  }
+});
+
+app.get('/api/photo-library/photos/:photoId/content', requireLookupAccess, async (req, res) => {
+  try {
+    const reference = photoLibraryService.getPhotoReference(req.params.photoId);
+    if (reference.hidden && !hasPhotoCuratorAccess(req)) {
+      return res.status(403).json({
+        success: false,
+        code: 'PHOTO_CURATOR_FORBIDDEN',
+        error: 'Curator authorization is required to load a hidden photograph.'
+      });
+    }
+    const token = await getGraphToken();
+    const response = await getPhotoLibraryContentResponse(token, reference);
+    await streamPhotoLibraryImage(res, response, reference, 5 * 60);
+  } catch (error) {
+    if (res.headersSent || isPhotoLibraryClientDisconnect(req, res, error)) return;
+    console.error('Photo Library content retrieval failed.', {
+      code: error?.code || 'PHOTO_LIBRARY_CONTENT_FAILED'
+    });
+    return sendPhotoLibraryError(res, error, 'Unable to retrieve the photograph.');
   }
 });
 
