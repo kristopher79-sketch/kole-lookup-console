@@ -84,10 +84,13 @@ function normalizeEngineName(value) {
   const normalized = normalizeSearchValue(raw);
   if (UNKNOWN_ENGINE_VALUES.has(normalized)) return null;
 
-  const compact = normalized.replace(/\s+/g, '');
+  let compact = normalized.replace(/\s+/g, '');
   let display = raw;
   if (/^cfm\s*56$/i.test(raw)) display = 'CFM56';
-  else if (/^pw\s*1100/i.test(raw)) display = 'PW1100';
+  else if (/^pw\s*1100/i.test(raw) || /^neo$/i.test(raw)) {
+    display = 'PW1100';
+    compact = 'pw1100';
+  }
   else if (/^pw\s*1500/i.test(raw)) display = 'PW1500';
   else if (/^v\s*2500/i.test(raw)) display = 'V2500';
   else if (/^leap[\s-]*1[ab]$/i.test(raw)) display = `LEAP ${raw.match(/1[ab]/i)[0].toUpperCase()}`;
@@ -610,9 +613,12 @@ function createPhotoLibraryService(dependencies) {
       itemId: item.id,
       photoKey,
       bidId: shipment.bidId,
+      engineType: cleanText(shipment.engineName),
       hidden: hidden === true,
       name: cleanText(item.name),
       mimeType: cleanText(item.file?.mimeType) || 'application/octet-stream',
+      eTag: cleanText(item.eTag),
+      size: Number.isSafeInteger(item.size) ? item.size : null,
       expiresAt: Date.now() + PHOTO_REFERENCE_CACHE_MS
     });
     while (photoReferences.size > PHOTO_REFERENCE_CACHE_MAX) {
@@ -668,6 +674,69 @@ function createPhotoLibraryService(dependencies) {
       });
     }
     return { photos, diagnostics };
+  }
+
+  async function resolvePhotoRecords(records, options = {}) {
+    const configuration = getConfiguration();
+    const [catalog, overrides] = await Promise.all([
+      options.catalog || getCatalog({ forceRefresh: options.forceRefresh === true }),
+      options.overrides || getOverrides({ forceRefresh: options.forceRefresh === true })
+    ]);
+    const shipments = new Map(catalog.shipments.map((shipment) => [shipment.bidId, shipment]));
+    const token = await getGraphToken();
+    // Coalesce only within this read. Every later read checks current metadata.
+    const metadata = new Map();
+    async function getItem(itemId) {
+      if (!metadata.has(itemId)) metadata.set(itemId, graphGet(token,
+        `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(configuration.driveId)}` +
+        `/items/${encodeURIComponent(itemId)}?$select=id,name,size,eTag,file,folder,parentReference,photo,lastModifiedDateTime,deleted,remoteItem`
+      ));
+      return metadata.get(itemId);
+    }
+    const unique = [...new Map(records.map((record) => [record.photoKey, record])).values()];
+    const results = await mapWithConcurrency(unique, 4, async (record) => {
+      const diagnostic = (code) => ({ diagnostic: { code, bidId: cleanText(record.bidId) } });
+      const shipment = shipments.get(cleanText(record.bidId));
+      if (!shipment) return diagnostic('FAVORITE_SHIPMENT_UNAVAILABLE');
+      const parts = /^od1:([A-Za-z0-9_-]+):([A-Za-z0-9_-]+)$/.exec(cleanText(record.photoKey));
+      if (!parts) return diagnostic('FAVORITE_PHOTO_KEY_INVALID');
+      const driveId = Buffer.from(parts[1], 'base64url').toString('utf8');
+      const itemId = Buffer.from(parts[2], 'base64url').toString('utf8');
+      if (!itemId || driveId !== configuration.driveId || encodePhotoKey(driveId, itemId) !== record.photoKey) return diagnostic('FAVORITE_PHOTO_KEY_INVALID');
+      const hidden = isPhotoKeyHidden(overrides, record.photoKey);
+      if (options.visibility === 'hidden' ? !hidden : hidden) return diagnostic(hidden ? 'FAVORITE_PHOTO_HIDDEN' : 'FAVORITE_PHOTO_VISIBLE');
+      try {
+        const item = await getItem(itemId);
+        if (item.id !== itemId || item.deleted || item.remoteItem || !isSupportedImage(item)) return diagnostic('FAVORITE_PHOTO_UNAVAILABLE');
+        const ancestors = [];
+        const seen = new Set([itemId]);
+        let parent = item.parentReference;
+        while (parent?.id && parent.id !== configuration.rootFolderId) {
+          if (parent.driveId && parent.driveId !== configuration.driveId) return diagnostic('FAVORITE_PHOTO_OUTSIDE_LIBRARY');
+          if (seen.has(parent.id)) return diagnostic('FAVORITE_PHOTO_OUTSIDE_LIBRARY');
+          seen.add(parent.id);
+          const folder = await getItem(parent.id);
+          if (folder.id !== parent.id || !folder.folder || folder.deleted || folder.remoteItem) return diagnostic('FAVORITE_PHOTO_OUTSIDE_LIBRARY');
+          ancestors.push(folder);
+          parent = folder.parentReference;
+        }
+        if (parent?.id !== configuration.rootFolderId || (parent.driveId && parent.driveId !== configuration.driveId)) return diagnostic('FAVORITE_PHOTO_OUTSIDE_LIBRARY');
+        // Same supported library layout as ordinary discovery; only this file's
+        // own parents are checked, without listing any sibling folders or files.
+        if (ancestors.length !== 3 && !(ancestors.length === 4 && normalizeSearchValue(ancestors[3].name) === 'inactive')) return diagnostic('FAVORITE_PHOTO_LOCATION_CHANGED');
+        const stageName = normalizeSearchValue(ancestors[0].name);
+        const stage = stageName.includes('pickup') ? 'pickup' : stageName.includes('delivery') ? 'delivery' : '';
+        const bol = normalizeSearchValue(shipment.bol);
+        if (!stage || !bol || !normalizeSearchValue(ancestors[1].name).startsWith(bol)) return diagnostic('FAVORITE_PHOTO_LOCATION_CHANGED');
+        return { photo: mapPhoto(configuration, shipment, item, stage, record.photoKey, hidden) };
+      } catch {
+        return diagnostic('FAVORITE_PHOTO_UNAVAILABLE');
+      }
+    });
+    return {
+      items: results.filter((result) => result.photo).map((result) => result.photo),
+      diagnostics: results.filter((result) => result.diagnostic).map((result) => result.diagnostic)
+    };
   }
 
   async function listPhotoPage(options) {
@@ -847,6 +916,7 @@ function createPhotoLibraryService(dependencies) {
     getOverrides,
     listModels,
     listPhotoPage,
+    resolvePhotoRecords,
     getPhotoReference,
     setPhotoHidden,
     getDiagnostics,

@@ -12,7 +12,8 @@ const multer = require('multer');
 const webpush = require('web-push');
 const { createMemoryCacheBudget, runWithWorkloadSlot, mapSequentialSettled } = require('./server-memory');
 const { buildDriverRosterEditSchema, buildDriverRosterEditPatch, driverRosterEditError } = require('./driver-roster-edit');
-const { createPhotoLibraryService } = require('./photo-library-service');
+const { createPhotoLibraryService, normalizeEngineName } = require('./photo-library-service');
+const { createFavoritesService } = require('./favorites-service');
 
 // Reuse native date formatters across rows and refreshes; bound future variants.
 const cachedDateFormatters = new Map();
@@ -13049,6 +13050,15 @@ const photoLibraryService = createPhotoLibraryService({
   getRootFolderId: getLoadPicturesFolderId
 });
 
+const favoritesService = createFavoritesService({
+  graphGet,
+  getGraphToken,
+  getSiteId: () => process.env.KOLE_SHAREPOINT_SITE_ID || process.env.SITE_ID || '',
+  getListId: () => process.env.PHOTO_LIBRARY_FAVORITES_LIST_ID || '33db6af5-bb7b-48a4-a706-5a54bad6e697',
+  normalizeEngineName,
+  photoLibraryService
+});
+
 function sendPhotoLibraryError(res, error, fallbackMessage) {
   const safeForClient = error?.safeForClient === true;
   const statusCode = safeForClient ? Number(error?.statusCode) : 502;
@@ -13102,7 +13112,7 @@ async function getPhotoLibraryThumbnailResponse(token, reference) {
   );
 }
 
-async function streamPhotoLibraryImage(res, response, reference, cacheSeconds) {
+async function streamPhotoLibraryImage(res, response, reference, cacheSeconds, varyHeader = 'X-Lookup-Token') {
   if (!response.ok || !response.body) {
     await response.arrayBuffer().catch(() => null);
     const error = new Error('The photograph could not be retrieved.');
@@ -13126,7 +13136,7 @@ async function streamPhotoLibraryImage(res, response, reference, cacheSeconds) {
     'Content-Type': contentType,
     'Content-Disposition': `inline; filename="${String(reference.name || 'photo').replace(/["\\\r\n]/g, '_')}"`,
     'X-Content-Type-Options': 'nosniff',
-    Vary: 'X-Lookup-Token'
+    Vary: varyHeader
   });
   const contentLength = response.headers.get('content-length');
   if (contentLength) res.set('Content-Length', contentLength);
@@ -24546,6 +24556,100 @@ app.get('/mobile/me', requireMobileSession, async (req, res) => {
     }
   });
 });
+
+// ------------------------------------------------------------
+// GET /mobile/strapping-examples
+// ------------------------------------------------------------
+
+app.get('/mobile/strapping-examples', requireMobileSession, async (req, res) => {
+  try {
+    const requestedEngine = String(req.query?.engine || '').trim();
+    if (requestedEngine.length > 80) {
+      return res.status(400).json({
+        success: false,
+        error: 'The requested engine type is invalid.'
+      });
+    }
+
+    const engines = await favoritesService.listEngineOptions();
+    if (!requestedEngine) {
+      return res.json({ success: true, engines, selectedEngine: null, photos: [] });
+    }
+
+    const normalizedEngine = normalizeEngineName(requestedEngine);
+    const selectedEngine = engines.find((engine) => engine.id === normalizedEngine?.key);
+    if (!selectedEngine) {
+      return res.status(404).json({
+        success: false,
+        error: 'No strapping examples are available for that engine type.'
+      });
+    }
+
+    const result = await favoritesService.listPhotoPage({ model: selectedEngine.id });
+    const photos = result.items.map((photo) => ({
+      id: photo.id,
+      stage: photo.stage,
+      capturedAt: photo.capturedAt,
+      alt: photo.alt,
+      thumbnailUrl: `/mobile/strapping-examples/photos/${encodeURIComponent(photo.id)}/thumbnail`,
+      fullUrl: `/mobile/strapping-examples/photos/${encodeURIComponent(photo.id)}/content`
+    }));
+
+    return res.json({
+      success: true,
+      engines,
+      selectedEngine,
+      photos,
+      unavailableFavoriteCount: result.diagnostics.length
+    });
+  } catch (error) {
+    console.error('Mobile strapping examples failed.', {
+      code: error?.code || 'MOBILE_STRAPPING_EXAMPLES_FAILED'
+    });
+    return sendPhotoLibraryError(res, error, 'Unable to load strapping examples right now.');
+  }
+});
+
+async function sendMobileStrappingExampleImage(req, res, size) {
+  try {
+    const reference = photoLibraryService.getPhotoReference(req.params.photoId);
+    if (reference.hidden) {
+      return res.status(404).json({
+        success: false,
+        error: 'That strapping example is no longer available.'
+      });
+    }
+    const token = await getGraphToken();
+    const response = size === 'thumbnail'
+      ? await getPhotoLibraryThumbnailResponse(token, reference)
+      : await getPhotoLibraryContentResponse(token, reference);
+    await streamPhotoLibraryImage(
+      res,
+      response,
+      reference,
+      size === 'thumbnail' ? 15 * 60 : 5 * 60,
+      'Authorization'
+    );
+  } catch (error) {
+    if (res.headersSent || isPhotoLibraryClientDisconnect(req, res, error)) return;
+    console.error('Mobile strapping example image failed.', {
+      code: error?.code || 'MOBILE_STRAPPING_IMAGE_FAILED'
+    });
+    return sendPhotoLibraryError(res, error, 'Unable to retrieve that strapping example.');
+  }
+}
+
+app.get(
+  '/mobile/strapping-examples/photos/:photoId/thumbnail',
+  requireMobileSession,
+  (req, res) => sendMobileStrappingExampleImage(req, res, 'thumbnail')
+);
+
+app.get(
+  '/mobile/strapping-examples/photos/:photoId/content',
+  requireMobileSession,
+  (req, res) => sendMobileStrappingExampleImage(req, res, 'content')
+);
 
 // ------------------------------------------------------------
 // GET /mobile/home
