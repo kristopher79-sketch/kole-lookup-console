@@ -12471,6 +12471,10 @@ function buildRecruitingCandidatePatchFromBody(body = {}) {
 
       if (patch.CandidateStatus === RECRUITING_CANDIDATE_STATUS.ACTIVE_QUALIFICATION) {
         patch.QualificationStartedFlag = true;
+
+        if (cleanRecruitingString(body.currentStatus) === RECRUITING_CANDIDATE_STATUS.DORMANT) {
+          patch.LastContactDate = formatEasternDate();
+        }
       }
 
       if (patch.CandidateStatus !== RECRUITING_CANDIDATE_STATUS.DISQUALIFIED) {
@@ -12817,7 +12821,8 @@ app.patch('/recruiting/candidates/:candidateId', requireLookupAccess, async (req
     const patch = buildRecruitingCandidatePatchFromBody({
       ...req.body,
       currentFirstName: profile.candidate.firstName,
-      currentLastName: profile.candidate.lastName
+      currentLastName: profile.candidate.lastName,
+      currentStatus: profile.candidate.status
     });
 
     if (Object.keys(patch).length === 0) {

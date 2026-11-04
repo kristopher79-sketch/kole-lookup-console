@@ -49,6 +49,11 @@ test('normalizes historical engine spelling without turning unknown values into 
     display: 'CFM56',
     source: 'CFM 56'
   });
+  assert.deepEqual(normalizeEngineName('Neo'), {
+    key: 'pw1100',
+    display: 'PW1100',
+    source: 'Neo'
+  });
   assert.equal(normalizeEngineName('NA'), null);
   assert.equal(normalizeEngineName(' Unknown '), null);
 });
