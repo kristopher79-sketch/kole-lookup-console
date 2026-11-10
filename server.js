@@ -123,7 +123,10 @@ function configureMobileWebPush() {
 configureMobileWebPush();
 
 const ARCHIVE_YEAR_MIN = 2024;
-const ARCHIVE_YEAR_MAX = 2030;
+const SALES_LEAD_YEAR_MAX = 2030;
+const SALES_LEAD_YEARS = Object.freeze(
+  Array.from({ length: SALES_LEAD_YEAR_MAX - ARCHIVE_YEAR_MIN + 1 }, (_, index) => ARCHIVE_YEAR_MIN + index)
+);
 const DEFAULT_UPLOAD_DIGEST_LIST_ID = 'c9e907f9-cdac-4657-9da6-cc6ecfaa19a8';
 const DEFAULT_KOLE_AUTO_UPDATER_LIST_ID = 'fd5b0d2f-b0e7-4445-a36d-af753825a3ea';
 const DEFAULT_SALES_LEADS_LIST_ID = '86cc3352-fb75-421d-a5e4-4b16d011fd1e';
@@ -1484,9 +1487,154 @@ function getArchiveYear(displayName) {
 
   const year = Number(match[1]);
 
-  if (year < ARCHIVE_YEAR_MIN || year > ARCHIVE_YEAR_MAX) return null;
+  if (year < ARCHIVE_YEAR_MIN) return null;
 
   return year;
+}
+
+function getMaximumReportYear() {
+  return Math.max(ARCHIVE_YEAR_MIN, Number(getEasternParts().year || ARCHIVE_YEAR_MIN) + 1);
+}
+
+function getBidReportSourceListsFromLists(lists = [], requestedYears = []) {
+  const years = new Set(
+    (Array.isArray(requestedYears) ? requestedYears : [requestedYears])
+      .map(Number)
+      .filter(Number.isInteger)
+  );
+  const currentList = lists.find((list) => list.label === 'Bid Listing') || null;
+  const archives = lists
+    .filter((list) => list.label !== 'Bid Listing' && years.has(Number(list.year)))
+    .sort((a, b) => Number(a.year || 0) - Number(b.year || 0));
+
+  return [currentList, ...archives].filter(Boolean);
+}
+
+async function getBidReportSourceLists(token, requestedYears = []) {
+  const lists = await getSearchableBidLists(token);
+  return getBidReportSourceListsFromLists(lists, requestedYears);
+}
+
+function getBidReportItemSourceList(item, fallbackSourceList = null) {
+  return item?.KoleSourceList || item?.sourceList || fallbackSourceList || null;
+}
+
+function tagBidReportItem(item, sourceList) {
+  return {
+    ...item,
+    KoleSourceList: sourceList
+  };
+}
+
+function getBidReportDedupeKey(item) {
+  const record = item?.record || item || {};
+  const fields = record.fields || record;
+  const bidId = normalizeText(fields.BidID);
+  const bol = normalizeText(
+    fields.BOLNumber_x0028_Won_x0029_ ?? fields.BOL
+  );
+  const sourceList = getBidReportItemSourceList(item, getBidReportItemSourceList(record));
+  const sourceListId = String(sourceList?.listId || fields.SourceListId || '').trim();
+  const itemId = String(record.id || fields.id || '').trim();
+
+  if (bidId) return `bid:${bidId}`;
+  if (bol) return `bol:${bol}`;
+  return sourceListId && itemId ? `item:${sourceListId}:${itemId}` : '';
+}
+
+function isLiveBidReportItem(item) {
+  const record = item?.record || item || {};
+  const sourceList = getBidReportItemSourceList(item, getBidReportItemSourceList(record));
+  return sourceList?.label === 'Bid Listing';
+}
+
+function dedupeBidReportItems(items = []) {
+  const recordsByKey = new Map();
+  const unkeyed = [];
+  let duplicateRecordsRemoved = 0;
+
+  items.forEach((item) => {
+    const key = getBidReportDedupeKey(item);
+    if (!key) {
+      unkeyed.push(item);
+      return;
+    }
+
+    const existing = recordsByKey.get(key);
+    if (!existing) {
+      recordsByKey.set(key, item);
+      return;
+    }
+
+    duplicateRecordsRemoved += 1;
+    if (isLiveBidReportItem(item) && !isLiveBidReportItem(existing)) {
+      recordsByKey.set(key, item);
+    }
+  });
+
+  return {
+    items: [...recordsByKey.values(), ...unkeyed],
+    duplicateRecordsRemoved
+  };
+}
+
+function buildBidReportSourceSummary(sourceLists = [], requestedYear = '') {
+  return {
+    label: sourceLists.map((list) => list.label).join(', ') || 'Bid Listing',
+    year: requestedYear,
+    listId: sourceLists.length === 1 ? sourceLists[0].listId : '',
+    sources: sourceLists.map((list) => ({
+      label: list.label,
+      year: list.year,
+      listId: list.listId
+    }))
+  };
+}
+
+async function getBidReportItemsFromSources(token, sourceLists, fieldSelect) {
+  const settled = await mapSequentialSettled(sourceLists, async (sourceList) => {
+    const bundle = await getAllListItemsWithFieldsResilient(token, sourceList.listId, fieldSelect);
+    return {
+      sourceList,
+      items: (bundle.items || []).map((item) => tagBidReportItem(item, sourceList)),
+      usedFallback: bundle.usedFallback,
+      warning: bundle.warning
+    };
+  });
+  const fulfilledBundles = settled
+    .filter((result) => result.status === 'fulfilled')
+    .map((result) => result.value);
+  const failedLists = settled
+    .map((result, index) => ({ result, list: sourceLists[index] }))
+    .filter((entry) => entry.result.status === 'rejected')
+    .map((entry) => ({
+      SourceList: entry.list.label,
+      error: entry.result.reason?.message || 'Unknown Bid Listing source failure'
+    }));
+
+  if (fulfilledBundles.length === 0) {
+    const error = new Error(failedLists[0]?.error || 'Unable to load any Bid Listing report source.');
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const sourceWarnings = fulfilledBundles
+    .filter((bundle) => bundle.usedFallback)
+    .map((bundle) => ({
+      SourceList: bundle.sourceList.label,
+      warning: 'Selected field fetch failed for this source, so the server retried with full fields.',
+      detail: bundle.warning
+    }));
+  const scannedRecords = fulfilledBundles.reduce((sum, bundle) => sum + bundle.items.length, 0);
+  const deduped = dedupeBidReportItems(fulfilledBundles.flatMap((bundle) => bundle.items));
+
+  return {
+    items: deduped.items,
+    duplicateRecordsRemoved: deduped.duplicateRecordsRemoved,
+    scannedRecords,
+    sourceWarnings,
+    failedLists
+  };
 }
 
 async function getSearchableBidLists(token, forceRefresh = false) {
@@ -4187,10 +4335,10 @@ function getSalesLeadFieldSelect() {
     'SuppressionReason',
     'SuppressionDate',
     'FollowUpInitialized',
-    'Quotes2024', 'Quotes2025', 'Quotes2026', 'Quotes2027', 'Quotes2028', 'Quotes2029', 'Quotes2030',
-    'Wins2024', 'Wins2025', 'Wins2026', 'Wins2027', 'Wins2028', 'Wins2029', 'Wins2030',
-    'FirstQuote2024', 'FirstQuote2025', 'FirstQuote2026', 'FirstQuote2027', 'FirstQuote2028', 'FirstQuote2029', 'FirstQuote2030',
-    'LastQuote2024', 'LastQuote2025', 'LastQuote2026', 'LastQuote2027', 'LastQuote2028', 'LastQuote2029', 'LastQuote2030'
+    ...SALES_LEAD_YEARS.map((year) => `Quotes${year}`),
+    ...SALES_LEAD_YEARS.map((year) => `Wins${year}`),
+    ...SALES_LEAD_YEARS.map((year) => `FirstQuote${year}`),
+    ...SALES_LEAD_YEARS.map((year) => `LastQuote${year}`)
   ].join(',');
 }
 
@@ -5032,11 +5180,11 @@ function cleanSalesLeadItem(item) {
   const winRate = quoteCount > 0 ? quotesWon / quoteCount : 0;
 
   const currentYear = Number(formatEasternDate().slice(0, 4));
-  const archiveYears = [2024, 2025].filter((year) => year < currentYear);
+  const archiveYears = SALES_LEAD_YEARS.filter((year) => year < currentYear);
   const archiveQuoteTotal = archiveYears.reduce((sum, year) => sum + (Number(f[`Quotes${year}`] || 0) || 0), 0);
   const archiveWinTotal = archiveYears.reduce((sum, year) => sum + (Number(f[`Wins${year}`] || 0) || 0), 0);
 
-  const yearDetails = [2024, 2025, 2026, 2027, 2028, 2029, 2030].map((year) => {
+  const yearDetails = SALES_LEAD_YEARS.map((year) => {
     const isCurrentYear = year === currentYear;
     const quotes = isCurrentYear
       ? Math.max(0, quoteCount - archiveQuoteTotal)
@@ -5716,21 +5864,9 @@ function getDriverSummaryFieldSelect() {
   ].join(',');
 }
 
-async function getDriverSummarySourceList(token, requestedYear) {
-  const lists = await getSearchableBidLists(token);
-  const currentList = lists.find((list) => list.label === 'Bid Listing');
-  const currentEasternYear = getEasternParts().year;
-
-  if (Number(requestedYear) === currentEasternYear) {
-    return currentList || null;
-  }
-
-  return lists.find((list) => String(list.year) === String(requestedYear)) || null;
-}
-
 function buildDriverSummaryResponse(items, sourceList, year, month) {
   const targetItems = items
-    .map((item) => getDriverSummaryItem(item, sourceList))
+    .map((item) => getDriverSummaryItem(item, getBidReportItemSourceList(item, sourceList)))
     .filter((record) => {
       const pickup = getUtcYearMonth(record.PickupDate);
       if (!pickup) return false;
@@ -5911,10 +6047,9 @@ function isDateInRecruitingSnapshotWindow(value, windowDef) {
 
 function getRecruitingSnapshotSourceLists(allLists, windowDef) {
   const years = getRecruitingSnapshotWindowYears(windowDef);
-  const currentEasternYear = getEasternParts().year;
 
   return (allLists || []).filter((list) => {
-    if (list.label === 'Bid Listing') return years.has(currentEasternYear);
+    if (list.label === 'Bid Listing') return true;
     const year = Number(list.year);
     return years.has(year);
   });
@@ -6308,9 +6443,11 @@ async function getRecruitingSnapshotReportPayload(options = {}) {
     return items;
   });
 
-  const successfulItems = settled
+  const successfulItemsRaw = settled
     .filter((result) => result.status === 'fulfilled')
     .flatMap((result) => result.value);
+  const dedupedItems = dedupeBidReportItems(successfulItemsRaw);
+  const successfulItems = dedupedItems.items;
 
   const listWarnings = settled
     .map((result, index) => ({ result, list: sourceLists[index] }))
@@ -6336,6 +6473,7 @@ async function getRecruitingSnapshotReportPayload(options = {}) {
 
   return {
     ...report,
+    duplicateRecordsRemoved: dedupedItems.duplicateRecordsRemoved,
     warnings: [...(report.warnings || []), ...listWarnings]
   };
 }
@@ -7149,9 +7287,11 @@ function buildMonthlyOperationsStory(summary, sections = {}) {
   return story;
 }
 
-function buildMonthlyOperationsSummaryResponse({ bidItems, availableItems, noAvailabilityRows, sourceList, year, month, sourceWarnings = [], failedLists = [] }) {
+function buildMonthlyOperationsSummaryResponse({ bidItems, availableItems, noAvailabilityRows, sourceList, year, month, sourceWarnings = [], failedLists = [], duplicateRecordsRemoved = 0 }) {
   const window = getReportMonthWindow(year, month);
-  const bidRecords = bidItems.map((item) => cleanMonthlyOperationsBidItem(item, sourceList));
+  const bidRecords = bidItems.map((item) => (
+    cleanMonthlyOperationsBidItem(item, getBidReportItemSourceList(item, sourceList))
+  ));
   const offerRows = bidRecords.filter((record) => isDateKeyInReportWindow(record.SolicitDate, window));
   const bookedLoads = bidRecords
     .filter((record) => isDateKeyInReportWindow(record.PickupDate, window))
@@ -7236,6 +7376,7 @@ function buildMonthlyOperationsSummaryResponse({ bidItems, availableItems, noAva
       availableTrucks: availableItems.length,
       noAvailability: noAvailabilityRows.length
     },
+    duplicateRecordsRemoved,
     sourceWarnings,
     failedLists
   };
@@ -7243,7 +7384,7 @@ function buildMonthlyOperationsSummaryResponse({ bidItems, availableItems, noAva
 
 async function getMonthlyOperationsSummaryPayload(monthValue, yearValue) {
   const month = parseReportInteger(monthValue, 'month', 1, 12);
-  const year = parseReportInteger(yearValue, 'year', ARCHIVE_YEAR_MIN, ARCHIVE_YEAR_MAX);
+  const year = parseReportInteger(yearValue, 'year', ARCHIVE_YEAR_MIN, getMaximumReportYear());
   const lockStatus = getDriverSummaryLockStatus(year, month);
 
   if (!lockStatus.isUnlocked) {
@@ -7262,19 +7403,20 @@ async function getMonthlyOperationsSummaryPayload(monthValue, yearValue) {
   }
 
   const token = await getGraphToken();
-  const sourceList = await getDriverSummarySourceList(token, year);
+  const sourceLists = await getBidReportSourceLists(token, [year]);
 
-  if (!sourceList) {
+  if (sourceLists.length === 0) {
     const notFoundError = new Error(`No Bid Listing source list was found for ${year}.`);
     notFoundError.statusCode = 404;
     throw notFoundError;
   }
+  const sourceList = buildBidReportSourceSummary(sourceLists, year);
 
   const sourceWarnings = [];
   const failedLists = [];
 
   const [bidBundle, availableResult, noAvailabilityResult] = await mapSequentialSettled([
-    () => getAllListItemsWithFieldsResilient(token, sourceList.listId, getMonthlyOperationsBidFieldSelect()),
+    () => getBidReportItemsFromSources(token, sourceLists, getMonthlyOperationsBidFieldSelect()),
     () => getAllListItemsWithFieldsResilient(token, getAvailableTrucksSingleLineListId(), getMonthlyOperationsAvailableFieldSelect()),
     () => mapSequentialSettled(getNoAvailabilitySources(), (source) => (
       getAllListItemsWithFields(token, source.listId, getNoAvailabilityFieldSelect(), {
@@ -7289,13 +7431,8 @@ async function getMonthlyOperationsSummaryPayload(monthValue, yearValue) {
     throw error;
   }
 
-  if (bidBundle.value.usedFallback) {
-    sourceWarnings.push({
-      SourceList: sourceList.label,
-      warning: 'Selected field fetch failed for Bid Listing, so the server retried with full fields.',
-      detail: bidBundle.value.warning
-    });
-  }
+  sourceWarnings.push(...(bidBundle.value.sourceWarnings || []));
+  failedLists.push(...(bidBundle.value.failedLists || []));
 
   let availableItems = [];
   if (availableResult.status === 'fulfilled') {
@@ -7344,7 +7481,8 @@ async function getMonthlyOperationsSummaryPayload(monthValue, yearValue) {
     year,
     month,
     sourceWarnings,
-    failedLists
+    failedLists,
+    duplicateRecordsRemoved: bidBundle.value.duplicateRecordsRemoved || 0
   });
 }
 
@@ -8086,7 +8224,7 @@ function buildGrossRevenueTotalsResponse(items, sourceList, year, rosterByTruck 
   }
 
   const targetItems = items
-    .map((item) => getGrossRevenueReportItem(item, sourceList))
+    .map((item) => getGrossRevenueReportItem(item, getBidReportItemSourceList(item, sourceList)))
     .filter((record) => {
       const pickup = getUtcYearMonth(record.PickupDate);
       if (!pickup) return false;
@@ -8470,7 +8608,7 @@ function getRevenueProjectionLoads(items = [], sourceList = {}, year) {
   const selectedYear = Number(year);
 
   return (items || [])
-    .map((item) => getGrossRevenueReportItem(item, sourceList))
+    .map((item) => getGrossRevenueReportItem(item, getBidReportItemSourceList(item, sourceList)))
     .map((load) => {
       const pickup = getProjectionDateYearMonth(load.PickupDate);
       const deliveryDate = normalizeProjectionDateOnly(load.DeliveryDate) || pickup?.date || '';
@@ -11675,12 +11813,17 @@ function isExcludedActiveNoRevenueSettlementRosterRow(roster) {
   );
 }
 
-function buildActiveDriversWithNoSettlementRevenue(rosterItems = [], mainRecords = [], suggestRecords = []) {
+function buildActiveDriversWithNoSettlementRevenue(rosterItems = [], mainRecords = [], suggestRecords = [], cutoffDate = '') {
   const mainRevenueKeys = buildSettlementRevenueKeySet(mainRecords);
   const suggestRevenueKeys = buildSettlementRevenueKeySet(suggestRecords);
+  const normalizedCutoffDate = normalizeEasternDateOnly(cutoffDate);
 
   return rosterItems
     .filter((roster) => normalizeText(roster.status) === 'active')
+    .filter((roster) => {
+      const startDate = normalizeEasternDateOnly(roster.startDate);
+      return !normalizedCutoffDate || !startDate || startDate <= normalizedCutoffDate;
+    })
     .filter((roster) => !isExcludedActiveNoRevenueSettlementRosterRow(roster))
     .map((roster) => {
       const matchKeys = getRosterRevenueMatchKeys(roster);
@@ -11758,7 +11901,12 @@ const payrollDate = getPayrollDatePartsFromCutoff(cutoff);
     .filter((record) => parseBoolean(record.Processed))
     .filter((record) => record.SubmittedComparable === null).length;
 
-  const activeDriversWithoutMainRevenue = buildActiveDriversWithNoSettlementRevenue(activeRosterItems, main, suggest);
+  const activeDriversWithoutMainRevenue = buildActiveDriversWithNoSettlementRevenue(
+    activeRosterItems,
+    main,
+    suggest,
+    cutoff.raw
+  );
 
   return {
     success: true,
@@ -15812,26 +15960,34 @@ app.get('/reports/won-not-registered', requireLookupAccess, withHeavyWorkload(as
 
 app.get('/reports/yearly-revenue-projection', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
-    const year = parseReportInteger(req.query.year || getEasternParts().year, 'year', 2024, 2030);
+    const year = parseReportInteger(req.query.year || getEasternParts().year, 'year', ARCHIVE_YEAR_MIN, getMaximumReportYear());
     const token = await getGraphToken();
-    const sourceList = await getDriverSummarySourceList(token, year);
+    const sourceLists = await getBidReportSourceLists(token, [year]);
 
-    if (!sourceList) {
+    if (sourceLists.length === 0) {
       return res.status(404).json({
         success: false,
         error: `No Bid Listing source list was found for ${year}.`
       });
     }
+    const sourceList = buildBidReportSourceSummary(sourceLists, year);
 
-    const [items, rosterItems, driverTimeOffResult] = await Promise.all([
-      getAllListItemsWithFields(token, sourceList.listId, getGrossRevenueFieldSelect()),
+    const [bidBundle, rosterItems, driverTimeOffResult] = await Promise.all([
+      getBidReportItemsFromSources(token, sourceLists, getGrossRevenueFieldSelect()),
       getDriverRosterItems(token),
       getDriverTimeOffListId()
         ? getDriverTimeOffRows(token).catch((error) => ({ rows: [], warning: error.message || 'Driver Time Off could not be loaded.' }))
         : Promise.resolve({ rows: [], warning: 'DRIVER_TIME_OFF_LOG_LIST_ID is not configured.' })
     ]);
 
-    res.json(buildYearlyRevenueProjectionResponse(items, sourceList, year, rosterItems, driverTimeOffResult));
+    res.json({
+      ...buildYearlyRevenueProjectionResponse(bidBundle.items, sourceList, year, rosterItems, driverTimeOffResult),
+      sourceLists: sourceList.sources,
+      sourceRecordsScanned: bidBundle.scannedRecords,
+      duplicateRecordsRemoved: bidBundle.duplicateRecordsRemoved,
+      sourceWarnings: bidBundle.sourceWarnings,
+      failedLists: bidBundle.failedLists
+    });
   } catch (error) {
     console.error(error);
 
@@ -15845,26 +16001,30 @@ app.get('/reports/yearly-revenue-projection', requireLookupAccess, withHeavyWork
 
 app.get('/reports/gross-revenue-totals', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
-    const year = parseReportInteger(req.query.year || getEasternParts().year, 'year', 2024, 2030);
+    const year = parseReportInteger(req.query.year || getEasternParts().year, 'year', ARCHIVE_YEAR_MIN, getMaximumReportYear());
     const token = await getGraphToken();
-    const sourceList = await getDriverSummarySourceList(token, year);
+    const sourceLists = await getBidReportSourceLists(token, [year]);
 
-    if (!sourceList) {
+    if (sourceLists.length === 0) {
       return res.status(404).json({
         success: false,
         error: `No Bid Listing source list was found for ${year}.`
       });
     }
+    const sourceList = buildBidReportSourceSummary(sourceLists, year);
 
-    const items = await getAllListItemsWithFields(
-      token,
-      sourceList.listId,
-      getGrossRevenueFieldSelect()
-    );
+    const bidBundle = await getBidReportItemsFromSources(token, sourceLists, getGrossRevenueFieldSelect());
 
     const rosterByTruck = await getDriverRosterByTruck(token);
 
-    res.json(buildGrossRevenueTotalsResponse(items, sourceList, year, rosterByTruck));
+    res.json({
+      ...buildGrossRevenueTotalsResponse(bidBundle.items, sourceList, year, rosterByTruck),
+      sourceLists: sourceList.sources,
+      sourceRecordsScanned: bidBundle.scannedRecords,
+      duplicateRecordsRemoved: bidBundle.duplicateRecordsRemoved,
+      sourceWarnings: bidBundle.sourceWarnings,
+      failedLists: bidBundle.failedLists
+    });
   } catch (error) {
     console.error(error);
 
@@ -16896,7 +17056,7 @@ app.get('/reports/sales-activity/pdf', requireLookupAccess, withHeavyWorkload(as
 
 async function getDriverSummaryReportPayload(monthValue, yearValue) {
   const month = parseReportInteger(monthValue, 'month', 1, 12);
-  const year = parseReportInteger(yearValue, 'year', 2024, 2030);
+  const year = parseReportInteger(yearValue, 'year', ARCHIVE_YEAR_MIN, getMaximumReportYear());
   const lockStatus = getDriverSummaryLockStatus(year, month);
 
   if (!lockStatus.isUnlocked) {
@@ -16915,20 +17075,28 @@ async function getDriverSummaryReportPayload(monthValue, yearValue) {
   }
 
   const token = await getGraphToken();
-  const sourceList = await getDriverSummarySourceList(token, year);
+  const sourceLists = await getBidReportSourceLists(token, [year]);
 
-  if (!sourceList) {
+  if (sourceLists.length === 0) {
     const notFoundError = new Error(`No Bid Listing source list was found for ${year}.`);
     notFoundError.statusCode = 404;
     throw notFoundError;
   }
-
-  const items = await getAllListItemsWithFields(
+  const sourceList = buildBidReportSourceSummary(sourceLists, year);
+  const bidBundle = await getBidReportItemsFromSources(
     token,
-    sourceList.listId
+    sourceLists,
+    getDriverSummaryFieldSelect()
   );
 
-  return buildDriverSummaryResponse(items, sourceList, year, month);
+  return {
+    ...buildDriverSummaryResponse(bidBundle.items, sourceList, year, month),
+    sourceLists: sourceList.sources,
+    sourceRecordsScanned: bidBundle.scannedRecords,
+    duplicateRecordsRemoved: bidBundle.duplicateRecordsRemoved,
+    sourceWarnings: bidBundle.sourceWarnings,
+    failedLists: bidBundle.failedLists
+  };
 }
 
 app.get('/reports/driver-summary', requireLookupAccess, withHeavyWorkload(async (req, res) => {
@@ -20022,7 +20190,7 @@ app.get('/reports/no-availability/pdf', requireLookupAccess, withHeavyWorkload(a
     const yearParam = String(req.query.year || 'all').trim().toLowerCase();
     const selectedYear = yearParam === 'all'
       ? 'all'
-      : parseReportInteger(yearParam, 'year', ARCHIVE_YEAR_MIN, ARCHIVE_YEAR_MAX);
+      : parseReportInteger(yearParam, 'year', ARCHIVE_YEAR_MIN, getMaximumReportYear());
     const sources = getNoAvailabilitySources();
 
     if (sources.length === 0) {
@@ -20072,7 +20240,7 @@ app.get('/reports/no-availability', requireLookupAccess, withHeavyWorkload(async
     const yearParam = String(req.query.year || 'all').trim().toLowerCase();
     const selectedYear = yearParam === 'all'
       ? 'all'
-      : parseReportInteger(yearParam, 'year', ARCHIVE_YEAR_MIN, ARCHIVE_YEAR_MAX);
+      : parseReportInteger(yearParam, 'year', ARCHIVE_YEAR_MIN, getMaximumReportYear());
     const sources = getNoAvailabilitySources();
 
     if (sources.length === 0) {
@@ -20134,7 +20302,7 @@ app.get('/reports/no-availability', requireLookupAccess, withHeavyWorkload(async
 app.get('/reports/customer-booking-trends', requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
     const throughMonth = parseReportInteger(req.query.month, 'month', 1, 12);
-    const throughYear = parseReportInteger(req.query.year, 'year', ARCHIVE_YEAR_MIN, ARCHIVE_YEAR_MAX);
+    const throughYear = parseReportInteger(req.query.year, 'year', ARCHIVE_YEAR_MIN, getMaximumReportYear());
     const lockStatus = getCustomerTrendReportLockStatus(throughYear, throughMonth);
 
     if (!lockStatus.isUnlocked) {
@@ -20150,21 +20318,9 @@ app.get('/reports/customer-booking-trends', requireLookupAccess, withHeavyWorklo
     }
 
     const token = await getGraphToken();
-    const allLists = await getSearchableBidLists(token);
-    const currentList = allLists.find((list) => list.label === 'Bid Listing') || null;
-    const currentEasternYear = getEasternParts().year;
-    const sourceLists = [];
-
-    for (let year = ARCHIVE_YEAR_MIN; year <= throughYear; year += 1) {
-      const archiveSource = allLists.find((list) => String(list.year) === String(year));
-      const yearSource = Number(year) === Number(currentEasternYear)
-        ? (currentList || archiveSource)
-        : archiveSource;
-
-      if (yearSource) {
-        sourceLists.push(yearSource);
-      }
-    }
+    const reportYears = [];
+    for (let year = ARCHIVE_YEAR_MIN; year <= throughYear; year += 1) reportYears.push(year);
+    const sourceLists = await getBidReportSourceLists(token, reportYears);
 
     if (sourceLists.length === 0) {
       return res.status(404).json({
@@ -20173,45 +20329,17 @@ app.get('/reports/customer-booking-trends', requireLookupAccess, withHeavyWorklo
       });
     }
 
-    const settled = await mapSequentialSettled(sourceLists, async (sourceList) => {
-      const bundle = await getAllListItemsWithFieldsResilient(
-        token,
-        sourceList.listId,
-        getCustomerBookingTrendsSourceFieldSelect(),
-        { mapItem: (item) => getCustomerBookingTrendRecordFromBidItem(item, sourceList) }
-      );
-
-      return {
-        sourceList,
-        items: bundle.items,
-        usedFallback: bundle.usedFallback,
-        warning: bundle.warning
-      };
-    });
-
-    const fulfilledBundles = settled
-      .filter((result) => result.status === 'fulfilled')
-      .map((result) => result.value);
-
-    const successfulItems = fulfilledBundles.flatMap((bundle) => bundle.items);
-
-    const sourceWarnings = fulfilledBundles
-      .filter((bundle) => bundle.usedFallback)
-      .map((bundle) => ({
-        SourceList: bundle.sourceList.label,
-        warning: 'Selected field fetch failed for this source, so the server retried with full fields.',
-        detail: bundle.warning
-      }));
-
-    const failedLists = settled
-      .map((result, index) => ({ result, list: sourceLists[index] }))
-      .filter((entry) => entry.result.status === 'rejected')
-      .map((entry) => ({
-        SourceList: entry.list.label,
-        error: entry.result.reason?.message || 'Unknown customer trend list failure'
-      }));
-
-    const trendRecords = successfulItems.filter(Boolean);
+    const bidBundle = await getBidReportItemsFromSources(
+      token,
+      sourceLists,
+      getCustomerBookingTrendsSourceFieldSelect()
+    );
+    const trendRecords = bidBundle.items
+      .map((item) => getCustomerBookingTrendRecordFromBidItem(
+        item,
+        getBidReportItemSourceList(item)
+      ))
+      .filter(Boolean);
 
     const report = buildCustomerBookingTrendsResponse(trendRecords, throughYear, throughMonth);
 
@@ -20219,9 +20347,10 @@ app.get('/reports/customer-booking-trends', requireLookupAccess, withHeavyWorklo
       ...report,
       source: 'Bid Listing + archives',
       sourceLists: sourceLists.map((list) => ({ label: list.label, year: list.year, listId: list.listId })),
-      sourceRecordsScanned: successfulItems.length,
-      sourceWarnings,
-      failedLists
+      sourceRecordsScanned: bidBundle.scannedRecords,
+      duplicateRecordsRemoved: bidBundle.duplicateRecordsRemoved,
+      sourceWarnings: bidBundle.sourceWarnings,
+      failedLists: bidBundle.failedLists
     });
   } catch (error) {
     console.error(error);

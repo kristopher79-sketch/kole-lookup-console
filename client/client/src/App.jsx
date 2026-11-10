@@ -1478,18 +1478,14 @@ async function openExternalLink(url) {
 }
 
 
-function getDefaultSettlementCutoffDate() {
-  const today = new Date();
-  const day = today.getDay(); // Sunday = 0, Thursday = 4
+function getDefaultSettlementCutoffDate(date = new Date()) {
+  const today = new Date(`${getEasternDateInputValue(date)}T00:00:00Z`);
+  const day = today.getUTCDay(); // Sunday = 0, Thursday = 4
   const diffToMostRecentThursday = day >= 4 ? day - 4 : day + 3;
   const cutoff = new Date(today);
-  cutoff.setDate(today.getDate() - diffToMostRecentThursday);
+  cutoff.setUTCDate(today.getUTCDate() - diffToMostRecentThursday);
 
-  return [
-    cutoff.getFullYear(),
-    String(cutoff.getMonth() + 1).padStart(2, '0'),
-    String(cutoff.getDate()).padStart(2, '0')
-  ].join('-');
+  return cutoff.toISOString().slice(0, 10);
 }
 
 
@@ -1500,6 +1496,21 @@ function getEasternDateInputValue(date = new Date()) {
     month: '2-digit',
     day: '2-digit'
   }).format(date);
+}
+
+function getEasternYearMonth(date = new Date()) {
+  const [year, month] = getEasternDateInputValue(date).split('-').map(Number);
+  return { year, month };
+}
+
+function getPreviousEasternYearMonth(date = new Date()) {
+  const current = getEasternYearMonth(date);
+  const previous = new Date(Date.UTC(current.year, current.month - 2, 1));
+
+  return {
+    year: previous.getUTCFullYear(),
+    month: previous.getUTCMonth() + 1
+  };
 }
 
 function addDaysToDateInput(dateValue, days) {
@@ -1725,19 +1736,15 @@ export default function App() {
   const [driverHistoryError, setDriverHistoryError] = useState('');
   const [sortField, setSortField] = useState('');
   const [sortDirection, setSortDirection] = useState('asc');
-  const initialReportDate = useMemo(() => {
-    const date = new Date();
-    date.setMonth(date.getMonth() - 1);
-    return date;
-  }, []);
-  const [reportMonth, setReportMonth] = useState(() => initialReportDate.getMonth() + 1);
-  const [reportYear, setReportYear] = useState(() => initialReportDate.getFullYear());
-  const [grossRevenueYear, setGrossRevenueYear] = useState(() => new Date().getFullYear());
+  const initialReportPeriod = useMemo(() => getPreviousEasternYearMonth(), []);
+  const [reportMonth, setReportMonth] = useState(() => initialReportPeriod.month);
+  const [reportYear, setReportYear] = useState(() => initialReportPeriod.year);
+  const [grossRevenueYear, setGrossRevenueYear] = useState(() => getEasternYearMonth().year);
   const [grossRevenueReport, setGrossRevenueReport] = useState(null);
   const [grossRevenueLoading, setGrossRevenueLoading] = useState(false);
   const [grossRevenueError, setGrossRevenueError] = useState(null);
   const [grossRevenueModalOpen, setGrossRevenueModalOpen] = useState(false);
-  const [yearlyProjectionYear, setYearlyProjectionYear] = useState(() => new Date().getFullYear());
+  const [yearlyProjectionYear, setYearlyProjectionYear] = useState(() => getEasternYearMonth().year);
   const [yearlyProjectionReport, setYearlyProjectionReport] = useState(null);
   const [yearlyProjectionLoading, setYearlyProjectionLoading] = useState(false);
   const [yearlyProjectionError, setYearlyProjectionError] = useState(null);
@@ -1756,8 +1763,8 @@ export default function App() {
   const [driverSummaryModalOpen, setDriverSummaryModalOpen] = useState(false);
   const [driverSummaryPdfLoading, setDriverSummaryPdfLoading] = useState(false);
   const [driverSummaryPdfError, setDriverSummaryPdfError] = useState('');
-  const [monthlyOpsMonth, setMonthlyOpsMonth] = useState(() => initialReportDate.getMonth() + 1);
-  const [monthlyOpsYear, setMonthlyOpsYear] = useState(() => initialReportDate.getFullYear());
+  const [monthlyOpsMonth, setMonthlyOpsMonth] = useState(() => initialReportPeriod.month);
+  const [monthlyOpsYear, setMonthlyOpsYear] = useState(() => initialReportPeriod.year);
   const [monthlyOpsReport, setMonthlyOpsReport] = useState(null);
   const [monthlyOpsLoading, setMonthlyOpsLoading] = useState(false);
   const [monthlyOpsError, setMonthlyOpsError] = useState(null);
@@ -1822,7 +1829,7 @@ export default function App() {
   const [operationalNotesTypeFilter, setOperationalNotesTypeFilter] = useState('Dispatch');
   const [operationalNotesOpenOrderKey, setOperationalNotesOpenOrderKey] = useState('');
   const [operationalNotesOpenOrderError, setOperationalNotesOpenOrderError] = useState('');
-  const [noAvailabilityYear, setNoAvailabilityYear] = useState(() => String(new Date().getFullYear()));
+  const [noAvailabilityYear, setNoAvailabilityYear] = useState(() => String(getEasternYearMonth().year));
   const [noAvailabilityReport, setNoAvailabilityReport] = useState(null);
   const [noAvailabilityLoading, setNoAvailabilityLoading] = useState(false);
   const [noAvailabilityError, setNoAvailabilityError] = useState(null);
@@ -1842,7 +1849,7 @@ export default function App() {
   const [serviceLocationSaving, setServiceLocationSaving] = useState(false);
   const [serviceLocationActionMessage, setServiceLocationActionMessage] = useState('');
   const [serviceLocationActionError, setServiceLocationActionError] = useState('');
-  const [driverTimeOffYear, setDriverTimeOffYear] = useState(() => new Date().getFullYear());
+  const [driverTimeOffYear, setDriverTimeOffYear] = useState(() => getEasternYearMonth().year);
   const [driverTimeOffReport, setDriverTimeOffReport] = useState(null);
   const [driverTimeOffLoading, setDriverTimeOffLoading] = useState(false);
   const [driverTimeOffError, setDriverTimeOffError] = useState(null);
@@ -1883,8 +1890,8 @@ export default function App() {
   const [salesActivityPdfError, setSalesActivityPdfError] = useState('');
   const [driverTimeOffPdfLoading, setDriverTimeOffPdfLoading] = useState(false);
   const [driverTimeOffPdfError, setDriverTimeOffPdfError] = useState('');
-  const [customerTrendMonth, setCustomerTrendMonth] = useState(() => initialReportDate.getMonth() + 1);
-  const [customerTrendYear, setCustomerTrendYear] = useState(() => initialReportDate.getFullYear());
+  const [customerTrendMonth, setCustomerTrendMonth] = useState(() => initialReportPeriod.month);
+  const [customerTrendYear, setCustomerTrendYear] = useState(() => initialReportPeriod.year);
   const [customerTrendReport, setCustomerTrendReport] = useState(null);
   const [customerTrendModalOpen, setCustomerTrendModalOpen] = useState(false);
   const [customerTrendLoading, setCustomerTrendLoading] = useState(false);
@@ -6839,7 +6846,7 @@ function getPositionStatusLabel(position) {
   }
 
   function getReportYears() {
-    const currentYear = new Date().getFullYear();
+    const currentYear = getEasternYearMonth().year;
     const years = [];
 
     for (let year = currentYear; year >= 2024; year -= 1) {
@@ -6851,14 +6858,14 @@ function getPositionStatusLabel(position) {
 
 
   function getDefaultGrossRevenueQuarter(reportYear) {
-    const currentDate = new Date();
-    const currentYear = currentDate.getFullYear();
+    const currentDate = getEasternYearMonth();
+    const currentYear = currentDate.year;
 
     if (Number(reportYear) !== currentYear) {
       return 'Q1';
     }
 
-    return `Q${Math.floor(currentDate.getMonth() / 3) + 1}`;
+    return `Q${Math.floor((currentDate.month - 1) / 3) + 1}`;
   }
 
   function toggleGrossRevenueQuarter(quarterLabel) {
@@ -8374,7 +8381,7 @@ function getPositionStatusLabel(position) {
     setDriverTimeOffModalOpen(false);
 
     try {
-      const reportYearToLoad = Number(options.yearOverride || driverTimeOffYear || new Date().getFullYear());
+      const reportYearToLoad = Number(options.yearOverride || driverTimeOffYear || getEasternYearMonth().year);
       const params = new URLSearchParams({ year: String(reportYearToLoad) });
       const res = await authedFetch(`${API}/reports/driver-time-off?${params.toString()}`);
       const data = await res.json().catch(() => ({}));
@@ -8400,7 +8407,7 @@ function getPositionStatusLabel(position) {
   }
 
   async function openFutureTimeOffQuickReport() {
-    const currentYear = String(new Date().getFullYear());
+    const currentYear = String(getEasternYearMonth().year);
     setDriverTimeOffYear(Number(currentYear));
     await loadDriverTimeOffReport({ yearOverride: currentYear });
   }
@@ -11591,6 +11598,29 @@ function openReportLoadDetails(load) {
     return null;
   }
 
+  function ReportSourceHealth({ report }) {
+    const sourceWarnings = report?.sourceWarnings || [];
+    const failedLists = report?.failedLists || [];
+
+    if (sourceWarnings.length === 0 && failedLists.length === 0) return null;
+
+    return (
+      <div className="report-alert warning" role="status">
+        <h4>Some report sources needed attention.</h4>
+        {sourceWarnings.map((entry, index) => (
+          <p key={`source-warning-${entry.SourceList || 'source'}-${index}`}>
+            {entry.SourceList || 'Bid Listing'}: {entry.warning || entry.detail || 'The source was loaded with a fallback.'}
+          </p>
+        ))}
+        {failedLists.map((entry, index) => (
+          <p key={`source-failure-${entry.SourceList || 'source'}-${index}`}>
+            {entry.SourceList || 'Bid Listing'}: {entry.error || 'The source could not be loaded.'}
+          </p>
+        ))}
+      </div>
+    );
+  }
+
   function GrossRevenueTotalsPreview() {
     if (!grossRevenueReport) return null;
 
@@ -11624,6 +11654,7 @@ function openReportLoadDetails(load) {
         <div className="driver-report-generated">
           Generated: {grossRevenueReport.generatedAt}
         </div>
+        <ReportSourceHealth report={grossRevenueReport} />
 
         <div className={`report-kpi-grid gross-revenue-kpi-grid ${isCurrentGrossRevenueYear ? 'has-current-month' : ''}`}>
           {isCurrentGrossRevenueYear && (
@@ -12214,6 +12245,7 @@ function openReportLoadDetails(load) {
     return (
       <div className="driver-report-preview modal-report-preview yearly-projection-preview">
         <RosterReportStaleNotice report={yearlyProjectionReport} />
+        <ReportSourceHealth report={yearlyProjectionReport} />
         <div className="yearly-projection-hero">
           <div>
             <span>Projected Annual Revenue</span>
@@ -12509,6 +12541,7 @@ function openReportLoadDetails(load) {
         <div className="driver-report-generated">
           Generated: {driverSummaryReport.generatedAt}
         </div>
+        <ReportSourceHealth report={driverSummaryReport} />
 
         <div className="report-kpi-grid">
           <div className="report-kpi-card">
