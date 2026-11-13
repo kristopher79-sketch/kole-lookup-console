@@ -11657,13 +11657,6 @@ function openReportLoadDetails(load) {
         <ReportSourceHealth report={grossRevenueReport} />
 
         <div className={`report-kpi-grid gross-revenue-kpi-grid ${isCurrentGrossRevenueYear ? 'has-current-month' : ''}`}>
-          {isCurrentGrossRevenueYear && (
-            <div className="report-kpi-card gross-revenue-current-month-card">
-              <span>Current Month Revenue</span>
-              <strong>{formatReportMoney(currentMonthRevenue)}</strong>
-              <small>{currentMonth?.name || 'Current Month'} · {formatReportNumber(currentMonthLoadCount)} load{currentMonthLoadCount === 1 ? '' : 's'}</small>
-            </div>
-          )}
           <div className="report-kpi-card">
             <span>Gross Revenue</span>
             <strong>{formatReportMoney(grossRevenueReport.totals?.totalGrossRevenue)}</strong>
@@ -11673,11 +11666,18 @@ function openReportLoadDetails(load) {
             <strong>{formatReportNumber(grossRevenueReport.totals?.loadCount)}</strong>
           </div>
           <div className="report-kpi-card">
-            <span>Permits/Escorts Excluded</span>
-            <strong>{formatReportMoney(grossRevenueReport.totals?.totalPermitEscortExcluded)}</strong>
+            <span>Admin Fees</span>
+            <strong>{formatReportMoney(grossRevenueReport.totals?.totalAdminFees)}</strong>
           </div>
+          {isCurrentGrossRevenueYear && (
+            <div className="report-kpi-card gross-revenue-current-month-card">
+              <span>Current Month Revenue</span>
+              <strong>{formatReportMoney(currentMonthRevenue)}</strong>
+              <small>{currentMonth?.name || 'Current Month'} · {formatReportNumber(currentMonthLoadCount)} load{currentMonthLoadCount === 1 ? '' : 's'}</small>
+            </div>
+          )}
           <div className="report-kpi-card">
-            <span>Avg Rev / Month</span>
+            <span>Avg Per Month</span>
             <strong>{formatReportMoney(grossRevenueReport.totals?.averageActiveMonthRevenue ?? grossRevenueReport.totals?.averageMonthlyRevenue)}</strong>
             <small>{formatReportNumber(grossRevenueReport.totals?.monthsElapsed || 12)} month basis</small>
           </div>

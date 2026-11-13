@@ -1593,7 +1593,8 @@ function buildBidReportSourceSummary(sourceLists = [], requestedYear = '') {
 
 async function getBidReportItemsFromSources(token, sourceLists, fieldSelect) {
   const settled = await mapSequentialSettled(sourceLists, async (sourceList) => {
-    const bundle = await getAllListItemsWithFieldsResilient(token, sourceList.listId, fieldSelect);
+    const selectedFields = typeof fieldSelect === 'function' ? fieldSelect(sourceList) : fieldSelect;
+    const bundle = await getAllListItemsWithFieldsResilient(token, sourceList.listId, selectedFields);
     return {
       sourceList,
       items: (bundle.items || []).map((item) => tagBidReportItem(item, sourceList)),
@@ -8142,8 +8143,8 @@ function buildNoAvailabilityResponse(rawRows, options = {}) {
   };
 }
 
-function getGrossRevenueFieldSelect() {
-  return [
+function getGrossRevenueFieldSelect(includeAdminFee = false) {
+  const fields = [
     'BOLNumber_x0028_Won_x0029_',
     'BidID',
     'Company',
@@ -8156,7 +8157,11 @@ function getGrossRevenueFieldSelect() {
     'Quoted_x0020_Total',
     'FinalBillableTotal',
     'Permits_x002f_Escort_x0020_Fees_'
-  ].join(',');
+  ];
+
+  if (includeAdminFee) fields.push('AdminFee');
+
+  return fields.join(',');
 }
 
 function getGrossRevenueReportItem(item, sourceList) {
@@ -8165,6 +8170,7 @@ function getGrossRevenueReportItem(item, sourceList) {
   const operatorTeam = getChoiceValue(f.Operator_x002f_Team || f['Operator_x002f_Team/Value'] || '');
   const customer = getChoiceValue(f.Company || f['Company/Value'] || '');
   const quotedTotal = getNumberValue(f.Quoted_x0020_Total);
+  const adminFees = getNumberValue(f.AdminFee);
   const permitsEscortFees = getNumberValue(f.Permits_x002f_Escort_x0020_Fees_);
   const grossRevenue = Math.max(0, quotedTotal - permitsEscortFees);
 
@@ -8182,6 +8188,7 @@ function getGrossRevenueReportItem(item, sourceList) {
     DeliveryDate: f.Expected_x0020_Delivery_x0020_Da || '',
     PickupDateDisplay: formatShortDate(f.Pickup_x0020_Offer_x0020_Date),
     QuotedTotal: quotedTotal,
+    AdminFees: adminFees,
     PermitsEscortFees: permitsEscortFees,
     GrossRevenue: grossRevenue
   };
@@ -8215,6 +8222,7 @@ function buildGrossRevenueTotalsResponse(items, sourceList, year, rosterByTruck 
         monthLoadCounts: makeEmptyMonthlyMap(),
         totalGrossRevenue: 0,
         loadCount: 0,
+        adminFeeTotal: 0,
         permitEscortTotal: 0,
         loads: []
       });
@@ -8252,6 +8260,7 @@ function buildGrossRevenueTotalsResponse(items, sourceList, year, rosterByTruck 
     group.monthTotals[pickup.month] += load.GrossRevenue;
     group.monthLoadCounts[pickup.month] += 1;
     group.totalGrossRevenue += load.GrossRevenue;
+    group.adminFeeTotal += load.AdminFees;
     group.permitEscortTotal += load.PermitsEscortFees;
     group.loadCount += 1;
     group.loads.push(load);
@@ -8275,6 +8284,7 @@ function buildGrossRevenueTotalsResponse(items, sourceList, year, rosterByTruck 
   const monthlyTotals = Object.fromEntries(monthKeys.map((month) => [month.month, 0]));
   const monthlyLoadCounts = Object.fromEntries(monthKeys.map((month) => [month.month, 0]));
   let totalGrossRevenue = 0;
+  let totalAdminFees = 0;
   let totalPermitEscortExcluded = 0;
   let totalLoadCount = 0;
 
@@ -8285,6 +8295,7 @@ function buildGrossRevenueTotalsResponse(items, sourceList, year, rosterByTruck 
     });
 
     totalGrossRevenue += truck.totalGrossRevenue;
+    totalAdminFees += truck.adminFeeTotal;
     totalPermitEscortExcluded += truck.permitEscortTotal;
     totalLoadCount += truck.loadCount;
   });
@@ -8305,6 +8316,7 @@ function buildGrossRevenueTotalsResponse(items, sourceList, year, rosterByTruck 
     totals: {
       loadCount: totalLoadCount,
       totalGrossRevenue,
+      totalAdminFees,
       totalPermitEscortExcluded,
       averageMonthlyRevenue: safeAverage(totalGrossRevenue, elapsedMonthCount),
       averageActiveMonthRevenue: safeAverage(totalGrossRevenue, elapsedMonthCount),
@@ -16013,7 +16025,11 @@ app.get('/reports/gross-revenue-totals', requireLookupAccess, withHeavyWorkload(
     }
     const sourceList = buildBidReportSourceSummary(sourceLists, year);
 
-    const bidBundle = await getBidReportItemsFromSources(token, sourceLists, getGrossRevenueFieldSelect());
+    const bidBundle = await getBidReportItemsFromSources(
+      token,
+      sourceLists,
+      (bidSourceList) => getGrossRevenueFieldSelect(bidSourceList.label === 'Bid Listing')
+    );
 
     const rosterByTruck = await getDriverRosterByTruck(token);
 
