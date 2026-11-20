@@ -307,7 +307,7 @@ function getHeavyWorkloadKind(req) {
     return 'photo-library';
   }
 
-  if (['/search', '/bid-listing/no-bol', '/documents/loadphotos/by-bol', '/recruiting/snapshot',
+  if (['/search', '/bid-listing/no-bol', '/documents/loadphotos/by-bol', '/documents/delivery-photos', '/recruiting/snapshot',
     '/driver-roster/history', '/driver-roster/history-batch'].includes(req.path)) return 'history';
 
   if (DASHBOARD_REFRESH_PATHS.has(req.path)) {
@@ -1150,6 +1150,7 @@ async function findLoadPhotoFolderForBol(token, bol, options = {}) {
   const activeDriverFolders = rootItems.filter((item) => item.folder && normalizeSearchValue(item.name) !== 'inactive');
 
   const scopeDefs = [];
+  const matchLoadFolder = options.matchLoadFolder || findFolderByBolPrefix;
 
   if (preferInactive && inactiveFolder) {
     scopeDefs.push({ name: 'Inactive', parentFolder: inactiveFolder, folders: null, operatorInactive: true });
@@ -1178,7 +1179,7 @@ async function findLoadPhotoFolderForBol(token, bol, options = {}) {
         driverFolder.id
       );
 
-      const loadFolder = findFolderByBolPrefix(loadFolders, bol);
+      const loadFolder = matchLoadFolder(loadFolders, bol);
 
       if (loadFolder) {
         return {
@@ -1191,6 +1192,8 @@ async function findLoadPhotoFolderForBol(token, bol, options = {}) {
       }
     }
   }
+
+  if (options.driverFoldersOnly) return null;
 
   // Last resort: the Upload Digest row only absolutely needs the BOL. If the driver
   // name from the order/digest does not match the OneDrive folder name exactly,
@@ -1209,7 +1212,7 @@ async function findLoadPhotoFolderForBol(token, bol, options = {}) {
         driverFolder.id
       );
 
-      const loadFolder = findFolderByBolPrefix(loadFolders, bol);
+      const loadFolder = matchLoadFolder(loadFolders, bol);
 
       if (loadFolder) {
         return {
@@ -13255,14 +13258,15 @@ async function getPhotoLibraryContentResponse(token, reference) {
   );
 }
 
-async function getPhotoLibraryThumbnailResponse(token, reference) {
+async function getPhotoLibraryThumbnailResponse(token, reference, preferredSize = 'medium') {
   const thumbnailData = await graphGet(
     token,
     `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(reference.driveId)}` +
       `/items/${encodeURIComponent(reference.itemId)}/thumbnails?$select=id,medium,large`
   );
   const thumbnailSet = thumbnailData.value?.[0];
-  const thumbnailUrl = thumbnailSet?.medium?.url || thumbnailSet?.large?.url;
+  const fallbackSize = preferredSize === 'large' ? 'medium' : 'large';
+  const thumbnailUrl = thumbnailSet?.[preferredSize]?.url || thumbnailSet?.[fallbackSize]?.url;
   if (!thumbnailUrl) {
     const error = new Error('A thumbnail is not available for this photograph.');
     error.statusCode = 404;
@@ -14447,6 +14451,117 @@ app.get('/documents/loadphotos', requireLookupAccess, async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+const DELIVERY_PHOTO_MANIFEST_MS = 60 * 1000;
+const DELIVERY_PHOTO_EXTENSIONS = /\.(?:jpe?g|png|webp|gif|bmp|avif|heic|heif|tiff?)$/i;
+const DELIVERY_PHOTO_CONVERSION_EXTENSIONS = /\.(?:heic|heif|tiff?)$/i;
+const DELIVERY_PHOTO_CONTENT_TYPES = /^image\/(?:jpeg|png|webp|gif|bmp|x-ms-bmp|avif)(?:;|$)/i;
+const deliveryPhotoManifests = new Map();
+
+async function getDeliveryPhotoManifest(token, orderId, sourceListId) {
+  const order = await getLoadPaperworkOrder(token, orderId, sourceListId);
+  const candidateDrivers = uniqueNonEmpty([order.TMSName, order.Driver]);
+  if (!order.BOL || !candidateDrivers.length) return [];
+
+  const driveId = process.env.DISPATCH_ONEDRIVE_ID;
+  if (!driveId || !getLoadPicturesFolderId()) {
+    throw createLoadPaperworkError('Delivery photo storage is temporarily unavailable.', 503, 'DELIVERY_PHOTO_STORAGE_UNAVAILABLE');
+  }
+
+  const match = await findLoadPhotoFolderForBol(token, order.BOL, {
+    candidateDrivers,
+    matchLoadFolder(items) {
+      const { folder, ambiguous } = findLoadPaperworkLoadFolder(items, order);
+      if (ambiguous) {
+        throw createLoadPaperworkError('More than one photo folder matches this order.', 409, 'DELIVERY_PHOTO_FOLDER_AMBIGUOUS');
+      }
+      return folder;
+    },
+    driverFoldersOnly: true
+  });
+  if (!match) return [];
+
+  const folders = await getAllChildrenFromFolder(token, driveId, match.loadFolder.id);
+  const deliveryFolder = findUploadTypeFolder(folders.filter((item) => !/\bpick[\s-]*up\b/i.test(item.name)), 'delivery');
+  if (!deliveryFolder) return [];
+
+  const items = await getAllChildrenFromFolder(token, driveId, deliveryFolder.id);
+  return items.filter((item) => item.id && item.file && DELIVERY_PHOTO_EXTENSIONS.test(item.name))
+    .sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }))
+    .map((item) => ({ itemId: item.id, driveId, name: item.name, mimeType: item.file.mimeType }));
+}
+
+function getDeliveryPhotoRequest(req) {
+  const { orderId, sourceListId } = req.query;
+  if (typeof orderId !== 'string' || !/^\d{1,12}$/.test(orderId) ||
+      typeof sourceListId !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(sourceListId)) {
+    throw createLoadPaperworkError('A valid order reference is required.', 400, 'DELIVERY_PHOTO_INVALID_ORDER');
+  }
+  return { orderId, sourceListId, key: `${sourceListId.toLowerCase()}:${orderId}` };
+}
+
+function sendDeliveryPhotoError(res, error) {
+  const status = Number(error?.statusCode);
+  const message = String(error?.code || '').startsWith('DELIVERY_PHOTO_') ||
+    error?.code === 'LOAD_PAPERWORK_ORDER_SOURCE_NOT_FOUND' ? error.message : 'Unable to load delivery photos for this order.';
+  return res.status([400, 404, 409, 415, 503].includes(status) ? status : 502).json({ success: false, error: message });
+}
+
+app.get('/documents/delivery-photos', requireLookupAccess, withHeavyWorkload(async (req, res) => {
+  try {
+    const { orderId, sourceListId, key } = getDeliveryPhotoRequest(req);
+    const photos = await getDeliveryPhotoManifest(await getGraphToken(), orderId, sourceListId);
+    setCacheRecord(deliveryPhotoManifests, key, photos);
+    return res.set('Cache-Control', 'no-store').json({
+      success: true,
+      photos: photos.map(({ itemId, name }) => ({ id: itemId, name }))
+    });
+  } catch (error) {
+    return sendDeliveryPhotoError(res, error);
+  }
+}));
+
+app.get('/documents/delivery-photos/:photoId/:size', requireLookupAccess, async (req, res) => {
+  try {
+    const { orderId, sourceListId, key } = getDeliveryPhotoRequest(req);
+    const { photoId, size } = req.params;
+    if (!/^[\w!-]{1,200}$/.test(photoId) || !['thumbnail', 'content'].includes(size)) {
+      return res.status(400).json({ success: false, error: 'A valid delivery photo reference is required.' });
+    }
+
+    const token = await getGraphToken();
+    let photos = getCacheRecord(deliveryPhotoManifests, key, DELIVERY_PHOTO_MANIFEST_MS);
+    if (!photos) {
+      photos = await getDeliveryPhotoManifest(token, orderId, sourceListId);
+      setCacheRecord(deliveryPhotoManifests, key, photos);
+    }
+    const photo = photos.find((item) => item.itemId === photoId);
+    if (!photo) return res.status(404).json({ success: false, error: 'That delivery photo is unavailable for this order.' });
+
+    const needsConversion = DELIVERY_PHOTO_CONVERSION_EXTENSIONS.test(photo.name);
+    let response;
+    if (size === 'thumbnail' || needsConversion) {
+      try {
+        response = await getPhotoLibraryThumbnailResponse(token, photo, size === 'content' ? 'large' : 'medium');
+      } catch (error) {
+        if (needsConversion || error?.code !== 'PHOTO_THUMBNAIL_NOT_AVAILABLE') throw error;
+      }
+    }
+    if (!needsConversion && !response?.ok) {
+      await response?.body?.cancel().catch(() => {});
+      response = await getPhotoLibraryContentResponse(token, photo);
+    }
+    const contentType = response.headers.get('content-type') || photo.mimeType || '';
+    if (response.ok && !DELIVERY_PHOTO_CONTENT_TYPES.test(contentType)) {
+      await response.body?.cancel().catch(() => {});
+      return res.status(415).json({ success: false, error: 'The delivery photo could not be converted to a supported image.' });
+    }
+    await streamPhotoLibraryImage(res, response, { ...photo, name: 'delivery-photo' }, 0);
+  } catch (error) {
+    if (res.headersSent || isPhotoLibraryClientDisconnect(req, res, error)) return;
+    return sendDeliveryPhotoError(res, error);
   }
 });
 

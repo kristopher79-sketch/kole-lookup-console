@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import './App.css?seasonal-modals=v9';
 import koleLogo from './assets/kole-logo.png';
 import BetaDashboard from './BetaDashboard';
 import DriverRosterEditor from './DriverRosterEditor';
+import DeliveryPhotoPackage from './DeliveryPhotoPackage';
 import { createLookupTokenStorage } from './lookup-token-storage';
 
 function RosterReportStaleNotice({ report }) {
@@ -22,6 +23,7 @@ const API =
   ((isViteDev || isLocalDevHost)
     ? 'http://localhost:5000'
     : 'https://kole-lookup-console.onrender.com');
+const DELIVERY_PHOTOS_ENDPOINT = `${API}/documents/delivery-photos`;
 
 function useMediaQuery(query) {
   const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
@@ -1621,6 +1623,8 @@ export default function App() {
   const [error, setError] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [deliveryPhotoCheck, setDeliveryPhotoCheck] = useState(null);
+  const [deliveryPhotoRetry, setDeliveryPhotoRetry] = useState(0);
   const [selectedView, setSelectedView] = useState('basic');
   const [rateConfirmationsData, setRateConfirmationsData] = useState(null);
   const [rateConfirmationsLoading, setRateConfirmationsLoading] = useState(false);
@@ -3926,6 +3930,44 @@ export default function App() {
 
     return res;
   }
+
+  const deliveryPhotoOrder = selected?.BOL && selected.id && selected.SourceListId && canShowOrderViews(selected.Status)
+    ? selected
+    : null;
+  const deliveryPhotoQuery = deliveryPhotoOrder ? new URLSearchParams({
+    orderId: deliveryPhotoOrder.id,
+    sourceListId: deliveryPhotoOrder.SourceListId
+  }).toString() : '';
+  const currentDeliveryPhotoCheck = deliveryPhotoCheck?.order === deliveryPhotoOrder &&
+    deliveryPhotoCheck.retry === deliveryPhotoRetry ? deliveryPhotoCheck : null;
+  const deliveryPhotos = currentDeliveryPhotoCheck?.photos || [];
+  const deliveryPhotoTabTitle = !deliveryPhotoOrder
+    ? 'No delivery photos uploaded'
+    : !currentDeliveryPhotoCheck
+      ? 'Checking for delivery photos'
+      : currentDeliveryPhotoCheck.error || (deliveryPhotos.length ? 'Package delivery photos into a PDF' : 'No delivery photos uploaded');
+
+  const checkDeliveryPhotos = useEffectEvent(async (order, query, retry, signal) => {
+    try {
+      const response = await authedFetch(`${DELIVERY_PHOTOS_ENDPOINT}?${query}`, { signal });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success || !Array.isArray(data.photos)) {
+        throw new Error(data.error || 'Unable to check for delivery photos.');
+      }
+      if (!signal.aborted) setDeliveryPhotoCheck({ order, retry, photos: data.photos });
+    } catch (err) {
+      if (!signal.aborted) {
+        setDeliveryPhotoCheck({ order, retry, error: err.message || 'Unable to check for delivery photos.' });
+      }
+    }
+  });
+
+  useEffect(() => {
+    if (!accessToken || !deliveryPhotoOrder) return;
+    const controller = new AbortController();
+    void checkDeliveryPhotos(deliveryPhotoOrder, deliveryPhotoQuery, deliveryPhotoRetry, controller.signal);
+    return () => controller.abort();
+  }, [accessToken, deliveryPhotoOrder, deliveryPhotoQuery, deliveryPhotoRetry]);
 
   function handleQueryChange(value) {
     setQuery(value);
@@ -9795,6 +9837,7 @@ function openReportLoadDetails(load) {
     if (selectedView === 'dispatch') return 'Dispatch Info';
     if (selectedView === 'billing') return 'Billing Info';
     if (selectedView === 'documents') return 'Documents';
+    if (selectedView === 'package-pdf') return 'Package to PDF';
     if (selectedView === 'notes') return 'Order Notes';
     if (selectedView === 'edit') return 'Selective Order Edit';
     return 'Basic Load Info';
@@ -24486,6 +24529,15 @@ function openReportLoadDetails(load) {
                   >
                     Documents
                   </button>
+                  <button
+                    type="button"
+                    className={selectedView === 'package-pdf' ? 'active-tab' : ''}
+                    onClick={() => setSelectedView('package-pdf')}
+                    disabled={!deliveryPhotos.length}
+                    title={deliveryPhotoTabTitle}
+                  >
+                    Package to PDF
+                  </button>
                 </>
               )}
 
@@ -24509,10 +24561,30 @@ function openReportLoadDetails(load) {
             </div>
 
             <div className="modal-body">
+              {currentDeliveryPhotoCheck?.error && (
+                <div className="load-paperwork-state is-error" role="alert">
+                  <span>{currentDeliveryPhotoCheck.error}</span>
+                  <button type="button" className="document-launch-button" onClick={() => setDeliveryPhotoRetry((retry) => retry + 1)}>
+                    Retry photo check
+                  </button>
+                </div>
+              )}
               {selectedView === 'basic' && <BasicView />}
               {selectedView === 'dispatch' && <DispatchView />}
               {selectedView === 'billing' && <BillingView />}
               {selectedView === 'documents' && <DocumentsView />}
+              {deliveryPhotos.length > 0 && (
+                <div hidden={selectedView !== 'package-pdf'}>
+                  <DeliveryPhotoPackage
+                    key={deliveryPhotoQuery}
+                    photos={deliveryPhotos}
+                    endpoint={DELIVERY_PHOTOS_ENDPOINT}
+                    orderQuery={deliveryPhotoQuery}
+                    authedFetch={authedFetch}
+                    onDownload={(pdf) => downloadBlob(pdf, `${getSafeFileNamePart(selected.BOL)}-delivery-photos.pdf`)}
+                  />
+                </div>
+              )}
               {selectedView === 'edit' && renderOrderEditView()}
               {selectedView === 'notes' && renderOrderNotesView()}
             </div>
