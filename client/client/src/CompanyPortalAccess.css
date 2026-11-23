@@ -1,0 +1,12 @@
+.company-portal-access { padding: 22px; margin-top: 24px; border: 1px solid var(--kole-border); border-radius: 12px; background: var(--kole-surface-2); color: var(--kole-text); }
+.company-portal-access-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+.company-portal-access h3 { margin: 0 0 8px; font-size: 1.05rem; }
+.company-portal-access p { color: var(--kole-muted); line-height: 1.6; font-size: .875rem; }
+.company-portal-access-heading p { margin-top: 0; }
+.company-portal-access-heading > span { flex-shrink: 0; font-size: .875rem; color: var(--kole-text-soft); }
+.company-portal-access .company-portal-reset { display: flex; flex-direction: row; align-items: flex-start; gap: 10px; margin: 16px 0; font-size: .875rem; color: var(--kole-muted); }
+.company-portal-access .company-portal-reset input { width: 18px; height: 18px; flex-shrink: 0; margin: 2px 0 0; }
+.company-portal-invitation { margin-top: 18px; }
+.company-portal-invitation textarea { width: 100%; min-height: 220px; resize: vertical; padding: 14px; border: 1px solid var(--kole-control-border); border-radius: 8px; background: var(--kole-control-bg); color: var(--kole-text); font: inherit; font-size: .875rem; line-height: 1.6; }
+.company-portal-invitation button { margin-top: 12px; }
+@media (max-width: 700px) { .company-portal-access-heading { flex-direction: column; gap: 8px; } .company-portal-access { padding: 17px; } }

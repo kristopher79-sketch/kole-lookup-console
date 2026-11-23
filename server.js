@@ -14,6 +14,7 @@ const { createMemoryCacheBudget, runWithWorkloadSlot, mapSequentialSettled } = r
 const { buildDriverRosterEditSchema, buildDriverRosterEditPatch, driverRosterEditError } = require('./driver-roster-edit');
 const { createPhotoLibraryService, normalizeEngineName } = require('./photo-library-service');
 const { createFavoritesService } = require('./favorites-service');
+const { createCustomerPortalRoutes } = require('./customer-portal');
 
 // Reuse native date formatters across rows and refreshes; bound future variants.
 const cachedDateFormatters = new Map();
@@ -19440,6 +19441,11 @@ async function findCurrentBidOrderByBol(token, currentList, bol) {
   }
 }
 
+async function setIntelliTrackEnabled(token, listId, orderId, enabled, etag = '') {
+  const patchUrl = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${encodeURIComponent(listId)}/items/${encodeURIComponent(orderId)}/fields`;
+  return graphPatch(token, patchUrl, { EnableTracking: enabled }, etag ? { 'If-Match': etag } : {});
+}
+
 
 
 app.get('/available-trucks/distribution-list', requireLookupAccess, withHeavyWorkload(async (req, res) => {
@@ -19752,6 +19758,27 @@ app.get('/available-trucks', requireLookupAccess, withHeavyWorkload(async (req, 
   }
 }));
 
+createCustomerPortalRoutes(app, {
+  getGraphToken,
+  graphGet,
+  graphPatch,
+  getAllListItemsWithFields,
+  getListColumns: getAllQuoteEngineColumns,
+  getCurrentBidListingSource,
+  getSalesLeadsListId,
+  getCustomerTrackingRecords,
+  getUploadEvidenceSets,
+  buildCustomerTrackingSnapshot,
+  setIntelliTrackEnabled,
+  getSessionSecret: getCustomerTrackingSessionSecret,
+  getSiteId: () => process.env.SITE_ID,
+  getRosterListId: () => process.env.DRIVER_ROSTER_LIST_ID,
+  getTimeOffListId: getDriverTimeOffListId,
+  getAvailableTrucksListId: getAvailableTrucksSingleLineListId,
+  requireLookupAccess,
+  clearSalesLeadsCache: clearSalesLeadsReportCache
+});
+
 app.post('/api/v1/track/session', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Referrer-Policy', 'no-referrer');
@@ -19934,10 +19961,7 @@ app.post('/tracking/intellitrack/order/:id', requireLookupAccess, async (req, re
       });
     }
 
-    const patchUrl = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/lists/${currentList.listId}/items/${orderId}/fields`;
-    await graphPatch(token, patchUrl, {
-      EnableTracking: enabled
-    });
+    await setIntelliTrackEnabled(token, currentList.listId, orderId, enabled);
 
     const updatedItem = await graphGet(token, readUrl);
     const updatedOrder = cleanIntelliTrackBidOrder(updatedItem, currentList);

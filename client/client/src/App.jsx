@@ -5,6 +5,7 @@ import koleLogo from './assets/kole-logo.png';
 import BetaDashboard from './BetaDashboard';
 import DriverRosterEditor from './DriverRosterEditor';
 import DeliveryPhotoPackage from './DeliveryPhotoPackage';
+import CompanyPortalAccess from './CompanyPortalAccess';
 import { createLookupTokenStorage } from './lookup-token-storage';
 
 function RosterReportStaleNotice({ report }) {
@@ -18873,6 +18874,13 @@ function openReportLoadDetails(load) {
                 </div>
               </>
             )}
+            <CompanyPortalAccess
+              key={trackingPreferencesLead.id}
+              leadId={trackingPreferencesLead.id}
+              companyName={trackingPreferencesLead.CompanyName}
+              apiBase={API}
+              authedFetch={authedFetch}
+            />
           </form>
         </div>
       </div>
