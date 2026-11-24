@@ -19764,7 +19764,7 @@ app.get('/available-trucks', requireLookupAccess, withHeavyWorkload(async (req, 
   }
 }));
 
-createCustomerPortalRoutes(app, {
+const customerPortalRoutes = createCustomerPortalRoutes(app, {
   getGraphToken,
   graphGet,
   graphPatch,
@@ -20308,6 +20308,7 @@ app.post('/driver-time-off', requireLookupAccess, async (req, res) => {
     cachedLargeReports.delete('cachedOperationsToday');
     cachedOperationsTodayAt = 0;
 
+    customerPortalRoutes.clearCapacityCache();
     res.status(201).json({ success: true, itemId: createdItem.id || '', message: 'Driver time off added.' });
   } catch (error) {
     console.error(error);
@@ -20337,6 +20338,7 @@ app.patch('/driver-time-off/:id', requireLookupAccess, async (req, res) => {
     cachedLargeReports.delete('cachedOperationsToday');
     cachedOperationsTodayAt = 0;
 
+    customerPortalRoutes.clearCapacityCache();
     res.json({ success: true, itemId, message: 'Driver time off updated.' });
   } catch (error) {
     console.error(error);

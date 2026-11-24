@@ -102,6 +102,63 @@ test('capacity excludes bookings through day seven and time off through the addi
   assert.equal(buildPortalCapacity({ ...base, timeOff: [off] }).opportunities.length, 1);
 });
 
+const returnRow = (extra = {}) => ({ id: 'return-1', fields: {
+  TruckNumber: '0001', OperatorName: 'Private driver 1', Status: 'Active',
+  StartDate: '2026-11-20', EndDate: '2026-11-24', LaunchingPoint: 'Charlotte, NC', ...extra
+} });
+
+test('time-off returns create projected capacity from the launching point and roster equipment without a published run', () => {
+  const capacity = buildPortalCapacity({ now, roster: [rosterRow('1', '0001')], timeOff: [returnRow()] });
+  assert.deepEqual(capacity.opportunities, [
+    { date: '2026-11-24', location: 'Charlotte, NC', equipment: 'Conestoga', kind: 'Projected' }
+  ]);
+  assert.equal(capacity.asOf, now.toISOString());
+  for (const hidden of ['0001', 'Private driver', 'TruckNumber', 'returningTimeOff', 'LaunchingPoint']) {
+    assert.equal(JSON.stringify(capacity).includes(hidden), false);
+  }
+});
+
+test('time-off return dates include today through day seven and exclude past, day eight, invalid and cancelled returns', () => {
+  const base = { now, roster: [rosterRow('1', '0001')] };
+  for (const EndDate of ['2026-11-23', '2026-11-30']) {
+    assert.equal(buildPortalCapacity({ ...base, timeOff: [returnRow({ EndDate })] }).opportunities[0]?.date, EndDate);
+  }
+  for (const extra of [
+    { EndDate: '2026-11-22' }, { EndDate: '2026-12-01' }, { EndDate: 'invalid' },
+    { StartDate: '2026-11-25' }, { StartDate: '' }, { LaunchingPoint: '' },
+    { LaunchingPoint: 'Unknown' }, { Status: 'Cancelled' }, { Status: 'Canceled' }, { Status: 'Inactive' }
+  ]) {
+    assert.deepEqual(buildPortalCapacity({ ...base, timeOff: [returnRow(extra)] }).opportunities, []);
+  }
+});
+
+test('return projections keep booking, other time-off, solo and unique-roster eligibility checks', () => {
+  const base = { now, roster: [rosterRow('1', '0001')], timeOff: [returnRow()] };
+  const booking = row('40', 'ANY', { Truck_x0020_Number: '1', Pickup_x0020_Offer_x0020_Date: '2026-12-01', Expected_x0020_Delivery_x0020_Da: '2026-12-02' });
+  assert.deepEqual(buildPortalCapacity({ ...base, orders: [booking] }).opportunities, []);
+  const otherOff = { id: 'other-off', fields: { TruckNumber: '0001', Status: 'Active', StartDate: '2026-12-03', EndDate: '2026-12-05' } };
+  assert.deepEqual(buildPortalCapacity({ ...base, timeOff: [...base.timeOff, otherOff] }).opportunities, []);
+  otherOff.fields.StartDate = '2026-12-04';
+  assert.equal(buildPortalCapacity({ ...base, timeOff: [...base.timeOff, otherOff] }).opportunities.length, 1);
+  for (const extra of [{ SoloorTeam: 'Team' }, { Status: 'Inactive' }, { TrailerType: 'Unknown' }]) {
+    assert.deepEqual(buildPortalCapacity({ ...base, roster: [rosterRow('1', '0001', extra)] }).opportunities, []);
+  }
+  assert.deepEqual(buildPortalCapacity({ ...base, roster: [...base.roster, rosterRow('2', '0001')] }).opportunities, []);
+});
+
+test('a return is not shown as current while time off is active and does not replace another equipment family', () => {
+  const current = [
+    { createdDateTime: '2026-11-23T12:00:00Z', fields: { UnitNo: '0001', DateSent: '2026-11-23', CurrentLocation: 'Previous City, NC' } },
+    { createdDateTime: '2026-11-23T12:00:00Z', fields: { UnitNo: '0002', DateSent: '2026-11-23', CurrentLocation: 'Charlotte, NC' } }
+  ];
+  const capacity = buildPortalCapacity({ now, current, projected: [capacityRow('1', '0001')],
+    roster: [rosterRow('1', '0001'), rosterRow('2', '0002', { TrailerType: "48' RGN" })], timeOff: [returnRow()] });
+  assert.deepEqual(capacity.opportunities, [
+    { date: '2026-11-23', location: 'Charlotte, NC', equipment: 'RGN', kind: 'Current' },
+    { date: '2026-11-24', location: 'Charlotte, NC', equipment: 'Conestoga', kind: 'Projected' }
+  ]);
+});
+
 test('capacity fails closed for stale publications, missing eligibility data, and closed hours', () => {
   const stale = { ...capacityRow('1', '0001'), createdDateTime: '2026-11-20T12:00:00Z' };
   assert.equal(buildPortalCapacity({ now, projected: [stale], roster: [rosterRow('1', '0001')] }).opportunities.length, 0);
@@ -109,6 +166,44 @@ test('capacity fails closed for stale publications, missing eligibility data, an
   const closed = buildPortalCapacity({ now: new Date('2026-11-23T23:00:00Z') });
   assert.equal(closed.open, false);
   assert.deepEqual(closed.opportunities, []);
+});
+
+test('capacity HTTP reads launching points and refreshes cached returns after time-off writes', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: now.getTime() });
+  const app = express();
+  let launchingPoint = 'Charlotte, NC';
+  let capacityReads = 0;
+  const portal = createCustomerPortalRoutes(app, {
+    getGraphToken: async () => 'fake-graph-token',
+    getCurrentBidListingSource: async () => ({ listId: 'orders' }),
+    getAvailableTrucksListId: () => 'available', getRosterListId: () => 'roster', getTimeOffListId: () => 'time-off',
+    getAllListItemsWithFields: async (_token, list, fields) => {
+      if (list === 'roster') return [rosterRow('1', '0001')];
+      if (list === 'time-off') {
+        assert.ok(fields.split(',').includes('LaunchingPoint'));
+        capacityReads++;
+        return [returnRow({ LaunchingPoint: launchingPoint })];
+      }
+      return [];
+    },
+    getUploadEvidenceSets: async () => ({}), requireLookupAccess: (_req, _res, next) => next()
+  });
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  t.after(() => server.close());
+  const endpoint = `http://127.0.0.1:${server.address().port}/api/v1/portal/capacity`;
+  const load = async () => {
+    const response = await fetch(endpoint);
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  assert.equal((await load()).opportunities[0].location, 'Charlotte, NC');
+  launchingPoint = 'Greensboro, NC';
+  assert.equal((await load()).opportunities[0].location, 'Charlotte, NC');
+  assert.equal(capacityReads, 1);
+  portal.clearCapacityCache();
+  assert.equal((await load()).opportunities[0].location, 'Greensboro, NC');
+  assert.equal(capacityReads, 2);
 });
 
 test('HTTP routes enforce tenant isolation, cookie scope, logout, and office-only provisioning', async t => {

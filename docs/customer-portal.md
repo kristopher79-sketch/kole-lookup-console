@@ -25,10 +25,12 @@ The separate HttpOnly, SameSite=Lax company cookie is scoped to `/api/v1/portal`
 - Publication hours: 6:00 AM until 6:00 PM `America/New_York`.
 - Current candidates: today's published **Available Trucks Single Line** rows. Projected candidates: the latest **Project Equipment Availability** run. Publications older than 24 hours are hidden.
 - Projected fields: `ProjectedEmpty`, `Location`, `Operator`, `Equipment`, `RunDateandTime`. `Equipment` is actually an internal truck reference; displayed equipment type comes from Driver Roster.
+- Return candidates also come directly from the live **Time Off Log** using `EndDate` (the return date displayed in KOLE Connect) and `LaunchingPoint`. Returns today through seven days ahead are projected even without a posted available truck or forecast run; their publication time is when the live data was checked. Cancelled/inactive records, missing locations, and invalid dates cannot create availability.
 - Each candidate must resolve to exactly one active Solo roster record. Teams, unknown equipment, ambiguous assignments, unverified locations, and invalid dates are excluded.
 - Won bookings block through seven days after the candidate date. Time off blocks through that window plus two days. Current assignments extending past the candidate date and overdue unconfirmed assignments also block publication.
+- A return candidate treats only its own time-off record as finished on its return date. Other time off and all existing roster/booking checks still apply. Driver Roster supplies the public equipment family; driver names, truck numbers, and source records stay private.
 - Business date-only values retain their calendar date rather than shifting from UTC midnight to the previous Eastern date.
-- Public rows are deduplicated by date, location, equipment, and availability class. No quantities are published. Sanitized results are cached up to 60 seconds; raw operational lists stay request-scoped.
+- Public rows are deduplicated by date, location, equipment, and availability class. No quantities are published. Sanitized results are cached up to 60 seconds and invalidated after time-off additions/edits in KOLE Connect; raw operational lists stay request-scoped.
 - The inquiry form requires origin, destination, and needed date, then prepares an email to dispatch in the customer's email app. It does not claim a message was sent or book equipment automatically.
 
 ## Configuration and delivery

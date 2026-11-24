@@ -194,7 +194,11 @@ function isCapacityEligible(candidate, roster, orders, timeOff, evidence) {
     if (/^(cancelled|canceled|inactive)$/i.test(text(f.Status)) || !sameOperator(f.TruckNumber, f.OperatorName, roster)) continue;
     const start = businessDate(f.StartDate);
     const end = businessDate(f.EndDate);
-    if (!start || !end || end < start || (start <= timeOffHorizon && end >= candidate.date)) return false;
+    if (!start || !end || end < start) return false;
+    // EndDate is the return date shown in KOLE Connect. Only the source
+    // record has finished for this return; other time off still blocks it.
+    if (candidate.returningTimeOff === item && end === candidate.date) continue;
+    if (start <= timeOffHorizon && end >= candidate.date) return false;
   }
   return true;
 }
@@ -220,6 +224,14 @@ function buildPortalCapacity({ projected = [], current = [], roster = [], orders
     const f = item.fields || {};
     if (text(f.RunDateandTime) !== run) continue;
     candidates.push({ truck: f.Equipment, operator: f.Operator, date: businessDate(f.ProjectedEmpty), location: text(f.Location), kind: 'Projected', publishedAt: item.createdDateTime || f.Created });
+  }
+  for (const item of timeOff) {
+    const f = item.fields || {};
+    const start = businessDate(f.StartDate);
+    const end = businessDate(f.EndDate);
+    if (/^(cancelled|canceled|inactive)$/i.test(text(f.Status)) || !start || !end || end < start) continue;
+    candidates.push({ truck: f.TruckNumber, operator: f.OperatorName, date: end, location: text(f.LaunchingPoint),
+      kind: 'Projected', publishedAt: now.toISOString(), returningTimeOff: item });
   }
   const seenTrucks = new Set();
   const seenPublic = new Set();
@@ -248,6 +260,12 @@ function createCustomerPortalRoutes(app, deps) {
   const attempts = new Map();
   let capacityCache = null;
   let capacityPromise = null;
+  let capacityCacheVersion = 0;
+  const clearCapacityCache = () => {
+    capacityCacheVersion++;
+    capacityCache = null;
+    capacityPromise = null;
+  };
   const accountUrl = id => `https://graph.microsoft.com/v1.0/sites/${deps.getSiteId()}/lists/${encodeURIComponent(deps.getSalesLeadsListId())}/items/${encodeURIComponent(id)}`;
   const getAccount = async (token, id) => {
     if (!/^\d+$/.test(text(id))) throw portalError('Please sign in again.', 401, 'portal_session_required');
@@ -380,22 +398,26 @@ function createCustomerPortalRoutes(app, deps) {
     const { hour } = easternClock();
     if (hour < 6 || hour >= 18) return res.json(buildPortalCapacity({}));
     if (capacityCache && Date.now() - capacityCache.at < 60000) return res.json(capacityCache.payload);
-    if (!capacityPromise) capacityPromise = (async () => {
-      const token = await deps.getGraphToken();
-      const source = await deps.getCurrentBidListingSource(token);
-      if (!source) throw portalError('Equipment availability is temporarily unavailable.');
-      const [projected, current, roster, orders, timeOff, evidence] = await Promise.all([
-        deps.getAllListItemsWithFields(token, process.env.PROJECT_EQUIPMENT_AVAILABILITY_LIST_ID || PROJECTED_LIST_ID, 'ProjectedEmpty,Location,Operator,Equipment,RunDateandTime'),
-        deps.getAllListItemsWithFields(token, deps.getAvailableTrucksListId(), 'DateSent,DriverName,UnitNo,CurrentLocation'),
-        deps.getAllListItemsWithFields(token, deps.getRosterListId() || ROSTER_LIST_ID, 'Operator_x002f_TeamName,TMSName,Trucks,Status,TrailerType,SoloorTeam'),
-        deps.getAllListItemsWithFields(token, source.listId, ORDER_FIELDS),
-        deps.getAllListItemsWithFields(token, deps.getTimeOffListId() || TIME_OFF_LIST_ID, 'TruckNumber,OperatorName,StartDate,EndDate,Status'),
-        deps.getUploadEvidenceSets(token)
-      ]);
-      const payload = buildPortalCapacity({ projected, current, roster, orders, timeOff, evidence });
-      capacityCache = { at: Date.now(), payload };
-      return payload;
-    })().finally(() => { capacityPromise = null; });
+    if (!capacityPromise) {
+      const cacheVersion = capacityCacheVersion;
+      const pending = (async () => {
+        const token = await deps.getGraphToken();
+        const source = await deps.getCurrentBidListingSource(token);
+        if (!source) throw portalError('Equipment availability is temporarily unavailable.');
+        const [projected, current, roster, orders, timeOff, evidence] = await Promise.all([
+          deps.getAllListItemsWithFields(token, process.env.PROJECT_EQUIPMENT_AVAILABILITY_LIST_ID || PROJECTED_LIST_ID, 'ProjectedEmpty,Location,Operator,Equipment,RunDateandTime'),
+          deps.getAllListItemsWithFields(token, deps.getAvailableTrucksListId(), 'DateSent,DriverName,UnitNo,CurrentLocation'),
+          deps.getAllListItemsWithFields(token, deps.getRosterListId() || ROSTER_LIST_ID, 'Operator_x002f_TeamName,TMSName,Trucks,Status,TrailerType,SoloorTeam'),
+          deps.getAllListItemsWithFields(token, source.listId, ORDER_FIELDS),
+          deps.getAllListItemsWithFields(token, deps.getTimeOffListId() || TIME_OFF_LIST_ID, 'TruckNumber,OperatorName,StartDate,EndDate,Status,LaunchingPoint'),
+          deps.getUploadEvidenceSets(token)
+        ]);
+        const payload = buildPortalCapacity({ projected, current, roster, orders, timeOff, evidence });
+        if (cacheVersion === capacityCacheVersion) capacityCache = { at: Date.now(), payload };
+        return payload;
+      })().finally(() => { if (capacityPromise === pending) capacityPromise = null; });
+      capacityPromise = pending;
+    }
     res.json(await capacityPromise);
   }));
   app.use('/api/v1/portal', router);
@@ -436,6 +458,7 @@ function createCustomerPortalRoutes(app, deps) {
     res.json({ success: true, enabled: true, created: true, customerCode: account.customerCode, password,
       portalUrl: `${PORTAL_ORIGIN}/shipments`, message: 'Copy this password now. It is displayed once.' });
   }));
+  return { clearCapacityCache };
 }
 
 module.exports = { businessDate, easternClock, hashPortalPassword, verifyPortalPassword, createPortalSession,
