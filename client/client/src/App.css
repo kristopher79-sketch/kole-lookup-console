@@ -9165,6 +9165,15 @@ button.available-truck-distribution-summary-card:disabled {
   gap: 6px;
 }
 
+.driver-time-off-form-grid .driver-time-off-launching-point-field {
+  grid-column: 1 / -1;
+}
+
+.driver-time-off-launching-point-field small {
+  color: var(--kole-muted-subtle);
+  font-size: 12px;
+}
+
 .driver-time-off-form-grid label span {
   color: #cbd5e1;
   font-size: 12px;
@@ -9352,6 +9361,11 @@ button.available-truck-distribution-summary-card:disabled {
 
 .driver-time-off-history-table {
   min-width: 640px !important;
+}
+
+:is(.driver-time-off-history-table, .driver-time-off-report-table) :is(th, td).driver-time-off-launching-point-cell {
+  min-width: 160px;
+  text-align: left;
 }
 
 
@@ -16367,6 +16381,11 @@ button.available-truck-distribution-summary-card:disabled {
 .driver-time-off-card-facts > div {
   min-width: 0;
   flex: 1 1 0;
+}
+
+.driver-time-off-card-launching-point {
+  margin-top: 10px;
+  overflow-wrap: anywhere;
 }
 
 .driver-time-off-card > small {

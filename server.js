@@ -10998,6 +10998,7 @@ function getDriverTimeOffFieldSelect() {
     'OperatorName',
     'StartDate',
     'EndDate',
+    'LaunchingPoint',
     'Reason',
     'Status'
   ].join(',');
@@ -11015,6 +11016,7 @@ function cleanDriverTimeOffItem(item) {
     operatorName: cleanRosterText(f.OperatorName),
     startDate,
     endDate,
+    launchingPoint: cleanRosterText(f.LaunchingPoint),
     reason: cleanRosterText(f.Reason),
     status: cleanRosterText(f.Status || 'Active'),
     isCancelled: normalizeText(f.Status) === 'cancelled',
@@ -11317,6 +11319,7 @@ function buildDriverTimeOffFieldsFromBody(body = {}, rosterOption = null) {
   const endDate = normalizeEasternDateOnly(body.endDate);
   const operatorName = cleanRosterText(rosterOption?.driverName || body.operatorName);
   const truckNumber = cleanRosterText(rosterOption?.unitNo || body.truckNumber);
+  const launchingPoint = typeof body.launchingPoint === 'string' ? cleanRosterText(body.launchingPoint) : '';
   const reason = normalizeDriverTimeOffReason(body.reason);
   const status = cleanRosterText(body.status || 'Active') || 'Active';
 
@@ -11325,6 +11328,8 @@ function buildDriverTimeOffFieldsFromBody(body = {}, rosterOption = null) {
   if (!startDate) throw new Error('Start date is required.');
   if (!endDate) throw new Error('End date is required.');
   if (endDate < startDate) throw new Error('End date cannot be before start date.');
+  if (!launchingPoint) throw new Error('Launching point is required. Enter where the driver will start when time off ends.');
+  if (launchingPoint.length > 255) throw new Error('Launching point must be 255 characters or fewer.');
 
   const recordNumber = cleanRosterText(body.recordNumber) || `TO-${Date.now()}`;
 
@@ -11335,6 +11340,7 @@ function buildDriverTimeOffFieldsFromBody(body = {}, rosterOption = null) {
     OperatorName: operatorName,
     StartDate: startDate,
     EndDate: endDate,
+    LaunchingPoint: launchingPoint,
     Reason: reason,
     Status: status
   };

@@ -1872,6 +1872,7 @@ export default function App() {
     truckNumber: '',
     startDate: getEasternDateInputValue(),
     endDate: getEasternDateInputValue(),
+    launchingPoint: '',
     reason: 'Home Time',
     status: 'Active'
   }));
@@ -8365,6 +8366,7 @@ function getPositionStatusLabel(position) {
         truckNumber: record.truckNumber || '',
         startDate: record.startDate || getEasternDateInputValue(),
         endDate: record.endDate || record.startDate || getEasternDateInputValue(),
+        launchingPoint: record.launchingPoint || '',
         reason: normalizeDriverTimeOffReason(record.reason),
         status: record.status || 'Active'
       };
@@ -8377,6 +8379,7 @@ function getPositionStatusLabel(position) {
       truckNumber: '',
       startDate: today,
       endDate: today,
+      launchingPoint: '',
       reason: 'Home Time',
       status: 'Active'
     };
@@ -8457,6 +8460,16 @@ function getPositionStatusLabel(position) {
 
   async function submitDriverTimeOff(event) {
     event.preventDefault();
+    if (driverTimeOffSubmitting) return;
+    const launchingPoint = String(driverTimeOffDraft.launchingPoint || '').trim();
+    if (!launchingPoint) {
+      setDriverTimeOffActionError('Launching point is required. Enter where the driver will start when time off ends.');
+      return;
+    }
+    if (launchingPoint.length > 255) {
+      setDriverTimeOffActionError('Launching point must be 255 characters or fewer.');
+      return;
+    }
     setDriverTimeOffSubmitting(true);
     setDriverTimeOffActionError('');
     setDriverTimeOffActionMessage('');
@@ -8471,6 +8484,7 @@ function getPositionStatusLabel(position) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...driverTimeOffDraft,
+          launchingPoint,
           reason: normalizeDriverTimeOffReason(driverTimeOffDraft.reason)
         })
       });
@@ -14200,6 +14214,13 @@ function openReportLoadDetails(load) {
                               </div>
                             </div>
 
+                            <div className="driver-time-off-card-facts driver-time-off-card-launching-point">
+                              <div>
+                                <span>Launching Point</span>
+                                <strong>{record.launchingPoint || 'Not recorded'}</strong>
+                              </div>
+                            </div>
+
                             <small>Open details / edit</small>
                           </button>
                         );
@@ -14233,7 +14254,7 @@ function openReportLoadDetails(load) {
           </div>
 
           <form className="modal-body driver-time-off-form" onSubmit={submitDriverTimeOff}>
-            {driverTimeOffActionError && <div className="msg error">{driverTimeOffActionError}</div>}
+            {driverTimeOffActionError && <div className="msg error" role="alert">{driverTimeOffActionError}</div>}
 
             <div className="driver-time-off-form-grid">
               <label>
@@ -14291,6 +14312,22 @@ function openReportLoadDetails(load) {
                 />
               </label>
 
+              <label className="driver-time-off-launching-point-field">
+                <span>Launching Point (required)</span>
+                <input
+                  type="text"
+                  name="launchingPoint"
+                  value={driverTimeOffDraft.launchingPoint || ''}
+                  onChange={(e) => updateDriverTimeOffDraft('launchingPoint', e.target.value)}
+                  placeholder="City, state or starting location"
+                  aria-describedby="driver-time-off-launching-point-help"
+                  required
+                  maxLength={255}
+                  disabled={driverTimeOffSubmitting}
+                />
+                <small id="driver-time-off-launching-point-help">Where the driver will start when time off ends.</small>
+              </label>
+
               <label>
                 <span>Reason</span>
                 <select
@@ -14342,6 +14379,7 @@ function openReportLoadDetails(load) {
                       <tr>
                         <th>Start</th>
                         <th>End</th>
+                        <th className="driver-time-off-launching-point-cell">Launching Point</th>
                         <th>Reason</th>
                         <th>Status</th>
                         <th>Days</th>
@@ -14369,6 +14407,7 @@ function openReportLoadDetails(load) {
                           >
                             <td>{formatDateOnly(row.startDate)}</td>
                             <td>{formatDateOnly(row.endDate)}</td>
+                            <td className="driver-time-off-launching-point-cell">{row.launchingPoint || 'Not recorded'}</td>
                             <td>{row.reason || '-'}</td>
                             <td>{row.timingStatus || row.status || '-'}</td>
                             <td>{formatReportNumber(row.reportDays || row.days)}</td>
@@ -14446,6 +14485,7 @@ function openReportLoadDetails(load) {
                     <th>Truck</th>
                     <th>Start</th>
                     <th>End</th>
+                    <th className="driver-time-off-launching-point-cell">Launching Point</th>
                     <th>Reason</th>
                     <th>Status</th>
                     <th>Days</th>
@@ -14470,6 +14510,7 @@ function openReportLoadDetails(load) {
                       <td>{row.truckNumber || '-'}</td>
                       <td>{formatDateOnly(row.startDate)}</td>
                       <td>{formatDateOnly(row.endDate)}</td>
+                      <td className="driver-time-off-launching-point-cell">{row.launchingPoint || 'Not recorded'}</td>
                       <td>{row.reason || '-'}</td>
                       <td>{row.timingStatus || row.status || '-'}</td>
                       <td>{formatReportNumber(row.reportDays || row.days)}</td>
