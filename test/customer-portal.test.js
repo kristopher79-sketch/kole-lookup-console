@@ -110,7 +110,7 @@ const returnRow = (extra = {}) => ({ id: 'return-1', fields: {
 test('time-off returns create projected capacity from the launching point and roster equipment without a published run', () => {
   const capacity = buildPortalCapacity({ now, roster: [rosterRow('1', '0001')], timeOff: [returnRow()] });
   assert.deepEqual(capacity.opportunities, [
-    { date: '2026-11-24', location: 'Charlotte, NC', equipment: 'Conestoga', kind: 'Projected' }
+    { date: '2026-11-25', location: 'Charlotte, NC', equipment: 'Conestoga', kind: 'Projected' }
   ]);
   assert.equal(capacity.asOf, now.toISOString());
   for (const hidden of ['0001', 'Private driver', 'TruckNumber', 'returningTimeOff', 'LaunchingPoint']) {
@@ -120,15 +120,64 @@ test('time-off returns create projected capacity from the launching point and ro
 
 test('time-off return dates include today through day seven and exclude past, day eight, invalid and cancelled returns', () => {
   const base = { now, roster: [rosterRow('1', '0001')] };
-  for (const EndDate of ['2026-11-23', '2026-11-30']) {
-    assert.equal(buildPortalCapacity({ ...base, timeOff: [returnRow({ EndDate })] }).opportunities[0]?.date, EndDate);
+  for (const [EndDate, availableDate] of [['2026-11-22', '2026-11-23'], ['2026-11-29', '2026-11-30']]) {
+    assert.equal(buildPortalCapacity({ ...base, timeOff: [returnRow({ EndDate })] }).opportunities[0]?.date, availableDate);
   }
   for (const extra of [
-    { EndDate: '2026-11-22' }, { EndDate: '2026-12-01' }, { EndDate: 'invalid' },
+    { EndDate: '2026-11-21' }, { EndDate: '2026-11-30' }, { EndDate: 'invalid' },
     { StartDate: '2026-11-25' }, { StartDate: '' }, { LaunchingPoint: '' },
     { LaunchingPoint: 'Unknown' }, { Status: 'Cancelled' }, { Status: 'Canceled' }, { Status: 'Inactive' }
   ]) {
     assert.deepEqual(buildPortalCapacity({ ...base, timeOff: [returnRow(extra)] }).opportunities, []);
+  }
+});
+
+test('future returns project scheduled load completion and start after inclusive time off', () => {
+  const base = {
+    now: new Date('2026-11-25T15:29:00Z'), roster: [rosterRow('1', '0001')],
+    timeOff: [returnRow({ StartDate: '2026-11-25T00:00:00Z', EndDate: '2026-11-30T00:00:00Z' })]
+  };
+  const load = row('40', 'ANY', {
+    Truck_x0020_Number: '1', Pickup_x0020_Offer_x0020_Date: '2026-11-23',
+    Expected_x0020_Delivery_x0020_Da: '2026-11-25'
+  });
+  const expected = [{ date: '2026-12-01', location: 'Charlotte, NC', equipment: 'Conestoga', kind: 'Projected' }];
+  for (const delivery of ['2026-11-25', '2026-11-30', '2026-12-01']) {
+    const orders = [{ ...load, fields: { ...load.fields, Expected_x0020_Delivery_x0020_Da: delivery } }];
+    assert.deepEqual(buildPortalCapacity({ ...base, orders }).opportunities, expected);
+  }
+  for (const delivery of ['2026-11-24', '2026-12-02', '', 'invalid', '2026-11-22']) {
+    const orders = [{ ...load, fields: { ...load.fields, Expected_x0020_Delivery_x0020_Da: delivery } }];
+    assert.deepEqual(buildPortalCapacity({ ...base, orders }).opportunities, []);
+  }
+  const overdue = { ...load, fields: { ...load.fields, Expected_x0020_Delivery_x0020_Da: '2026-11-24' } };
+  const evidence = { deliveryEvidenceBols: new Set(['DEMO-40']) };
+  assert.deepEqual(buildPortalCapacity({ ...base, orders: [overdue], evidence }).opportunities, expected);
+  const futureBooking = row('41', 'ANY', {
+    Truck_x0020_Number: '1', Pickup_x0020_Offer_x0020_Date: '2026-12-08',
+    Expected_x0020_Delivery_x0020_Da: '2026-12-09'
+  });
+  assert.deepEqual(buildPortalCapacity({ ...base, orders: [load, futureBooking] }).opportunities, []);
+  const otherOff = returnRow({ StartDate: '2026-12-01', EndDate: '2026-12-10' });
+  assert.deepEqual(buildPortalCapacity({ ...base, orders: [load], timeOff: [...base.timeOff, otherOff] }).opportunities, []);
+});
+
+test('published future forecasts may rely on scheduled delivery while today requires completion', () => {
+  const load = row('40', 'ANY', {
+    Truck_x0020_Number: '1', Pickup_x0020_Offer_x0020_Date: '2026-11-22',
+    Expected_x0020_Delivery_x0020_Da: '2026-11-23'
+  });
+  const base = { now, roster: [rosterRow('1', '0001')], orders: [load] };
+  assert.equal(buildPortalCapacity({ ...base, projected: [capacityRow('1', '0001')] }).opportunities.length, 1);
+  const overdue = { ...load, fields: { ...load.fields, Expected_x0020_Delivery_x0020_Da: '2026-11-22' } };
+  assert.deepEqual(buildPortalCapacity({ ...base, orders: [overdue], projected: [capacityRow('1', '0001')] }).opportunities, []);
+  for (const candidates of [
+    { current: [{ createdDateTime: '2026-11-23T12:00:00Z', fields: { UnitNo: '0001', DateSent: '2026-11-23', CurrentLocation: 'Charlotte, NC' } }] },
+    { projected: [capacityRow('1', '0001', { ProjectedEmpty: '2026-11-23' })] }
+  ]) {
+    assert.deepEqual(buildPortalCapacity({ ...base, ...candidates }).opportunities, []);
+    const evidence = { deliveryEvidenceBols: new Set(['DEMO-40']) };
+    assert.equal(buildPortalCapacity({ ...base, ...candidates, evidence }).opportunities.length, 1);
   }
 });
 
@@ -138,7 +187,7 @@ test('return projections keep booking, other time-off, solo and unique-roster el
   assert.deepEqual(buildPortalCapacity({ ...base, orders: [booking] }).opportunities, []);
   const otherOff = { id: 'other-off', fields: { TruckNumber: '0001', Status: 'Active', StartDate: '2026-12-03', EndDate: '2026-12-05' } };
   assert.deepEqual(buildPortalCapacity({ ...base, timeOff: [...base.timeOff, otherOff] }).opportunities, []);
-  otherOff.fields.StartDate = '2026-12-04';
+  otherOff.fields.StartDate = '2026-12-05';
   assert.equal(buildPortalCapacity({ ...base, timeOff: [...base.timeOff, otherOff] }).opportunities.length, 1);
   for (const extra of [{ SoloorTeam: 'Team' }, { Status: 'Inactive' }, { TrailerType: 'Unknown' }]) {
     assert.deepEqual(buildPortalCapacity({ ...base, roster: [rosterRow('1', '0001', extra)] }).opportunities, []);
@@ -155,7 +204,7 @@ test('a return is not shown as current while time off is active and does not rep
     roster: [rosterRow('1', '0001'), rosterRow('2', '0002', { TrailerType: "48' RGN" })], timeOff: [returnRow()] });
   assert.deepEqual(capacity.opportunities, [
     { date: '2026-11-23', location: 'Charlotte, NC', equipment: 'RGN', kind: 'Current' },
-    { date: '2026-11-24', location: 'Charlotte, NC', equipment: 'Conestoga', kind: 'Projected' }
+    { date: '2026-11-25', location: 'Charlotte, NC', equipment: 'Conestoga', kind: 'Projected' }
   ]);
 });
 

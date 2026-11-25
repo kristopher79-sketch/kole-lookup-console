@@ -172,11 +172,12 @@ function sameOperator(truck, operator, roster) {
     (key(operator) && [key(roster.Operator_x002f_TeamName), key(roster.TMSName)].includes(key(operator))));
 }
 
-function isCapacityEligible(candidate, roster, orders, timeOff, evidence) {
+function isCapacityEligible(candidate, roster, orders, timeOff, evidence, today) {
   if (key(roster.Status) !== 'ACTIVE' || key(roster.SoloorTeam) !== 'SOLO' || !equipmentFamily(roster.TrailerType)) return false;
   if (/new vision/i.test(text(roster.Operator_x002f_TeamName)) || truckKey(roster.Trucks) === '5550') return false;
   const bookingHorizon = addDays(candidate.date, 7);
   const timeOffHorizon = addDays(bookingHorizon, 2);
+  const isFutureProjection = candidate.kind === 'Projected' && candidate.date > today;
   const bolCounts = countBols(orders);
   for (const order of orders) {
     const f = order.fields || {};
@@ -186,8 +187,9 @@ function isCapacityEligible(candidate, roster, orders, timeOff, evidence) {
     if (!pickup || !delivery || delivery < pickup) return false;
     if (pickup >= candidate.date && pickup <= bookingHorizon) return false;
     if (pickup < candidate.date && delivery > candidate.date) return false;
-    // An overdue, unconfirmed assignment does not establish an empty unit.
-    if (delivery < candidate.date) return false;
+    // Future projections may rely on scheduled completion, but a load already
+    // overdue today needs confirmation. Today's availability still requires an empty unit.
+    if (delivery <= candidate.date && (!isFutureProjection || delivery < today)) return false;
   }
   for (const item of timeOff) {
     const f = item.fields || {};
@@ -195,9 +197,6 @@ function isCapacityEligible(candidate, roster, orders, timeOff, evidence) {
     const start = businessDate(f.StartDate);
     const end = businessDate(f.EndDate);
     if (!start || !end || end < start) return false;
-    // EndDate is the return date shown in KOLE Connect. Only the source
-    // record has finished for this return; other time off still blocks it.
-    if (candidate.returningTimeOff === item && end === candidate.date) continue;
     if (start <= timeOffHorizon && end >= candidate.date) return false;
   }
   return true;
@@ -230,8 +229,9 @@ function buildPortalCapacity({ projected = [], current = [], roster = [], orders
     const start = businessDate(f.StartDate);
     const end = businessDate(f.EndDate);
     if (/^(cancelled|canceled|inactive)$/i.test(text(f.Status)) || !start || !end || end < start) continue;
-    candidates.push({ truck: f.TruckNumber, operator: f.OperatorName, date: end, location: text(f.LaunchingPoint),
-      kind: 'Projected', publishedAt: now.toISOString(), returningTimeOff: item });
+    // KOLE Connect includes EndDate in time off; the first available day follows it.
+    candidates.push({ truck: f.TruckNumber, operator: f.OperatorName, date: addDays(end, 1), location: text(f.LaunchingPoint),
+      kind: 'Projected', publishedAt: now.toISOString() });
   }
   const seenTrucks = new Set();
   const seenPublic = new Set();
@@ -241,7 +241,7 @@ function buildPortalCapacity({ projected = [], current = [], roster = [], orders
     if (matches.length !== 1) continue;
     const driver = matches[0].fields;
     const unit = truckKey(driver.Trucks);
-    if (!unit || seenTrucks.has(unit) || !isCapacityEligible(candidate, driver, orders, timeOff, evidence)) continue;
+    if (!unit || seenTrucks.has(unit) || !isCapacityEligible(candidate, driver, orders, timeOff, evidence, today)) continue;
     seenTrucks.add(unit);
     const equipment = equipmentFamily(driver.TrailerType);
     const publicKey = [candidate.date, key(candidate.location), equipment, candidate.kind].join('|');
