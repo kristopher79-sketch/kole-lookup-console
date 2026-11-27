@@ -7,6 +7,7 @@ import DriverRosterEditor from './DriverRosterEditor';
 import DeliveryPhotoPackage from './DeliveryPhotoPackage';
 import CompanyPortalAccess from './CompanyPortalAccess';
 import { createLookupTokenStorage } from './lookup-token-storage';
+import { createDashboardRefreshQueue, isDashboardRefreshVisible } from './dashboard-refresh';
 
 function RosterReportStaleNotice({ report }) {
   return report?.rosterStale ? <div className="report-alert warning" role="status">Driver details changed after this report was generated. Run it again for current roster information.</div> : null;
@@ -1946,6 +1947,8 @@ export default function App() {
   const startupSplashCloseTimerRef = useRef(null);
   const dashboardRefreshLastRunRef = useRef({});
   const dashboardRefreshInFlightRef = useRef(new Set());
+  const dashboardRefreshQueueRef = useRef(createDashboardRefreshQueue());
+  const dashboardSessionRef = useRef(0);
   const uploadDigestDateRef = useRef(getEasternDateInputValue());
   const operationsActiveTodayRef = useRef(null);
   const operationsLoadingTodayRef = useRef(null);
@@ -3295,8 +3298,17 @@ export default function App() {
     dashboardRefreshInFlightRef.current.clear();
     void loadDashboardBootstrap();
 
-    const tick = () => {
-      if (document.visibilityState !== 'visible') return;
+    let disposed = false;
+    let desktopWindow = null;
+    const desktopUnlisteners = [];
+    const tick = async () => {
+      if (disposed || document.visibilityState !== 'visible') return;
+      let minimized = false;
+      if (desktopWindow) {
+        try { minimized = await desktopWindow.isMinimized(); }
+        catch { /* Browser visibility remains the fallback. */ }
+      }
+      if (disposed || !isDashboardRefreshVisible(document, minimized)) return;
       runCoordinatedDashboardRefresh();
     };
     const interval = window.setInterval(tick, DASHBOARD_REFRESH_TICK_MS);
@@ -3305,7 +3317,22 @@ export default function App() {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
+    if (isTauriRuntime) {
+      void import('@tauri-apps/api/window').then(async ({ getCurrentWindow }) => {
+        if (disposed) return;
+        desktopWindow = getCurrentWindow();
+        for (const subscribe of [desktopWindow.onResized.bind(desktopWindow), desktopWindow.onFocusChanged.bind(desktopWindow)]) {
+          const unlisten = await subscribe(tick);
+          if (disposed) unlisten();
+          else desktopUnlisteners.push(unlisten);
+        }
+        await tick();
+      }).catch(() => {});
+    }
+
     return () => {
+      disposed = true;
+      desktopUnlisteners.forEach((unlisten) => unlisten());
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       dashboardRefreshInFlightRef.current.clear();
@@ -3571,6 +3598,7 @@ export default function App() {
   }
 
   function resetAppState() {
+    dashboardSessionRef.current += 1;
     dashboardRefreshLastRunRef.current = {};
     dashboardRefreshInFlightRef.current.clear();
     setQuery('');
@@ -4641,7 +4669,18 @@ async function loadDashboardBootstrap(options = {}) {
   const moduleKeys = Array.isArray(options.moduleKeys) && options.moduleKeys.length > 0
     ? [...new Set(options.moduleKeys)]
     : getVisibleDashboardModuleKeys();
+  const session = dashboardSessionRef.current;
+  const uploadDate = uploadDigestDateRef.current;
+  const key = JSON.stringify([accessToken, uploadDate, [...moduleKeys].sort()]);
+  return dashboardRefreshQueueRef.current.run(key, () => {
+    if (session !== dashboardSessionRef.current) return false;
+    return fetchDashboardBootstrap(moduleKeys, uploadDate, session);
+  }, { afterCurrent: options.afterCurrent });
+}
+
+async function fetchDashboardBootstrap(moduleKeys, uploadDate, session) {
   const requestedAt = Date.now();
+  let useLegacyFallback = false;
   moduleKeys.forEach((moduleKey) => dashboardRefreshInFlightRef.current.add(moduleKey));
 
   if (moduleKeys.includes('operations') && !operationsData) setOperationsLoading(true);
@@ -4656,23 +4695,34 @@ async function loadDashboardBootstrap(options = {}) {
   try {
     const params = new URLSearchParams({
       include: moduleKeys.join(','),
-      uploadDate: uploadDigestDateRef.current
+      uploadDate
     });
     const res = await authedFetch(`${API}/dashboard/bootstrap?${params.toString()}`);
+    useLegacyFallback = res.status === 404 || res.status === 405;
     const data = await res.json().catch(() => ({}));
+    if (session !== dashboardSessionRef.current) return false;
 
     if (!res.ok || !data.success) {
       throw new Error(data.error || 'Unable to load the dashboard bootstrap.');
     }
 
     moduleKeys.forEach((moduleKey) => {
+      if (moduleKey === 'uploadDigest' && uploadDate !== uploadDigestDateRef.current) return;
       applyDashboardBootstrapModule(moduleKey, data.modules?.[moduleKey]);
       dashboardRefreshLastRunRef.current[moduleKey] = requestedAt;
     });
     return data.modules || {};
   } catch {
-    // Keep compatibility during a staggered frontend/server deployment and
-    // preserve the last good screen if the bootstrap request itself fails.
+    if (session !== dashboardSessionRef.current) return false;
+    if (!useLegacyFallback) {
+      // A transient backend failure must not fan out into eight more requests.
+      // Keep the last good screen and let the normal cadence retry it.
+      moduleKeys.forEach((moduleKey) => applyDashboardBootstrapModule(moduleKey, {
+        ok: false, error: 'Unable to refresh this dashboard section. Please try again.'
+      }));
+      return false;
+    }
+    // Preserve compatibility when an older server lacks the bootstrap route.
     const fallbacks = [];
     if (moduleKeys.includes('operations')) fallbacks.push(loadOperationsDashboard({ silent: Boolean(operationsData) }));
     if (moduleKeys.includes('driverPositions')) fallbacks.push(loadDriverPositions({ silent: Boolean(driverPositionsData) }));
@@ -5746,7 +5796,7 @@ function applyDriverRosterEditToClient(result) {
   setDriverSummaryReport(staleReport);
   setWeeklySettlementReport(staleReport);
   setRecruitingSnapshotReport(staleReport);
-  void loadDashboardBootstrap({ moduleKeys: ['operations', 'driverPositions', 'availableTrucks', 'availableTruckDistribution'] });
+  void loadDashboardBootstrap({ moduleKeys: ['operations', 'driverPositions', 'availableTrucks', 'availableTruckDistribution'], afterCurrent: true });
   window.requestAnimationFrame(() => driverRosterEditButtonRef.current?.focus());
 }
 
@@ -5944,6 +5994,7 @@ async function submitDriverTermination(event) {
     setDriverTerminationModalOpen(false);
     setDriverTerminationConfirmed(false);
     void loadDashboardBootstrap({
+      afterCurrent: true,
       moduleKeys: ['operations', 'driverPositions', 'availableTrucks', 'availableTruckDistribution']
     });
   } catch (err) {

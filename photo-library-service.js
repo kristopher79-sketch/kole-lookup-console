@@ -629,6 +629,8 @@ function createPhotoLibraryService(dependencies) {
 
   function mapPhoto(configuration, shipment, item, stage, photoKey, hidden) {
     const id = registerPhotoReference(configuration, shipment, item, stage, photoKey, hidden);
+    const revision = cleanText(item.eTag) || cleanText(item.lastModifiedDateTime);
+    const version = revision ? `?v=${crypto.createHash('sha256').update(revision).digest('hex').slice(0, 24)}` : '';
     const capturedAt = cleanText(item.photo?.takenDateTime) || cleanText(item.lastModifiedDateTime) || `${shipment.pickupDate}T12:00:00Z`;
     const timestampSource = item.photo?.takenDateTime ? 'photo' : item.lastModifiedDateTime ? 'modified' : 'pickup-date';
     return {
@@ -637,8 +639,8 @@ function createPhotoLibraryService(dependencies) {
       stage,
       capturedAt,
       timestampSource,
-      thumbnailUrl: `/api/photo-library/photos/${encodeURIComponent(id)}/thumbnail`,
-      fullUrl: `/api/photo-library/photos/${encodeURIComponent(id)}/content`,
+      thumbnailUrl: `/api/photo-library/photos/${encodeURIComponent(id)}/thumbnail${version}`,
+      fullUrl: `/api/photo-library/photos/${encodeURIComponent(id)}/content${version}`,
       alt: `${shipment.engineName || shipment.freight || 'Freight'} ${stage} photograph`,
       isDemo: false,
       hidden,

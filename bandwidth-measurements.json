@@ -1,0 +1,14 @@
+{
+  "syntheticOnly": true,
+  "rows": 16000,
+  "jsonBytes": 4173755,
+  "gzipBytes": 297562,
+  "reductionPercent": 92.9,
+  "estimatedObjectBytes": 16709454,
+  "legacyCacheAdmitted": false,
+  "compactCacheAdmitted": true,
+  "retainedCacheBytes": 235678,
+  "encodeMs": 81.6,
+  "decodeMs": 41.4,
+  "restoredRows": 16000
+}

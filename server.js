@@ -11,6 +11,7 @@ const { pipeline } = require('stream/promises');
 const multer = require('multer');
 const webpush = require('web-push');
 const { createMemoryCacheBudget, runWithWorkloadSlot, mapSequentialSettled } = require('./server-memory');
+const { createTransferMonitor, coalesceLookupJson } = require('./server-transfer');
 const { buildDriverRosterEditSchema, buildDriverRosterEditPatch, driverRosterEditError } = require('./driver-roster-edit');
 const { createPhotoLibraryService, normalizeEngineName } = require('./photo-library-service');
 const { createFavoritesService } = require('./favorites-service');
@@ -81,6 +82,13 @@ const {
 } = require('./customer-tracking');
 
 const app = express();
+const transferMonitor = createTransferMonitor();
+// Cumulative process totals, fixed route templates only; never a public endpoint.
+const transferLogTimer = setInterval(() => {
+  console.info('Transfer totals (application body bytes; upstream declared lengths)', transferMonitor.snapshot());
+}, 5 * 60 * 1000);
+transferLogTimer.unref();
+app.use(transferMonitor.middleware);
 app.use(cors());
 app.use(express.json({ limit: '256kb' }));
 app.use((req, res, next) => {
@@ -188,9 +196,10 @@ function getLoadPicturesFolderId() {
 
 
 // These are estimated retained-object budgets, not an RSS limit. Oversized
-// results are still returned in full, but are not kept between requests.
+// results are returned in full; bounded lossless compaction is attempted before
+// rejecting them. Compaction never extends the existing freshness windows.
 const largeCacheBudget = createMemoryCacheBudget({ maxBytes: 32 * 1024 * 1024, maxEntryBytes: 8 * 1024 * 1024 });
-const cachedLargeReports = largeCacheBudget.createCache();
+const cachedLargeReports = largeCacheBudget.createCache({ name: 'reports', compactOversized: true });
 let cachedBidLists = null;
 let cachedBidListsAt = 0;
 let cachedSalesLeadsNotesListId = null;
@@ -212,9 +221,9 @@ let graphTokenRefreshPromise = null;
 let cachedLoadPaperworkRootFolder = null;
 let cachedLoadPaperworkRootFolderAt = 0;
 let cachedOperationsTodayAt = 0;
-const cachedBidItemsByList = largeCacheBudget.createCache();
-const cachedOrderNotesByOrder = largeCacheBudget.createCache();
-const cachedQuoteComparableItemsByList = largeCacheBudget.createCache();
+const cachedBidItemsByList = largeCacheBudget.createCache({ name: 'bidItems', compactOversized: true });
+const cachedOrderNotesByOrder = largeCacheBudget.createCache({ name: 'orderNotes', compactOversized: true });
+const cachedQuoteComparableItemsByList = largeCacheBudget.createCache({ name: 'quoteComparables', compactOversized: true });
 let quoteComparableCacheGeneration = 0;
 const cachedQuotePublishResults = new Map();
 const inFlightQuotePublishRequests = new Map();
@@ -631,6 +640,7 @@ async function fetchWithTimeoutAndRetry(url, options = {}, retryOptions = {}) {
 
     try {
       const response = await fetch(url, { ...options, signal: controller.signal });
+      transferMonitor.recordUpstream(response, String(url).startsWith('https://graph.microsoft.com/') ? 'graph' : 'other');
       if (!isRetryableGraphStatus(response.status) || attempt >= maxRetries) return response;
 
       await response.arrayBuffer().catch(() => null);
@@ -799,6 +809,8 @@ function setCacheRecord(cache, key, value, maxEntries = 40) {
 }
 
 function sweepExpiredCache(cache, ttlMs) {
+  // Inspect timestamps without inflating every compacted source on each sweep.
+  if (typeof cache.sweepExpired === 'function') return cache.sweepExpired(ttlMs);
   const now = Date.now();
 
   for (const [key, cached] of cache.entries()) {
@@ -1789,13 +1801,15 @@ async function getAllBidItemsFromList(token, sourceList, options = {}) {
     if (cached) return cached;
   }
 
-  const bundle = await getAllListItemsWithFieldsResilient(token, sourceList.listId, getBidSearchFieldSelect(), {
-    mapItem: (item) => cleanBidItem(item, sourceList)
+  const revision = cachedBidItemsByList.revision;
+  return coalesceRequest(`bid-items:${revision}:${cacheKey}:${forceRefresh}`, async () => {
+    const bundle = await getAllListItemsWithFieldsResilient(token, sourceList.listId, getBidSearchFieldSelect(), {
+      mapItem: (item) => cleanBidItem(item, sourceList)
+    });
+    const records = bundle.items;
+    if (revision === cachedBidItemsByList.revision) setCacheRecord(cachedBidItemsByList, cacheKey, records, 24);
+    return records;
   });
-  const records = bundle.items;
-  setCacheRecord(cachedBidItemsByList, cacheKey, records, 24);
-
-  return records;
 }
 
 function buildRecordResponse(data, sourceList) {
@@ -19024,13 +19038,13 @@ function getDashboardBidFieldSelect() {
   ].filter(Boolean))).join(',');
 }
 
-async function refreshDashboardBidSource(token, currentList) {
+async function refreshDashboardBidSource(token, currentList, revision = cachedLargeReports.revision) {
   const items = await getAllListItemsWithFields(
     token,
     currentList.listId,
     getDashboardBidFieldSelect()
   );
-  cachedLargeReports.set('cachedDashboardBidSource', {
+  if (revision === cachedLargeReports.revision) cachedLargeReports.set('cachedDashboardBidSource', {
     listId: currentList.listId,
     items,
     cachedAt: Date.now()
@@ -19048,12 +19062,13 @@ async function getDashboardBidSource(token, currentList, options = {}) {
     return cached.items;
   }
 
-  const requestKey = `dashboard-bid-source:${currentList?.listId || 'missing'}`;
+  const revision = cachedLargeReports.revision;
+  const requestKey = `dashboard-bid-source:${revision}:${currentList?.listId || 'missing'}`;
   if (!forceRefresh && matchesList && ageMs < DASHBOARD_BID_SOURCE_MAX_STALE_MS) {
     // Keep refresh work inside the caller's workload slot. A detached refresh
     // can otherwise overlap the next report after this response finishes.
     try {
-      return await coalesceRequest(requestKey, () => refreshDashboardBidSource(token, currentList));
+      return await coalesceRequest(requestKey, () => refreshDashboardBidSource(token, currentList, revision));
     } catch (error) {
       if (options.waitForRefresh === true) throw error;
       console.warn('Dashboard Bid Listing refresh failed; using the recent cached snapshot.');
@@ -19061,7 +19076,7 @@ async function getDashboardBidSource(token, currentList, options = {}) {
     }
   }
 
-  return coalesceRequest(requestKey, () => refreshDashboardBidSource(token, currentList));
+  return coalesceRequest(requestKey, () => refreshDashboardBidSource(token, currentList, revision));
 }
 
 function getIntelliTrackFieldSelect() {
@@ -20072,17 +20087,19 @@ app.get('/upload-digest', requireLookupAccess, withHeavyWorkload(async (req, res
 
 app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, withHeavyWorkload(async (req, res) => {
   try {
+    const cacheRevision = cachedLargeReports.revision;
     const targetDate = formatEasternDate();
     const forceRefresh = String(req.query.refresh || '').toLowerCase() === 'true';
+    const cachedOperations = cachedLargeReports.get('cachedOperationsToday');
 
     if (
       !forceRefresh &&
-      cachedLargeReports.get('cachedOperationsToday') &&
-      cachedLargeReports.get('cachedOperationsToday').targetDate === targetDate &&
+      cachedOperations &&
+      cachedOperations.targetDate === targetDate &&
       Date.now() - cachedOperationsTodayAt < OPERATIONS_TODAY_CACHE_MS
     ) {
       return res.json({
-        ...cachedLargeReports.get('cachedOperationsToday').payload,
+        ...cachedOperations.payload,
         cache: {
           hit: true,
           ageSeconds: Math.round((Date.now() - cachedOperationsTodayAt) / 1000)
@@ -20191,11 +20208,13 @@ app.get(['/operations/today', '/operations/snapshot'], requireLookupAccess, with
       loadingNext7
     };
 
-    cachedLargeReports.set('cachedOperationsToday', {
-      targetDate,
-      payload
-    });
-    cachedOperationsTodayAt = Date.now();
+    if (cacheRevision === cachedLargeReports.revision) {
+      cachedLargeReports.set('cachedOperationsToday', {
+        targetDate,
+        payload
+      });
+      cachedOperationsTodayAt = Date.now();
+    }
 
     res.json(payload);
   } catch (error) {
@@ -21221,16 +21240,17 @@ app.get('/reports/sales-leads/suppression/pdf', requireLookupAccess, withHeavyWo
   }
 }));
 
-async function buildBootstrapOperationsPayload(token, currentList, items, evidenceSets) {
+async function buildBootstrapOperationsPayload(token, currentList, items, evidenceSets, cacheRevision = cachedLargeReports.revision) {
   const targetDate = formatEasternDate();
+  const cachedOperations = cachedLargeReports.get('cachedOperationsToday');
 
   if (
-    cachedLargeReports.get('cachedOperationsToday') &&
-    cachedLargeReports.get('cachedOperationsToday').targetDate === targetDate &&
+    cachedOperations &&
+    cachedOperations.targetDate === targetDate &&
     Date.now() - cachedOperationsTodayAt < OPERATIONS_TODAY_CACHE_MS
   ) {
     return {
-      ...cachedLargeReports.get('cachedOperationsToday').payload,
+      ...cachedOperations.payload,
       cache: {
         hit: true,
         ageSeconds: Math.round((Date.now() - cachedOperationsTodayAt) / 1000)
@@ -21314,8 +21334,10 @@ async function buildBootstrapOperationsPayload(token, currentList, items, eviden
     loadingNext7
   };
 
-  cachedLargeReports.set('cachedOperationsToday', { targetDate, payload });
-  cachedOperationsTodayAt = Date.now();
+  if (cacheRevision === cachedLargeReports.revision) {
+    cachedLargeReports.set('cachedOperationsToday', { targetDate, payload });
+    cachedOperationsTodayAt = Date.now();
+  }
   return payload;
 }
 
@@ -21614,19 +21636,22 @@ async function settleBootstrapModule(work, moduleKey = '') {
     }
     return { ok: true, data };
   } catch (error) {
-    console.error('Dashboard bootstrap module failed:', error);
+    console.error('Dashboard bootstrap module failed.', {
+      module: moduleKey, statusCode: Number(error?.statusCode || error?.status || 0) || null
+    });
     if (moduleKey) {
       logServerMemory('Dashboard bootstrap module failed', {
         module: moduleKey,
         statusCode: Number(error?.statusCode || error?.status || 0) || null
       });
     }
-    return { ok: false, error: error.message || 'Unable to load dashboard module.' };
+    return { ok: false, error: error?.safeForClient === true ? error.message : 'Unable to load dashboard module. Please try again.' };
   }
 }
 
-app.get('/dashboard/bootstrap', requireLookupAccess, withHeavyWorkload(async (req, res) => {
+app.get('/dashboard/bootstrap', requireLookupAccess, coalesceLookupJson(withHeavyWorkload(async (req, res) => {
   try {
+    const cacheRevision = cachedLargeReports.revision;
     const allowedModules = new Set([
       'operations',
       'driverPositions',
@@ -21653,7 +21678,7 @@ app.get('/dashboard/bootstrap', requireLookupAccess, withHeavyWorkload(async (re
       : Promise.resolve({ pickupEvidenceBols: new Set(), deliveryEvidenceBols: new Set(), uploadDigestCount: 0 });
 
     const builders = {
-      operations: async () => buildBootstrapOperationsPayload(token, currentList, await bidItemsPromise, await evidencePromise),
+      operations: async () => buildBootstrapOperationsPayload(token, currentList, await bidItemsPromise, await evidencePromise, cacheRevision),
       driverPositions: () => buildBootstrapDriverPositionsPayload(token, {
         currentList, bidItems: bidItemsPromise, evidenceSets: evidencePromise
       }),
@@ -21685,13 +21710,13 @@ app.get('/dashboard/bootstrap', requireLookupAccess, withHeavyWorkload(async (re
       modules: Object.fromEntries(entries)
     });
   } catch (error) {
-    console.error(error);
+    console.error('Dashboard bootstrap failed.', { statusCode: Number(error?.statusCode || error?.status || 0) || null });
     res.status(500).json({
       success: false,
-      error: error.message || 'Unable to load dashboard bootstrap.'
+      error: 'Unable to load dashboard bootstrap. Please try again.'
     });
   }
-}));
+})));
 
 
 function getServiceLocationField(fields, aliases) {

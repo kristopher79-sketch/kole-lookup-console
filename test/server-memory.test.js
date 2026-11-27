@@ -73,6 +73,55 @@ test('expired large report entries are released even without revisiting their ke
   assert.equal(budget.diagnostics().estimatedBytes, 0);
 });
 
+test('opt-in compact caches retain oversized records without losing types or missing values', () => {
+  const budget = createMemoryCacheBudget({ maxBytes: 4096, maxEntryBytes: 2048 });
+  const cache = budget.createCache({ name: 'synthetic', compactOversized: true });
+  const value = { records: Array.from({ length: 100 }, (_, id) => ({ id, text: 'repeated'.repeat(10), empty: '', zero: 0, no: false, nullable: null, missing: undefined })),
+    date: new Date('2026-11-27T12:00:00Z'), map: new Map([['key', new Set(['a', 'b'])]]) };
+  value.self = value;
+  assert.ok(estimateRetainedBytes(value) > 2048);
+  cache.set('records', value);
+  const restored = cache.get('records');
+  assert.deepEqual(restored, value);
+  assert.equal(Object.hasOwn(restored.records[0], 'missing'), true);
+  assert.equal(restored.self, restored);
+  assert.deepEqual([...cache.values()][0], value);
+  assert.deepEqual([...cache.entries()][0], ['records', value]);
+  assert.deepEqual([...cache][0], ['records', value]);
+  cache.forEach((row, key) => { assert.deepEqual(row, value); assert.equal(key, 'records'); });
+  const totals = budget.diagnostics();
+  assert.ok(totals.estimatedBytes <= 2048);
+  assert.equal(totals.caches.synthetic.compacted, 1);
+  assert.equal(totals.skippedEntries, 0);
+  cache.clear();
+  assert.equal(budget.diagnostics().estimatedBytes, 0);
+});
+
+test('compacted caches retain global LRU bounds and skip unsupported oversized values safely', () => {
+  const budget = createMemoryCacheBudget({ maxBytes: 2300, maxEntryBytes: 2200 });
+  const cache = budget.createCache({ name: 'synthetic', compactOversized: true });
+  const row = { text: 'repeat'.repeat(5000) };
+  for (let index = 0; index < 10; index++) cache.set(String(index), row);
+  assert.ok(budget.diagnostics().estimatedBytes <= 2300);
+  assert.ok(budget.diagnostics().evictions > 0);
+  cache.set('unsupported', { text: row.text, fn: () => {} });
+  assert.equal(cache.has('unsupported'), false);
+  assert.equal(budget.diagnostics().caches.synthetic.skippedEncoding, 1);
+  assert.equal(budget.diagnostics().skippedEntries, 1);
+  const revision = cache.revision;
+  cache.delete('not-present');
+  assert.ok(cache.revision > revision, 'explicit invalidation advances even for a skipped/missing entry');
+});
+
+test('expired compacted cache wrappers are swept without decoding their contents', () => {
+  const cache = createMemoryCacheBudget({ maxBytes: 4096, maxEntryBytes: 2048 }).createCache({ compactOversized: true });
+  cache.set('expired', { cachedAt: Date.now() - 60000, value: 'repeat'.repeat(5000) });
+  cache.set('fresh', { cachedAt: Date.now(), value: 'repeat'.repeat(5000) });
+  cache.get = () => { throw Error('Sweep must not inflate data'); };
+  cache.sweepExpired(1000);
+  assert.equal(cache.has('expired'), false); assert.equal(cache.has('fresh'), true);
+});
+
 test('disconnect does not release capacity while handler work is still running', async () => {
   const work = deferred(); const res = response(); let released = 0;
   const pending = runWithWorkloadSlot(() => work.promise, {}, res, () => released++);
@@ -216,6 +265,42 @@ test('upload evidence consumes pages without retaining raw rows and preserves un
   const rows = await ctx.getAllListItemsWithFields('synthetic', 'uploads', '', { consumeItem: () => consumed++ });
   assert.equal(consumed, 4);
   assert.equal(rows.length, 0);
+});
+
+test('bid list reads coalesce but cannot repopulate a cache invalidated during a write', async () => {
+  const budget = createMemoryCacheBudget({ maxBytes: 4096, maxEntryBytes: 2048 });
+  const cache = budget.createCache();
+  const reads = [deferred(), deferred()]; let calls = 0;
+  const ctx = loadFunctions(['getAllBidItemsFromList', 'getBidItemsCacheKey', 'getCacheRecord', 'setCacheRecord', 'coalesceRequest'], {
+    cachedBidItemsByList: cache, BID_ITEM_CACHE_MS: 60000, inFlightRequests: new Map(),
+    getBidSearchFieldSelect: () => 'synthetic', cleanBidItem: row => row,
+    getAllListItemsWithFieldsResilient: () => reads[calls++].promise
+  });
+  const source = { listId: 'synthetic', year: 2026, label: 'synthetic' };
+  const a = ctx.getAllBidItemsFromList('synthetic', source);
+  const b = ctx.getAllBidItemsFromList('synthetic', source);
+  await Promise.resolve(); assert.equal(calls, 1);
+  cache.clear();
+  const c = ctx.getAllBidItemsFromList('synthetic', source);
+  await Promise.resolve(); assert.equal(calls, 2);
+  reads[0].resolve({ items: ['old'] }); await Promise.all([a, b]);
+  assert.equal(cache.size, 0);
+  reads[1].resolve({ items: ['new'] }); await c;
+  assert.deepEqual(Array.from(await ctx.getAllBidItemsFromList('synthetic', source)), ['new']);
+  assert.equal(calls, 2);
+});
+
+test('dashboard source refresh discards old cache writes after invalidation and preserves every row', async () => {
+  const cache = createMemoryCacheBudget({ maxBytes: 4096, maxEntryBytes: 2048 }).createCache();
+  const read = deferred();
+  const ctx = loadFunctions(['refreshDashboardBidSource'], { cachedLargeReports: cache,
+    getDashboardBidFieldSelect: () => 'synthetic', getAllListItemsWithFields: () => read.promise });
+  const pending = ctx.refreshDashboardBidSource('synthetic', { listId: 'synthetic' });
+  cache.delete('cachedDashboardBidSource');
+  const rows = [{ fields: { missing: undefined, empty: '', no: false, zero: 0 } }];
+  read.resolve(rows);
+  assert.equal(await pending, rows);
+  assert.equal(cache.has('cachedDashboardBidSource'), false);
 });
 
 test('permit alert count preserves today, past, status, missing BOL and requested exclusions without folder reads', async () => {

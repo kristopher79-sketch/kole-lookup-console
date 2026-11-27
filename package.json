@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
+    "test:bandwidth": "node --test test/bandwidth-transfer.test.js test/dashboard-refresh.test.js test/server-memory.test.js",
     "test:customer-tracking": "node --test test/customer-tracking.test.js",
     "test:load-paperwork": "node test/load-paperwork.test.js",
     "test:mobile-paperwork": "node test/mobile-home.test.js && node test/mobile-paperwork.test.js",

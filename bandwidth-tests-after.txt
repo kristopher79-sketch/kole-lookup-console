@@ -1,0 +1,548 @@
+✔ Case 1: active driver with GPS and pickup evidence is In Transit (84.5109ms)
+✔ Case 2: extended/medical leave remains visible without GPS (1.7264ms)
+✔ Case 3: long Home Time survives telemetry cleanup (0.9978ms)
+✔ Case 4: active driver without assignments or time off is Available (1.929ms)
+✔ Case 5: earliest future pickup wins, including time-of-day ties (4.6129ms)
+✔ Case 6: inactive driver with lingering GPS is excluded (1.1274ms)
+✔ Case 7: unexplained missing GPS remains visible and Available (0.9249ms)
+✔ New Vision truck 5550 is excluded from the shared roster rows with or without GPS (2.7326ms)
+✔ working evidence overrides overlapping time off; delivery today has priority (1.6988ms)
+✔ schedule span alone never establishes In Transit (2.302ms)
+✔ delivered, processed, finally settled, and non-Won loads cannot drive duty (2.6068ms)
+✔ latest position is attached; stale data stays stale; unmatched GPS never adds rows (5.0356ms)
+✔ roster identity survives duplicate and missing truck numbers (1.6541ms)
+✔ time off is inclusive, respects cancellation and known trucks, and supports operator fallback (6.7668ms)
+✔ SharePoint schedule dates do not shift at midnight UTC; business today uses Eastern (3.6651ms)
+✔ future load remains attached during time off and during a current load (2.1059ms)
+✔ unavailable time-off source never quietly implies Available (0.9858ms)
+✔ payload fetches each source once for 200 drivers and honors refresh/shared sources (55.043ms)
+✔ existing operational refresh reloads enriched roster with force refresh and retains data on failure (20.1336ms)
+✔ JSON gzip preserves data, negotiates q=0, varies caches, and measures transmitted body bytes (102.3682ms)
+✔ bootstrap coalescing precedes computation, respects authorization/query, and does not cache settled results (36.1212ms)
+✔ mutation barriers prevent a post-write read from sharing an older bootstrap (29.5726ms)
+✔ byte totals contain only bounded route templates and aggregate upstream lengths (70.9594ms)
+✔ preserves business dates and applies Eastern publication hours across DST (44.8713ms)
+✔ stores a salted password verifier and rejects plaintext and malformed hashes (2323.6657ms)
+✔ company sessions are separate from shipment links and revoke on password or customer changes (10.1289ms)
+✔ dashboard includes only the exact customer’s open bookings and strips internal details (2.4038ms)
+✔ tracking records cannot be joined using only a reused shipment number (0.395ms)
+✔ public capacity deduplicates units, uses real equipment type, and drops teams and old runs (2.2055ms)
+✔ capacity excludes bookings through day seven and time off through the additional two-day buffer (1.8808ms)
+✔ time-off returns create projected capacity from the launching point and roster equipment without a published run (0.7618ms)
+✔ time-off return dates include today through day seven and exclude past, day eight, invalid and cancelled returns (6.7132ms)
+✔ future returns project scheduled load completion and start after inclusive time off (5.0941ms)
+✔ published future forecasts may rely on scheduled delivery while today requires completion (2.8675ms)
+✔ return projections keep booking, other time-off, solo and unique-roster eligibility checks (4.1521ms)
+✔ a return is not shown as current while time off is active and does not replace another equipment family (2.1538ms)
+✔ capacity fails closed for stale publications, missing eligibility data, and closed hours (1.5572ms)
+✔ capacity HTTP reads launching points and refreshes cached returns after time-off writes (137.9487ms)
+✔ HTTP routes enforce tenant isolation, cookie scope, logout, and office-only provisioning (1898.7295ms)
+✔ normalizes only bounded URL-safe passkeys (3.766ms)
+✔ compares passkeys without exposing their original values (2.5888ms)
+✔ creates a revocable session bound to record and passkey fingerprint (8.4902ms)
+✔ serializes and reads the HttpOnly tracking cookie (1.0467ms)
+✔ builds a customer-safe in-transit payload (1.0177ms)
+✔ does not invent a milestone or expose invalid coordinates (0.4528ms)
+✔ shows picked up until telemetry confirms an active trip (0.7803ms)
+✔ delivery evidence takes precedence over pickup evidence (0.5042ms)
+✔ duplicate bootstrap callers share a request; different module batches never overlap (8.1801ms)
+✔ a mutation refresh runs after older work and queued duplicates still share (9.4531ms)
+✔ hidden tabs and minimized desktop windows pause visual polling; visible unfocused windows remain eligible (1.5874ms)
+✔ queued dashboard work from an ended login cannot fetch or populate a new session (43.6864ms)
+✔ transient bootstrap failures retain the screen without fallback fan-out; older servers still work (42.4921ms)
+✔ patch contains only supplied allowed fields, preserving zero, clearing and omitted values (22.3895ms)
+✔ live required, read-only, missing, incompatible and choice metadata are enforced (2.1867ms)
+✔ numeric ranges, integer axles, emails and unit lengths are checked without truncation (3.4454ms)
+✔ calendar dates preserve date-only values and cannot start after termination (7.8766ms)
+✔ function uses approved existing values and driver identity cannot be erased (1.9932ms)
+✔ save writes once with If-Match and returns normalized values after invalidating caches (17.6729ms)
+✔ stale versions and wildcard versions never write (10.2281ms)
+✔ truck reassignment checks all pages and rejects another active driver (8.4015ms)
+✔ unknown save outcome blocks blind retry without exposing upstream errors (9.8656ms)
+✔ confirmed save remains successful if follow-up read fails (18.2037ms)
+✔ simultaneous submissions for a driver are rejected until the first save completes (17.5654ms)
+✔ SharePoint Yes/No writes and reads preserve both boolean values (9.8814ms)
+✔ unavailable or incompatible override column prevents unlogged early check-in (3.3566ms)
+✔ findFavoriteColumn requires the expected writable SharePoint type (4.6034ms)
+✔ favorites service lists engine choices and resolves only active favorites (42.5471ms)
+✔ finds only the matching TMS folder (5.1132ms)
+✔ prefers the exact BOL, driver, and route folder for an order (1.3789ms)
+✔ does not confuse a BOL with a longer BOL prefix (0.9753ms)
+✔ refuses an ambiguous duplicate BOL folder (1.0725ms)
+✔ sanitizes OneDrive filenames while retaining the validated extension (1.8913ms)
+✔ adds a non-destructive suffix for duplicate filenames (1.329ms)
+✔ returns files only and keeps a dispatch sheet at the top (5.9106ms)
+✔ complete appointment time takes precedence over the redundant AM/PM field, matching Mobile display (79.9408ms)
+✔ early-arrival override is strictly boolean and only valid for In (1.1456ms)
+✔ early pickup and delivery require explicit override, preserve its flag on replay, and allow checkout (97.8936ms)
+✔ override never bypasses missing appointments, ownership, or an invalid server clock (4.2738ms)
+✔ normal check-ins and overrides reaching the server at opening are recorded as not early (5.4397ms)
+✔ no events means the next stop action is In (6.3147ms)
+✔ an In event means the next stop action is Out (0.7846ms)
+✔ In and Out events make the stop complete (0.9429ms)
+✔ duplicate In is an idempotent replay and creates no second item (2.6638ms)
+✔ an existing In remains an idempotent replay if its appointment changes (4.0846ms)
+✔ simultaneous duplicate In taps share one create operation (24.471ms)
+✔ duplicate Out is an idempotent replay and creates no second item (2.4627ms)
+✔ Out without a matching In is rejected (1.2417ms)
+✔ Pickup and Delivery ordering is independent (7.6021ms)
+✔ a later stop without its own appointment cannot create an In event (2.2281ms)
+✔ check-in opens at the exact Eastern appointment date and time minus one hour (4.9295ms)
+✔ missing and invalid appointment information blocks In without affecting existing Out (2.7288ms)
+✔ Eastern winter offset is used for the appointment window (2.0948ms)
+✔ a midnight appointment opens on the previous calendar date (1.5925ms)
+✔ invalid coordinates are rejected when location is Captured (1.0653ms)
+✔ Denied, Unavailable, and Timeout create events without coordinates (3.8998ms)
+✔ a different driver or truck cannot write an event for the load (0.8494ms)
+✔ GPS failure does not block event creation (1.572ms)
+✔ BOL, truck, operator, and time are derived outside client input (1.8571ms)
+✔ Won and TONU loads remain eligible for the assigned mobile driver (7.2504ms)
+✔ TONU remains visible only until either upload type has evidence (3.4568ms)
+✔ Won loads remain visible after Delivery evidence until final settlement (0.6911ms)
+✔ production load summaries use Status when applying upload visibility (0.9519ms)
+✔ load eligibility requires the assigned truck and a live operational status (1.5955ms)
+✔ available-load lookup only returns current or upcoming Mobile selections (1.656ms)
+✔ mobile metadata contains only allowed PDFs and public fields (5.2334ms)
+✔ assigned driver can list and open paperwork for an accessible load (3.7374ms)
+✔ another driver cannot list paperwork for an assigned load (2.9274ms)
+✔ a document ID from another load cannot cross the authorized folder boundary (3.3497ms)
+✔ stale load access is checked again before document content is read (4.3215ms)
+✔ document lookup rejects non-PDF files even when the ID matches (1.9474ms)
+✔ a missing paperwork folder is an empty list but not an openable document (1.2393ms)
+✔ subscription creation derives ownership from the authenticated driver (6.8466ms)
+✔ subscription re-registration upserts without changing CreatedAt (15.9119ms)
+✔ a driver cannot claim or disable another driver subscription (4.6837ms)
+✔ unsubscribe deactivates the authenticated device and preserves history (1.2775ms)
+✔ one driver can register multiple devices (1.5614ms)
+✔ Pending event with a subscription becomes Delivered (5.4519ms)
+✔ push payload keeps the required fields and uses driver-friendly change wording (10.4195ms)
+✔ registered load payload uses one consolidated notification message (1.1085ms)
+✔ Pending event without a subscription becomes NoSubscription (1.8309ms)
+✔ expired subscription is disabled and the event becomes DeliveryFailed (2.2027ms)
+✔ all non-expired push attempts failing produces DeliveryFailed (2.1129ms)
+✔ one successful device makes a multi-device event Delivered (2.844ms)
+✔ one delivery attempt is bounded to ten active devices (3.9977ms)
+✔ an already-Delivered duplicate event is never resent (1.0834ms)
+✔ SubscriptionID is deterministic by device endpoint, not truck number (0.8773ms)
+✔ public VAPID configuration never returns the private key (1.2104ms)
+✔ proximity push reuses the existing load deep link and update event (0.7291ms)
+✔ new Won load assigned to a truck creates NEW_LOAD (8.5991ms)
+✔ newly created Won item with an assigned truck creates NEW_LOAD (3.9028ms)
+✔ Won order without a truck creates no event (2.8133ms)
+✔ truck populated on an unfinished bid creates no event (0.9647ms)
+✔ truck assigned after an order is already Won creates NEW_LOAD (1.7419ms)
+✔ Won order cancellation targets the previously assigned truck (1.9066ms)
+✔ TONU remains distinct from cancellation (1.2644ms)
+✔ pickup time edit creates one LOAD_UPDATED event (7.4679ms)
+✔ registration field fills stay silent until a BOL is assigned (1.7402ms)
+✔ a real edit to existing Bid-ID-only load details still notifies (1.7724ms)
+✔ bid-to-BOL registration creates one consolidated load-details event (2.0518ms)
+✔ registration window suppresses follow-up detail-fill revisions (1.7238ms)
+✔ delivery date edit compares business date rather than timestamp suffix (1.6126ms)
+✔ Order Notes rich-text edit creates LOAD_UPDATED (1.4243ms)
+✔ freight details edit creates one aggregated LOAD_UPDATED event (1.4512ms)
+✔ administrative-only changes create no event (1.025ms)
+✔ truck reassignment creates LOAD_REMOVED for old and NEW_LOAD for new (0.9098ms)
+✔ truck removal without a replacement creates LOAD_REMOVED (0.9205ms)
+✔ multiple meaningful fields remain one event with an exact allowlisted summary (1.1232ms)
+✔ same SharePoint revision produces the same deterministic event ID (1.3664ms)
+✔ driver targeting uses the active Mobile authentication roster mapping (1.2025ms)
+✔ allowlist contains only intentional driver-impacting fields (0.6518ms)
+✔ proximity changes use LOAD_UPDATED even during registration; repeats and clearing stay silent (6.1824ms)
+✔ proximity does not override reassignment/cancellation or repeat on ordinary edits (2.3473ms)
+✔ Pickup: 0 events, evidence stays independent (8.2221ms)
+✔ Pickup: 1 events, evidence stays independent (18.1654ms)
+✔ Pickup: 2 events, evidence stays independent (3.2637ms)
+✔ Delivery: 0 events, evidence stays independent (3.3007ms)
+✔ Delivery: 1 events, evidence stays independent (4.7988ms)
+✔ Delivery: 2 events, evidence stays independent (4.4665ms)
+✔ bulk and detail fail soft; archive never queries reused IDs (9.0545ms)
+✔ one bulk read for many rows; BOL, load and sequence isolation; invalid timestamps ignored (6.5017ms)
+✔ uses canonical earliest In and Out, independent of event order (3.4848ms)
+✖ both dashboard paths and both record routes call the shared hydration (8.8845ms)
+✔ BOL-first matching: both correct, dashboard and detail (7.5093ms)
+✔ BOL-first matching: BOL correct, ID wrong, dashboard and detail (5.205ms)
+✔ BOL-first matching: BOL correct, ID blank, dashboard and detail (5.5449ms)
+✔ BOL-first matching: BOL blank, ID correct, dashboard and detail (5.8126ms)
+✔ BOL-first matching: BOL wrong, ID correct, dashboard and detail (7.2584ms)
+✔ BOL-first matching: both blank, dashboard and detail (7.3544ms)
+✔ record cleaning preserves multiline SMS, amounts, statuses, and optional phone values (13.1716ms)
+✔ unexpected duplicate confirmations sort newest first with a stable item ID tie-breaker (39.9782ms)
+✔ lookup filters by BidID and preserves prefixes and leading zeros (12.8277ms)
+✔ lookup returns an empty result without treating it as an error (10.7119ms)
+✔ upstream failure returns a modest isolated error without exposing Graph details (4.667ms)
+✔ endpoint remains office-authenticated and is absent from mobile routes and payload builders (4.6712ms)
+✖ billing UI reads by BidID and includes loading, empty, error, disclosure, wrapping, and theme styling (7.166ms)
+✔ verifies the live suppression column only when it is a single boolean field (4.8193ms)
+✔ verifies writable override fields without confusing SharePoint title aliases (1.3429ms)
+✔ derives a stable canonical photo key from OneDrive identity (1.3516ms)
+✔ normalizes historical engine spelling without turning unknown values into models (3.2904ms)
+✔ classifies freight while preserving a separate dynamic engine identity (1.3249ms)
+✔ round trips opaque pagination offsets and rejects malformed cursors (3.0344ms)
+✔ large caches share an estimated byte budget and evict least recently used data (5.0789ms)
+✔ oversized results are not retained; replacement and cyclic/Map values are accounted for (1.1633ms)
+✔ expired large report entries are released even without revisiting their keys (19.1768ms)
+✔ opt-in compact caches retain oversized records without losing types or missing values (366.9307ms)
+✔ compacted caches retain global LRU bounds and skip unsupported oversized values safely (3.3487ms)
+✔ disconnect does not release capacity while handler work is still running (0.7722ms)
+✔ capacity is held until both computation and response transmission finish (0.6533ms)
+✔ unexpected handler failure releases capacity and propagates to Express (1.9284ms)
+✔ quote, report and search handlers serialize, including after disconnect (7.7121ms)
+✔ a disconnected queued request never runs and does not block its successor (3.4064ms)
+✔ pages are projected before the next read and opaque nextLink is preserved (3.6497ms)
+✔ full-field fallback restarts cleanly after a partial selected-field read (4.1006ms)
+✔ sequential archive reads preserve order, partial failures, and later sources (1.1838ms)
+✔ cached date formatters preserve Eastern date boundaries and reuse native instances (41.7334ms)
+✔ upload evidence consumes pages without retaining raw rows and preserves unique evidence/counts (3.5531ms)
+✔ bid list reads coalesce but cannot repopulate a cache invalidated during a write (5.5423ms)
+✔ dashboard source refresh discards old cache writes after invalidation and preserves every row (3.1267ms)
+✔ permit alert count preserves today, past, status, missing BOL and requested exclusions without folder reads (4.8798ms)
+✔ historical settlement no-pay list excludes drivers who started after its cutoff (37.0216ms)
+✔ historical cutoff filter preserves revenue matching and inactive filtering (2.0275ms)
+✔ single-year reports keep the live Bid Listing beside the matching archive (10.4415ms)
+✔ migration overlap is deduplicated and the live record wins (4.013ms)
+✔ report loading merges live and archive reads before returning records (5.0655ms)
+✔ January recruiting snapshot always includes the fluid live list (4.0703ms)
+✔ 2027 Sales Lead totals subtract every completed supported year (5.0479ms)
+✔ archive discovery no longer stops at 2030 (3.5627ms)
+✔ client report periods switch years on Eastern midnight (51.6672ms)
+ℹ tests 208
+ℹ suites 0
+ℹ pass 206
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6377.4284
+
+✖ failing tests:
+
+test at test\office-checkin.test.js:64:1
+✖ both dashboard paths and both record routes call the shared hydration (8.8845ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  3 !== 2
+  
+      at TestContext.<anonymous> (C:\Projects\kole-lookup-console\test\office-checkin.test.js:66:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1106:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:788:18)
+      at Test.postRun (node:internal/test_runner/test:1235:19)
+      at Test.run (node:internal/test_runner/test:1163:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 3,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test\operator-rate-confirmations.test.js:149:1
+✖ billing UI reads by BidID and includes loading, empty, error, disclosure, wrapping, and theme styling (7.166ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /historical provider-submission information/. Input:
+  
+  "import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';\r\n" +
+    "import { openUrl } from '@tauri-apps/plugin-opener';\r\n" +
+    "import './App.css?seasonal-modals=v9';\r\n" +
+    "import koleLogo from './assets/kole-logo.png';\r\n" +
+    "import BetaDashboard from './BetaDashboard';\r\n" +
+    "import DriverRosterEditor from './DriverRosterEditor';\r\n" +
+    "import DeliveryPhotoPackage from './DeliveryPhotoPackage';\r\n" +
+    "import CompanyPortalAccess from './CompanyPortalAccess';\r\n" +
+    "import { createLookupTokenStorage } from './lookup-token-storage';\r\n" +
+    "import { createDashboardRefreshQueue, isDashboardRefreshVisible } from './dashboard-refresh';\r\n" +
+    '\r\n' +
+    'function RosterReportStaleNotice({ report }) {\r\n' +
+    '  return report?.rosterStale ? <div className="report-alert warning" role="status">Driver details changed after this report was generated. Run it again for current roster information.</div> : null;\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'const isTauriRuntime = Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);\r\n' +
+    'const lookupTokenStorage = createLookupTokenStorage(window);\r\n' +
+    'const isViteDev = import.meta.env?.DEV === true;\r\n' +
+    "const configuredApiBase = String(import.meta.env?.VITE_KOLE_API_BASE || '').trim();\r\n" +
+    "const isLocalDevHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);\r\n" +
+    "const MOBILE_LAYOUT_QUERY = '(max-width: 760px), (max-width: 950px) and (pointer: coarse)';\r\n" +
+    '\r\n' +
+    'const API =\r\n' +
+    '  configuredApiBase ||\r\n' +
+    '  ((isViteDev || isLocalDevHost)\r\n' +
+    "    ? 'http://localhost:5000'\r\n" +
+    "    : 'https://kole-lookup-console.onrender.com');\r\n" +
+    'const DELIVERY_PHOTOS_ENDPOINT = `${API}/documents/delivery-photos`;\r\n' +
+    '\r\n' +
+    'function useMediaQuery(query) {\r\n' +
+    '  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);\r\n' +
+    '\r\n' +
+    '  useEffect(() => {\r\n' +
+    '    const mediaQuery = window.matchMedia(query);\r\n' +
+    '    const handleChange = (event) => setMatches(event.matches);\r\n' +
+    '\r\n' +
+    "    mediaQuery.addEventListener('change', handleChange);\r\n" +
+    '\r\n' +
+    "    return () => mediaQuery.removeEventListener('change', handleChange);\r\n" +
+    '  }, [query]);\r\n' +
+    '\r\n' +
+    '  return matches;\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'const SALES_NOTE_MAX_LENGTH = 63000;\r\n' +
+    'const SALES_SNOOZE_NOTE_MAX_LENGTH = 4000;\r\n' +
+    'const AVAILABLE_TRUCK_MAX_ROWS = 8;\r\n' +
+    'const SEARCH_RESULT_CACHE_MS = 2 * 60 * 1000;\r\n' +
+    'const ORDER_NOTES_CLIENT_CACHE_MS = 60 * 1000;\r\n' +
+    'const ORDER_NOTE_MAX_LENGTH = 20000;\r\n' +
+    "const ORDER_NOTE_TYPE_OPTIONS = ['Dispatch', 'Paperwork', 'Permits', 'Billing', 'Operations'];\r\n" +
+    'const LOAD_PAPERWORK_MAX_FILE_SIZE = 20 * 1024 * 1024;\r\n' +
+    'const LOAD_PAPERWORK_MAX_FILES = 10;\r\n' +
+    "const LOAD_PAPERWORK_ACCEPT = '.pdf,.jpg,.jpeg,.png,.heic,.heif';\r\n" +
+    "const LOAD_PAPERWORK_ALLOWED_EXTENSIONS = new Set(['.pdf', '.jpg', '.jpeg', '.png', '.heic', '.heif']);\r\n" +
+    "const ORDER_EDIT_STATUS_OPTIONS = ['-', 'Won', 'Lost', 'CAN', 'TONU'];\r\n" +
+    "const ORDER_EDIT_TERMINAL_STATUSES = new Set(['CAN', 'TONU']);\r\n" +
+    "const ORDER_EDIT_DATE_FIELDS = new Set(['PickupDate', 'DeliveryDate']);\r\n" +
+    "const ORDER_EDIT_YES_NO_FIELDS = new Set(['TeamRequired', 'AircraftRelated']);\r\n" +
+    "const QUOTE_ENGINE_UNKNOWN_DATE = '2100-01-01';\r\n" +
+    'const ORDER_EDIT_FIELD_KEYS = [\r\n' +
+    "  'Status',\r\n" +
+    "  'Requestor',\r\n" +
+    "  'Freight',\r\n" +
+    "  'Origin',\r\n" +
+    "  'Destination',\r\n" +
+    "  'PickupDate',\r\n" +
+    "  'PickupTime',\r\n" +
+    "  'PickupAMPM',\r\n" +
+    "  'DeliveryDate',\r\n" +
+    "  'DeliveryTime',\r\n" +
+    "  'DeliveryAMPM',\r\n" +
+    "  'Length',\r\n" +
+    "  'Width',\r\n" +
+    "  'Height',\r\n" +
+    "  'TeamRequired',\r\n" +
+    "  'AircraftRelated',\r\n" +
+    "  'Pickup1Name',\r\n" +
+    "  'Pickup1Address1',\r\n" +
+    "  'Pickup1City',\r\n" +
+    "  'Pickup1State',\r\n" +
+    "  'Pickup1Zip',\r\n" +
+    "  'Pickup1ContactName',\r\n" +
+    "  'Pickup1ContactNumber',\r\n" +
+    "  'Delivery1Name',\r\n" +
+    "  'Delivery1Address1',\r\n" +
+    "  'Delivery1City',\r\n" +
+    "  'Delivery1State',\r\n" +
+    "  'Delivery1Zip',\r\n" +
+    "  'Delivery1ContactName',\r\n" +
+    "  'Delivery1ContactNumber',\r\n" +
+    "  'Item1QTY',\r\n" +
+    "  'Item1Description',\r\n" +
+    "  'Item1Serial',\r\n" +
+    "  'Item1Dimensions',\r\n" +
+    "  'EstimatedWeight',\r\n" +
+    "  'TotalPieces',\r\n" +
+    "  'ShipperNumber',\r\n" +
+    "  'Contract'\r\n" +
+    '];\r\n' +
+    '\r\n' +
+    'function getLoadPaperworkFileExtension(fileName) {\r\n' +
+    "  const match = String(fileName || '').toLowerCase().match(/\\.[a-z0-9]{1,10}$/);\r\n" +
+    "  return match ? match[0] : '';\r\n" +
+    '}\r\n' +
+    '\r\n' +
+    'function validateLoadPaperworkFiles(files) {\r\n' +
+    "  if (!files.length) return 'Choose at least one file.';\r\n" +
+    '  if (files.length > LOAD_PAPERWORK_MAX_FILES) {\r\n' +
+    '    return `Choose no more than ${LOAD_PAPERWORK_MAX_FILES} files at once.`;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  const unsupported = files.find((file) => (\r\n' +
+    '    !LOAD_PAPERWORK_ALLOWED_EXTENSIONS.has(getLoadPaperworkFileExtension(file?.name))\r\n' +
+    '  ));\r\n' +
+    '  if (unsupported) {\r\n' +
+    "    return `${unsupported.name || 'One file'} is not a supported PDF or image.`;\r\n" +
+    '  }\r\n' +
+    '\r\n' +
+    '  const oversized = files.find((file) => Number(file?.size || 0) > LOAD_PAPERWORK_MAX_FILE_SIZE);\r\n' +
+    '  if (oversized) {\r\n' +
+    "    return `${oversized.name || 'One file'} is larger than 20 MB.`;\r\n" +
+    '  }\r\n' +
+    '\r\n' +
+    "  return '';\r\n" +
+    '}\r\n' +
+    '\r\n' +
+    'function formatLoadPaperworkFileSize(value) {\r\n' +
+    '  const bytes = Number(value || 0);\r\n' +
+    "  if (!Number.isFinite(bytes) || bytes <= 0) return 'Size unavailable';\r\n" +
+    '  if (bytes < 1024) return `${bytes} B`;\r\n' +
+    '  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;\r\n' +
+    '  return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function formatLoadPaperworkModified(value) {\r\n' +
+    "  if (!value) return 'Modified date unavailable';\r\n" +
+    '\r\n' +
+    '  const date = new Date(value);\r\n' +
+    "  if (Number.isNaN(date.getTime())) return 'Modified date unavailable';\r\n" +
+    '\r\n' +
+    "  return date.toLocaleString('en-US', {\r\n" +
+    "    timeZone: 'America/New_York',\r\n" +
+    "    month: 'short',\r\n" +
+    "    day: 'numeric',\r\n" +
+    "    year: 'numeric',\r\n" +
+    "    hour: 'numeric',\r\n" +
+    "    minute: '2-digit'\r\n" +
+    '  });\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function formatRateConfirmationDate(value) {\r\n' +
+    "  if (!value) return '-';\r\n" +
+    '\r\n' +
+    '  const date = new Date(value);\r\n' +
+    '  if (Number.isNaN(date.getTime())) return String(value);\r\n' +
+    '\r\n' +
+    "  return date.toLocaleString('en-US', {\r\n" +
+    "    timeZone: 'America/New_York',\r\n" +
+    "    month: 'short',\r\n" +
+    "    day: 'numeric',\r\n" +
+    "    year: 'numeric',\r\n" +
+    "    hour: 'numeric',\r\n" +
+    "    minute: '2-digit'\r\n" +
+    '  });\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function getRateConfirmationRecordKey(record, index) {\r\n' +
+    "  return String(record?.id || `${record?.dateSent || 'undated'}-${index}`);\r\n" +
+    '}\r\n' +
+    '\r\n' +
+    'function createSalesLeadTrackingPreferencesDraft(preferences = {}) {\r\n' +
+    '  return {\r\n' +
+    "    Email1: String(preferences.Email1 || ''),\r\n" +
+    "    Email2: String(preferences.Email2 || ''),\r\n" +
+    "    Email3: String(preferences.Email3 || ''),\r\n" +
+    "    Email4: String(preferences.Email4 || ''),\r\n" +
+    "    Email5: String(preferences.Email5 || ''),\r\n" +
+    "    Email6: String(preferences.Email6 || ''),\r\n" +
+    "    UpdateInterval: String(preferences.UpdateInterval || '')\r\n" +
+    '  };\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function createSalesLeadTrackingIntervalConfig(config = {}) {\r\n' +
+    "  const min = config.min === null || config.min === undefined || config.min === '' ? null : Number(config.min);\r\n" +
+    "  const max = config.max === null || config.max === undefined || config.max === '' ? null : Number(config.max);\r\n" +
+    '\r\n' +
+    '  return {\r\n' +
+    "    mode: config.mode === 'choice' || config.mode === 'number' ? config.mode : '',\r\n" +
+    '    choices: Array.isArray(config.choices) ? config.choices : [],\r\n' +
+    '    min: Number.isFinite(min) ? min : null,\r\n' +
+    '    max: Number.isFinite(max) ? max : null,\r\n' +
+    "    step: config.step === 'any' || Number(config.step) > 0 ? config.step : 1,\r\n" +
+    '    required: config.required === true\r\n' +
+    '  };\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    '\r\n' +
+    'function createServiceLocationDraft(location = {}) {\r\n' +
+    '  return {\r\n' +
+    "    Title: String(location.Title || ''),\r\n" +
+    "    Address1: String(location.Address1 || ''),\r\n" +
+    "    Address2: String(location.Address2 || ''),\r\n" +
+    "    City: String(location.City || ''),\r\n" +
+    "    State: String(location.State || '').toUpperCase(),\r\n" +
+    "    PostalCode: String(location.PostalCode || ''),\r\n" +
+    "    ContactName: String(location.ContactName || ''),\r\n" +
+    "    Phone: String(location.Phone || ''),\r\n" +
+    "    OperatingDays: String(location.OperatingDays || ''),\r\n" +
+    "    OperatingHours: String(location.OperatingHours || ''),\r\n" +
+    "    ServiceNotesKeyword: String(location.ServiceNotesKeyword || ''),\r\n" +
+    "    SearchAliases: String(location.SearchAliases || ''),\r\n" +
+    "    ParentComplex: String(location.ParentComplex || ''),\r\n" +
+    '    Active: location.Active !== false\r\n' +
+    '  };\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function normalizeServiceLocationSearch(value) {\r\n' +
+    "  return String(value || '')\r\n" +
+    '    .toLowerCase()\r\n' +
+    "    .replace(/&/g, ' and ')\r\n" +
+    "    .replace(/[^a-z0-9]+/g, ' ')\r\n" +
+    "    .replace(/\\s+/g, ' ')\r\n" +
+    '    .trim();\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function getServiceLocationSearchBlob(location = {}) {\r\n' +
+    '  return normalizeServiceLocationSearch([\r\n' +
+    '    location.Title,\r\n' +
+    '    location.LocationID,\r\n' +
+    '    location.Address1,\r\n' +
+    '    location.Address2,\r\n' +
+    '    location.City,\r\n' +
+    '    location.State,\r\n' +
+    '    location.PostalCode,\r\n' +
+    '    location.ContactName,\r\n' +
+    '    location.Phone,\r\n' +
+    '    location.OperatingDays,\r\n' +
+    '    location.OperatingHours,\r\n' +
+    '    location.ServiceNotesKeyword,\r\n' +
+    '    location.SearchAliases,\r\n' +
+    '    location.ParentComplex,\r\n' +
+    '    location.NormalizedAddress\r\n' +
+    "  ].filter(Boolean).join(' '));\r\n" +
+    '}\r\n' +
+    '\r\n' +
+    'function sortServiceLocationRecords(a, b) {\r\n' +
+    "  const titleDiff = String(a?.Title || '').localeCompare(String(b?.Title || ''), undefined, { sensitivity: 'base', numeric: true });\r\n" +
+    '  if (titleDiff !== 0) return titleDiff;\r\n' +
+    "  const cityDiff = String(a?.City || '').localeCompare(String(b?.City || ''), undefined, { sensitivity: 'base', numeric: true });\r\n" +
+    '  if (cityDiff !== 0) return cityDiff;\r\n' +
+    "  return String(a?.State || '').localeCompare(String(b?.State || ''), undefined, { sensitivity: 'base' });\r\n" +
+    '}\r\n' +
+    '\r\n' +
+    'function getServiceLocationAddress(location = {}) {\r\n' +
+    "  const street = [location.Address1, location.Address2].filter(Boolean).join(', ');\r\n" +
+    "  const cityState = [location.City, location.State].filter(Boolean).join(', ');\r\n" +
+    "  return [street, cityState, location.PostalCode].filter(Boolean).join(' ');\r\n" +
+    '}\r\n' +
+    '\r\n' +
+    'function createQuoteEngineDraft() {\r\n' +
+    '  return {\r\n' +
+    "    company: '',\r\n" +
+    "    requestor: '',\r\n" +
+    '    dateSolicited: getEasternDateInputValue(),\r\n' +
+    "    readyDate: '',\r\n" +
+    '    readyDateUnknown: false,\r\n' +
+    "    pickupDate: '',\r\n" +
+    '    pickupDateUnknown: false,\r\n' +
+    "    deliveryDate: '',\r\n" +
+    '    deliveryDateUnknown: false,\r\n' +
+    "    freight: '',\r\n" +
+    "    length: '',\r\n" +
+    "    width: '',\r\n" +
+    "    height: '',\r\n" +
+    "    operatorStartingLocation: '',\r\n" +
+    "    origin: '',\r\n" +
+    "    destination: '',\r\n" +
+    "    emptyMiles: '',\r\n" +
+    "    loadedMiles: '',\r\n" +
+    "    deadheadConfidence: 'estimated',\r\n" +
+    "    teamRequired: '',\r\n" +
+    "    extraordinaryCosts: '0',\r\n" +
+    '    extraordinaryCostsConfirmed: false,\r\n' +
+    "    truck: '-',\r\n" +
+    "    operator: '-',\r\n" +
+    "    aircraftRelated: '',\r\n" +
+    '    enableTracking: false,\r\n' +
+    '    loca'... 1049486 more characters
+  
+      at TestContext.<anonymous> (C:\Projects\kole-lookup-console\test\operator-rate-confirmations.test.js:153:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1106:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:788:18)
+      at Test.postRun (node:internal/test_runner/test:1235:19)
+      at Test.run (node:internal/test_runner/test:1163:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'import { useEffect, useEffectEvent, useMemo, useRef, useState } from \'react\';\r\nimport { openUrl } from \'@tauri-apps/plugin-opener\';\r\nimport \'./App.css?seasonal-modals=v9\';\r\nimport koleLogo from \'./assets/kole-logo.png\';\r\nimport BetaDashboard from \'./BetaDashboard\';\r\nimport DriverRosterEditor from \'./DriverRosterEditor\';\r\nimport DeliveryPhotoPackage from \'./DeliveryPhotoPackage\';\r\nimport CompanyPortalAccess from \'./CompanyPortalAccess\';\r\nimport { createLookupTokenStorage } from \'./lookup-token-storage\';\r\nimport { createDashboardRefreshQueue, isDashboardRefreshVisible } from \'./dashboard-refresh\';\r\n\r\nfunction RosterReportStaleNotice({ report }) {\r\n  return report?.rosterStale ? <div className="report-alert warning" role="status">Driver details changed after this report was generated. Run it again for current roster information.</div> : null;\r\n}\r\n\r\nconst isTauriRuntime = Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);\r\nconst lookupTokenStorage = createLookupTokenStorage(window);\r\nconst isViteDev = import.meta.env?.DEV === true;\r\nconst configuredApiBase = String(import.meta.env?.VITE_KOLE_API_BASE || \'\').trim();\r\nconst isLocalDevHost = [\'localhost\', \'127.0.0.1\'].includes(window.location.hostname);\r\nconst MOBILE_LAYOUT_QUERY = \'(max-width: 760px), (max-width: 950px) and (pointer: coarse)\';\r\n\r\nconst API =\r\n  configuredApiBase ||\r\n  ((isViteDev || isLocalDevHost)\r\n    ? \'http://localhost:5000\'\r\n    : \'https://kole-lookup-console.onrender.com\');\r\nconst DELIVERY_PHOTOS_ENDPOINT = `${API}/documents/delivery-photos`;\r\n\r\nfunction useMediaQuery(query) {\r\n  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);\r\n\r\n  useEffect(() => {\r\n    const mediaQuery = window.matchMedia(query);\r\n    const handleChange = (event) => setMatches(event.matches);\r\n\r\n    mediaQuery.addEventListener(\'change\', handleChange);\r\n\r\n    return () => mediaQuery.removeEventListener(\'change\', handleChange);\r\n  }, [query]);\r\n\r\n  return matches;\r\n}\r\n\r\nconst SALES_NOTE_MAX_LENGTH = 63000;\r\nconst SALES_SNOOZE_NOTE_MAX_LENGTH = 4000;\r\nconst AVAILABLE_TRUCK_MAX_ROWS = 8;\r\nconst SEARCH_RESULT_CACHE_MS = 2 * 60 * 1000;\r\nconst ORDER_NOTES_CLIENT_CACHE_MS = 60 * 1000;\r\nconst ORDER_NOTE_MAX_LENGTH = 20000;\r\nconst ORDER_NOTE_TYPE_OPTIONS = [\'Dispatch\', \'Paperwork\', \'Permits\', \'Billing\', \'Operations\'];\r\nconst LOAD_PAPERWORK_MAX_FILE_SIZE = 20 * 1024 * 1024;\r\nconst LOAD_PAPERWORK_MAX_FILES = 10;\r\nconst LOAD_PAPERWORK_ACCEPT = \'.pdf,.jpg,.jpeg,.png,.heic,.heif\';\r\nconst LOAD_PAPERWORK_ALLOWED_EXTENSIONS = new Set([\'.pdf\', \'.jpg\', \'.jpeg\', \'.png\', \'.heic\', \'.heif\']);\r\nconst ORDER_EDIT_STATUS_OPTIONS = [\'-\', \'Won\', \'Lost\', \'CAN\', \'TONU\'];\r\nconst ORDER_EDIT_TERMINAL_STATUSES = new Set([\'CAN\', \'TONU\']);\r\nconst ORDER_EDIT_DATE_FIELDS = new Set([\'PickupDate\', \'DeliveryDate\']);\r\nconst ORDER_EDIT_YES_NO_FIELDS = new Set([\'TeamRequired\', \'AircraftRelated\']);\r\nconst QUOTE_ENGINE_UNKNOWN_DATE = \'2100-01-01\';\r\nconst ORDER_EDIT_FIELD_KEYS = [\r\n  \'Status\',\r\n  \'Requestor\',\r\n  \'Freight\',\r\n  \'Origin\',\r\n  \'Destination\',\r\n  \'PickupDate\',\r\n  \'PickupTime\',\r\n  \'PickupAMPM\',\r\n  \'DeliveryDate\',\r\n  \'DeliveryTime\',\r\n  \'DeliveryAMPM\',\r\n  \'Length\',\r\n  \'Width\',\r\n  \'Height\',\r\n  \'TeamRequired\',\r\n  \'AircraftRelated\',\r\n  \'Pickup1Name\',\r\n  \'Pickup1Address1\',\r\n  \'Pickup1City\',\r\n  \'Pickup1State\',\r\n  \'Pickup1Zip\',\r\n  \'Pickup1ContactName\',\r\n  \'Pickup1ContactNumber\',\r\n  \'Delivery1Name\',\r\n  \'Delivery1Address1\',\r\n  \'Delivery1City\',\r\n  \'Delivery1State\',\r\n  \'Delivery1Zip\',\r\n  \'Delivery1ContactName\',\r\n  \'Delivery1ContactNumber\',\r\n  \'Item1QTY\',\r\n  \'Item1Description\',\r\n  \'Item1Serial\',\r\n  \'Item1Dimensions\',\r\n  \'EstimatedWeight\',\r\n  \'TotalPieces\',\r\n  \'ShipperNumber\',\r\n  \'Contract\'\r\n];\r\n\r\nfunction getLoadPaperworkFileExtension(fileName) {\r\n  const match = String(fileName || \'\').toLowerCase().match(/\\.[a-z0-9]{1,10}$/);\r\n  return match ? match[0] : \'\';\r\n}\r\n\r\nfunction validateLoadPaperworkFiles(files) {\r\n  if (!files.length) return \'Choose at least one file.\';\r\n  if (files.length > LOAD_PAPERWORK_MAX_FILES) {\r\n    return `Choose no more than ${LOAD_PAPERWORK_MAX_FILES} files at once.`;\r\n  }\r\n\r\n  const unsupported = files.find((file) => (\r\n    !LOAD_PAPERWORK_ALLOWED_EXTENSIONS.has(getLoadPaperworkFileExtension(file?.name))\r\n  ));\r\n  if (unsupported) {\r\n    return `${unsupported.name || \'One file\'} is not a supported PDF or image.`;\r\n  }\r\n\r\n  const oversized = files.find((file) => Number(file?.size || 0) > LOAD_PAPERWORK_MAX_FILE_SIZE);\r\n  if (oversized) {\r\n    return `${oversized.name || \'One file\'} is larger than 20 MB.`;\r\n  }\r\n\r\n  return \'\';\r\n}\r\n\r\nfunction formatLoadPaperworkFileSize(value) {\r\n  const bytes = Number(value || 0);\r\n  if (!Number.isFinite(bytes) || bytes <= 0) return \'Size unavailable\';\r\n  if (bytes < 1024) return `${bytes} B`;\r\n  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;\r\n  return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;\r\n}\r\n\r\nfunction formatLoadPaperworkModified(value) {\r\n  if (!value) return \'Modified date unavailable\';\r\n\r\n  const date = new Date(value);\r\n  if (Number.isNaN(date.getTime())) return \'Modified date unavailable\';\r\n\r\n  return date.toLocaleString(\'en-US\', {\r\n    timeZone: \'America/New_York\',\r\n    month: \'short\',\r\n    day: \'numeric\',\r\n    year: \'numeric\',\r\n    hour: \'numeric\',\r\n    minute: \'2-digit\'\r\n  });\r\n}\r\n\r\nfunction formatRateConfirmationDate(value) {\r\n  if (!value) return \'-\';\r\n\r\n  const date = new Date(value);\r\n  if (Number.isNaN(date.getTime())) return String(value);\r\n\r\n  return date.toLocaleString(\'en-US\', {\r\n    timeZone: \'America/New_York\',\r\n    month: \'short\',\r\n    day: \'numeric\',\r\n    year: \'numeric\',\r\n    hour: \'numeric\',\r\n    minute: \'2-digit\'\r\n  });\r\n}\r\n\r\nfunction getRateConfirmationRecordKey(record, index) {\r\n  return String(record?.id || `${record?.dateSent || \'undated\'}-${index}`);\r\n}\r\n\r\nfunction createSalesLeadTrackingPreferencesDraft(preferences = {}) {\r\n  return {\r\n    Email1: String(preferences.Email1 || \'\'),\r\n    Email2: String(preferences.Email2 || \'\'),\r\n    Email3: String(preferences.Email3 || \'\'),\r\n    Email4: String(preferences.Email4 || \'\'),\r\n    Email5: String(preferences.Email5 || \'\'),\r\n    Email6: String(preferences.Email6 || \'\'),\r\n    UpdateInterval: String(preferences.UpdateInterval || \'\')\r\n  };\r\n}\r\n\r\nfunction createSalesLeadTrackingIntervalConfig(config = {}) {\r\n  const min = config.min === null || config.min === undefined || config.min === \'\' ? null : Number(config.min);\r\n  const max = config.max === null || config.max === undefined || config.max === \'\' ? null : Number(config.max);\r\n\r\n  return {\r\n    mode: config.mode === \'choice\' || config.mode === \'number\' ? config.mode : \'\',\r\n    choices: Array.isArray(config.choices) ? config.choices : [],\r\n    min: Number.isFinite(min) ? min : null,\r\n    max: Number.isFinite(max) ? max : null,\r\n    step: config.step === \'any\' || Number(config.step) > 0 ? config.step : 1,\r\n    required: config.required === true\r\n  };\r\n}\r\n\r\n\r\nfunction createServiceLocationDraft(location = {}) {\r\n  return {\r\n    Title: String(location.Title || \'\'),\r\n    Address1: String(location.Address1 || \'\'),\r\n    Address2: String(location.Address2 || \'\'),\r\n    City: String(location.City || \'\'),\r\n    State: String(location.State || \'\').toUpperCase(),\r\n    PostalCode: String(location.PostalCode || \'\'),\r\n    ContactName: String(location.ContactName || \'\'),\r\n    Phone: String(location.Phone || \'\'),\r\n    OperatingDays: String(location.OperatingDays || \'\'),\r\n    OperatingHours: String(location.OperatingHours || \'\'),\r\n    ServiceNotesKeyword: String(location.ServiceNotesKeyword || \'\'),\r\n    SearchAliases: String(location.SearchAliases || \'\'),\r\n    ParentComplex: String(location.ParentComplex || \'\'),\r\n    Active: location.Active !== false\r\n  };\r\n}\r\n\r\nfunction normalizeServiceLocationSearch(value) {\r\n  return String(value || \'\')\r\n    .toLowerCase()\r\n    .replace(/&/g, \' and \')\r\n    .replace(/[^a-z0-9]+/g, \' \')\r\n    .replace(/\\s+/g, \' \')\r\n    .trim();\r\n}\r\n\r\nfunction getServiceLocationSearchBlob(location = {}) {\r\n  return normalizeServiceLocationSearch([\r\n    location.Title,\r\n    location.LocationID,\r\n    location.Address1,\r\n    location.Address2,\r\n    location.City,\r\n    location.State,\r\n    location.PostalCode,\r\n    location.ContactName,\r\n    location.Phone,\r\n    location.OperatingDays,\r\n    location.OperatingHours,\r\n    location.ServiceNotesKeyword,\r\n    location.SearchAliases,\r\n    location.ParentComplex,\r\n    location.NormalizedAddress\r\n  ].filter(Boolean).join(\' \'));\r\n}\r\n\r\nfunction sortServiceLocationRecords(a, b) {\r\n  const titleDiff = String(a?.Title || \'\').localeCompare(String(b?.Title || \'\'), undefined, { sensitivity: \'base\', numeric: true });\r\n  if (titleDiff !== 0) return titleDiff;\r\n  const cityDiff = String(a?.City || \'\').localeCompare(String(b?.City || \'\'), undefined, { sensitivity: \'base\', numeric: true });\r\n  if (cityDiff !== 0) return cityDiff;\r\n  return String(a?.State || \'\').localeCompare(String(b?.State || \'\'), undefined, { sensitivity: \'base\' });\r\n}\r\n\r\nfunction getServiceLocationAddress(location = {}) {\r\n  const street = [location.Address1, location.Address2].filter(Boolean).join(\', \');\r\n  const cityState = [location.City, location.State].filter(Boolean).join(\', \');\r\n  return [street, cityState, location.PostalCode].filter(Boolean).join(\' \');\r\n}\r\n\r\nfunction createQuoteEngineDraft() {\r\n  return {\r\n    company: \'\',\r\n    requestor: \'\',\r\n    dateSolicited: getEasternDateInputValue(),\r\n    readyDate: \'\',\r\n    readyDateUnknown: false,\r\n    pickupDate: \'\',\r\n    pickupDateUnknown: false,\r\n    deliveryDate: \'\',\r\n    deliveryDateUnknown: false,\r\n    freight: \'\',\r\n    length: \'\',\r\n    width: \'\',\r\n    height: \'\',\r\n    operatorStartingLocation: \'\',\r\n    origin: \'\',\r\n    destination: \'\',\r\n    emptyMiles: \'\',\r\n    loadedMiles: \'\',\r\n    deadheadConfidence: \'estimated\',\r\n    teamRequired: \'\',\r\n    extraordinaryCosts: \'0\',\r\n    extraordinaryCostsConfirmed: false,\r\n    truck: \'-\',\r\n    operator: \'-\',\r\n    aircraftRelated: \'\',\r\n    enableTracking: false,\r\n    loca'... 1049486 more characters,
+    expected: /historical provider-submission information/,
+    operator: 'match',
+    diff: 'simple'
+  }
